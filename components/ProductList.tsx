@@ -541,7 +541,7 @@ export default function ProductList({ initialData, brands, categories }: Product
 
       {/* Grid View */}
       {viewMode === 'grid' && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {products.map((product) => (
             <div
               key={product.id}
