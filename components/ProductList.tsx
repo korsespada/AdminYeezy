@@ -429,9 +429,6 @@ export default function ProductList({ initialData, brands, categories }: Product
                     Photo
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                    Product ID
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                     Name
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
@@ -464,11 +461,6 @@ export default function ProductList({ initialData, brands, categories }: Product
                         </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900 dark:text-white font-mono">
-                        {product.productId}
-                      </div>
-                    </td>
                     <td 
                       className="px-6 py-4 cursor-pointer"
                       onDoubleClick={() => startEditing(product.id, 'name', product.name)}
@@ -481,7 +473,7 @@ export default function ProductList({ initialData, brands, categories }: Product
                           onBlur={() => handleBlur(product.id, 'name')}
                           onKeyDown={(e) => handleKeyPress(e, product.id, 'name')}
                           autoFocus
-                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"
+                          className="w-full px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                         />
                       ) : (
                         <div className="text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 px-2 py-1 rounded">
@@ -514,7 +506,7 @@ export default function ProductList({ initialData, brands, categories }: Product
                           onBlur={() => handleBlur(product.id, 'price')}
                           onKeyDown={(e) => handleKeyPress(e, product.id, 'price')}
                           autoFocus
-                          className="w-24 px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="w-24 px-2 py-1 text-sm border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       ) : (
                         <div className="text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-600 px-2 py-1 rounded">
@@ -592,7 +584,7 @@ export default function ProductList({ initialData, brands, categories }: Product
                         onKeyDown={(e) => handleKeyPress(e, product.id, 'name')}
                         onClick={(e) => e.stopPropagation()}
                         autoFocus
-                        className="w-full px-2 py-1 text-sm font-medium border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white"
+                        className="w-full px-2 py-1 text-sm font-medium border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                     ) : (
                       <h3 className="font-medium text-gray-900 dark:text-white truncate hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded">
@@ -625,7 +617,7 @@ export default function ProductList({ initialData, brands, categories }: Product
                       onKeyDown={(e) => handleKeyPress(e, product.id, 'price')}
                       onClick={(e) => e.stopPropagation()}
                       autoFocus
-                      className="w-full px-2 py-1 text-lg font-bold border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      className="w-full px-2 py-1 text-lg font-bold border border-blue-500 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
                   ) : (
                     <div className="text-lg font-bold text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded">
