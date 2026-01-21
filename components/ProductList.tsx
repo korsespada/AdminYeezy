@@ -591,9 +591,6 @@ export default function ProductList({ initialData, brands, categories }: Product
                         {product.name}
                       </h3>
                     )}
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-mono px-2">
-                      {product.productId}
-                    </p>
                   </div>
                 </div>
 
