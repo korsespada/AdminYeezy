@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
-import { type Product, type Brand, type Category } from '@/lib/types'
+import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
 import { X, Upload, Trash2, GripVertical } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -10,15 +10,16 @@ interface ProductFormProps {
   product?: Product | null
   brands: Brand[]
   categories: Category[]
+  subcategories: Subcategory[]
   isOpen: boolean
   onClose: () => void
 }
 
-export default function ProductForm({ product, brands, categories, isOpen, onClose }: ProductFormProps) {
+export default function ProductForm({ product, brands, categories, subcategories, isOpen, onClose }: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState('')
-  
+
   const [productId, setProductId] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -26,6 +27,7 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
   const [status, setStatus] = useState<'active' | 'inactive'>('active')
   const [brand, setBrand] = useState('')
   const [category, setCategory] = useState('')
+  const [subcategory, setSubcategory] = useState('')
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
@@ -41,13 +43,14 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
         setStatus(product.status)
         setBrand(product.brand)
         setCategory(product.category)
+        setSubcategory(product.expand?.subcategory?.id || '')
         setPhotoFiles([])
         setPhotoPreviews([])
-        
+
         // Set existing photos (they are external URLs, not PocketBase files)
         if (product.photos && product.photos.length > 0) {
           let photoUrls: any = product.photos
-          
+
           // If photos is stored as JSON string, parse it
           if (typeof photoUrls === 'string' && photoUrls.startsWith('[')) {
             try {
@@ -57,7 +60,7 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
               photoUrls = []
             }
           }
-          
+
           setExistingPhotos(Array.isArray(photoUrls) ? photoUrls : [])
         } else {
           setExistingPhotos([])
@@ -71,6 +74,7 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
         setStatus('active')
         setBrand(brands[0]?.id || '')
         setCategory(categories[0]?.id || '')
+        setSubcategory('')
         setPhotoFiles([])
         setPhotoPreviews([])
         setExistingPhotos([])
@@ -83,7 +87,7 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
     const files = Array.from(e.target.files || [])
     if (files.length > 0) {
       setPhotoFiles((prev) => [...prev, ...files])
-      
+
       // Create previews
       files.forEach((file) => {
         const objectUrl = URL.createObjectURL(file)
@@ -159,12 +163,13 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
     formData.append('status', status)
     formData.append('brand', brand)
     formData.append('category', category)
-    
+    formData.append('subcategory', subcategory)
+
     // Add existing photos in new order (as JSON)
     if (existingPhotos.length > 0) {
       formData.append('existingPhotos', JSON.stringify(existingPhotos))
     }
-    
+
     // Add new photo files
     photoFiles.forEach((file, index) => {
       formData.append(`photo_${index}`, file)
@@ -230,7 +235,7 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Product Photos
               </label>
-              
+
               {/* Existing Photos with Drag and Drop */}
               {existingPhotos.length > 0 && (
                 <div className="mb-4">
@@ -243,9 +248,8 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
                         onDragStart={() => handleDragStart(index)}
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDragEnd={handleDragEnd}
-                        className={`relative group cursor-move ${
-                          draggedIndex === index ? 'opacity-50' : ''
-                        }`}
+                        className={`relative group cursor-move ${draggedIndex === index ? 'opacity-50' : ''
+                          }`}
                       >
                         <img
                           src={url}
@@ -405,6 +409,28 @@ export default function ProductForm({ product, brands, categories, isOpen, onClo
                     {c.name}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            {/* Subcategory */}
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Subcategory
+              </label>
+              <select
+                value={subcategory}
+                onChange={(e) => setSubcategory(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                disabled={isPending || !category}
+              >
+                <option value="">Select subcategory...</option>
+                {subcategories
+                  .filter((s) => s.category === category)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
               </select>
             </div>
 

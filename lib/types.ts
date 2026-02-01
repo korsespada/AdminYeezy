@@ -25,6 +25,20 @@ export interface Category {
 }
 
 /**
+ * Subcategory type matching PocketBase collection schema
+ */
+export interface Subcategory {
+  id: string
+  name: string
+  category: string // Category ID
+  description: string
+  created: string
+  updated: string
+  collectionId: string
+  collectionName: string
+}
+
+/**
  * Product type matching PocketBase collection schema
  */
 export interface Product {
@@ -47,6 +61,7 @@ export interface Product {
   expand?: {
     brand?: Brand
     category?: Category
+    subcategory?: Subcategory
   }
 }
 
@@ -80,6 +95,7 @@ export const Collections = {
   Products: 'products',
   Brand: 'brands',
   Category: 'categories',
+  Subcategory: 'subcategories',
 } as const
 
 export type CollectionName = typeof Collections[keyof typeof Collections]
