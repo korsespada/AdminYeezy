@@ -169,16 +169,45 @@ export default function ProductList({ initialData, brands, categories, subcatego
             ) : (
               <>
                 {viewMode === 'grid' ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
-                    {products.map(product => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        onEdit={handleEdit}
-                        onDelete={handleDelete}
-                        onUpdate={handleProductUpdate}
-                      />
-                    ))}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between px-1">
+                      <button
+                        onClick={() => {
+                          if (selectedProductIds.length === products.length) {
+                            setSelectedProductIds([])
+                          } else {
+                            setSelectedProductIds(products.map(p => p.id))
+                          }
+                        }}
+                        className="flex items-center gap-2 text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                      >
+                        {selectedProductIds.length === products.length && products.length > 0 ? (
+                          <CheckSquare className="w-5 h-5 text-indigo-500" />
+                        ) : (
+                          <Square className="w-5 h-5" />
+                        )}
+                        <span>{selectedProductIds.length === products.length ? 'Снять всё' : 'Выбрать все на странице'}</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+                      {products.map(product => (
+                        <ProductCard
+                          key={product.id}
+                          product={product}
+                          onEdit={handleEdit}
+                          onDelete={handleDelete}
+                          onUpdate={handleProductUpdate}
+                          selected={selectedProductIds.includes(product.id)}
+                          onToggleSelect={(id) => {
+                            if (selectedProductIds.includes(id)) {
+                              setSelectedProductIds(selectedProductIds.filter(pid => pid !== id))
+                            } else {
+                              setSelectedProductIds([...selectedProductIds, id])
+                            }
+                          }}
+                        />
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-sm mb-8">

@@ -10,9 +10,11 @@ interface ProductCardProps {
     onEdit: (product: Product) => void;
     onDelete: (id: string) => void;
     onUpdate: (product: Product) => void;
+    selected: boolean;
+    onToggleSelect: (id: string) => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = ({ product, onEdit, onDelete, onUpdate }) => {
+const ProductCard: React.FC<ProductCardProps> = ({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -98,6 +100,16 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onEdit, onDelete, on
                         No image
                     </div>
                 )}
+                {/* Selection Checkbox */}
+                <div className="absolute top-3 left-3 z-10">
+                    <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => onToggleSelect(product.id)}
+                        className="w-5 h-5 rounded border-slate-700 bg-slate-900/80 text-indigo-600 focus:ring-indigo-500 cursor-pointer shadow-lg backdrop-blur-sm"
+                        onClick={(e) => e.stopPropagation()}
+                    />
+                </div>
                 {/* Delete button on hover */}
                 <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
