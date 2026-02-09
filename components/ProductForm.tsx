@@ -43,7 +43,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         setStatus(product.status)
         setBrand(product.brand)
         setCategory(product.category)
-        setSubcategory(product.expand?.subcategory?.id || '')
+        setSubcategory(product.subcategory || '')
         setPhotoFiles([])
         setPhotoPreviews([])
 
@@ -398,7 +398,10 @@ export default function ProductForm({ product, brands, categories, subcategories
               </label>
               <select
                 value={category}
-                onChange={(e) => setCategory(e.target.value)}
+                onChange={(e) => {
+                  setCategory(e.target.value)
+                  setSubcategory('')
+                }}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
                 required
                 disabled={isPending}

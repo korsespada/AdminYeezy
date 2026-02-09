@@ -20,7 +20,8 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
     const status = formData.get('status') as string
     const brand = formData.get('brand') as string
     const category = formData.get('category') as string
-    
+    const subcategory = formData.get('subcategory') as string
+
     // Get all photo files
     const photos: File[] = []
     let photoIndex = 0
@@ -71,6 +72,7 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
       status: status || 'active',
       brand,
       category,
+      subcategory,
       photos_processed: false,
     }
 
@@ -116,8 +118,9 @@ export async function updateProductAction(
     const status = formData.get('status') as string
     const brand = formData.get('brand') as string
     const category = formData.get('category') as string
+    const subcategory = formData.get('subcategory') as string
     const existingPhotosStr = formData.get('existingPhotos') as string
-    
+
     // Get new photos (not used for now, photos are external URLs)
     const photos: File[] = []
     let photoIndex = 0
@@ -157,6 +160,7 @@ export async function updateProductAction(
       status: status || 'active',
       brand,
       category,
+      subcategory,
     }
 
     // Update photos array (reordered URLs from drag-and-drop)

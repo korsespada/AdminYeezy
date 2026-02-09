@@ -50,6 +50,7 @@ export interface Product {
   status: 'active' | 'inactive'
   brand: string // Brand ID
   category: string // Category ID
+  subcategory: string // Subcategory ID
   photos: string[] // Array of photo filenames
   photos_processed: boolean
   thumb: string
@@ -76,6 +77,7 @@ export interface ProductFormData {
   status: 'active' | 'inactive'
   brand: string
   category: string
+  subcategory: string
   photos?: File[]
 }
 

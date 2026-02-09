@@ -51,6 +51,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onEdit, onDelete, on
         formData.append('status', product.status);
         formData.append('brand', product.brand);
         formData.append('category', product.category);
+        formData.append('subcategory', product.subcategory || '');
         if (product.photos && product.photos.length > 0) {
             formData.append('existingPhotos', JSON.stringify(product.photos));
         }
