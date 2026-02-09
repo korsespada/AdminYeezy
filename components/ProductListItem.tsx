@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import { type Product } from '@/lib/types';
 import { Trash2 } from 'lucide-react';
 import { updateProductAction } from '@/actions/products';
@@ -94,15 +95,16 @@ const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDe
                     onClick={(e) => e.stopPropagation()}
                 />
                 <div
-                    className="w-12 h-12 rounded-lg bg-slate-900 overflow-hidden shrink-0 border border-slate-700 cursor-pointer"
+                    className="relative w-12 h-12 rounded-lg bg-slate-900 overflow-hidden shrink-0 border border-slate-700 cursor-pointer"
                     onClick={() => onEdit(product)}
                 >
                     {thumb ? (
-                        <img src={thumb} alt={product.name} className="w-full h-full object-cover" />
+                        <Image src={thumb} alt={product.name} fill sizes="48px" className="object-cover" />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-600 uppercase">No</div>
                     )}
                 </div>
+
                 <div className="min-w-0 flex-1">
                     {/* Editable Name */}
                     {editingField === 'name' ? (

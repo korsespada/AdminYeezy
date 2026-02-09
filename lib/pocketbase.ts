@@ -9,8 +9,6 @@ import { cookies } from 'next/headers'
 export function createClient(): PocketBase {
   const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL
 
-  console.log('Creating PocketBase client with URL:', pbUrl)
-
   if (!pbUrl) {
     throw new Error(
       'NEXT_PUBLIC_POCKETBASE_URL environment variable is not set. ' +
@@ -26,20 +24,14 @@ export function createClient(): PocketBase {
       // Load auth token from cookies on server
       const cookieStore = cookies()
       const authCookie = cookieStore.get('pb_auth')
-      
+
       if (authCookie?.value) {
-        console.log('Auth cookie found, parsing...')
         try {
           const authData = JSON.parse(authCookie.value)
           pb.authStore.save(authData.token, authData.model)
-          console.log('Auth store loaded successfully')
-          console.log('Auth store valid:', pb.authStore.isValid)
-          console.log('Auth user:', authData.model?.email || authData.model?.id)
         } catch (parseError) {
-          console.error('Failed to parse auth cookie:', parseError)
+          // Ignore parse errors
         }
-      } else {
-        console.log('No auth cookie found')
       }
     } catch (error) {
       // cookies() can only be called in Server Components/Actions

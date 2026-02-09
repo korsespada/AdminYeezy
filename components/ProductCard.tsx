@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react';
+import Image from 'next/image';
 import { type Product } from '@/lib/types';
 import { Trash2 } from 'lucide-react';
 import { updateProductAction } from '@/actions/products';
@@ -90,16 +91,19 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onEdit, onDelete, on
                 onClick={() => onEdit(product)}
             >
                 {thumb ? (
-                    <img
+                    <Image
                         src={thumb}
                         alt={product.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
+                        fill
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                        className="object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-600 bg-slate-800/50 uppercase tracking-widest text-xs">
                         No image
                     </div>
                 )}
+
                 {/* Selection Checkbox */}
                 <div className="absolute top-3 left-3 z-10">
                     <input

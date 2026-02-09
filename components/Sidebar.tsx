@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { X, Filter, Search, LogOut } from 'lucide-react'
 import { type Brand, type Category, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -19,11 +19,26 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
+    const [searchValue, setSearchValue] = useState(searchParams.get('search') || '')
 
-    const currentSearch = searchParams.get('search') || ''
     const currentBrand = searchParams.get('brand') || ''
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
+
+    // Debounce search
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (searchValue !== (searchParams.get('search') || '')) {
+                applyFilter('search', searchValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [searchValue])
+
+    // Update local search value when URL changes (e.g. on reset)
+    useEffect(() => {
+        setSearchValue(searchParams.get('search') || '')
+    }, [searchParams])
 
     const applyFilter = (key: string, value: string | null) => {
         const params = new URLSearchParams(searchParams.toString())
@@ -45,6 +60,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
     }
 
     const handleReset = () => {
+        setSearchValue('')
         router.push('/admin')
     }
 
@@ -90,8 +106,8 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                                 <input
                                     type="text"
                                     placeholder="Поиск..."
-                                    value={currentSearch}
-                                    onChange={(e) => applyFilter('search', e.target.value)}
+                                    value={searchValue}
+                                    onChange={(e) => setSearchValue(e.target.value)}
                                     className="w-full pl-9 pr-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />

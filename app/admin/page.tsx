@@ -28,26 +28,15 @@ export default async function AdminPage({
   try {
     const pb = createClient()
 
-    console.log('Fetching products from PocketBase...')
-    console.log('Search term:', searchTerm)
-    console.log('Brand filter:', brandFilter)
-    console.log('Category filter:', categoryFilter)
-    console.log('Auth store valid:', pb.authStore.isValid)
-
     // Build filter for search and filters
     const filters: string[] = []
 
     if (searchTerm) {
-      // Make search case-insensitive and handle spaces
-      // Split by spaces and search for each word
       const searchWords = searchTerm.trim().toLowerCase().split(/\s+/)
-
       if (searchWords.length === 1) {
-        // Single word search - case insensitive
         const word = searchWords[0]
         filters.push(`(name ~ "${word}" || productId ~ "${word}" || description ~ "${word}")`)
       } else {
-        // Multiple words - search for each word (AND logic)
         const wordFilters = searchWords.map(word =>
           `(name ~ "${word}" || productId ~ "${word}" || description ~ "${word}")`
         )
@@ -55,95 +44,60 @@ export default async function AdminPage({
       }
     }
 
-    if (brandFilter) {
-      filters.push(`brand = "${brandFilter}"`)
-    }
-
-    if (categoryFilter) {
-      filters.push(`category = "${categoryFilter}"`)
-    }
-
-    if (subcategoryFilter) {
-      filters.push(`subcategory = "${subcategoryFilter}"`)
-    }
+    if (brandFilter) filters.push(`brand = "${brandFilter}"`)
+    if (categoryFilter) filters.push(`category = "${categoryFilter}"`)
+    if (subcategoryFilter) filters.push(`subcategory = "${subcategoryFilter}"`)
 
     const filter = filters.length > 0 ? filters.join(' && ') : ''
 
-    console.log('Generated filter:', filter)
-
-    // Fetch products with expanded relations
-    const result = await pb.collection(Collections.Products).getList<Product>(page, perPage, {
-      sort: '-created',
-      expand: 'brand,category,subcategory',
-      filter: filter,
-      requestKey: null,
-    })
-    console.log('Products fetched:', result.items.length)
+    // Fetch everything in parallel
+    const [result, brandsResult, categoriesResult, subcategoriesResult] = await Promise.all([
+      pb.collection(Collections.Products).getList<Product>(page, perPage, {
+        sort: '-created',
+        expand: 'brand,category,subcategory',
+        filter: filter,
+        requestKey: null,
+      }),
+      pb.collection(Collections.Brand).getFullList<Brand>({
+        sort: 'name',
+        requestKey: null,
+      }).catch(() => [] as Brand[]),
+      pb.collection(Collections.Category).getFullList<Category>({
+        sort: 'name',
+        requestKey: null,
+      }).catch(() => [] as Category[]),
+      pb.collection(Collections.Subcategory).getFullList({
+        sort: 'name',
+        requestKey: null,
+      }).catch(() => [] as any[])
+    ])
 
     products = result.items
     totalPages = result.totalPages
     totalItems = result.totalItems
+    brands = brandsResult
+    categories = categoriesResult
+    subcategories = subcategoriesResult
 
-    // Optimize: Get brands and categories from the brand and category collections directly
-    // This is much faster than scanning all products
-    try {
-      const brandsResult = await pb.collection(Collections.Brand).getFullList<Brand>({
-        sort: 'name',
-        requestKey: null,
-      })
-      brands = brandsResult
-      console.log('Brands fetched directly:', brands.length)
-    } catch (e) {
-      console.log('Brand collection not found, extracting from products')
-      // Fallback: extract from current page products only
+    // Handle fallbacks if direct collections failed but we have products
+    if (brands.length === 0 && products.length > 0) {
       const brandMap = new Map<string, Brand>()
-      products.forEach(product => {
-        if (product.expand?.brand) {
-          brandMap.set(product.expand.brand.id, product.expand.brand)
-        }
-      })
+      products.forEach(p => p.expand?.brand && brandMap.set(p.expand.brand.id, p.expand.brand))
       brands = Array.from(brandMap.values()).sort((a, b) => a.name.localeCompare(b.name))
     }
 
-    try {
-      const categoriesResult = await pb.collection(Collections.Category).getFullList<Category>({
-        sort: 'name',
-        requestKey: null,
-      })
-      categories = categoriesResult
-      console.log('Categories fetched directly:', categories.length)
-    } catch (e) {
-      console.log('Category collection not found, extracting from products')
-      // Fallback: extract from current page products only
+    if (categories.length === 0 && products.length > 0) {
       const categoryMap = new Map<string, Category>()
-      products.forEach(product => {
-        if (product.expand?.category) {
-          categoryMap.set(product.expand.category.id, product.expand.category)
-        }
-      })
+      products.forEach(p => p.expand?.category && categoryMap.set(p.expand.category.id, p.expand.category))
       categories = Array.from(categoryMap.values()).sort((a, b) => a.name.localeCompare(b.name))
     }
 
-    try {
-      const subcategoriesResult = await pb.collection(Collections.Subcategory).getFullList({
-        sort: 'name',
-        requestKey: null,
-      })
-      subcategories = subcategoriesResult
-      console.log('Subcategories fetched directly:', subcategories.length)
-    } catch (e) {
-      console.log('Subcategory collection error, extracting from products')
-      const subcategoryMap = new Map<string, any>()
-      products.forEach(product => {
-        if (product.expand?.subcategory) {
-          subcategoryMap.set(product.expand.subcategory.id, product.expand.subcategory)
-        }
-      })
-      subcategories = Array.from(subcategoryMap.values()).sort((a, b) => a.name.localeCompare(b.name))
+    if (subcategories.length === 0 && products.length > 0) {
+      const subMap = new Map<string, any>()
+      products.forEach(p => p.expand?.subcategory && subMap.set(p.expand.subcategory.id, p.expand.subcategory))
+      subcategories = Array.from(subMap.values()).sort((a, b) => a.name.localeCompare(b.name))
     }
-    console.log('Extracted brands:', brands.length)
-    console.log('Extracted categories:', categories.length)
-    console.log('All data loaded successfully!')
+
   } catch (err: any) {
     console.error('Failed to fetch data:', err)
     console.error('Error details:', {
