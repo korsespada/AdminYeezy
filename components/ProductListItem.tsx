@@ -10,9 +10,11 @@ interface ProductListItemProps {
     onEdit: (product: Product) => void;
     onDelete: (id: string) => void;
     onUpdate: (product: Product) => void;
+    selected: boolean;
+    onToggleSelect: (id: string) => void;
 }
 
-const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDelete, onUpdate }) => {
+const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -82,8 +84,15 @@ const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDe
 
     return (
         <div className="grid grid-cols-12 gap-4 p-4 items-center hover:bg-slate-700/30 transition-colors group">
-            {/* Product Info */}
+            {/* Checkbox & Product Info */}
             <div className="col-span-12 sm:col-span-6 flex items-center gap-4">
+                <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => onToggleSelect(product.id)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                />
                 <div
                     className="w-12 h-12 rounded-lg bg-slate-900 overflow-hidden shrink-0 border border-slate-700 cursor-pointer"
                     onClick={() => onEdit(product)}

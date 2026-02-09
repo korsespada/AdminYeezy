@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
+import { bulkUpdateSubcategoryAction } from '@/actions/bulk-update'
 import ProductForm from './ProductForm'
-import { LayoutGrid, List, Search, Plus, Menu } from 'lucide-react'
+import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ProductCard from './ProductCard'
 import ProductListItem from './ProductListItem'
@@ -27,6 +28,11 @@ export default function ProductList({ initialData, brands, categories, subcatego
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+
+  // Selection state
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [selectedSubcategory, setSelectedSubcategory] = useState('')
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false)
 
   // Update local state when initialData changes (e.g. after search/filter)
   useEffect(() => {
@@ -177,7 +183,25 @@ export default function ProductList({ initialData, brands, categories, subcatego
                 ) : (
                   <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-sm mb-8">
                     <div className="hidden sm:grid grid-cols-12 gap-4 p-4 border-b border-slate-700 bg-slate-800/50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      <div className="col-span-6">Товар</div>
+                      <div className="col-span-6 flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            if (selectedProductIds.length === products.length) {
+                              setSelectedProductIds([])
+                            } else {
+                              setSelectedProductIds(products.map(p => p.id))
+                            }
+                          }}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          {selectedProductIds.length === products.length && products.length > 0 ? (
+                            <CheckSquare className="w-4 h-4 text-indigo-500" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                        Товар
+                      </div>
                       <div className="col-span-4">Категория</div>
                       <div className="col-span-2 text-right">Цена</div>
                     </div>
@@ -189,6 +213,14 @@ export default function ProductList({ initialData, brands, categories, subcatego
                           onEdit={handleEdit}
                           onDelete={handleDelete}
                           onUpdate={handleProductUpdate}
+                          selected={selectedProductIds.includes(product.id)}
+                          onToggleSelect={(id) => {
+                            if (selectedProductIds.includes(id)) {
+                              setSelectedProductIds(selectedProductIds.filter(pid => pid !== id))
+                            } else {
+                              setSelectedProductIds([...selectedProductIds, id])
+                            }
+                          }}
                         />
                       ))}
                     </div>
@@ -212,6 +244,76 @@ export default function ProductList({ initialData, brands, categories, subcatego
           setEditingProduct(null)
         }}
       />
+
+      {/* Bulk Action Toolbar */}
+      <div className={`fixed bottom-0 left-0 lg:left-72 right-0 bg-slate-800 border-t border-slate-700 p-4 transform transition-transform duration-300 z-40 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-4 text-sm text-slate-300">
+            <span className="bg-indigo-600 text-white px-2 py-0.5 rounded text-xs font-bold">{selectedProductIds.length}</span>
+            <span>выбрано</span>
+            <button
+              onClick={() => setSelectedProductIds([])}
+              className="text-slate-500 hover:text-slate-300 ml-2"
+            >
+              Сбросить
+            </button>
+          </div>
+
+          <div className="flex flex-1 w-full sm:w-auto items-center gap-4 justify-end">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
+              <select
+                value={selectedSubcategory}
+                onChange={(e) => setSelectedSubcategory(e.target.value)}
+                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
+              >
+                <option value="">Выберите подкатегорию...</option>
+                {(() => {
+                  // Determine common category
+                  const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
+                  const categories = [...new Set(selectedProducts.map(p => p.category))]
+
+                  if (categories.length === 1) {
+                    const categoryId = categories[0]
+                    return subcategories
+                      .filter(s => s.category === categoryId)
+                      .map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                  } else if (categories.length > 1) {
+                    return <option value="" disabled>Разные категории (выберите одну)</option>
+                  } else {
+                    return null
+                  }
+                })()}
+              </select>
+            </div>
+
+            <button
+              onClick={async () => {
+                if (!selectedSubcategory) return
+                if (confirm(`Применить подкатегорию для ${selectedProductIds.length} товаров?`)) {
+                  setIsBulkUpdating(true)
+                  const res = await bulkUpdateSubcategoryAction(selectedProductIds, selectedSubcategory)
+                  if (res.success) {
+                    setIsBulkUpdating(false)
+                    setSelectedProductIds([])
+                    setSelectedSubcategory('')
+                    // Optimistic update or refresh?
+                    // Refresh is safer
+                    router.refresh()
+                  } else {
+                    alert('Error updating products')
+                    setIsBulkUpdating(false)
+                  }
+                }
+              }}
+              disabled={!selectedSubcategory || isBulkUpdating}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {isBulkUpdating ? 'Обновление...' : 'Применить'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
