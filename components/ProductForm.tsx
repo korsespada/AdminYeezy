@@ -231,10 +231,29 @@ export default function ProductForm({ product, brands, categories, subcategories
             )}
 
             {/* Photos Upload - MOVED TO TOP */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Product Photos
-              </label>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Фотографии товара
+                </label>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById('photo-upload')?.click()}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors border border-blue-200 dark:border-blue-800/50"
+                  disabled={isPending}
+                >
+                  <Upload size={16} />
+                  Добавить фото
+                </button>
+                <input
+                  id="photo-upload"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handlePhotoChange}
+                  className="hidden"
+                />
+              </div>
 
               {/* Existing Photos with Drag and Drop */}
               {existingPhotos.length > 0 && (
@@ -254,7 +273,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                         <img
                           src={url}
                           alt={`Photo ${index + 1}`}
-                          className="w-full h-24 object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600"
+                          className="w-full aspect-square object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
                         />
                         <div className="absolute top-1 left-1 p-1 bg-gray-800/70 text-white rounded">
                           <GripVertical size={14} />
@@ -285,7 +304,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                         <img
                           src={url}
                           alt={`Preview ${index + 1}`}
-                          className="w-full h-24 object-cover rounded-lg border border-gray-300 dark:border-gray-600"
+                          className="w-full aspect-square object-cover rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm"
                         />
                         <button
                           type="button"
@@ -300,27 +319,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                 </div>
               )}
 
-              {/* Upload Button */}
-              <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 flex flex-col items-center justify-center hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors relative group bg-gray-50 dark:bg-gray-900/50">
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handlePhotoChange}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  disabled={isPending}
-                />
-                <div className="p-4 bg-blue-50 dark:bg-gray-700 text-blue-500 rounded-full mb-3">
-                  <Upload size={28} />
-                </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-                  <span className="font-semibold text-blue-600 dark:text-blue-400">
-                    Upload photos
-                  </span>{' '}
-                  or drag and drop
-                </p>
-                <p className="text-xs text-gray-400 mt-2">PNG, JPG, GIF up to 5MB each</p>
-              </div>
+              {/* Upload zone removed and replaced by button in header */}
             </div>
 
             {/* Product ID */}
@@ -363,7 +362,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={3}
+                rows={6}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
                 placeholder="Product description..."
                 disabled={isPending}
@@ -391,50 +390,53 @@ export default function ProductForm({ product, brands, categories, subcategories
               </select>
             </div>
 
-            {/* Category */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Category *
-              </label>
-              <select
-                value={category}
-                onChange={(e) => {
-                  setCategory(e.target.value)
-                  setSubcategory('')
-                }}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                required
-                disabled={isPending}
-              >
-                <option value="">Select category...</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Subcategory */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Subcategory
-              </label>
-              <select
-                value={subcategory}
-                onChange={(e) => setSubcategory(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                disabled={isPending || !category}
-              >
-                <option value="">Select subcategory...</option>
-                {subcategories
-                  .filter((s) => s.category === category)
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
+            {/* Category & Subcategory Row */}
+            <div className="grid grid-cols-2 gap-4">
+              {/* Category */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Category *
+                </label>
+                <select
+                  value={category}
+                  onChange={(e) => {
+                    setCategory(e.target.value)
+                    setSubcategory('')
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  required
+                  disabled={isPending}
+                >
+                  <option value="">Select category...</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
                     </option>
                   ))}
-              </select>
+                </select>
+              </div>
+
+              {/* Subcategory */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Subcategory
+                </label>
+                <select
+                  value={subcategory}
+                  onChange={(e) => setSubcategory(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending || !category}
+                >
+                  <option value="">Select subcategory...</option>
+                  {subcategories
+                    .filter((s) => s.category === category)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
             </div>
 
             {/* Price */}
