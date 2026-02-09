@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
+import Image from 'next/image'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
 import { X, Upload, Trash2, GripVertical } from 'lucide-react'
@@ -267,13 +268,16 @@ export default function ProductForm({ product, brands, categories, subcategories
                         onDragStart={() => handleDragStart(index)}
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDragEnd={handleDragEnd}
-                        className={`relative group cursor-move ${draggedIndex === index ? 'opacity-50' : ''
+                        className={`relative aspect-square group cursor-move ${draggedIndex === index ? 'opacity-50' : ''
                           }`}
                       >
-                        <img
+                        <Image
                           src={url}
                           alt={`Photo ${index + 1}`}
-                          className="w-full aspect-square object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                          fill
+                          sizes="(max-width: 768px) 33vw, 200px"
+                          loading={index < 3 ? 'eager' : 'lazy'}
+                          className="object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
                         />
                         <div className="absolute top-1 left-1 p-1 bg-gray-800/70 text-white rounded">
                           <GripVertical size={14} />
@@ -300,11 +304,13 @@ export default function ProductForm({ product, brands, categories, subcategories
                   <p className="text-xs text-gray-500 mb-2">New photos to upload:</p>
                   <div className="grid grid-cols-3 gap-2">
                     {photoPreviews.map((url, index) => (
-                      <div key={index} className="relative group">
-                        <img
+                      <div key={index} className="relative aspect-square group">
+                        <Image
                           src={url}
                           alt={`Preview ${index + 1}`}
-                          className="w-full aspect-square object-cover rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm"
+                          fill
+                          sizes="(max-width: 768px) 33vw, 200px"
+                          className="object-cover rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm"
                         />
                         <button
                           type="button"
