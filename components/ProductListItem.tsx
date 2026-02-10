@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import Image from 'next/image';
 import { type Product } from '@/lib/types';
 import { Trash2 } from 'lucide-react';
@@ -15,7 +15,7 @@ interface ProductListItemProps {
     onToggleSelect: (id: string) => void;
 }
 
-const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect }) => {
+const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -28,7 +28,7 @@ const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDe
                 const photosArray = JSON.parse(photoUrl)
                 photoUrl = photosArray[0]
             } catch (e) {
-                console.error('Failed to parse photos JSON:', e)
+                // ignore parse errors
             }
         }
         return photoUrl
@@ -69,7 +69,7 @@ const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDe
                 onUpdate(updatedProduct);
             }
         } catch (e) {
-            console.error('Update failed:', e);
+            // update failed silently
         }
         setEditingField(null);
         setIsSaving(false);
@@ -173,6 +173,8 @@ const ProductListItem: React.FC<ProductListItemProps> = ({ product, onEdit, onDe
             </div>
         </div>
     );
-};
+});
+
+ProductListItem.displayName = 'ProductListItem';
 
 export default ProductListItem;

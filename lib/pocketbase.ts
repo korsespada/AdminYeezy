@@ -36,7 +36,6 @@ export function createClient(): PocketBase {
     } catch (error) {
       // cookies() can only be called in Server Components/Actions
       // If it fails, we're likely in a context where it's not available
-      console.warn('Unable to load auth token from cookies:', error)
     }
   }
 

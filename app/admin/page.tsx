@@ -1,15 +1,15 @@
 import { createClient } from '@/lib/pocketbase'
 import { Collections, type Product, type Brand, type Category } from '@/lib/types'
 import ProductList from '@/components/ProductList'
-
-// Force dynamic rendering to prevent caching
-export const dynamic = 'force-dynamic'
+import { unstable_noStore as noStore } from 'next/cache'
 
 export default async function AdminPage({
   searchParams,
 }: {
   searchParams: { page?: string; search?: string; brand?: string; category?: string; subcategory?: string }
 }) {
+  // Opt out of static rendering; page always fetches fresh data on request
+  noStore()
   const page = Number(searchParams.page) || 1
   const perPage = 40
   const searchTerm = searchParams.search || ''
@@ -99,14 +99,6 @@ export default async function AdminPage({
     }
 
   } catch (err: any) {
-    console.error('Failed to fetch data:', err)
-    console.error('Error details:', {
-      message: err?.message,
-      status: err?.status,
-      data: err?.data,
-      url: err?.url,
-      isAbort: err?.isAbort,
-    })
     error = `Failed to load data: ${err?.message || 'Unknown error'}`
   }
 
@@ -164,18 +156,52 @@ export default async function AdminPage({
                       </svg>
                     </a>
 
-                    {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map((pageNum) => (
-                      <a
-                        key={pageNum}
-                        href={`/admin?page=${pageNum}${searchTerm ? `&search=${searchTerm}` : ''}${brandFilter ? `&brand=${brandFilter}` : ''}${categoryFilter ? `&category=${categoryFilter}` : ''}${subcategoryFilter ? `&subcategory=${subcategoryFilter}` : ''}`}
-                        className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${pageNum === page
-                          ? 'z-10 bg-blue-600 text-white'
-                          : 'text-gray-900 dark:text-gray-300 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
-                          }`}
-                      >
-                        {pageNum}
-                      </a>
-                    ))}
+                    {(() => {
+                      // Build smart page numbers: 1 ... (page-2) (page-1) [page] (page+1) (page+2) ... last
+                      const pages: (number | '...')[] = []
+                      const delta = 2
+                      const left = Math.max(2, page - delta)
+                      const right = Math.min(totalPages - 1, page + delta)
+
+                      // Always show page 1
+                      pages.push(1)
+
+                      // Left ellipsis
+                      if (left > 2) pages.push('...')
+
+                      // Middle pages
+                      for (let i = left; i <= right; i++) {
+                        pages.push(i)
+                      }
+
+                      // Right ellipsis
+                      if (right < totalPages - 1) pages.push('...')
+
+                      // Always show last page
+                      if (totalPages > 1) pages.push(totalPages)
+
+                      return pages.map((pageNum, idx) =>
+                        pageNum === '...' ? (
+                          <span
+                            key={`dots-${idx}`}
+                            className="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-500 dark:text-gray-400 ring-1 ring-inset ring-gray-300 dark:ring-gray-600"
+                          >
+                            …
+                          </span>
+                        ) : (
+                          <a
+                            key={pageNum}
+                            href={`/admin?page=${pageNum}${searchTerm ? `&search=${searchTerm}` : ''}${brandFilter ? `&brand=${brandFilter}` : ''}${categoryFilter ? `&category=${categoryFilter}` : ''}${subcategoryFilter ? `&subcategory=${subcategoryFilter}` : ''}`}
+                            className={`relative inline-flex items-center px-4 py-2 text-sm font-semibold ${pageNum === page
+                              ? 'z-10 bg-blue-600 text-white'
+                              : 'text-gray-900 dark:text-gray-300 ring-1 ring-inset ring-gray-300 dark:ring-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                              }`}
+                          >
+                            {pageNum}
+                          </a>
+                        )
+                      )
+                    })()}
 
                     <a
                       href={page < totalPages ? `/admin?page=${page + 1}${searchTerm ? `&search=${searchTerm}` : ''}${brandFilter ? `&brand=${brandFilter}` : ''}${categoryFilter ? `&category=${categoryFilter}` : ''}${subcategoryFilter ? `&subcategory=${subcategoryFilter}` : ''}` : '#'}

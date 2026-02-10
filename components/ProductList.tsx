@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
@@ -57,27 +57,34 @@ export default function ProductList({ initialData, brands, categories, subcatego
     setIsModalOpen(true)
   }
 
-  const handleEdit = (product: Product) => {
+  const handleEdit = useCallback((product: Product) => {
     setEditingProduct(product)
     setIsModalOpen(true)
-  }
+  }, [])
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     if (!confirm('Вы уверены, что хотите удалить этот товар?')) return
 
     try {
       const result = await deleteProductAction(id)
       if (result.success) {
-        setProducts(products.filter(p => p.id !== id))
+        setProducts(prev => prev.filter(p => p.id !== id))
       }
     } catch (error) {
-      console.error('Delete error:', error)
+      // delete failed
     }
-  }
+  }, [])
 
-  const handleProductUpdate = (updatedProduct: Product) => {
-    setProducts(products.map(p => p.id === updatedProduct.id ? updatedProduct : p))
-  }
+  const handleProductUpdate = useCallback((updatedProduct: Product) => {
+    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p))
+  }, [])
+
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedProductIds(prev =>
+      prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
+    )
+  }, [])
+
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans text-slate-200">
@@ -198,13 +205,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
                           onDelete={handleDelete}
                           onUpdate={handleProductUpdate}
                           selected={selectedProductIds.includes(product.id)}
-                          onToggleSelect={(id) => {
-                            if (selectedProductIds.includes(id)) {
-                              setSelectedProductIds(selectedProductIds.filter(pid => pid !== id))
-                            } else {
-                              setSelectedProductIds([...selectedProductIds, id])
-                            }
-                          }}
+                          onToggleSelect={handleToggleSelect}
                         />
                       ))}
                     </div>
@@ -243,13 +244,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
                           onDelete={handleDelete}
                           onUpdate={handleProductUpdate}
                           selected={selectedProductIds.includes(product.id)}
-                          onToggleSelect={(id) => {
-                            if (selectedProductIds.includes(id)) {
-                              setSelectedProductIds(selectedProductIds.filter(pid => pid !== id))
-                            } else {
-                              setSelectedProductIds([...selectedProductIds, id])
-                            }
-                          }}
+                          onToggleSelect={handleToggleSelect}
                         />
                       ))}
                     </div>
