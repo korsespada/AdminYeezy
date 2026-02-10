@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
-import { bulkUpdateSubcategoryAction } from '@/actions/bulk-update'
+import { bulkUpdateProductsAction } from '@/actions/bulk-update'
 import ProductForm from './ProductForm'
 import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square } from 'lucide-react'
 import Sidebar from './Sidebar'
@@ -31,6 +31,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
 
   // Selection state
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
 
@@ -38,6 +39,23 @@ export default function ProductList({ initialData, brands, categories, subcatego
   useEffect(() => {
     setProducts(initialData)
   }, [initialData])
+
+  // Auto-select category if all selected products share the same one
+  useEffect(() => {
+    if (selectedProductIds.length > 0) {
+      const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
+      const uniqueCategories = [...new Set(selectedProducts.map(p => p.category).filter(Boolean))]
+      if (uniqueCategories.length === 1) {
+        setSelectedCategory(uniqueCategories[0])
+      } else {
+        setSelectedCategory('')
+      }
+      setSelectedSubcategory('') // Reset subcategory selection
+    } else {
+      setSelectedCategory('')
+      setSelectedSubcategory('')
+    }
+  }, [selectedProductIds, products])
 
   // Load view mode from localStorage
   useEffect(() => {
@@ -284,45 +302,57 @@ export default function ProductList({ initialData, brands, categories, subcatego
           </div>
 
           <div className="flex flex-1 w-full sm:w-auto items-center gap-4 justify-end">
+            {/* Category Select */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-sm text-slate-400 whitespace-nowrap">Категория:</span>
+              <select
+                value={selectedCategory}
+                onChange={(e) => {
+                  setSelectedCategory(e.target.value)
+                  setSelectedSubcategory('') // Reset subcategory when category changes
+                }}
+                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
+              >
+                <option value="">Выберите категорию...</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Subcategory Select */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <span className="text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
               <select
                 value={selectedSubcategory}
                 onChange={(e) => setSelectedSubcategory(e.target.value)}
-                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
+                disabled={!selectedCategory}
+                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <option value="">Выберите подкатегорию...</option>
-                {(() => {
-                  // Determine common category
-                  const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
-                  const categories = [...new Set(selectedProducts.map(p => p.category))]
-
-                  if (categories.length === 1) {
-                    const categoryId = categories[0]
-                    return subcategories
-                      .filter(s => s.category === categoryId)
-                      .map(s => <option key={s.id} value={s.id}>{s.name}</option>)
-                  } else if (categories.length > 1) {
-                    return <option value="" disabled>Разные категории (выберите одну)</option>
-                  } else {
-                    return null
-                  }
-                })()}
+                <option value="">Без изменений</option>
+                <option value="__none__">Без подкатегории (сбросить)</option>
+                {subcategories
+                  .filter(s => s.category === selectedCategory)
+                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                }
               </select>
             </div>
 
             <button
               onClick={async () => {
-                if (!selectedSubcategory) return
-                if (confirm(`Применить подкатегорию для ${selectedProductIds.length} товаров?`)) {
+                if (!selectedCategory && !selectedSubcategory) return
+                if (confirm(`Обновить ${selectedProductIds.length} товаров?`)) {
                   setIsBulkUpdating(true)
-                  const res = await bulkUpdateSubcategoryAction(selectedProductIds, selectedSubcategory)
+                  const updates: any = {}
+                  if (selectedCategory) updates.category = selectedCategory
+                  if (selectedSubcategory) updates.subcategory = selectedSubcategory
+
+                  const res = await bulkUpdateProductsAction(selectedProductIds, updates)
                   if (res.success) {
                     setIsBulkUpdating(false)
                     setSelectedProductIds([])
                     setSelectedSubcategory('')
-                    // Optimistic update or refresh?
-                    // Refresh is safer
+                    setSelectedCategory('')
                     router.refresh()
                   } else {
                     alert('Error updating products')
@@ -330,7 +360,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
                   }
                 }
               }}
-              disabled={!selectedSubcategory || isBulkUpdating}
+              disabled={(!selectedCategory && !selectedSubcategory) || isBulkUpdating}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
