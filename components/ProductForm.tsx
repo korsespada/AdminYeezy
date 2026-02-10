@@ -278,6 +278,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                           sizes="(max-width: 768px) 33vw, 200px"
                           loading={index < 3 ? 'eager' : 'lazy'}
                           className="object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
+                          unoptimized
                         />
                         <div className="absolute top-1 left-1 p-1 bg-gray-800/70 text-white rounded">
                           <GripVertical size={14} />
@@ -311,6 +312,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                           fill
                           sizes="(max-width: 768px) 33vw, 200px"
                           className="object-cover rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm"
+                          unoptimized
                         />
                         <button
                           type="button"

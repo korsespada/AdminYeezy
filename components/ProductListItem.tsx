@@ -103,7 +103,14 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                     onClick={() => onEdit(product)}
                 >
                     {thumb ? (
-                        <Image src={thumb} alt={product.name} fill sizes="48px" className="object-cover" />
+                        <Image
+                            src={thumb}
+                            alt={product.name}
+                            fill
+                            sizes="48px"
+                            className="object-cover"
+                            unoptimized
+                        />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-600 uppercase">No</div>
                     )}
