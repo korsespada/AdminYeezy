@@ -135,10 +135,10 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                             <select
                                 value={currentSubcategory}
                                 onChange={(e) => applyFilter('subcategory', e.target.value || null)}
-                                disabled={!currentCategory}
-                                className="w-full rounded-lg border-slate-600 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 py-2.5 px-3 bg-slate-700 text-slate-200 border disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full rounded-lg border-slate-600 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 py-2.5 px-3 bg-slate-700 text-slate-200 border"
                             >
                                 <option value="">Все подкатегории</option>
+                                <option value="__none__">Без подкатегории</option>
                                 {availableSubcategories.map(sub => (
                                     <option key={sub.id} value={sub.id}>{sub.name}</option>
                                 ))}

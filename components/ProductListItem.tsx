@@ -46,15 +46,19 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
         if (isSaving) return;
         setIsSaving(true);
 
+        const brandId = product.brand || product.expand?.brand?.id || '';
+        const categoryId = product.category || product.expand?.category?.id || '';
+        const subcategoryId = product.subcategory || product.expand?.subcategory?.id || '';
+
         const formData = new FormData();
         formData.append('productId', product.productId);
         formData.append('name', editingField === 'name' ? editValue.trim() : product.name);
         formData.append('description', product.description || '');
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
-        formData.append('brand', product.brand);
-        formData.append('category', product.category);
-        formData.append('subcategory', product.subcategory || '');
+        formData.append('brand', brandId);
+        formData.append('category', categoryId);
+        formData.append('subcategory', subcategoryId);
         if (product.photos && product.photos.length > 0) {
             formData.append('existingPhotos', JSON.stringify(product.photos));
         }

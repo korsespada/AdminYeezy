@@ -42,9 +42,9 @@ export default function ProductForm({ product, brands, categories, subcategories
         setDescription(product.description || '')
         setPrice(Number(product.price).toString())
         setStatus(product.status)
-        setBrand(product.brand)
-        setCategory(product.category)
-        setSubcategory(product.subcategory || '')
+        setBrand(product.brand || product.expand?.brand?.id || '')
+        setCategory(product.category || product.expand?.category?.id || '')
+        setSubcategory(product.subcategory || product.expand?.subcategory?.id || '')
         setPhotoFiles([])
         setPhotoPreviews([])
 

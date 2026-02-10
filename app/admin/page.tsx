@@ -46,7 +46,11 @@ export default async function AdminPage({
 
     if (brandFilter) filters.push(`brand = "${brandFilter}"`)
     if (categoryFilter) filters.push(`category = "${categoryFilter}"`)
-    if (subcategoryFilter) filters.push(`subcategory = "${subcategoryFilter}"`)
+    if (subcategoryFilter === '__none__') {
+      filters.push(`subcategory = ""`)
+    } else if (subcategoryFilter) {
+      filters.push(`subcategory = "${subcategoryFilter}"`)
+    }
 
     const filter = filters.length > 0 ? filters.join(' && ') : ''
 
@@ -97,6 +101,14 @@ export default async function AdminPage({
       products.forEach(p => p.expand?.subcategory && subMap.set(p.expand.subcategory.id, p.expand.subcategory))
       subcategories = Array.from(subMap.values()).sort((a, b) => a.name.localeCompare(b.name))
     }
+
+    // Ensure all products have their relation IDs populated (fallback to expand)
+    products = products.map(p => ({
+      ...p,
+      brand: p.brand || p.expand?.brand?.id || '',
+      category: p.category || p.expand?.category?.id || '',
+      subcategory: p.subcategory || p.expand?.subcategory?.id || ''
+    }))
 
   } catch (err: any) {
     error = `Failed to load data: ${err?.message || 'Unknown error'}`
