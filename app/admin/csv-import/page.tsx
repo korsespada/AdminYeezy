@@ -39,39 +39,70 @@ function parseCsvLine(line: string, delimiter: string): string[] {
     return result
 }
 
-function parseCsv(text: string): CsvProduct[] {
+function parseCsv(text: string): { products: CsvProduct[], columns: { name: string, key: string }[] } {
     const lines = text.split(/\r?\n/).filter(l => l.trim())
-    if (lines.length < 2) return []
+    if (lines.length < 2) return { products: [], columns: [] }
     const delimiter = detectDelimiter(lines[0])
-    const headers = parseCsvLine(lines[0], delimiter).map(h => h.toLowerCase().trim())
 
-    return lines.slice(1).map(line => {
+    const originalHeaders = parseCsvLine(lines[0], delimiter).map(h => h.trim())
+    const lowerHeaders = originalHeaders.map(h => h.toLowerCase())
+
+    // Map headers to internal keys
+    const columns = originalHeaders.map((h, i) => {
+        const lower = lowerHeaders[i]
+        let key = lower
+        if (['productid', 'product_id', 'id'].includes(lower)) key = 'productId'
+        else if (['name', 'title'].includes(lower)) key = 'name'
+        else if (['description', 'desc'].includes(lower)) key = 'description'
+        else if (['price'].includes(lower)) key = 'price'
+        else if (['status'].includes(lower)) key = 'status'
+        else if (['brand'].includes(lower)) key = 'brand'
+        else if (['category'].includes(lower)) key = 'category'
+        else if (['subcategory'].includes(lower)) key = 'subcategory'
+        else if (['photos', 'images'].includes(lower)) key = 'photos'
+        return { name: h, key }
+    })
+
+    const products = lines.slice(1).map(line => {
         const values = parseCsvLine(line, delimiter)
-        const row: Record<string, string> = {}
-        headers.forEach((h, i) => { row[h] = values[i] || '' })
+        const product: any = {}
 
-        let photos: string[] = []
-        const photosRaw = row['photos'] || ''
-        if (photosRaw) {
-            if (photosRaw.startsWith('[')) {
-                try { photos = JSON.parse(photosRaw) } catch { photos = photosRaw.split(',').map(s => s.trim()).filter(Boolean) }
+        columns.forEach((col, i) => {
+            const val = values[i] || ''
+            if (col.key === 'photos') {
+                let photos: string[] = []
+                if (val) {
+                    if (val.startsWith('[')) {
+                        try { photos = JSON.parse(val) } catch { photos = val.split(',').map(s => s.trim()).filter(Boolean) }
+                    } else {
+                        photos = val.split(delimiter === ';' ? ',' : ';').map(s => s.trim()).filter(Boolean)
+                    }
+                }
+                product[col.key] = photos
+            } else if (col.key === 'price') {
+                product[col.key] = parseFloat(val || '0') || 0
+            } else if (col.key === 'status') {
+                product[col.key] = (val === 'inactive' ? 'inactive' : 'active')
             } else {
-                photos = photosRaw.split(delimiter === ';' ? ',' : ';').map(s => s.trim()).filter(Boolean)
+                product[col.key] = val
             }
-        }
+        })
 
-        return {
-            productId: row['productid'] || row['product_id'] || row['id'] || '',
-            name: row['name'] || row['title'] || '',
-            description: row['description'] || row['desc'] || '',
-            price: parseFloat(row['price'] || '0') || 0,
-            status: (row['status'] === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-            brand: row['brand'] || '',
-            category: row['category'] || '',
-            subcategory: row['subcategory'] || '',
-            photos,
-        }
+        // Ensure required fields exist
+        if (!product.productId) product.productId = ''
+        if (!product.name) product.name = ''
+        if (!product.price) product.price = 0
+        if (!product.status) product.status = 'active'
+        if (!product.brand) product.brand = ''
+        if (!product.category) product.category = ''
+        if (!product.subcategory) product.subcategory = ''
+        if (!product.photos) product.photos = []
+        if (!product.description) product.description = ''
+
+        return product as CsvProduct
     }).filter(p => p.productId || p.name)
+
+    return { products, columns }
 }
 
 function resolveName(id: string, items: { id: string; name: string }[]): string {
@@ -84,6 +115,7 @@ function resolveName(id: string, items: { id: string; name: string }[]): string 
 
 export default function CsvImportPage() {
     const [products, setProducts] = useState<CsvProduct[]>([])
+    const [columns, setColumns] = useState<{ name: string, key: string }[]>([])
     const [fileName, setFileName] = useState('')
     const [isPushing, setIsPushing] = useState(false)
     const [result, setResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
@@ -134,7 +166,7 @@ export default function CsvImportPage() {
     const handleModeChange = (mode: 'upload' | 'local') => {
         setImportMode(mode)
         localStorage.setItem('csv_import_mode', mode)
-        setProducts([]); setResult(null); setFileName(''); setIsDirty(false); setSaveMsg(null)
+        setProducts([]); setColumns([]); setResult(null); setFileName(''); setIsDirty(false); setSaveMsg(null)
         setFilterBrand(''); setFilterCategory(''); setFilterSubcategory('')
     }
 
@@ -143,7 +175,11 @@ export default function CsvImportPage() {
         if (!file.name.endsWith('.csv')) { alert('Пожалуйста, загрузите файл CSV'); return }
         setFileName(file.name); setResult(null); setIsDirty(false); setSaveMsg(null)
         const reader = new FileReader()
-        reader.onload = (e) => setProducts(parseCsv(e.target?.result as string))
+        reader.onload = (e) => {
+            const { products, columns } = parseCsv(e.target?.result as string)
+            setProducts(products)
+            setColumns(columns)
+        }
         reader.readAsText(file, 'utf-8')
     }, [])
 
@@ -159,7 +195,9 @@ export default function CsvImportPage() {
         setIsLoadingPath(true); setPathError(''); setResult(null); setSaveMsg(null); setIsDirty(false)
         const res = await readLocalCsvAction(localPath)
         if (res.success && res.content) {
-            setProducts(parseCsv(res.content))
+            const { products, columns } = parseCsv(res.content)
+            setProducts(products)
+            setColumns(columns)
             setFileName(localPath.split(/[/\\]/).pop() || 'local.csv')
             localStorage.setItem('csv_local_path', localPath)
         } else {
@@ -173,7 +211,7 @@ export default function CsvImportPage() {
         if (!localPath || products.length === 0) return
         setIsSaving(true); setSaveMsg(null)
         try {
-            const res = await saveLocalCsvAction(localPath, products)
+            const res = await saveLocalCsvAction(localPath, products, columns)
             if (res.success) {
                 setIsDirty(false)
                 setSaveMsg('✓ Файл сохранён')

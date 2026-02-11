@@ -14,6 +14,7 @@ export interface CsvProduct {
     category: string
     subcategory: string
     photos: string[]
+    [key: string]: any
 }
 
 export interface Lookups {
@@ -98,10 +99,10 @@ export async function readLocalCsvAction(filePath: string) {
     }
 }
 
-export async function saveLocalCsvAction(filePath: string, products: CsvProduct[]) {
+export async function saveLocalCsvAction(filePath: string, products: CsvProduct[], columns?: { name: string, key: string }[]) {
     try {
         const cleanPath = filePath.replace(/"/g, '')
-        const csvContent = productsToCsv(products)
+        const csvContent = productsToCsv(products, columns)
         await fs.writeFile(path.resolve(cleanPath), csvContent, 'utf-8')
         return { success: true }
     } catch (error: any) {
@@ -110,26 +111,35 @@ export async function saveLocalCsvAction(filePath: string, products: CsvProduct[
     }
 }
 
-function productsToCsv(products: CsvProduct[]): string {
-    const headers = ['productId', 'name', 'price', 'brand', 'category', 'subcategory', 'status', 'description', 'photos']
+function productsToCsv(products: CsvProduct[], columns?: { name: string, key: string }[]): string {
+    // Если колонок нет, используем дефолтные
+    const cols = columns || [
+        { name: 'productId', key: 'productId' },
+        { name: 'name', key: 'name' },
+        { name: 'price', key: 'price' },
+        { name: 'brand', key: 'brand' },
+        { name: 'category', key: 'category' },
+        { name: 'subcategory', key: 'subcategory' },
+        { name: 'status', key: 'status' },
+        { name: 'description', key: 'description' },
+        { name: 'photos', key: 'photos' }
+    ]
+
+    const headers = cols.map(c => c.name)
     const lines = [headers.join(';')]
 
     for (const p of products) {
-        const row = [
-            p.productId,
-            p.name,
-            p.price.toString(),
-            p.brand,
-            p.category,
-            p.subcategory,
-            p.status,
-            p.description,
-            JSON.stringify(p.photos) // Фотографии сохраняем как JSON массив
-        ]
+        const row = cols.map(col => {
+            const val = p[col.key]
+            if (col.key === 'photos' && Array.isArray(val)) {
+                return JSON.stringify(val)
+            }
+            return val
+        })
 
         // Экранирование значений
         const escapedRow = row.map(val => {
-            const str = String(val || '')
+            const str = String(val !== undefined && val !== null ? val : '')
             if (str.includes(';') || str.includes('"') || str.includes('\n')) {
                 return `"${str.replace(/"/g, '""')}"`
             }
