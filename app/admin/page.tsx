@@ -2,6 +2,8 @@ import { createClient } from '@/lib/pocketbase'
 import { Collections, type Product, type Brand, type Category } from '@/lib/types'
 import ProductList from '@/components/ProductList'
 import { unstable_noStore as noStore } from 'next/cache'
+import { logoutAction } from '@/actions/auth'
+import { LogOut } from 'lucide-react'
 
 export default async function AdminPage({
   searchParams,
@@ -117,8 +119,21 @@ export default async function AdminPage({
   return (
     <>
       {error ? (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-          <p className="text-red-600 dark:text-red-400">{error}</p>
+        <div className="flex flex-col items-center justify-center p-8 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <p className="text-red-600 dark:text-red-400 font-medium mb-4">{error}</p>
+          <p className="text-gray-600 dark:text-gray-400 mb-6 text-center max-w-md">
+            This error usually occurs when your session has expired or you don't have sufficient permissions.
+            Please sign out and sign in again.
+          </p>
+          <form action={logoutAction}>
+            <button
+              type="submit"
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-sm"
+            >
+              <LogOut size={18} />
+              Sign Out & Retry
+            </button>
+          </form>
         </div>
       ) : (
         <>
@@ -231,7 +246,8 @@ export default async function AdminPage({
             </div>
           )}
         </>
-      )}
+      )
+      }
     </>
   )
 }

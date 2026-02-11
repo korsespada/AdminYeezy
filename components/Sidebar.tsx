@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { X, Filter, Search, LogOut } from 'lucide-react'
+import { X, Filter, Search, LogOut, FileSpreadsheet } from 'lucide-react'
+import Link from 'next/link'
 import { type Brand, type Category, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { logoutAction } from '@/actions/auth'
@@ -192,8 +193,19 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                         </button>
                     </div>
 
-                    {/* User Section at bottom of sidebar */}
+                    {/* CSV Import Link */}
                     <div className="mt-8 pt-6 border-t border-slate-700">
+                        <Link
+                            href="/admin/csv-import"
+                            className="flex items-center gap-3 w-full px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                        >
+                            <FileSpreadsheet size={18} />
+                            Импорт CSV
+                        </Link>
+                    </div>
+
+                    {/* User Section at bottom of sidebar */}
+                    <div className="mt-4 pt-6 border-t border-slate-700">
                         <form action={logoutAction}>
                             <button
                                 type="submit"
