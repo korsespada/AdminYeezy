@@ -59,17 +59,36 @@ export async function pushCsvProductsAction(products: CsvProduct[]) {
                     subcategory: product.subcategory || '',
                     photos: product.photos || [],
                     photos_processed: false,
+                    gender: product.gender || '',
                 }
 
-                await pb.collection(Collections.Products).create(data)
+                // Проверяем, существует ли уже товар с таким productId
+                const existing = await pb.collection(Collections.Products)
+                    .getFirstListItem(`productId="${product.productId}"`)
+                    .catch(() => null)
+
+                if (existing) {
+                    await pb.collection(Collections.Products).update(existing.id, data)
+                } else {
+                    await pb.collection(Collections.Products).create(data)
+                }
+
                 results.success++
             } catch (err: any) {
                 results.failed++
-                const msg = err?.data?.data
-                    ? Object.entries(err.data.data)
-                        .map(([f, e]: [string, any]) => `${f}: ${e.message}`)
+                console.error(`Error pushing product ${product.productId}:`, err)
+
+                let msg = ''
+                if (err?.data?.data) {
+                    msg = Object.entries(err.data.data)
+                        .map(([f, e]: [string, any]) => `${f}: ${e.message || JSON.stringify(e)}`)
                         .join(', ')
-                    : err?.message || 'Unknown error'
+                } else if (err?.data?.message) {
+                    msg = err.data.message
+                } else {
+                    msg = err?.message || 'Unknown error'
+                }
+
                 results.errors.push(`${product.productId || product.name}: ${msg}`)
             }
         }
@@ -91,7 +110,17 @@ import path from 'path'
 export async function readLocalCsvAction(filePath: string) {
     try {
         const cleanPath = filePath.replace(/"/g, '') // Убираем кавычки, если скопировали путь как "C:\..."
-        const content = await fs.readFile(path.resolve(cleanPath), 'utf-8')
+
+        // Проверка: если мы не на Windows, а путь похож на Windows-путь (C:\...)
+        if (process.platform !== 'win32' && /^[a-zA-Z]:[\\/]/.test(cleanPath)) {
+            return {
+                success: false,
+                error: 'Доступ к путям Windows (C:\\...) невозможен из облака (Vercel). Используйте "Локальный файл" только при запуске на localhost. Для облака используйте "Загрузку файла".'
+            }
+        }
+
+        const targetPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(cleanPath)
+        const content = await fs.readFile(targetPath, 'utf-8')
         return { success: true, content }
     } catch (error: any) {
         console.error('Read local CSV error:', error)
@@ -102,8 +131,18 @@ export async function readLocalCsvAction(filePath: string) {
 export async function saveLocalCsvAction(filePath: string, products: CsvProduct[], columns?: { name: string, key: string }[]) {
     try {
         const cleanPath = filePath.replace(/"/g, '')
+
+        // Проверка: если мы не на Windows, а путь похож на Windows-путь (C:\...)
+        if (process.platform !== 'win32' && /^[a-zA-Z]:[\\/]/.test(cleanPath)) {
+            return {
+                success: false,
+                error: 'Сохранение в локальные пути Windows невозможно из облака. Используйте localhost.'
+            }
+        }
+
         const csvContent = productsToCsv(products, columns)
-        await fs.writeFile(path.resolve(cleanPath), csvContent, 'utf-8')
+        const targetPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(cleanPath)
+        await fs.writeFile(targetPath, csvContent, 'utf-8')
         return { success: true }
     } catch (error: any) {
         console.error('Save local CSV error:', error)
@@ -122,32 +161,69 @@ function productsToCsv(products: CsvProduct[], columns?: { name: string, key: st
         { name: 'subcategory', key: 'subcategory' },
         { name: 'status', key: 'status' },
         { name: 'description', key: 'description' },
+        { name: 'gender', key: 'gender' },
         { name: 'photos', key: 'photos' }
     ]
 
     const headers = cols.map(c => c.name)
     const lines = [headers.join(';')]
 
-    for (const p of products) {
+    // Фильтруем пустые товары перед сохранением
+    const validProducts = products.filter(p => (p.productId && String(p.productId).trim()) || (p.name && String(p.name).trim()))
+
+    for (const p of validProducts) {
         const row = cols.map(col => {
-            const val = p[col.key]
-            if (col.key === 'photos' && Array.isArray(val)) {
-                return JSON.stringify(val)
+            let val = p[col.key]
+            if (col.key === 'photos') {
+                // Всегда приводим к JSON-массиву для сохранения
+                if (Array.isArray(val)) {
+                    // Добавляем пробел после запятой для красоты и соответствия вашему формату
+                    return JSON.stringify(val).replace(/,/g, ', ')
+                }
+                if (typeof val === 'string' && val.trim()) {
+                    const str = val.trim()
+                    if (str.startsWith('[') && str.endsWith(']')) {
+                        return str.replace(/,/g, ', ')
+                    }
+                    // Если это список через | или запятую - превращаем в JSON с пробелами
+                    const list = str.split(/[||,;]/).map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean)
+                    return JSON.stringify(list).replace(/,/g, ', ')
+                }
+                return '[]'
             }
             return val
         })
 
         // Экранирование значений
-        const escapedRow = row.map(val => {
-            const str = String(val !== undefined && val !== null ? val : '')
-            if (str.includes(';') || str.includes('"') || str.includes('\n')) {
+        // Экранирование значений
+        const escapedRow = row.map((val, i) => {
+            const str = String(val !== undefined && val !== null ? val : '').trim()
+            const key = cols[i].key
+
+            // 1. Для поля photos (JSON) всегда используем стандартное экранирование.
+            // Это даст результат типа "[""url""]", что является корректным CSV и 
+            // гарантирует, что PocketBase воспримет это как JSON-массив.
+            if (key === 'photos') {
                 return `"${str.replace(/"/g, '""')}"`
             }
+
+            // 2. Для остальных полей используем "минималистичное" экранирование:
+            // Оборачиваем в кавычки ТОЛЬКО если есть разделитель (;) или переносы строк.
+            const hasDelimiter = str.includes(';')
+            const hasNewline = str.includes('\n') || str.includes('\r')
+
+            if (hasDelimiter || hasNewline) {
+                return `"${str.replace(/"/g, '""')}"`
+            }
+
+            // В остальных случаях (как Rolex "Pepsi") возвращаем как есть.
             return str
         })
 
         lines.push(escapedRow.join(';'))
     }
 
-    return lines.join('\n')
+    // Сохраняем в Windows-формате (CRLF) и гарантируем пустую строку в конце
+    const csvResult = lines.join('\r\n')
+    return csvResult.endsWith('\r\n') ? csvResult : csvResult + '\r\n'
 }

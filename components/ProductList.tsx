@@ -6,20 +6,25 @@ import { type Product, type Brand, type Category, type Subcategory } from '@/lib
 import { deleteProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction } from '@/actions/bulk-update'
 import ProductForm from './ProductForm'
-import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square } from 'lucide-react'
+import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square, LogOut, FileSpreadsheet, BarChart3 } from 'lucide-react'
 import Sidebar from './Sidebar'
 import ProductCard from './ProductCard'
-import ProductListItem from './ProductListItem'
+import ProductTableView from './ProductTableView'
+import Link from 'next/link'
+import { logoutAction } from '@/actions/auth'
 
 interface ProductListProps {
   initialData: Product[]
   brands: Brand[]
+  allBrands?: Brand[] // Complete list of brands for editing
   categories: Category[]
   subcategories: Subcategory[]
+  activeSubcategoryIds?: string[]
   totalItems: number
+  pagination?: React.ReactNode
 }
 
-export default function ProductList({ initialData, brands, categories, subcategories, totalItems }: ProductListProps) {
+export default function ProductList({ initialData, brands, allBrands = [], categories, subcategories, activeSubcategoryIds = [], totalItems, pagination }: ProductListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -29,10 +34,14 @@ export default function ProductList({ initialData, brands, categories, subcatego
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
 
+  // Use allBrands if provided, otherwise fallback to filtered brands (though suboptimal for editing)
+  const editingBrands = allBrands.length > 0 ? allBrands : brands
+
   // Selection state
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
+  const [selectedGender, setSelectedGender] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
 
   // Update local state when initialData changes (e.g. after search/filter)
@@ -51,9 +60,11 @@ export default function ProductList({ initialData, brands, categories, subcatego
         setSelectedCategory('')
       }
       setSelectedSubcategory('') // Reset subcategory selection
+      setSelectedGender('') // Reset gender
     } else {
       setSelectedCategory('')
       setSelectedSubcategory('')
+      setSelectedGender('')
     }
   }, [selectedProductIds, products])
 
@@ -112,6 +123,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
         brands={brands}
         categories={categories}
         subcategories={subcategories}
+        activeSubcategoryIds={activeSubcategoryIds}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         count={totalItems}
@@ -130,17 +142,52 @@ export default function ProductList({ initialData, brands, categories, subcatego
               <Menu className="w-5 h-5" />
             </button>
             <div className="hidden sm:block">
-              <h1 className="text-xl font-bold text-slate-100">Admin Panel</h1>
+              <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                <span className="text-indigo-500">Yeezy</span>
+                <span>Unique</span>
+                <span className="text-slate-500 text-sm font-normal ml-2">Админка</span>
+              </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="h-8 w-px bg-slate-700 hidden sm:block"></div>
-            <div className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-700/50 border border-slate-600">
-              <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-xs border border-indigo-500/30">
-                AD
+          <div className="flex items-center gap-2 sm:gap-6">
+            <Link
+              href="/admin/csv-import"
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all"
+              title="Импорт CSV"
+            >
+              <FileSpreadsheet size={20} className="text-emerald-500" />
+              <span className="hidden md:inline">Импорт</span>
+            </Link>
+
+            <Link
+              href="/admin/analytics"
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all"
+              title="Аналитика"
+            >
+              <BarChart3 size={20} className="text-indigo-400" />
+              <span className="hidden md:inline">Аналитика</span>
+            </Link>
+
+            <div className="h-6 w-px bg-slate-700"></div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-700/30 border border-slate-700">
+                <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-xs border border-indigo-500/30">
+                  AD
+                </div>
+                <span className="text-sm font-medium text-slate-300 hidden sm:block pr-2">Admin</span>
               </div>
-              <span className="text-sm font-medium text-slate-300 hidden sm:block pr-2">Admin</span>
+
+              <form action={logoutAction} className="flex items-center">
+                <button
+                  type="submit"
+                  title="Выйти"
+                  className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                >
+                  <LogOut size={20} />
+                </button>
+              </form>
             </div>
           </div>
         </header>
@@ -229,47 +276,25 @@ export default function ProductList({ initialData, brands, categories, subcatego
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-sm mb-8">
-                    <div className="hidden sm:grid grid-cols-12 gap-4 p-4 border-b border-slate-700 bg-slate-800/50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                      <div className="col-span-6 flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            if (selectedProductIds.length === products.length) {
-                              setSelectedProductIds([])
-                            } else {
-                              setSelectedProductIds(products.map(p => p.id))
-                            }
-                          }}
-                          className="text-slate-400 hover:text-white"
-                        >
-                          {selectedProductIds.length === products.length && products.length > 0 ? (
-                            <CheckSquare className="w-4 h-4 text-indigo-500" />
-                          ) : (
-                            <Square className="w-4 h-4" />
-                          )}
-                        </button>
-                        Товар
-                      </div>
-                      <div className="col-span-4">Категория</div>
-                      <div className="col-span-2 text-right">Цена</div>
-                    </div>
-                    <div className="divide-y divide-slate-700">
-                      {products.map(product => (
-                        <ProductListItem
-                          key={product.id}
-                          product={product}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
-                          onUpdate={handleProductUpdate}
-                          selected={selectedProductIds.includes(product.id)}
-                          onToggleSelect={handleToggleSelect}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <ProductTableView
+                    products={products}
+                    selectedIds={selectedProductIds}
+                    onToggleSelect={handleToggleSelect}
+                    onToggleSelectAll={() => {
+                      if (selectedProductIds.length === products.length) {
+                        setSelectedProductIds([])
+                      } else {
+                        setSelectedProductIds(products.map(p => p.id))
+                      }
+                    }}
+                    onUpdateProduct={handleProductUpdate}
+                  />
                 )}
               </>
             )}
+
+            {/* Pagination injection */}
+            {pagination}
           </div>
         </div>
       </main>
@@ -277,7 +302,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
       {/* Product Form Modal */}
       <ProductForm
         product={editingProduct}
-        brands={brands}
+        brands={editingBrands}
         categories={categories}
         subcategories={subcategories}
         isOpen={isModalOpen}
@@ -302,6 +327,21 @@ export default function ProductList({ initialData, brands, categories, subcatego
           </div>
 
           <div className="flex flex-1 w-full sm:w-auto items-center gap-4 justify-end">
+            {/* Gender Select */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <span className="text-sm text-slate-400 whitespace-nowrap">Гендер:</span>
+              <select
+                value={selectedGender}
+                onChange={(e) => setSelectedGender(e.target.value)}
+                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
+              >
+                <option value="">Без изменений</option>
+                <option value="Для мужчин">Для мужчин</option>
+                <option value="Для женщин">Для женщин</option>
+                <option value="Унисекс">Унисекс</option>
+              </select>
+            </div>
+
             {/* Category Select */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <span className="text-sm text-slate-400 whitespace-nowrap">Категория:</span>
@@ -340,12 +380,13 @@ export default function ProductList({ initialData, brands, categories, subcatego
 
             <button
               onClick={async () => {
-                if (!selectedCategory && !selectedSubcategory) return
+                if (!selectedCategory && !selectedSubcategory && !selectedGender) return
                 if (confirm(`Обновить ${selectedProductIds.length} товаров?`)) {
                   setIsBulkUpdating(true)
                   const updates: any = {}
                   if (selectedCategory) updates.category = selectedCategory
                   if (selectedSubcategory) updates.subcategory = selectedSubcategory
+                  if (selectedGender) updates.gender = selectedGender
 
                   const res = await bulkUpdateProductsAction(selectedProductIds, updates)
                   if (res.success) {
@@ -353,6 +394,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
                     setSelectedProductIds([])
                     setSelectedSubcategory('')
                     setSelectedCategory('')
+                    setSelectedGender('')
                     router.refresh()
                   } else {
                     alert('Error updating products')
@@ -360,7 +402,7 @@ export default function ProductList({ initialData, brands, categories, subcatego
                   }
                 }
               }}
-              disabled={(!selectedCategory && !selectedSubcategory) || isBulkUpdating}
+              disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}

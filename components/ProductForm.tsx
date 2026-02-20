@@ -6,6 +6,17 @@ import { type Product, type Brand, type Category, type Subcategory } from '@/lib
 import { createProductAction, updateProductAction } from '@/actions/products'
 import { X, Upload, Trash2, GripVertical } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import BrandSelect from './BrandSelect'
+
+const getOptimizedPhotoUrl = (url: string) => {
+  if (typeof url === 'string' && url.includes('szwego.com')) {
+    const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
+    if (!url.includes('?imageMogr2')) {
+      return url + IMG_SUFFIX;
+    }
+  }
+  return url;
+}
 
 interface ProductFormProps {
   product?: Product | null
@@ -26,9 +37,10 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState('')
   const [status, setStatus] = useState<'active' | 'inactive'>('active')
-  const [brand, setBrand] = useState('')
+  const [brandIds, setBrandIds] = useState<string[]>([])
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
+  const [gender, setGender] = useState('')
   const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
@@ -42,9 +54,26 @@ export default function ProductForm({ product, brands, categories, subcategories
         setDescription(product.description || '')
         setPrice(Number(product.price).toString())
         setStatus(product.status)
-        setBrand(product.brand || product.expand?.brand?.id || '')
+
+        // Handle brand as array or single value
+        const b = product.brand || product.expand?.brand
+        if (Array.isArray(b)) {
+          if (b.length > 0 && typeof b[0] === 'object') {
+            setBrandIds((b as Brand[]).map(x => x.id))
+          } else {
+            setBrandIds(b as string[])
+          }
+        } else if (typeof b === 'string' && b) {
+          setBrandIds([b])
+        } else if (b && typeof b === 'object' && 'id' in b) {
+          setBrandIds([(b as Brand).id])
+        } else {
+          setBrandIds([])
+        }
+
         setCategory(product.category || product.expand?.category?.id || '')
         setSubcategory(product.subcategory || product.expand?.subcategory?.id || '')
+        setGender(product.gender || '')
         setPhotoFiles([])
         setPhotoPreviews([])
 
@@ -73,9 +102,10 @@ export default function ProductForm({ product, brands, categories, subcategories
         setDescription('')
         setPrice('')
         setStatus('active')
-        setBrand(brands[0]?.id || '')
+        setBrandIds([])
         setCategory(categories[0]?.id || '')
         setSubcategory('')
+        setGender('')
         setPhotoFiles([])
         setPhotoPreviews([])
         setExistingPhotos([])
@@ -141,8 +171,8 @@ export default function ProductForm({ product, brands, categories, subcategories
       setError('Product name is required')
       return
     }
-    if (!brand) {
-      setError('Brand is required')
+    if (brandIds.length === 0) {
+      setError('At least one brand is required')
       return
     }
     if (!category) {
@@ -162,9 +192,15 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('description', description.trim())
     formData.append('price', priceNum.toString())
     formData.append('status', status)
-    formData.append('brand', brand)
+
+    // Append each brand ID
+    brandIds.forEach(id => {
+      formData.append('brand', id)
+    })
+
     formData.append('category', category)
     formData.append('subcategory', subcategory)
+    formData.append('gender', gender)
 
     // Add existing photos in new order (as JSON)
     if (existingPhotos.length > 0) {
@@ -213,7 +249,7 @@ export default function ProductForm({ product, brands, categories, subcategories
           {/* Header */}
           <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {product ? 'Edit Product' : 'New Product'}
+              {product ? 'Изменить товар' : 'Новый товар'}
             </h2>
             <button
               onClick={onClose}
@@ -231,7 +267,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               </div>
             )}
 
-            {/* Photos Upload - MOVED TO TOP */}
+            {/* Photos Upload */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -259,7 +295,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               {/* Existing Photos with Drag and Drop */}
               {existingPhotos.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-2">Current photos (drag to reorder):</p>
+                  <p className="text-xs text-gray-500 mb-2">Текущие фото (перетащите для изменения порядка):</p>
                   <div className="grid grid-cols-3 gap-2">
                     {existingPhotos.map((url, index) => (
                       <div
@@ -272,7 +308,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                           }`}
                       >
                         <Image
-                          src={url}
+                          src={getOptimizedPhotoUrl(url)}
                           alt={`Photo ${index + 1}`}
                           fill
                           sizes="(max-width: 768px) 33vw, 200px"
@@ -302,7 +338,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               {/* New Photos */}
               {photoPreviews.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-2">New photos to upload:</p>
+                  <p className="text-xs text-gray-500 mb-2">Новые фото для загрузки:</p>
                   <div className="grid grid-cols-3 gap-2">
                     {photoPreviews.map((url, index) => (
                       <div key={index} className="relative aspect-square group">
@@ -326,8 +362,6 @@ export default function ProductForm({ product, brands, categories, subcategories
                   </div>
                 </div>
               )}
-
-              {/* Upload zone removed and replaced by button in header */}
             </div>
 
             {/* Product ID */}
@@ -340,7 +374,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                 value={productId}
                 onChange={(e) => setProductId(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                placeholder="e.g. SKU-12345"
+                placeholder="например SKU-12345"
                 required
                 disabled={isPending}
               />
@@ -349,14 +383,14 @@ export default function ProductForm({ product, brands, categories, subcategories
             {/* Name */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Product Name *
+                Название товара *
               </label>
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                placeholder="e.g. Chanel Комплект"
+                placeholder="например Chanel Комплект"
                 required
                 disabled={isPending}
               />
@@ -365,14 +399,14 @@ export default function ProductForm({ product, brands, categories, subcategories
             {/* Description */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Description
+                Описание
               </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={6}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                placeholder="Product description..."
+                placeholder="Описание товара..."
                 disabled={isPending}
               />
             </div>
@@ -380,22 +414,17 @@ export default function ProductForm({ product, brands, categories, subcategories
             {/* Brand */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Brand *
+                Бренды *
               </label>
-              <select
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                required
+              <BrandSelect
+                brands={brands}
+                selectedBrandIds={brandIds}
+                onChange={setBrandIds}
                 disabled={isPending}
-              >
-                <option value="">Select brand...</option>
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
+              />
+              {brandIds.length === 0 && (
+                <p className="text-xs text-red-500">Пожалуйста, выберите хотя бы один бренд.</p>
+              )}
             </div>
 
             {/* Category & Subcategory Row */}
@@ -403,7 +432,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               {/* Category */}
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Category *
+                  Категория *
                 </label>
                 <select
                   value={category}
@@ -415,7 +444,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                   required
                   disabled={isPending}
                 >
-                  <option value="">Select category...</option>
+                  <option value="">Выберите категорию...</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -427,7 +456,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               {/* Subcategory */}
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Subcategory
+                  Подкатегория
                 </label>
                 <select
                   value={subcategory}
@@ -435,7 +464,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
                   disabled={isPending || !category}
                 >
-                  <option value="">Select subcategory...</option>
+                  <option value="">Выберите подкатегорию...</option>
                   {subcategories
                     .filter((s) => s.category === category)
                     .map((s) => (
@@ -447,38 +476,58 @@ export default function ProductForm({ product, brands, categories, subcategories
               </div>
             </div>
 
-            {/* Price */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Price ($) *
-              </label>
-              <input
-                type="number"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                step="0.01"
-                min="0"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                placeholder="0.00"
-                required
-                disabled={isPending}
-              />
-            </div>
+            {/* Gender, Price & Status Row */}
+            <div className="grid grid-cols-3 gap-4">
+              {/* Gender */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Для кого
+                </label>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="">Не указано</option>
+                  <option value="Для мужчин">Для мужчин</option>
+                  <option value="Для женщин">Для женщин</option>
+                </select>
+              </div>
 
-            {/* Status */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Status
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'active' | 'inactive')}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                disabled={isPending}
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+              {/* Price */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Цена (₽) *
+                </label>
+                <input
+                  type="number"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  step="0.01"
+                  min="0"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  placeholder="0.00"
+                  required
+                  disabled={isPending}
+                />
+              </div>
+
+              {/* Status */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Статус
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as 'active' | 'inactive')}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="active">Активный</option>
+                  <option value="inactive">Неактивный</option>
+                </select>
+              </div>
             </div>
           </form>
 
@@ -490,7 +539,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               disabled={isPending}
               className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
             >
-              Cancel
+              Отмена
             </button>
             <button
               type="submit"
@@ -498,7 +547,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               disabled={isPending}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
             >
-              {isPending ? 'Saving...' : product ? 'Update' : 'Create'}
+              {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
             </button>
           </div>
         </div>

@@ -11,12 +11,13 @@ interface SidebarProps {
     brands: Brand[]
     categories: Category[]
     subcategories: Subcategory[]
+    activeSubcategoryIds: string[]
     isOpen: boolean
     onClose: () => void
     count: number
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, isOpen, onClose, count }) => {
+const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, activeSubcategoryIds, isOpen, onClose, count }) => {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
     const currentBrand = searchParams.get('brand') || ''
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
+    const currentGender = searchParams.get('gender') || ''
 
     // Debounce search
     useEffect(() => {
@@ -66,7 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
     }
 
     const availableSubcategories = currentCategory
-        ? subcategories.filter(sub => sub.category === currentCategory)
+        ? subcategories.filter(sub => sub.category === currentCategory || activeSubcategoryIds.includes(sub.id))
         : []
 
     // Filter brands by search
@@ -140,15 +142,66 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                             >
                                 <option value="">Все подкатегории</option>
                                 <option value="__none__">Без подкатегории</option>
-                                {availableSubcategories.map(sub => (
-                                    <option key={sub.id} value={sub.id}>{sub.name}</option>
-                                ))}
+                                {availableSubcategories.map(sub => {
+                                    const isForeign = sub.category !== currentCategory
+                                    const foreignCategoryName = isForeign
+                                        ? categories.find(c => c.id === sub.category)?.name || 'Другое'
+                                        : '';
+                                    return (
+                                        <option key={sub.id} value={sub.id}>
+                                            {sub.name} {isForeign ? `(из: ${foreignCategoryName})` : ''}
+                                        </option>
+                                    )
+                                })}
                             </select>
+                        </div>
+
+                        {/* Gender Filter */}
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-2">Пол</label>
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    onClick={() => applyFilter('gender', null)}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${!currentGender
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    Все
+                                </button>
+                                <button
+                                    onClick={() => applyFilter('gender', 'Для мужчин')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === 'Для мужчин'
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    Мужчинам
+                                </button>
+                                <button
+                                    onClick={() => applyFilter('gender', 'Для женщин')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === 'Для женщин'
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    Женщинам
+                                </button>
+                                <button
+                                    onClick={() => applyFilter('gender', '__none__')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === '__none__'
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
+                                        }`}
+                                >
+                                    Без гендера
+                                </button>
+                            </div>
                         </div>
 
                         {/* Brand Filter with Search */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Бренд</label>
+                            <label className="block text-sm font-medium text-slate-300 mb-2">Бренды</label>
                             {/* Brand Search Input */}
                             <div className="relative mb-2">
                                 <input
@@ -160,21 +213,49 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                                 />
                                 <Search className="w-3 h-3 text-slate-500 absolute left-3 top-2" />
                             </div>
-                            <div className="space-y-2 max-h-48 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
-                                {filteredBrands.map(brand => (
-                                    <label key={brand.id} className="flex items-center gap-2 cursor-pointer group">
-                                        <input
-                                            type="radio"
-                                            name="brand"
-                                            checked={currentBrand === brand.id}
-                                            onChange={() => applyFilter('brand', currentBrand === brand.id ? null : brand.id)}
-                                            className="w-4 h-4 text-indigo-500 border-slate-500 bg-slate-700 focus:ring-indigo-500 focus:ring-offset-slate-800 rounded-full"
-                                        />
-                                        <span className="text-sm text-slate-400 group-hover:text-slate-200 transition-colors">{brand.name}</span>
-                                    </label>
-                                ))}
+
+                            {/* Brand List */}
+                            <div className="space-y-0.5 max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
+                                {(() => {
+                                    const selectedIds = currentBrand ? currentBrand.split(',') : []
+
+                                    // 1. Sort brands: selected first, then by name
+                                    const sortedBrands = [...filteredBrands].sort((a, b) => {
+                                        const aSelected = selectedIds.includes(a.id)
+                                        const bSelected = selectedIds.includes(b.id)
+                                        if (aSelected && !bSelected) return -1
+                                        if (!aSelected && bSelected) return 1
+                                        return a.name.localeCompare(b.name)
+                                    })
+
+                                    return sortedBrands.map(brand => {
+                                        const isSelected = selectedIds.includes(brand.id)
+                                        return (
+                                            <label key={brand.id} className={`flex items-center gap-2 cursor-pointer group py-1 px-1.5 rounded-md transition-colors ${isSelected ? 'bg-indigo-500/10' : 'hover:bg-slate-700/50'}`}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => {
+                                                        let newIds: string[]
+                                                        if (isSelected) {
+                                                            newIds = selectedIds.filter(id => id !== brand.id)
+                                                        } else {
+                                                            newIds = [...selectedIds, brand.id]
+                                                        }
+                                                        applyFilter('brand', newIds.length > 0 ? newIds.join(',') : null)
+                                                    }}
+                                                    className="w-3.5 h-3.5 text-indigo-500 border-slate-500 bg-slate-700 focus:ring-indigo-500 focus:ring-offset-slate-800 rounded"
+                                                />
+                                                <span className={`text-sm transition-colors ${isSelected ? 'text-indigo-400 font-medium' : 'text-slate-400 group-hover:text-slate-200'}`}>
+                                                    {brand.name}
+                                                </span>
+                                            </label>
+                                        )
+                                    })
+                                })()}
+
                                 {filteredBrands.length === 0 && (
-                                    <p className="text-xs text-slate-500">Бренды не найдены</p>
+                                    <p className="text-xs text-slate-500 py-2">Бренды не найдены</p>
                                 )}
                             </div>
                         </div>
@@ -193,29 +274,6 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                         </button>
                     </div>
 
-                    {/* CSV Import Link */}
-                    <div className="mt-8 pt-6 border-t border-slate-700">
-                        <Link
-                            href="/admin/csv-import"
-                            className="flex items-center gap-3 w-full px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-                        >
-                            <FileSpreadsheet size={18} />
-                            Импорт CSV
-                        </Link>
-                    </div>
-
-                    {/* User Section at bottom of sidebar */}
-                    <div className="mt-4 pt-6 border-t border-slate-700">
-                        <form action={logoutAction}>
-                            <button
-                                type="submit"
-                                className="flex items-center gap-3 w-full px-4 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-                            >
-                                <LogOut size={18} />
-                                Выйти
-                            </button>
-                        </form>
-                    </div>
                 </div>
             </aside>
         </>

@@ -48,11 +48,12 @@ export interface Product {
   description: string
   price: number
   status: 'active' | 'inactive'
-  brand: string // Brand ID
+  brand: string | string[] // Brand ID or array of IDs
   category: string // Category ID
   subcategory: string // Subcategory ID
   photos: string[] // Array of photo filenames
   photos_processed: boolean
+  gender: string
   thumb: string
   created: string
   updated: string
@@ -60,7 +61,7 @@ export interface Product {
   collectionName: string
   // Expanded relations (when using expand parameter)
   expand?: {
-    brand?: Brand
+    brand?: Brand | Brand[]
     category?: Category
     subcategory?: Subcategory
   }
@@ -78,6 +79,7 @@ export interface ProductFormData {
   brand: string
   category: string
   subcategory: string
+  gender: string
   photos?: File[]
 }
 

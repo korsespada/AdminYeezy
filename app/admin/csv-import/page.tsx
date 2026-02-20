@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { Upload, FileSpreadsheet, Trash2, Send, CheckCircle, AlertTriangle, ArrowLeft, X, Edit3, Save, HardDrive, RefreshCw, FolderOpen, Filter } from 'lucide-react'
+import { Upload, FileSpreadsheet, Trash2, Send, CheckCircle, AlertTriangle, ArrowLeft, X, Edit3, Save, HardDrive, RefreshCw, FolderOpen, Filter, Merge, CheckSquare, Square } from 'lucide-react'
 import { pushCsvProductsAction, fetchLookupsAction, readLocalCsvAction, saveLocalCsvAction, type CsvProduct, type Lookups } from '@/actions/csv-import'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -9,6 +9,149 @@ import Link from 'next/link'
 const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
 
 // ─── CSV Parsing ───────────────────────────────────────────────────────
+
+function parseCsv(text: string): { products: CsvProduct[], columns: { name: string, key: string }[] } {
+    const rows: string[][] = []
+    let currentRow: string[] = []
+    let currentField = ''
+    let inQuotes = false
+
+    const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    const delimiter = detectDelimiter(normalizedText.split('\n')[0] || '')
+
+    for (let i = 0; i < normalizedText.length; i++) {
+        const char = normalizedText[i]
+        const nextChar = normalizedText[i + 1]
+
+        if (inQuotes) {
+            if (char === '"') {
+                if (nextChar === '"') { // Escaped "" -> "
+                    currentField += '"'
+                    i++
+                } else { // Closing quote
+                    inQuotes = false
+                }
+            } else {
+                currentField += char
+            }
+        } else {
+            if (char === '"' && currentField.trim().length === 0) {
+                inQuotes = true
+                currentField = '' // reset to ignore leading spaces
+            } else if (char === delimiter) {
+                currentRow.push(currentField.trim())
+                currentField = ''
+            } else if (char === '\n') {
+                currentRow.push(currentField.trim())
+                if (currentRow.some(v => v.trim() !== '')) {
+                    rows.push(currentRow)
+                }
+                currentRow = []
+                currentField = ''
+            } else {
+                currentField += char
+            }
+        }
+    }
+
+    if (currentField !== '' || currentRow.length > 0) {
+        currentRow.push(currentField.trim())
+        if (currentRow.some(v => v.trim() !== '')) {
+            rows.push(currentRow)
+        }
+    }
+
+    if (rows.length < 1) return { products: [], columns: [] }
+
+    const headerRow = rows[0]
+    const columns = headerRow.map(h => {
+        const lower = h.toLowerCase().trim()
+        let key = lower
+        if (['productid', 'product_id', 'id'].includes(lower)) key = 'productId'
+        else if (['name', 'title'].includes(lower)) key = 'name'
+        else if (['description', 'desc'].includes(lower)) key = 'description'
+        else if (['price'].includes(lower)) key = 'price'
+        else if (['status'].includes(lower)) key = 'status'
+        else if (['brand'].includes(lower)) key = 'brand'
+        else if (['category'].includes(lower)) key = 'category'
+        else if (['subcategory'].includes(lower)) key = 'subcategory'
+        else if (['photos', 'images', 'image_urls'].includes(lower)) key = 'photos'
+        else if (['gender', 'пол'].includes(lower)) key = 'gender'
+        return { name: h, key }
+    })
+
+    const products = rows.slice(1).map(values => {
+        // --- Row Healer Logic ---
+        // Если у нас слишком мало колонок (например, 3 вместо 10) и одна из них подозрительно длинная и содержит разделитель,
+        // значит парсер "проглотил" несколько колонок в одну из-за кривых кавычек.
+        if (values.length < columns.length / 2 && values.some(v => v.includes(delimiter))) {
+            const healedValues: string[] = []
+            for (const val of values) {
+                if (val.includes(delimiter) && val.length > 50) {
+                    // Рекурсивно пробуем распарсить это поле как мини-строку CSV без учета внешних кавычек
+                    const subParts = val.split(delimiter)
+                    healedValues.push(...subParts)
+                } else {
+                    healedValues.push(val)
+                }
+            }
+            if (healedValues.length > values.length) {
+                values = healedValues
+            }
+        }
+
+        if (values.length === 0 || values.every(v => !v.trim())) return null
+
+        const product: any = {}
+        columns.forEach((col, i) => {
+            let val = (values[i] || '').trim()
+
+            if (col.key === 'photos') {
+                let photos: string[] = []
+                if (val) {
+                    // Агрессивная очистка от кавычечного ада (от "" до """")
+                    const cleanVal = val.replace(/"+/g, '"').replace(/^"|"$/g, '').trim()
+
+                    if (cleanVal.startsWith('[') && cleanVal.endsWith(']')) {
+                        try {
+                            const parsed = JSON.parse(cleanVal)
+                            photos = Array.isArray(parsed) ? parsed : [parsed]
+                        } catch {
+                            // Если не JSON, но в скобках
+                            photos = cleanVal.slice(1, -1).split(/[|,;]/).map(s => s.trim().replace(/"/g, '')).filter(Boolean)
+                        }
+                    } else {
+                        photos = cleanVal.split(/[||,;]/).map(s => s.trim().replace(/"/g, '')).filter(Boolean)
+                    }
+                }
+                product[col.key] = photos
+            } else if (col.key === 'price') {
+                const numeric = val.replace(/[^\d.,]/g, '').replace(',', '.')
+                product[col.key] = parseFloat(numeric) || 0
+            } else if (col.key === 'status') {
+                const low = val.toLowerCase()
+                product[col.key] = (low === 'inactive' || low === '0' ? 'inactive' : 'active')
+            } else {
+                // Убираем двойные кавычки, если они пролезли в обычные поля
+                product[col.key] = val.replace(/""/g, '"')
+            }
+        })
+
+        // Ensure baseline fields are never undefined to prevent corruption on save
+        product.productId = product.productId || ''
+        product.name = product.name || ''
+        product.price = product.price || 0
+        product.status = product.status || 'active'
+        product.photos = product.photos || []
+
+        // Final sanity check
+        if (!product.productId && !product.name) return null
+
+        return product as CsvProduct
+    }).filter((p): p is CsvProduct => p !== null)
+
+    return { products, columns }
+}
 
 function detectDelimiter(headerLine: string): string {
     let semis = 0, commas = 0, inQuotes = false
@@ -20,89 +163,6 @@ function detectDelimiter(headerLine: string): string {
         }
     }
     return semis > commas ? ';' : ','
-}
-
-function parseCsvLine(line: string, delimiter: string): string[] {
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (let i = 0; i < line.length; i++) {
-        const char = line[i]
-        if (char === '"') {
-            if (inQuotes && i + 1 < line.length && line[i + 1] === '"') { current += '"'; i++ }
-            else inQuotes = !inQuotes
-        } else if (char === delimiter && !inQuotes) {
-            result.push(current.trim()); current = ''
-        } else { current += char }
-    }
-    result.push(current.trim())
-    return result
-}
-
-function parseCsv(text: string): { products: CsvProduct[], columns: { name: string, key: string }[] } {
-    const lines = text.split(/\r?\n/).filter(l => l.trim())
-    if (lines.length < 2) return { products: [], columns: [] }
-    const delimiter = detectDelimiter(lines[0])
-
-    const originalHeaders = parseCsvLine(lines[0], delimiter).map(h => h.trim())
-    const lowerHeaders = originalHeaders.map(h => h.toLowerCase())
-
-    // Map headers to internal keys
-    const columns = originalHeaders.map((h, i) => {
-        const lower = lowerHeaders[i]
-        let key = lower
-        if (['productid', 'product_id', 'id'].includes(lower)) key = 'productId'
-        else if (['name', 'title'].includes(lower)) key = 'name'
-        else if (['description', 'desc'].includes(lower)) key = 'description'
-        else if (['price'].includes(lower)) key = 'price'
-        else if (['status'].includes(lower)) key = 'status'
-        else if (['brand'].includes(lower)) key = 'brand'
-        else if (['category'].includes(lower)) key = 'category'
-        else if (['subcategory'].includes(lower)) key = 'subcategory'
-        else if (['photos', 'images'].includes(lower)) key = 'photos'
-        return { name: h, key }
-    })
-
-    const products = lines.slice(1).map(line => {
-        const values = parseCsvLine(line, delimiter)
-        const product: any = {}
-
-        columns.forEach((col, i) => {
-            const val = values[i] || ''
-            if (col.key === 'photos') {
-                let photos: string[] = []
-                if (val) {
-                    if (val.startsWith('[')) {
-                        try { photos = JSON.parse(val) } catch { photos = val.split(',').map(s => s.trim()).filter(Boolean) }
-                    } else {
-                        photos = val.split(delimiter === ';' ? ',' : ';').map(s => s.trim()).filter(Boolean)
-                    }
-                }
-                product[col.key] = photos
-            } else if (col.key === 'price') {
-                product[col.key] = parseFloat(val || '0') || 0
-            } else if (col.key === 'status') {
-                product[col.key] = (val === 'inactive' ? 'inactive' : 'active')
-            } else {
-                product[col.key] = val
-            }
-        })
-
-        // Ensure required fields exist
-        if (!product.productId) product.productId = ''
-        if (!product.name) product.name = ''
-        if (!product.price) product.price = 0
-        if (!product.status) product.status = 'active'
-        if (!product.brand) product.brand = ''
-        if (!product.category) product.category = ''
-        if (!product.subcategory) product.subcategory = ''
-        if (!product.photos) product.photos = []
-        if (!product.description) product.description = ''
-
-        return product as CsvProduct
-    }).filter(p => p.productId || p.name)
-
-    return { products, columns }
 }
 
 function resolveName(id: string, items: { id: string; name: string }[]): string {
@@ -119,8 +179,11 @@ export default function CsvImportPage() {
     const [fileName, setFileName] = useState('')
     const [isPushing, setIsPushing] = useState(false)
     const [result, setResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null)
+    const [pushProgress, setPushProgress] = useState<{ current: number; total: number } | null>(null)
     const [lookups, setLookups] = useState<Lookups | null>(null)
     const [selectedIdx, setSelectedIdx] = useState<number | null>(null)
+    const [selectedForMerge, setSelectedForMerge] = useState<number[]>([]) // Список индексов в порядке выбора
+    const [previousProducts, setPreviousProducts] = useState<CsvProduct[] | null>(null) // Для отмены объединения
 
     // Local file mode
     const [importMode, setImportMode] = useState<'upload' | 'local'>('upload')
@@ -137,6 +200,7 @@ export default function CsvImportPage() {
     const [filterBrand, setFilterBrand] = useState('')
     const [filterCategory, setFilterCategory] = useState('')
     const [filterSubcategory, setFilterSubcategory] = useState('')
+    const [filterGender, setFilterGender] = useState('')
 
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -149,25 +213,71 @@ export default function CsvImportPage() {
     }, [])
 
     // Unique values for filters (derived from all products)
-    const uniqueBrands = useMemo(() => [...new Set(products.map(p => p.brand).filter(Boolean))], [products])
-    const uniqueCategories = useMemo(() => [...new Set(products.map(p => p.category).filter(Boolean))], [products])
-    const uniqueSubcategories = useMemo(() => [...new Set(products.map(p => p.subcategory).filter(Boolean))], [products])
+    const uniqueBrands = useMemo(() => {
+        const brands = [...new Set(products.map(p => p.brand).filter(Boolean))]
+        if (products.some(p => !p.brand)) brands.push('__EMPTY__')
+        return brands
+    }, [products])
+
+    const uniqueCategories = useMemo(() => {
+        const cats = [...new Set(products.map(p => p.category).filter(Boolean))]
+        if (products.some(p => !p.category)) cats.push('__EMPTY__')
+        return cats
+    }, [products])
+
+    const uniqueSubcategories = useMemo(() => {
+        const subcats = [...new Set(products.map(p => p.subcategory).filter(Boolean))]
+        if (products.some(p => !p.subcategory)) subcats.push('__EMPTY__')
+        return subcats
+    }, [products])
+
+    const uniqueGenders = useMemo(() => {
+        const genders = [...new Set(products.map(p => p.gender).filter(Boolean))]
+        if (products.some(p => !p.gender)) genders.push('__EMPTY__')
+        return genders
+    }, [products])
 
     // Filtered products for display
     const filteredProducts = useMemo(() => {
         return products.filter(p => {
-            if (filterBrand && p.brand !== filterBrand) return false
-            if (filterCategory && p.category !== filterCategory) return false
-            if (filterSubcategory && p.subcategory !== filterSubcategory) return false
+            if (filterBrand) {
+                if (filterBrand === '__EMPTY__') {
+                    if (p.brand) return false
+                } else if (p.brand !== filterBrand) {
+                    return false
+                }
+            }
+            if (filterCategory) {
+                if (filterCategory === '__EMPTY__') {
+                    if (p.category) return false
+                } else if (p.category !== filterCategory) {
+                    return false
+                }
+            }
+            if (filterSubcategory) {
+                if (filterSubcategory === '__EMPTY__') {
+                    if (p.subcategory) return false
+                } else if (p.subcategory !== filterSubcategory) {
+                    return false
+                }
+            }
+            if (filterGender) {
+                if (filterGender === '__EMPTY__') {
+                    if (p.gender) return false
+                } else if (p.gender !== filterGender) {
+                    return false
+                }
+            }
             return true
         })
-    }, [products, filterBrand, filterCategory, filterSubcategory])
+    }, [products, filterBrand, filterCategory, filterSubcategory, filterGender])
 
     const handleModeChange = (mode: 'upload' | 'local') => {
         setImportMode(mode)
         localStorage.setItem('csv_import_mode', mode)
         setProducts([]); setColumns([]); setResult(null); setFileName(''); setIsDirty(false); setSaveMsg(null)
-        setFilterBrand(''); setFilterCategory(''); setFilterSubcategory('')
+        setFilterBrand(''); setFilterCategory(''); setFilterSubcategory(''); setFilterGender('')
+        setSelectedForMerge([]); setPreviousProducts(null)
     }
 
     // ─── Upload Mode ──────────────────────────────────────────────────
@@ -228,14 +338,35 @@ export default function CsvImportPage() {
     // ─── Data Handlers ────────────────────────────────────────────────
     const handlePush = async () => {
         if (products.length === 0) return
-        setIsPushing(true); setResult(null)
+        setIsPushing(true); setResult(null); setPushProgress({ current: 0, total: products.length })
+
+        const CHUNK_SIZE = 20
+        const total = products.length
+        const errors: string[] = []
+        let success = 0
+        let failed = 0
+
         try {
-            const res = await pushCsvProductsAction(products)
-            if (res.success && res.data) setResult(res.data)
-            else setResult({ success: 0, failed: products.length, errors: [res.error || 'Unknown error'] })
-        } catch {
-            setResult({ success: 0, failed: products.length, errors: ['Network error'] })
+            for (let i = 0; i < total; i += CHUNK_SIZE) {
+                const chunk = products.slice(i, i + CHUNK_SIZE)
+                setPushProgress({ current: i, total })
+
+                const res = await pushCsvProductsAction(chunk)
+                if (res.success && res.data) {
+                    success += res.data.success
+                    failed += res.data.failed
+                    errors.push(...res.data.errors)
+                } else {
+                    failed += chunk.length
+                    errors.push(res.error || 'Server error on chunk ' + (i / CHUNK_SIZE + 1))
+                }
+            }
+            setResult({ success, failed, errors })
+        } catch (e: any) {
+            setResult({ success, failed, errors: [...errors, 'Network or unexpected error: ' + e.message] })
         }
+
+        setPushProgress(null)
         setIsPushing(false)
     }
 
@@ -256,7 +387,58 @@ export default function CsvImportPage() {
 
     const handleClear = () => {
         setProducts([]); setFileName(''); setResult(null); setSelectedIdx(null); setIsDirty(false); setSaveMsg(null)
+        setFilterBrand(''); setFilterCategory(''); setFilterSubcategory(''); setFilterGender('')
+        setSelectedForMerge([]); setPreviousProducts(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+
+    const toggleMergeSelection = useCallback((index: number) => {
+        setSelectedForMerge(prev => {
+            if (prev.includes(index)) return prev.filter(i => i !== index)
+            return [...prev, index]
+        })
+    }, [])
+
+    const handleMergePhotos = () => {
+        if (selectedForMerge.length < 2) return
+
+        // Сохраняем состояние для отмены
+        setPreviousProducts([...products])
+
+        const targetIdx = selectedForMerge[0]
+        const sourceIndices = selectedForMerge.slice(1)
+
+        // Собираем все фото по порядку выбора
+        const allPhotos: string[] = []
+        selectedForMerge.forEach(idx => {
+            products[idx].photos.forEach(url => {
+                if (!allPhotos.includes(url)) allPhotos.push(url)
+            })
+        })
+
+        setProducts(prev => {
+            const next = [...prev]
+            // Обновляем первый выбранный товар новыми фото
+            next[targetIdx] = { ...next[targetIdx], photos: allPhotos }
+
+            // Удаляем остальные товары (сортируем индексы в обратном порядке, чтобы не сбить порядок при удалении)
+            const sortedIndicesToRemove = [...sourceIndices].sort((a, b) => b - a)
+            sortedIndicesToRemove.forEach(idx => {
+                next.splice(idx, 1)
+            })
+            return next
+        })
+
+        setSelectedForMerge([])
+        setIsDirty(true)
+    }
+
+    const handleUndoMerge = () => {
+        if (previousProducts) {
+            setProducts(previousProducts)
+            setPreviousProducts(null)
+            setIsDirty(true)
+        }
     }
 
     // ─── Render ───────────────────────────────────────────────────────
@@ -301,6 +483,14 @@ export default function CsvImportPage() {
                                     <span className="font-semibold text-white">{products.length}</span> товаров
                                 </span>
 
+                                {previousProducts && (
+                                    <button onClick={handleUndoMerge}
+                                        className="px-4 py-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30 rounded-lg transition-all flex items-center gap-2">
+                                        <RefreshCw className="w-4 h-4" />
+                                        Отменить объединение
+                                    </button>
+                                )}
+
                                 {/* Кнопка Сохранить — только в режиме local и если есть изменения */}
                                 {importMode === 'local' && (
                                     <button onClick={handleSaveToFile} disabled={isSaving || !isDirty}
@@ -318,7 +508,17 @@ export default function CsvImportPage() {
                                 </button>
                                 <button onClick={handlePush} disabled={isPushing}
                                     className="px-6 py-2.5 text-sm font-medium bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white rounded-lg transition-all shadow-lg flex items-center gap-2 disabled:opacity-50">
-                                    {isPushing ? 'Загружаю...' : <><Send className="w-4 h-4" /> Запушить в БД</>}
+                                    {isPushing ? (
+                                        <>
+                                            <RefreshCw className="w-4 h-4 animate-spin" />
+                                            {pushProgress ? `Загружаю ${pushProgress.current}/${pushProgress.total}...` : 'Загружаю...'}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="w-4 h-4" />
+                                            Запушить в БД
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         )}
@@ -375,14 +575,53 @@ export default function CsvImportPage() {
 
                 {/* Result */}
                 {result && (
-                    <div className={`mb-6 p-4 rounded-xl border ${result.failed === 0 ? 'bg-emerald-900/30 border-emerald-700' : result.success === 0 ? 'bg-red-900/30 border-red-700' : 'bg-amber-900/30 border-amber-700'}`}>
-                        <div className="flex items-center gap-3 mb-2">
-                            {result.failed === 0 ? <CheckCircle className="w-5 h-5 text-emerald-400" /> : <AlertTriangle className="w-5 h-5 text-amber-400" />}
-                            <span className="font-semibold">Успешно: {result.success} | Ошибки: {result.failed}</span>
+                    <div id="import-result" className={`mb-6 p-5 rounded-2xl border shadow-xl animate-in fade-in slide-in-from-top-4 duration-500 ${result.failed === 0
+                            ? 'bg-emerald-900/20 border-emerald-500/30'
+                            : result.success === 0
+                                ? 'bg-red-900/20 border-red-500/30'
+                                : 'bg-amber-900/20 border-amber-500/30'
+                        }`}>
+                        <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                                {result.failed === 0 ? (
+                                    <div className="p-2 bg-emerald-500/20 rounded-lg"><CheckCircle className="w-6 h-6 text-emerald-400" /></div>
+                                ) : (
+                                    <div className="p-2 bg-red-500/20 rounded-lg"><AlertTriangle className="w-6 h-6 text-red-400" /></div>
+                                )}
+                                <div>
+                                    <h3 className="text-lg font-bold text-white">Результаты импорта</h3>
+                                    <p className="text-sm text-slate-400">
+                                        Успешно: <span className="text-emerald-400 font-bold">{result.success}</span> |
+                                        Ошибки: <span className="text-red-400 font-bold">{result.failed}</span>
+                                    </p>
+                                </div>
+                            </div>
+
+                            {result.errors.length > 0 && (
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(result.errors.join('\n'))
+                                        alert('Логи ошибок скопированы в буфер обмена')
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium transition-colors border border-slate-700"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4" />
+                                    Копировать ошибки
+                                </button>
+                            )}
                         </div>
+
                         {result.errors.length > 0 && (
-                            <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                                {result.errors.map((err, i) => <div key={i} className="text-sm text-red-300 font-mono">• {err}</div>)}
+                            <div className="bg-black/40 rounded-xl p-4 border border-slate-800/50">
+                                <div className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-3">Лог ошибок</div>
+                                <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar font-mono text-xs">
+                                    {result.errors.map((err, i) => (
+                                        <div key={i} className="flex gap-3 text-red-300 leading-relaxed bg-red-500/5 p-2 rounded border border-red-500/10 hover:border-red-500/30 transition-colors">
+                                            <span className="text-red-500/50 flex-shrink-0">{i + 1}.</span>
+                                            <span>{err}</span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -410,7 +649,7 @@ export default function CsvImportPage() {
                 )}
 
                 {/* Filters */}
-                {products.length > 0 && (uniqueBrands.length > 1 || uniqueCategories.length > 1 || uniqueSubcategories.length > 1) && (
+                {products.length > 0 && (uniqueBrands.length > 1 || uniqueCategories.length > 1 || uniqueSubcategories.length > 1 || uniqueGenders.length > 1) && (
                     <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
                         <div className="flex items-center gap-2 text-slate-500 mr-1">
                             <Filter className="w-4 h-4" />
@@ -422,7 +661,7 @@ export default function CsvImportPage() {
                                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]">
                                 <option value="">Все бренды</option>
                                 {uniqueBrands.map(id => (
-                                    <option key={id} value={id}>{resolveName(id, lookups?.brands || [])}</option>
+                                    <option key={id} value={id}>{id === '__EMPTY__' ? 'Без бренда' : resolveName(id, lookups?.brands || [])}</option>
                                 ))}
                             </select>
                         )}
@@ -432,7 +671,7 @@ export default function CsvImportPage() {
                                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]">
                                 <option value="">Все категории</option>
                                 {uniqueCategories.map(id => (
-                                    <option key={id} value={id}>{resolveName(id, lookups?.categories || [])}</option>
+                                    <option key={id} value={id}>{id === '__EMPTY__' ? 'Без категории' : resolveName(id, lookups?.categories || [])}</option>
                                 ))}
                             </select>
                         )}
@@ -442,19 +681,29 @@ export default function CsvImportPage() {
                                 className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]">
                                 <option value="">Все подкатегории</option>
                                 {uniqueSubcategories.map(id => (
-                                    <option key={id} value={id}>{resolveName(id, lookups?.subcategories || [])}</option>
+                                    <option key={id} value={id}>{id === '__EMPTY__' ? 'Без подкатегории' : resolveName(id, lookups?.subcategories || [])}</option>
                                 ))}
                             </select>
                         )}
 
-                        {(filterBrand || filterCategory || filterSubcategory) && (
-                            <button onClick={() => { setFilterBrand(''); setFilterCategory(''); setFilterSubcategory('') }}
+                        {uniqueGenders.length > 1 && (
+                            <select value={filterGender} onChange={e => setFilterGender(e.target.value)}
+                                className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]">
+                                <option value="">Все гендеры (Для кого)</option>
+                                {uniqueGenders.map(g => (
+                                    <option key={g} value={g}>{g === '__EMPTY__' ? 'Без гендера' : g}</option>
+                                ))}
+                            </select>
+                        )}
+
+                        {(filterBrand || filterCategory || filterSubcategory || filterGender) && (
+                            <button onClick={() => { setFilterBrand(''); setFilterCategory(''); setFilterSubcategory(''); setFilterGender('') }}
                                 className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors">
                                 Сбросить
                             </button>
                         )}
 
-                        {(filterBrand || filterCategory || filterSubcategory) && (
+                        {(filterBrand || filterCategory || filterSubcategory || filterGender) && (
                             <span className="text-xs text-slate-500 ml-auto">
                                 Показано <span className="text-white font-semibold">{filteredProducts.length}</span> из {products.length}
                             </span>
@@ -464,15 +713,48 @@ export default function CsvImportPage() {
 
                 {/* Grid */}
                 {products.length > 0 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 pb-20">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 pb-32">
                         {filteredProducts.map((product) => {
                             const realIndex = products.indexOf(product)
+                            const selectionOrder = selectedForMerge.indexOf(realIndex)
                             return (
                                 <CsvProductCard key={`${product.productId}-${realIndex}`} product={product} index={realIndex} lookups={lookups}
+                                    isSelected={selectionOrder !== -1}
+                                    selectionOrder={selectionOrder + 1}
+                                    onToggleSelection={() => toggleMergeSelection(realIndex)}
                                     onRemove={handleRemove} onUpdate={updateProduct}
                                     onClick={() => setSelectedIdx(realIndex)} />
                             )
                         })}
+                    </div>
+                )}
+
+                {/* Floating Bulk Action Bar */}
+                {selectedForMerge.length > 0 && (
+                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                        <div className="bg-slate-800/90 backdrop-blur-md border border-slate-700 shadow-2xl rounded-2xl px-6 py-4 flex items-center gap-6">
+                            <div className="flex items-center gap-3 pr-6 border-r border-slate-700">
+                                <div className="p-2 bg-indigo-500/20 rounded-lg">
+                                    <CheckSquare className="w-5 h-5 text-indigo-400" />
+                                </div>
+                                <div>
+                                    <div className="text-sm font-bold text-white">Выбрано {selectedForMerge.length}</div>
+                                    <div className="text-[10px] text-slate-400 uppercase tracking-widest font-medium">Товаров для объединения</div>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                                <button onClick={() => setSelectedForMerge([])}
+                                    className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors">
+                                    Отмена
+                                </button>
+                                <button onClick={handleMergePhotos} disabled={selectedForMerge.length < 2}
+                                    className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:grayscale">
+                                    <Merge className="w-4 h-4" />
+                                    Объединить фото
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>
@@ -493,12 +775,15 @@ export default function CsvImportPage() {
 
 interface CsvProductCardProps {
     product: CsvProduct; index: number; lookups: Lookups | null
+    isSelected: boolean
+    selectionOrder: number
+    onToggleSelection: () => void
     onRemove: (i: number) => void
     onUpdate: (i: number, f: keyof CsvProduct, v: any) => void
     onClick: () => void
 }
 
-function CsvProductCard({ product, index, lookups, onRemove, onUpdate, onClick }: CsvProductCardProps) {
+function CsvProductCard({ product, index, lookups, isSelected, selectionOrder, onToggleSelection, onRemove, onUpdate, onClick }: CsvProductCardProps) {
     const [editField, setEditField] = useState<'name' | 'price' | null>(null)
     const [editVal, setEditVal] = useState('')
 
@@ -524,20 +809,50 @@ function CsvProductCard({ product, index, lookups, onRemove, onUpdate, onClick }
 
     return (
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden hover:shadow-xl hover:shadow-black/20 hover:border-slate-600 transition-all duration-300 group flex flex-col cursor-pointer" onClick={onClick}>
-            <div className="relative aspect-square overflow-hidden bg-slate-900">
+            <div className={`relative aspect-square overflow-hidden bg-slate-900 transition-all ${isSelected ? 'ring-4 ring-indigo-500 ring-inset' : ''}`}>
                 {product.photos?.[0] ? (
                     <Image src={product.photos[0] + IMG_SUFFIX} alt={product.name || ''} fill sizes="(max-width:768px) 100vw,25vw"
-                        className="object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100" unoptimized />
+                        className={`object-cover transition-transform duration-500 ${isSelected ? 'scale-105 opacity-100' : 'group-hover:scale-105 opacity-90 group-hover:opacity-100'}`} unoptimized />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-600 text-xs uppercase tracking-widest">No image</div>
                 )}
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+
+                {/* Selection Overlay */}
+                <div className={`absolute inset-0 transition-colors ${isSelected ? 'bg-indigo-500/10' : 'hover:bg-black/20'}`} />
+
+                {/* Checkbox */}
+                <button onClick={(e) => { e.stopPropagation(); onToggleSelection() }}
+                    className={`absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-lg ${isSelected ? 'bg-indigo-500 text-white scale-110' : 'bg-slate-900/60 text-slate-400 opacity-0 group-hover:opacity-100'}`}>
+                    {isSelected ? (
+                        <span className="text-xs font-bold">{selectionOrder}</span>
+                    ) : (
+                        <Square className="w-4 h-4" />
+                    )}
+                </button>
+
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                     <button onClick={(e) => { e.stopPropagation(); onRemove(index) }}
                         className="p-2 bg-slate-900/80 backdrop-blur-sm rounded-full shadow-lg hover:bg-red-600 text-slate-300 hover:text-white transition-colors">
                         <Trash2 className="w-4 h-4" />
                     </button>
                 </div>
-                <span className="absolute top-3 left-3 px-2 py-1 text-xs font-mono bg-slate-900/80 backdrop-blur-sm rounded-md text-slate-300">#{index + 1}</span>
+                <span className="absolute bottom-3 left-3 px-2 py-1 text-xs font-mono bg-slate-900/80 backdrop-blur-sm rounded-md text-slate-300 z-10">#{index + 1}</span>
+
+                {/* Photo Count Tag & Quick Actions */}
+                <div className="absolute bottom-3 right-3 flex items-center gap-1.5 z-10">
+                    {product.photos && product.photos.length > 0 && (
+                        <>
+                            <button onClick={(e) => { e.stopPropagation(); onUpdate(index, 'photos', product.photos.slice(1)) }}
+                                title="Удалить первое фото"
+                                className="px-2 py-1 bg-red-500/80 hover:bg-red-600 backdrop-blur-sm rounded text-[10px] font-bold text-white transition-colors border border-red-400/20">
+                                Удалить 1-е
+                            </button>
+                            <div className="px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md text-[10px] font-bold text-slate-300 border border-slate-700/50">
+                                {product.photos.length} фото
+                            </div>
+                        </>
+                    )}
+                </div>
             </div>
 
             <div className="p-5 flex-1 flex flex-col">
@@ -630,7 +945,15 @@ function CsvProductDrawer({ product, index, lookups, isOpen, onClose, onUpdate }
                     <div className="flex-1 p-6 space-y-8 pb-32">
                         {/* Photos */}
                         <section className="space-y-3">
-                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Фотографии ({local.photos.length})</h3>
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Фотографии ({local.photos.length})</h3>
+                                {local.photos.length > 0 && (
+                                    <button onClick={() => removePhoto(0)}
+                                        className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-wider">
+                                        Удалить первое фото
+                                    </button>
+                                )}
+                            </div>
                             {local.photos.length > 0 ? (
                                 <div className="grid grid-cols-3 gap-3">
                                     {local.photos.map((url, i) => (

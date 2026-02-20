@@ -31,6 +31,13 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 // ignore parse errors
             }
         }
+        if (typeof photoUrl === 'string' && photoUrl.includes('szwego.com')) {
+            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
+            if (!photoUrl.includes('?imageMogr2')) {
+                photoUrl += IMG_SUFFIX;
+            }
+        }
+
         return photoUrl
     }
 
@@ -46,7 +53,6 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         if (isSaving) return;
         setIsSaving(true);
 
-        const brandId = product.brand || product.expand?.brand?.id || '';
         const categoryId = product.category || product.expand?.category?.id || '';
         const subcategoryId = product.subcategory || product.expand?.subcategory?.id || '';
 
@@ -56,7 +62,21 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         formData.append('description', product.description || '');
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
-        formData.append('brand', brandId);
+        formData.append('gender', product.gender || '');
+
+        // Handle multiple brands
+        const b = product.brand || product.expand?.brand;
+        if (Array.isArray(b)) {
+            b.forEach(id => {
+                if (typeof id === 'string') formData.append('brand', id);
+                else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
+            });
+        } else if (typeof b === 'string' && b) {
+            formData.append('brand', b);
+        } else if (b && typeof b === 'object' && 'id' in b) {
+            formData.append('brand', b.id);
+        }
+
         formData.append('category', categoryId);
         formData.append('subcategory', subcategoryId);
         if (product.photos && product.photos.length > 0) {
@@ -128,16 +148,41 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         <Trash2 className="w-4 h-4" />
                     </button>
                 </div>
+
+                {/* Photo Count Tag */}
+                {product.photos && product.photos.length > 0 && (
+                    <div className="absolute bottom-3 right-3 px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md text-[10px] font-bold text-slate-300 z-10 border border-slate-700/50">
+                        {product.photos.length} фото
+                    </div>
+                )}
             </div>
 
             <div className="p-5 flex-1 flex flex-col">
                 {/* Product ID under the photo */}
-                <div className="text-[10px] text-slate-500 font-mono mb-2">{product.productId}</div>
+                <div className="mb-2">
+                    <div className="text-[10px] text-slate-500 font-mono">{product.productId}</div>
+                    <div className="text-[10px] text-indigo-400 font-semibold truncate">
+                        {(() => {
+                            const b = product.expand?.brand;
+                            if (Array.isArray(b)) return b.map(x => x.name).join(', ');
+                            if (b && typeof b === 'object') return b.name;
+                            return 'No Brand';
+                        })()}
+                    </div>
+                </div>
 
                 <div className="mb-2">
                     <div className="text-xs text-slate-500">
                         {product.expand?.category?.name || 'No Category'}
                         {product.expand?.subcategory?.name && ` • ${product.expand.subcategory.name}`}
+                        {product.gender && (
+                            <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${product.gender === 'Для мужчин'
+                                ? 'bg-blue-900/30 text-blue-400'
+                                : 'bg-pink-900/30 text-pink-400'
+                                }`}>
+                                {product.gender.replace('Для ', '')}
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -178,7 +223,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                             onBlur={handleSave}
                             onKeyDown={handleKeyDown}
                             autoFocus
-                            className="font-bold text-lg text-slate-200 bg-slate-700 border border-indigo-500 rounded px-2 py-1 w-28 outline-none"
+                            className="font-bold text-lg text-slate-200 bg-slate-700 border border-indigo-500 rounded px-2 py-1 w-28 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             onClick={(e) => e.stopPropagation()}
                         />
                     ) : (

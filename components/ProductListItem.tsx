@@ -31,6 +31,13 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                 // ignore parse errors
             }
         }
+        if (typeof photoUrl === 'string' && photoUrl.includes('szwego.com')) {
+            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
+            if (!photoUrl.includes('?imageMogr2')) {
+                photoUrl += IMG_SUFFIX;
+            }
+        }
+
         return photoUrl
     }
 
@@ -46,7 +53,6 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
         if (isSaving) return;
         setIsSaving(true);
 
-        const brandId = product.brand || product.expand?.brand?.id || '';
         const categoryId = product.category || product.expand?.category?.id || '';
         const subcategoryId = product.subcategory || product.expand?.subcategory?.id || '';
 
@@ -56,7 +62,20 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
         formData.append('description', product.description || '');
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
-        formData.append('brand', brandId);
+
+        // Handle multiple brands
+        const b = product.brand || product.expand?.brand;
+        if (Array.isArray(b)) {
+            b.forEach(id => {
+                if (typeof id === 'string') formData.append('brand', id);
+                else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
+            });
+        } else if (typeof b === 'string' && b) {
+            formData.append('brand', b);
+        } else if (b && typeof b === 'object' && 'id' in b) {
+            formData.append('brand', b.id);
+        }
+
         formData.append('category', categoryId);
         formData.append('subcategory', subcategoryId);
         if (product.photos && product.photos.length > 0) {
@@ -103,14 +122,21 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                     onClick={() => onEdit(product)}
                 >
                     {thumb ? (
-                        <Image
-                            src={thumb}
-                            alt={product.name}
-                            fill
-                            sizes="48px"
-                            className="object-cover"
-                            unoptimized
-                        />
+                        <>
+                            <Image
+                                src={thumb}
+                                alt={product.name}
+                                fill
+                                sizes="48px"
+                                className="object-cover"
+                                unoptimized
+                            />
+                            {product.photos && product.photos.length > 0 && (
+                                <div className="absolute bottom-0 right-0 px-1 bg-slate-900/90 text-[8px] font-bold text-slate-300 rounded-tl-sm border-t border-l border-slate-700/50">
+                                    {product.photos.length}
+                                </div>
+                            )}
+                        </>
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-600 uppercase">No</div>
                     )}
@@ -130,14 +156,26 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                             onClick={(e) => e.stopPropagation()}
                         />
                     ) : (
-                        <h4
-                            className="text-sm font-semibold text-slate-100 truncate cursor-text hover:bg-slate-700/50 rounded px-1 -mx-1"
-                            onClick={(e) => startEdit('name', e)}
-                        >
-                            {product.name}
-                        </h4>
+                        <>
+                            <h4
+                                className="text-sm font-semibold text-slate-100 truncate cursor-text hover:bg-slate-700/50 rounded px-1 -mx-1"
+                                onClick={(e) => startEdit('name', e)}
+                            >
+                                {product.name}
+                            </h4>
+                            <div className="flex items-center gap-2">
+                                <p className="text-[10px] text-slate-500 font-mono">{product.productId}</p>
+                                <p className="text-[10px] text-indigo-400 font-semibold truncate">
+                                    {(() => {
+                                        const b = product.expand?.brand;
+                                        if (Array.isArray(b)) return b.map(x => x.name).join(', ');
+                                        if (b && typeof b === 'object') return b.name;
+                                        return 'No Brand';
+                                    })()}
+                                </p>
+                            </div>
+                        </>
                     )}
-                    <p className="text-xs text-slate-500 truncate">{product.productId}</p>
                 </div>
             </div>
 
@@ -162,7 +200,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                         onBlur={handleSave}
                         onKeyDown={handleKeyDown}
                         autoFocus
-                        className="text-sm font-bold text-slate-200 bg-slate-700 border border-indigo-500 rounded px-2 py-1 w-24 outline-none text-right"
+                        className="text-sm font-bold text-slate-200 bg-slate-700 border border-indigo-500 rounded px-2 py-1 w-24 outline-none text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         onClick={(e) => e.stopPropagation()}
                     />
                 ) : (

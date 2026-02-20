@@ -18,9 +18,10 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
     const description = formData.get('description') as string
     const priceStr = formData.get('price') as string
     const status = formData.get('status') as string
-    const brand = formData.get('brand') as string
+    const brands = formData.getAll('brand') as string[]
     const category = formData.get('category') as string
     const subcategory = formData.get('subcategory') as string
+    const gender = formData.get('gender') as string
 
     // Get all photo files
     const photos: File[] = []
@@ -40,8 +41,8 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
     if (!name || !name.trim()) {
       return { success: false, error: 'Product name is required' }
     }
-    if (!brand) {
-      return { success: false, error: 'Brand is required' }
+    if (!brands || brands.length === 0) {
+      return { success: false, error: 'At least one brand is required' }
     }
     if (!category) {
       return { success: false, error: 'Category is required' }
@@ -70,9 +71,10 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
       description: description?.trim() || '',
       price,
       status: status || 'active',
-      brand,
+      brand: brands,
       category,
       subcategory,
+      gender,
       photos_processed: false,
     }
 
@@ -116,9 +118,10 @@ export async function updateProductAction(
     const description = formData.get('description') as string
     const priceStr = formData.get('price') as string
     const status = formData.get('status') as string
-    const brand = formData.get('brand') as string
+    const brands = formData.getAll('brand') as string[]
     const category = formData.get('category') as string
     const subcategory = formData.get('subcategory') as string
+    const gender = formData.get('gender') as string
     const existingPhotosStr = formData.get('existingPhotos') as string
 
     // Get new photos (not used for now, photos are external URLs)
@@ -139,8 +142,8 @@ export async function updateProductAction(
     if (!name || !name.trim()) {
       return { success: false, error: 'Product name is required' }
     }
-    if (!brand) {
-      return { success: false, error: 'Brand is required' }
+    if (!brands || brands.length === 0) {
+      return { success: false, error: 'At least one brand is required' }
     }
     if (!category) {
       return { success: false, error: 'Category is required' }
@@ -158,9 +161,10 @@ export async function updateProductAction(
       description: description?.trim() || '',
       price,
       status: status || 'active',
-      brand,
+      brand: brands,
       category,
       subcategory,
+      gender,
     }
 
     // Update photos array (reordered URLs from drag-and-drop)
