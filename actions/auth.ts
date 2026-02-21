@@ -35,13 +35,13 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
 
   try {
     const pb = createClient()
-    
+
     console.log('PocketBase URL:', pb.baseUrl)
     console.log('PocketBase version: 0.35')
     console.log('Attempting login with email:', trimmedEmail)
 
     let authData
-    
+
     // Try multiple authentication methods for PocketBase 0.35
     try {
       console.log('Method 1: Trying _superusers collection...')
@@ -49,7 +49,7 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
       console.log('✓ _superusers auth successful')
     } catch (superuserError: any) {
       console.log('✗ _superusers auth failed:', superuserError?.message)
-      
+
       // Try old admins API
       try {
         console.log('Method 2: Trying pb.admins API...')
@@ -57,7 +57,7 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
         console.log('✓ admins API auth successful')
       } catch (adminsError: any) {
         console.log('✗ admins API failed:', adminsError?.message)
-        
+
         // Try regular users collection as last resort
         try {
           console.log('Method 3: Trying users collection...')
@@ -69,7 +69,7 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
         }
       }
     }
-    
+
     console.log('Auth successful, token received:', !!authData.token)
 
     if (!authData || !authData.token) {
@@ -85,19 +85,23 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
       token: authData.token,
       model: (authData as any).record || (authData as any).admin || authData,
     })
-    
-    console.log('Saving auth data to cookie')
+
     cookieStore.set('pb_auth', authStoreData, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 24 * 30, // 30 days
       path: '/',
     })
 
-    // Redirect to admin dashboard
-    redirect('/admin')
+    // We return success, and the component will handle the redirect, or we do it outside catch
+    // But since server actions can redirect, let's just break out of the try-catch
   } catch (error: any) {
+    // Next.js redirect throws an error that we shouldn't catch
+    if (error?.message === 'NEXT_REDIRECT') {
+      throw error;
+    }
+
     console.error('Login error details:', {
       message: error?.message,
       status: error?.status,
@@ -133,13 +137,8 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
       error: `An error occurred during login: ${error?.message || 'Unknown error'}`,
     }
   }
+
+  // Redirect to admin dashboard (happens after successful try block)
+  redirect('/admin')
 }
 
-/**
- * Logout action - clears auth cookie and redirects to login
- */
-export async function logoutAction(): Promise<void> {
-  const cookieStore = cookies()
-  cookieStore.delete('pb_auth')
-  redirect('/login')
-}

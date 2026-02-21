@@ -1,8 +1,12 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock } from 'lucide-react'
+import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
+import { type Brand, type Category, type Subcategory, type Product } from '@/lib/types'
+import ProductForm from './ProductForm'
+import AnalyticsCharts from './AnalyticsCharts'
 
 type Period = 'today' | 'week' | 'month' | 'all'
 
@@ -28,6 +32,7 @@ interface OverviewStats {
     add_to_favorites: number
     order_submit: number
     ask_manager: number
+    new_profiles: number
 }
 
 interface ProductStat {
@@ -38,6 +43,20 @@ interface ProductStat {
     add_to_favorites: number
     order_submit: number
     ask_manager: number
+    fullProduct?: Product
+}
+
+interface SeriesData {
+    date: string
+    views: number
+    carts: number
+    manager: number
+}
+
+interface AnalyticsDashboardProps {
+    brands?: Brand[]
+    categories?: Category[]
+    subcategories?: Subcategory[]
 }
 
 function periodFilter(period: Period): string {
@@ -64,13 +83,21 @@ function periodFilter(period: Period): string {
     return `created >= "${since.toISOString().replace('T', ' ').replace('Z', '')}"`
 }
 
-export default function AnalyticsDashboard() {
+export default function AnalyticsDashboard({ brands = [], categories = [], subcategories = [] }: AnalyticsDashboardProps) {
     const [period, setPeriod] = useState<Period>('today')
     const [overview, setOverview] = useState<OverviewStats | null>(null)
     const [products, setProducts] = useState<ProductStat[]>([])
+    const [seriesData, setSeriesData] = useState<SeriesData[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'favorites' | 'orders' | 'manager'>('overview')
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+    const [isModalOpen, setIsModalOpen] = useState(false)
+
+    const handleEdit = (product: Product) => {
+        setEditingProduct(product)
+        setIsModalOpen(true)
+    }
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -86,6 +113,7 @@ export default function AnalyticsDashboard() {
             const data = await res.json()
             setOverview(data.overview)
             setProducts(data.products || [])
+            setSeriesData(data.seriesData || [])
         } catch (err: any) {
             console.error('Analytics fetch error:', err)
             setError(err?.message || 'Ошибка загрузки аналитики')
@@ -164,8 +192,9 @@ export default function AnalyticsDashboard() {
 
                 {/* Overview Cards */}
                 {overview && (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-                        <StatCard icon={<Users className="w-5 h-5" />} label="Посетители" value={overview.unique_visitors} color="indigo" />
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 mb-8">
+                        <StatCard icon={<Users className="w-5 h-5" />} label="Гости (Сессии)" value={overview.unique_visitors} color="indigo" />
+                        <StatCard icon={<UserPlus className="w-5 h-5" />} label="Новые лиды" value={overview.new_profiles} color="purple" />
                         <StatCard icon={<Clock className="w-5 h-5" />} label="Онлайн" value={overview.online_now} color="green" pulse />
                         <StatCard icon={<Eye className="w-5 h-5" />} label="Просмотры" value={overview.product_views} color="blue" />
                         <StatCard icon={<Heart className="w-5 h-5" />} label="Избранное" value={overview.add_to_favorites} color="pink" />
@@ -174,40 +203,48 @@ export default function AnalyticsDashboard() {
                     </div>
                 )}
 
-                {/* Quick Stats Row */}
-                {overview && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-                            <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                                <TrendingUp className="w-3.5 h-3.5" />
-                                Просмотры страниц
+                {/* Conversion Info */}
+                {overview && overview.product_views > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
+                            <div className="flex items-center gap-3 text-slate-400 mb-2">
+                                <TrendingUp className="w-4 h-4 text-emerald-400" />
+                                <span className="text-sm font-medium">Просмотры страниц</span>
                             </div>
-                            <p className="text-2xl font-bold text-slate-100">{overview.page_views.toLocaleString()}</p>
+                            <div className="text-3xl font-bold text-slate-100">{overview.page_views}</div>
                         </div>
-                        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-                            <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                                <MessageCircle className="w-3.5 h-3.5" />
-                                Спросить у менеджера
+                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
+                            <div className="flex items-center gap-3 text-slate-400 mb-2">
+                                <MessageCircle className="w-4 h-4 text-blue-400" />
+                                <span className="text-sm font-medium">Спросить у менеджера</span>
                             </div>
-                            <p className="text-2xl font-bold text-slate-100">{overview.ask_manager}</p>
+                            <div className="text-3xl font-bold text-slate-100">{overview.ask_manager}</div>
                         </div>
-                        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-                            <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                                <BarChart3 className="w-3.5 h-3.5" />
-                                Всего событий
+                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
+                            <div className="flex items-center gap-3 text-slate-400 mb-2">
+                                <BarChart3 className="w-4 h-4 text-indigo-400" />
+                                <span className="text-sm font-medium">Всего событий</span>
                             </div>
-                            <p className="text-2xl font-bold text-slate-100">{overview.total_events.toLocaleString()}</p>
+                            <div className="text-3xl font-bold text-slate-100">{overview.total_events}</div>
                         </div>
-                        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
-                            <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                                <Eye className="w-3.5 h-3.5" />
-                                Конверсия в корзину
+                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
+                            <div className="flex items-center gap-3 text-slate-400 mb-2">
+                                <Eye className="w-4 h-4 text-amber-400" />
+                                <span className="text-sm font-medium">Конверсия в корзину</span>
                             </div>
-                            <p className="text-2xl font-bold text-slate-100">
-                                {overview.product_views > 0 ? ((overview.add_to_cart / overview.product_views) * 100).toFixed(1) : 0}%
-                            </p>
+                            <div className="text-3xl font-bold text-slate-100">
+                                {((overview.add_to_cart / overview.product_views) * 100).toFixed(1)}%
+                            </div>
                         </div>
                     </div>
+                )}
+
+                {/* Charts Area */}
+                {overview && seriesData.length > 0 && (
+                    <AnalyticsCharts
+                        seriesData={seriesData}
+                        overview={overview}
+                    />
                 )}
 
                 {/* Tabs */}
@@ -243,6 +280,7 @@ export default function AnalyticsDashboard() {
                             <ProductTable
                                 title="Самые просматриваемые товары"
                                 data={sortedByField('views')}
+                                onEdit={handleEdit}
                                 columns={[
                                     { key: 'views', label: 'Просмотры' },
                                     { key: 'add_to_cart', label: 'В корзину' },
@@ -256,6 +294,7 @@ export default function AnalyticsDashboard() {
                             <ProductTable
                                 title="Добавления в избранное"
                                 data={sortedByField('add_to_favorites')}
+                                onEdit={handleEdit}
                                 columns={[
                                     { key: 'add_to_favorites', label: 'Добавили' },
                                     { key: 'views', label: 'Просмотры' },
@@ -268,6 +307,7 @@ export default function AnalyticsDashboard() {
                             <ProductTable
                                 title="Заказы по товарам"
                                 data={sortedByField('order_submit')}
+                                onEdit={handleEdit}
                                 columns={[
                                     { key: 'order_submit', label: 'Заказов' },
                                     { key: 'add_to_cart', label: 'В корзину' },
@@ -280,6 +320,7 @@ export default function AnalyticsDashboard() {
                             <ProductTable
                                 title="Клики «Спросить у менеджера»"
                                 data={sortedByField('ask_manager')}
+                                onEdit={handleEdit}
                                 columns={[
                                     { key: 'ask_manager', label: 'Кликов' },
                                     { key: 'views', label: 'Просмотры' },
@@ -290,6 +331,19 @@ export default function AnalyticsDashboard() {
                     </>
                 )}
             </div>
+
+            {/* Product Form Modal */}
+            <ProductForm
+                product={editingProduct}
+                brands={brands}
+                categories={categories}
+                subcategories={subcategories}
+                isOpen={isModalOpen}
+                onClose={() => {
+                    setIsModalOpen(false)
+                    setEditingProduct(null)
+                }}
+            />
         </div>
     )
 }
@@ -304,36 +358,60 @@ function StatCard({ icon, label, value, color, pulse }: {
     pulse?: boolean
 }) {
     const colorMap: Record<string, string> = {
-        indigo: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
-        green: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-        blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-        pink: 'bg-pink-500/10 text-pink-400 border-pink-500/20',
-        amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-        emerald: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+        indigo: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]',
+        purple: 'bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.1)]',
+        green: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]',
+        blue: 'bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]',
+        pink: 'bg-pink-500/10 text-pink-400 border border-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.1)]',
+        amber: 'bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.1)]',
+        emerald: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]',
     }
 
     return (
-        <div className={`rounded-xl border p-4 ${colorMap[color] || colorMap.indigo}`}>
-            <div className="flex items-center gap-2 mb-2">
+        <div className={`${colorMap[color] || 'bg-slate-800/50 text-slate-400'} rounded-xl p-4 flex flex-col justify-between backdrop-blur-sm transition-all hover:scale-[1.02] duration-200`}>
+            <div className="flex items-center gap-2 mb-2 opacity-80">
                 {icon}
-                <span className="text-xs font-medium opacity-80">{label}</span>
+                <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+            </div>
+            <div className="flex items-end gap-2">
+                <span className="text-3xl font-bold">{value}</span>
                 {pulse && value > 0 && (
-                    <span className="relative flex h-2 w-2 ml-auto">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+                    <span className="flex h-3 w-3 relative mb-2 ml-1">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
                     </span>
                 )}
             </div>
-            <p className="text-3xl font-bold">{value.toLocaleString()}</p>
         </div>
     )
 }
 
-function ProductTable({ title, data, columns }: {
+function ProductTable({ title, data, columns, onEdit }: {
     title: string
     data: ProductStat[]
     columns: { key: keyof ProductStat; label: string }[]
+    onEdit: (product: Product) => void
 }) {
+    const getPhotoUrl = (product: Product) => {
+        if (!product || !product.photos || product.photos.length === 0) return null
+        let photoUrl = product.photos[0]
+        if (typeof photoUrl === 'string' && photoUrl.startsWith('[')) {
+            try {
+                const photosArray = JSON.parse(photoUrl)
+                photoUrl = photosArray[0]
+            } catch (e) {
+                // ignore
+            }
+        }
+        if (typeof photoUrl === 'string' && photoUrl.includes('szwego.com')) {
+            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
+            if (!photoUrl.includes('?imageMogr2')) {
+                photoUrl += IMG_SUFFIX
+            }
+        }
+        return photoUrl
+    }
+
     if (data.length === 0) {
         return (
             <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
@@ -364,8 +442,35 @@ function ProductTable({ title, data, columns }: {
                             <tr key={item.product_id} className="hover:bg-slate-700/20 transition-colors">
                                 <td className="px-6 py-3 text-sm text-slate-500 font-mono">{i + 1}</td>
                                 <td className="px-6 py-3">
-                                    <div className="text-sm font-medium text-slate-200 truncate max-w-xs">{item.product_name}</div>
-                                    <div className="text-xs text-slate-500 font-mono">{item.product_id}</div>
+                                    <div className="flex items-center gap-3">
+                                        {item.fullProduct ? (
+                                            <div
+                                                onClick={() => onEdit(item.fullProduct!)}
+                                                className="w-10 h-10 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
+                                            >
+                                                {getPhotoUrl(item.fullProduct) ? (
+                                                    <Image src={getPhotoUrl(item.fullProduct)} alt={item.product_name} fill sizes="40px" className="object-cover" unoptimized />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-600 uppercase">No</div>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div className="w-10 h-10 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0 flex items-center justify-center text-[8px] text-slate-600 uppercase">No</div>
+                                        )}
+                                        <div>
+                                            {item.fullProduct ? (
+                                                <button
+                                                    onClick={() => onEdit(item.fullProduct!)}
+                                                    className="text-sm font-medium text-indigo-400 hover:underline text-left truncate max-w-xs block"
+                                                >
+                                                    {item.product_name}
+                                                </button>
+                                            ) : (
+                                                <div className="text-sm font-medium text-slate-200 truncate max-w-xs">{item.product_name}</div>
+                                            )}
+                                            <div className="text-xs text-slate-500 font-mono">{item.product_id}</div>
+                                        </div>
+                                    </div>
                                 </td>
                                 {columns.map(col => (
                                     <td key={col.key} className="px-6 py-3 text-right">
