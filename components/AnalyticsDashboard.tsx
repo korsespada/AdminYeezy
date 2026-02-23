@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus } from 'lucide-react'
+import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { type Brand, type Category, type Subcategory, type Product } from '@/lib/types'
@@ -88,11 +88,38 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
     const [overview, setOverview] = useState<OverviewStats | null>(null)
     const [products, setProducts] = useState<ProductStat[]>([])
     const [seriesData, setSeriesData] = useState<SeriesData[]>([])
+    const [osList, setOsList] = useState<{ name: string, visitors: number }[]>([])
+    const [countryList, setCountryList] = useState<{ name: string, visitors: number }[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'favorites' | 'orders' | 'manager'>('overview')
     const [editingProduct, setEditingProduct] = useState<Product | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
+    const [isResetMenuOpen, setIsResetMenuOpen] = useState(false)
+    const [isResetting, setIsResetting] = useState(false)
+
+    const handleReset = async (type: 'period' | 'all') => {
+        if (!confirm(`Вы уверены, что хотите сбросить аналитику ${type === 'all' ? 'за всё время' : 'за выбранный период'}? Это действие нельзя отменить.`)) {
+            return;
+        }
+
+        setIsResetting(true)
+        try {
+            const res = await fetch(`/api/analytics?type=${type}&period=${period}`, {
+                method: 'DELETE',
+            })
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
+                throw new Error(err.error || `HTTP ${res.status}`)
+            }
+            await fetchData()
+        } catch (err: any) {
+            console.error('Analytics reset error:', err)
+            setError(err?.message || 'Ошибка сброса аналитики')
+        } finally {
+            setIsResetting(false)
+        }
+    }
 
     const handleEdit = (product: Product) => {
         setEditingProduct(product)
@@ -114,6 +141,8 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
             setOverview(data.overview)
             setProducts(data.products || [])
             setSeriesData(data.seriesData || [])
+            setOsList(data.osList || [])
+            setCountryList(data.countryList || [])
         } catch (err: any) {
             console.error('Analytics fetch error:', err)
             setError(err?.message || 'Ошибка загрузки аналитики')
@@ -174,12 +203,43 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
 
                     <button
                         onClick={fetchData}
-                        disabled={loading}
+                        disabled={loading || isResetting}
                         className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all disabled:opacity-50"
                         title="Обновить"
                     >
-                        <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-4 h-4 ${loading || isResetting ? 'animate-spin' : ''}`} />
                     </button>
+
+                    <div className="relative ml-2">
+                        <button
+                            onClick={() => setIsResetMenuOpen(!isResetMenuOpen)}
+                            disabled={isResetting}
+                            className="flex items-center gap-2 px-3 py-1.5 text-red-400 hover:text-red-300 bg-red-400/10 hover:bg-red-400/20 rounded-lg transition-all border border-red-500/20 text-sm font-medium disabled:opacity-50"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                            Сбросить
+                        </button>
+
+                        {isResetMenuOpen && (
+                            <>
+                                <div className="fixed inset-0 z-40" onClick={() => setIsResetMenuOpen(false)}></div>
+                                <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-600 rounded-lg shadow-xl flex flex-col py-1 z-50">
+                                    <button
+                                        onClick={() => { handleReset('period'); setIsResetMenuOpen(false) }}
+                                        className="px-4 py-2 text-sm text-left text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                                    >
+                                        За выбранный период
+                                    </button>
+                                    <button
+                                        onClick={() => { handleReset('all'); setIsResetMenuOpen(false) }}
+                                        className="px-4 py-2 text-sm text-left text-red-400 hover:bg-slate-700 hover:text-red-300 transition-colors border-t border-slate-700 mt-1 pt-1"
+                                    >
+                                        За всё время
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
                 </div>
             </header>
 
@@ -245,6 +305,14 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
                         seriesData={seriesData}
                         overview={overview}
                     />
+                )}
+
+                {/* Geo and OS Stats */}
+                {overview && (osList.length > 0 || countryList.length > 0) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                        <StatsListCard title="Страны" data={countryList} />
+                        <StatsListCard title="Операционные системы" data={osList} />
+                    </div>
                 )}
 
                 {/* Tabs */}
@@ -393,7 +461,16 @@ function ProductTable({ title, data, columns, onEdit }: {
     onEdit: (product: Product) => void
 }) {
     const getPhotoUrl = (product: Product) => {
-        if (!product || !product.photos || product.photos.length === 0) return null
+        if (!product) return null
+
+        if (product.thumb && typeof product.thumb === 'string') {
+            if (product.thumb.startsWith('http')) {
+                return product.thumb;
+            }
+            return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
+        }
+
+        if (!product.photos || product.photos.length === 0) return null
         let photoUrl = product.photos[0]
         if (typeof photoUrl === 'string' && photoUrl.startsWith('[')) {
             try {
@@ -403,10 +480,14 @@ function ProductTable({ title, data, columns, onEdit }: {
                 // ignore
             }
         }
-        if (typeof photoUrl === 'string' && photoUrl.includes('szwego.com')) {
-            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
-            if (!photoUrl.includes('?imageMogr2')) {
-                photoUrl += IMG_SUFFIX
+        if (typeof photoUrl === 'string') {
+            if (photoUrl.includes('szwego.com')) {
+                const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
+                if (!photoUrl.includes('?imageMogr2')) {
+                    photoUrl += IMG_SUFFIX
+                }
+            } else if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
+                photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
             }
         }
         return photoUrl
@@ -439,7 +520,11 @@ function ProductTable({ title, data, columns, onEdit }: {
                     </thead>
                     <tbody className="divide-y divide-slate-700/30">
                         {data.slice(0, 50).map((item, i) => (
-                            <tr key={item.product_id} className="hover:bg-slate-700/20 transition-colors">
+                            <tr
+                                key={item.product_id}
+                                className="hover:bg-slate-700/20 transition-colors cursor-pointer"
+                                onClick={() => item.fullProduct && onEdit(item.fullProduct)}
+                            >
                                 <td className="px-6 py-3 text-sm text-slate-500 font-mono">{i + 1}</td>
                                 <td className="px-6 py-3">
                                     <div className="flex items-center gap-3">
@@ -449,7 +534,7 @@ function ProductTable({ title, data, columns, onEdit }: {
                                                 className="w-10 h-10 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
                                             >
                                                 {getPhotoUrl(item.fullProduct) ? (
-                                                    <Image src={getPhotoUrl(item.fullProduct)} alt={item.product_name} fill sizes="40px" className="object-cover" unoptimized />
+                                                    <Image src={getPhotoUrl(item.fullProduct)!} alt={item.product_name} fill sizes="40px" className="object-cover" unoptimized />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-600 uppercase">No</div>
                                                 )}
@@ -459,12 +544,11 @@ function ProductTable({ title, data, columns, onEdit }: {
                                         )}
                                         <div>
                                             {item.fullProduct ? (
-                                                <button
-                                                    onClick={() => onEdit(item.fullProduct!)}
+                                                <div
                                                     className="text-sm font-medium text-indigo-400 hover:underline text-left truncate max-w-xs block"
                                                 >
                                                     {item.product_name}
-                                                </button>
+                                                </div>
                                             ) : (
                                                 <div className="text-sm font-medium text-slate-200 truncate max-w-xs">{item.product_name}</div>
                                             )}
@@ -486,4 +570,63 @@ function ProductTable({ title, data, columns, onEdit }: {
             </div>
         </div>
     )
+}
+
+function StatsListCard({ title, data }: { title: string, data: { name: string, visitors: number }[] }) {
+    if (data.length === 0) return null;
+    const maxVal = Math.max(...data.map(d => d.visitors));
+    const totalVis = data.reduce((acc, curr) => acc + curr.visitors, 0);
+
+    const getFlag = (country: string) => {
+        if (!country || country === 'Unknown' || country === 'Неизвестно') return '🌍';
+        const map: Record<string, string> = {
+            'RU': '🇷🇺', 'Russian Federation': '🇷🇺', 'Russia': '🇷🇺',
+            'DE': '🇩🇪', 'Germany': '🇩🇪',
+            'NL': '🇳🇱', 'Netherlands': '🇳🇱',
+            'LV': '🇱🇻', 'Latvia': '🇱🇻',
+            'US': '🇺🇸', 'United States': '🇺🇸',
+            'GB': '🇬🇧', 'United Kingdom': '🇬🇧',
+            'FR': '🇫🇷', 'France': '🇫🇷',
+            'IT': '🇮🇹', 'Italy': '🇮🇹',
+            'ES': '🇪🇸', 'Spain': '🇪🇸',
+            'BY': '🇧🇾', 'Belarus': '🇧🇾',
+            'KZ': '🇰🇿', 'Kazakhstan': '🇰🇿',
+            'UA': '🇺🇦', 'Ukraine': '🇺🇦',
+            'CN': '🇨🇳', 'China': '🇨🇳'
+        };
+        return map[country] || '🌍';
+    };
+
+    const getDisplayName = (name: string) => {
+        if (name === 'Unknown') return 'Неизвестно';
+        if (name === 'Russian Federation') return 'Россия';
+        if (name === 'Russia') return 'Россия';
+        return name;
+    };
+
+    return (
+        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
+            <div className="flex justify-between text-xs font-semibold text-slate-400 mb-4 uppercase tracking-wider border-b border-slate-700/50 pb-2">
+                <span>{title}</span>
+                <span>ПОСЕТИТЕЛИ</span>
+            </div>
+            <div className="space-y-3">
+                {data.slice(0, 10).map((item, idx) => (
+                    <div key={idx} className="relative group">
+                        <div
+                            className="absolute top-0 left-0 h-full bg-slate-700/30 rounded-md transition-all duration-500 ease-out"
+                            style={{ width: `${(item.visitors / maxVal) * 100}%` }}
+                        ></div>
+                        <div className="relative flex justify-between items-center px-3 py-2 z-10 text-sm">
+                            <span className="text-slate-200 font-medium truncate flex items-center gap-2">
+                                {title === 'Страны' && <span className="text-lg">{getFlag(item.name)}</span>}
+                                {getDisplayName(item.name)}
+                            </span>
+                            <span className="text-slate-100 font-bold">{((item.visitors / totalVis) * 100).toFixed(0)}%</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
 }

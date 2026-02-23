@@ -21,6 +21,15 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
     const [isSaving, setIsSaving] = useState(false);
 
     const getPhotoUrl = (product: Product) => {
+        if (!product) return null
+
+        if (product.thumb && typeof product.thumb === 'string') {
+            if (product.thumb.startsWith('http')) {
+                return product.thumb;
+            }
+            return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
+        }
+
         if (!product.photos || product.photos.length === 0) return null
         let photoUrl = product.photos[0]
         if (typeof photoUrl === 'string' && photoUrl.startsWith('[')) {
@@ -31,10 +40,15 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                 // ignore parse errors
             }
         }
-        if (typeof photoUrl === 'string' && photoUrl.includes('szwego.com')) {
-            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
-            if (!photoUrl.includes('?imageMogr2')) {
-                photoUrl += IMG_SUFFIX;
+
+        if (typeof photoUrl === 'string') {
+            if (photoUrl.includes('szwego.com')) {
+                const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
+                if (!photoUrl.includes('?imageMogr2')) {
+                    photoUrl += IMG_SUFFIX;
+                }
+            } else if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
+                photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
             }
         }
 

@@ -138,7 +138,14 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
     }
   }
 
-  // Redirect to admin dashboard (happens after successful try block)
   redirect('/admin')
 }
 
+/**
+ * Logout action - clears the authentication cookie
+ */
+export async function logoutAction() {
+  const cookieStore = cookies()
+  cookieStore.delete('pb_auth')
+  redirect('/login')
+}
