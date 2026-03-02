@@ -61,3 +61,27 @@ export async function bulkPatchObjectsAction(updates: { id: string, data: any }[
         return { success: false, error: 'Failed to mass replace products' }
     }
 }
+
+export async function bulkDeleteProductsAction(ids: string[]) {
+    try {
+        const pb = createClient()
+        const CHUNK_SIZE = 5;
+        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+            const chunk = ids.slice(i, i + CHUNK_SIZE);
+            const promises = chunk.map(id =>
+                pb.collection(Collections.Products).delete(id)
+            );
+            await Promise.all(promises);
+            // Небольшая задержка между пачками
+            if (i + CHUNK_SIZE < ids.length) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+        }
+
+        revalidatePath('/admin')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Bulk delete error:', error)
+        return { success: false, error: 'Failed to delete products' }
+    }
+}

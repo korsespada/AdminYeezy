@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
-import { X, Upload, Trash2, GripVertical } from 'lucide-react'
+import { X, Upload, Trash2, GripVertical, Download } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from './BrandSelect'
 
@@ -41,10 +41,49 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
   const [gender, setGender] = useState('')
-  const [photoFiles, setPhotoFiles] = useState<File[]>([])
-  const [photoPreviews, setPhotoPreviews] = useState<string[]>([])
+  const [photoUrlsToAdd, setPhotoUrlsToAdd] = useState('')
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+
+  const handleDownload = async (url: string, index: number) => {
+    try {
+      const response = await fetch(`/api/download?url=${encodeURIComponent(url)}`)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch from proxy')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objectUrl
+      const extension = (url.split('.').pop() || '').split('?')[0] || 'jpg'
+      const cleanExtension = extension.replace(/[^a-zA-Z0-9]/g, '') || 'jpg'
+      const baseName = productId || name.substring(0, 10).trim() || 'product'
+      a.download = `${baseName}_photo_${index + 1}.${cleanExtension}`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(objectUrl)
+    } catch (e) {
+      console.error('Download error:', e)
+      window.open(url, '_blank')
+    }
+  }
+
+  const handleDownloadAll = async () => {
+    setIsDownloading(true)
+    try {
+      for (let i = 0; i < existingPhotos.length; i++) {
+        await handleDownload(existingPhotos[i], i)
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+    } finally {
+      setIsDownloading(false)
+    }
+  }
 
   useEffect(() => {
     if (isOpen) {
@@ -74,8 +113,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         setCategory(product.category || product.expand?.category?.id || '')
         setSubcategory(product.subcategory || product.expand?.subcategory?.id || '')
         setGender(product.gender || '')
-        setPhotoFiles([])
-        setPhotoPreviews([])
+        setPhotoUrlsToAdd('')
 
         // Set existing photos (they are external URLs, not PocketBase files)
         if (product.photos && product.photos.length > 0) {
@@ -106,30 +144,24 @@ export default function ProductForm({ product, brands, categories, subcategories
         setCategory(categories[0]?.id || '')
         setSubcategory('')
         setGender('')
-        setPhotoFiles([])
-        setPhotoPreviews([])
+        setPhotoUrlsToAdd('')
         setExistingPhotos([])
       }
       setError('')
     }
   }, [isOpen, product, brands, categories])
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || [])
-    if (files.length > 0) {
-      setPhotoFiles((prev) => [...prev, ...files])
+  const handleAddUrls = () => {
+    const urls = photoUrlsToAdd
+      .split('\n')
+      .map(url => url.trim())
+      .filter(url => url.length > 0)
 
-      // Create previews
-      files.forEach((file) => {
-        const objectUrl = URL.createObjectURL(file)
-        setPhotoPreviews((prev) => [...prev, objectUrl])
-      })
+    if (urls.length > 0) {
+      setExistingPhotos(prev => [...prev, ...urls])
+      setPhotoUrlsToAdd('')
+      setIsPhotoModalOpen(false)
     }
-  }
-
-  const removePhoto = (index: number) => {
-    setPhotoFiles((prev) => prev.filter((_, i) => i !== index))
-    setPhotoPreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
   const removeExistingPhoto = (index: number) => {
@@ -202,15 +234,10 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('subcategory', subcategory)
     formData.append('gender', gender)
 
-    // Add existing photos in new order (as JSON)
+    // Add existing photos in new order (as JSON) - this now includes newly added URLs
     if (existingPhotos.length > 0) {
       formData.append('existingPhotos', JSON.stringify(existingPhotos))
     }
-
-    // Add new photo files
-    photoFiles.forEach((file, index) => {
-      formData.append(`photo_${index}`, file)
-    })
 
     startTransition(async () => {
       try {
@@ -273,23 +300,28 @@ export default function ProductForm({ product, brands, categories, subcategories
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Фотографии товара
                 </label>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById('photo-upload')?.click()}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors border border-blue-200 dark:border-blue-800/50"
-                  disabled={isPending}
-                >
-                  <Upload size={16} />
-                  Добавить фото
-                </button>
-                <input
-                  id="photo-upload"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handlePhotoChange}
-                  className="hidden"
-                />
+                <div className="flex gap-2 ml-auto">
+                  {existingPhotos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadAll}
+                      className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors border border-green-200 dark:border-green-800/50"
+                      disabled={isPending || isDownloading}
+                    >
+                      <Download size={16} />
+                      {isDownloading ? 'Скачивание...' : 'Скачать все фото'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsPhotoModalOpen(true)}
+                    className="flex items-center gap-2 px-3 py-2 h-fit text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors border border-blue-200 dark:border-blue-800/50"
+                    disabled={isPending}
+                  >
+                    <Upload size={16} />
+                    Добавить фото по ссылкам
+                  </button>
+                </div>
               </div>
 
               {/* Existing Photos with Drag and Drop */}
@@ -319,13 +351,27 @@ export default function ProductForm({ product, brands, categories, subcategories
                         <div className="absolute top-1 left-1 p-1 bg-gray-800/70 text-white rounded">
                           <GripVertical size={14} />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeExistingPhoto(index)}
-                          className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="absolute top-1 right-1 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => removeExistingPhoto(index)}
+                            className="p-1 bg-red-500 text-white rounded-full shadow hover:bg-red-600 transition-colors"
+                            title="Удалить"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              handleDownload(url, index);
+                            }}
+                            className="p-1 bg-blue-500 text-white rounded-full shadow hover:bg-blue-600 transition-colors"
+                            title="Скачать исходное фото"
+                          >
+                            <Download size={14} />
+                          </button>
+                        </div>
                         <div className="absolute bottom-1 right-1 px-2 py-0.5 bg-gray-800/70 text-white text-xs rounded">
                           {index + 1}
                         </div>
@@ -335,33 +381,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                 </div>
               )}
 
-              {/* New Photos */}
-              {photoPreviews.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-2">Новые фото для загрузки:</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {photoPreviews.map((url, index) => (
-                      <div key={index} className="relative aspect-square group">
-                        <Image
-                          src={url}
-                          alt={`Preview ${index + 1}`}
-                          fill
-                          sizes="(max-width: 768px) 33vw, 200px"
-                          className="object-cover rounded-lg border border-gray-300 dark:border-gray-600 shadow-sm"
-                          unoptimized
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removePhoto(index)}
-                          className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* New Photos (Removed, as we now use URL input directly to existing photos list) */}
             </div>
 
             {/* Product ID */}
@@ -552,6 +572,61 @@ export default function ProductForm({ product, brands, categories, subcategories
           </div>
         </div>
       </div>
+
+      {/* Photo URL Modal */}
+      {isPhotoModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsPhotoModalOpen(false)}
+          />
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Добавить фото по ссылкам
+              </h3>
+              <button
+                onClick={() => setIsPhotoModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Вставьте ссылки на фотографии товара. Каждая ссылка должна быть с новой строки.
+              </p>
+              <textarea
+                value={photoUrlsToAdd}
+                onChange={(e) => setPhotoUrlsToAdd(e.target.value)}
+                placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.jpg"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-900 dark:text-white font-mono text-sm resize-y min-h-[150px]"
+                rows={6}
+                disabled={isPending}
+                autoFocus
+              />
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsPhotoModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleAddUrls}
+                disabled={!photoUrlsToAdd.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Upload size={16} />
+                Добавить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

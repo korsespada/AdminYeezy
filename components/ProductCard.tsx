@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Product } from '@/lib/types';
 import { Trash2 } from 'lucide-react';
@@ -20,13 +20,11 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    const getPhotoUrl = (product: Product) => {
+    const thumb = useMemo(() => {
         if (!product) return null
 
         if (product.thumb && typeof product.thumb === 'string') {
-            if (product.thumb.startsWith('http')) {
-                return product.thumb;
-            }
+            if (product.thumb.startsWith('http')) return product.thumb
             return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
         }
 
@@ -36,26 +34,20 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             try {
                 const photosArray = JSON.parse(photoUrl)
                 photoUrl = photosArray[0]
-            } catch (e) {
-                // ignore parse errors
-            }
+            } catch (e) { /* ignore */ }
         }
 
         if (typeof photoUrl === 'string') {
             if (photoUrl.includes('szwego.com')) {
-                const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
-                if (!photoUrl.includes('?imageMogr2')) {
-                    photoUrl += IMG_SUFFIX;
-                }
+                const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
+                if (!photoUrl.includes('?imageMogr2')) photoUrl += IMG_SUFFIX
             } else if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
-                photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
+                photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`
             }
         }
 
         return photoUrl
-    }
-
-    const thumb = getPhotoUrl(product)
+    }, [product.id, product.thumb, product.photos])
 
     const startEdit = (field: 'name' | 'price', e: React.MouseEvent) => {
         e.stopPropagation();
@@ -176,12 +168,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 <div className="mb-2">
                     <div className="text-[10px] text-slate-500 font-mono">{product.productId}</div>
                     <div className="text-[10px] text-indigo-400 font-semibold truncate">
-                        {(() => {
+                        {useMemo(() => {
                             const b = product.expand?.brand;
                             if (Array.isArray(b)) return b.map(x => x.name).join(', ');
                             if (b && typeof b === 'object') return b.name;
                             return 'No Brand';
-                        })()}
+                        }, [product.expand?.brand])}
                     </div>
                 </div>
 

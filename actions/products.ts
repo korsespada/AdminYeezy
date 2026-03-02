@@ -23,15 +23,16 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
     const subcategory = formData.get('subcategory') as string
     const gender = formData.get('gender') as string
 
-    // Get all photo files
-    const photos: File[] = []
-    let photoIndex = 0
-    while (formData.has(`photo_${photoIndex}`)) {
-      const photo = formData.get(`photo_${photoIndex}`) as File
-      if (photo && photo.size > 0) {
-        photos.push(photo)
+    // Get external photos
+    const existingPhotosStr = formData.get('existingPhotos') as string
+    let photos: string[] = []
+
+    if (existingPhotosStr) {
+      try {
+        photos = JSON.parse(existingPhotosStr)
+      } catch (e) {
+        console.error('Failed to parse existingPhotos:', e)
       }
-      photoIndex++
     }
 
     // Validation
@@ -53,17 +54,6 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
       return { success: false, error: 'Price must be a positive number' }
     }
 
-    // Validate photos
-    const maxSize = 5 * 1024 * 1024 // 5MB
-    for (const photo of photos) {
-      if (photo.size > maxSize) {
-        return { success: false, error: 'Each image must be smaller than 5MB' }
-      }
-      if (!photo.type.startsWith('image/')) {
-        return { success: false, error: 'Please upload valid image files' }
-      }
-    }
-
     // Prepare data
     const data: any = {
       productId: productId.trim(),
@@ -75,13 +65,9 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
       category,
       subcategory,
       gender,
+      photos, // Store array of URLs directly
       photos_processed: false,
     }
-
-    // Add photos
-    photos.forEach((photo, index) => {
-      data[`photos.${index}`] = photo
-    })
 
     // Create product
     await pb.collection(Collections.Products).create(data)
@@ -124,15 +110,15 @@ export async function updateProductAction(
     const gender = formData.get('gender') as string
     const existingPhotosStr = formData.get('existingPhotos') as string
 
-    // Get new photos (not used for now, photos are external URLs)
-    const photos: File[] = []
-    let photoIndex = 0
-    while (formData.has(`photo_${photoIndex}`)) {
-      const photo = formData.get(`photo_${photoIndex}`) as File
-      if (photo && photo.size > 0) {
-        photos.push(photo)
+    // Get external photos
+    let photos: string[] = []
+
+    if (existingPhotosStr) {
+      try {
+        photos = JSON.parse(existingPhotosStr)
+      } catch (e) {
+        console.error('Failed to parse existingPhotos:', e)
       }
-      photoIndex++
     }
 
     // Validation

@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
-import { bulkUpdateProductsAction } from '@/actions/bulk-update'
+import { bulkUpdateProductsAction, bulkDeleteProductsAction } from '@/actions/bulk-update'
 import ProductForm from './ProductForm'
 import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square, LogOut, FileSpreadsheet, BarChart3 } from 'lucide-react'
 import Sidebar from './Sidebar'
@@ -43,6 +43,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
 
   // Update local state when initialData changes (e.g. after search/filter)
   useEffect(() => {
@@ -50,22 +51,11 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
   }, [initialData])
 
   // Auto-select category if all selected products share the same one
-  useEffect(() => {
-    if (selectedProductIds.length > 0) {
-      const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
-      const uniqueCategories = [...new Set(selectedProducts.map(p => p.category).filter(Boolean))]
-      if (uniqueCategories.length === 1) {
-        setSelectedCategory(uniqueCategories[0])
-      } else {
-        setSelectedCategory('')
-      }
-      setSelectedSubcategory('') // Reset subcategory selection
-      setSelectedGender('') // Reset gender
-    } else {
-      setSelectedCategory('')
-      setSelectedSubcategory('')
-      setSelectedGender('')
-    }
+  const autoCategory = useMemo(() => {
+    if (selectedProductIds.length === 0) return ''
+    const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
+    const uniqueCategories = [...new Set(selectedProducts.map(p => p.category).filter(Boolean))]
+    return uniqueCategories.length === 1 ? uniqueCategories[0] : ''
   }, [selectedProductIds, products])
 
   // Load view mode from localStorage
@@ -402,10 +392,30 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                   }
                 }
               }}
-              disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating}
+              disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating || isBulkDeleting}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
+            </button>
+            <button
+              onClick={async () => {
+                if (confirm(`Вы уверены, что хотите удалить ${selectedProductIds.length} товаров? Это действие нельзя отменить.`)) {
+                  setIsBulkDeleting(true)
+                  const res = await bulkDeleteProductsAction(selectedProductIds)
+                  if (res.success) {
+                    setIsBulkDeleting(false)
+                    setSelectedProductIds([])
+                    router.refresh()
+                  } else {
+                    alert('Ошибка при удалении товаров')
+                    setIsBulkDeleting(false)
+                  }
+                }
+              }}
+              disabled={isBulkUpdating || isBulkDeleting}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              {isBulkDeleting ? 'Удаление...' : 'Удалить'}
             </button>
           </div>
         </div>
