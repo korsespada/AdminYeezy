@@ -27,12 +27,16 @@ export default function LoginPage() {
     startTransition(async () => {
       try {
         const result = await loginAction(formData)
-        
+
         if (!result.success && result.error) {
           setError(result.error)
         }
         // If successful, loginAction will redirect to /admin
-      } catch (err) {
+      } catch (err: any) {
+        // Next.js redirect throws a special error — let it propagate
+        if (err?.digest?.startsWith('NEXT_REDIRECT') || err?.message === 'NEXT_REDIRECT') {
+          throw err
+        }
         setError('An unexpected error occurred. Please try again.')
       }
     })
@@ -61,8 +65,8 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label 
-              htmlFor="email" 
+            <label
+              htmlFor="email"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
               Email Address
@@ -80,8 +84,8 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label 
-              htmlFor="password" 
+            <label
+              htmlFor="password"
               className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
             >
               Password
