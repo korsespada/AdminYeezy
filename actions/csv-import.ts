@@ -16,6 +16,12 @@ export interface CsvProduct {
     gender?: string
 }
 
+export interface Lookups {
+    brands: any[]
+    categories: any[]
+    subcategories: any[]
+}
+
 /**
  * Загрузка справочников для импорта
  */
