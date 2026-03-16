@@ -15,71 +15,76 @@ export async function GET(request: Request) {
     if (period === 'all') timeFilter = "1=1"
 
     // 1. Общая статистика (Overview)
-    // Мы считаем разные типы событий из одной таблицы analytics_events
     const overviewRes = await query(`
       SELECT 
         COUNT(DISTINCT session_id) as unique_visitors,
-        COUNT(*) FILTER (WHERE event_type = 'view') as product_views,
-        COUNT(*) FILTER (WHERE event_type = 'cart_add') as add_to_cart,
-        COUNT(*) FILTER (WHERE event_type = 'favorite_add') as add_to_favorites,
-        COUNT(*) FILTER (WHERE event_type = 'order_success') as order_submit,
-        COUNT(*) FILTER (WHERE event_type = 'ask_manager') as ask_manager
+        COUNT(*) FILTER (WHERE event = 'product_view') as product_views,
+        COUNT(*) FILTER (WHERE event = 'add_to_cart') as add_to_cart,
+        COUNT(*) FILTER (WHERE event = 'add_to_favorites') as add_to_favorites,
+        COUNT(*) FILTER (WHERE event = 'order_success' OR event = 'order_submit') as order_submit,
+        COUNT(*) FILTER (WHERE event = 'ask_manager') as ask_manager,
+        COUNT(*) FILTER (WHERE event = 'page_view') as page_views,
+        (SELECT COUNT(DISTINCT session_id) FROM analytics_events WHERE created_at >= NOW() - INTERVAL '5 minutes') as online_now
       FROM analytics_events 
       WHERE ${timeFilter}
-    `).catch(() => ({ rows: [{ unique_visitors: 0, product_views: 0, add_to_cart: 0, add_to_favorites: 0, order_submit: 0, ask_manager: 0 }] }))
+    `).catch((e) => {
+      console.error('Overview query failed:', e.message)
+      return { rows: [{ unique_visitors: 0, product_views: 0, add_to_cart: 0, add_to_favorites: 0, order_submit: 0, ask_manager: 0, page_views: 0, online_now: 0 }] }
+    })
 
     const overview = {
       ...overviewRes.rows[0],
-      online_now: Math.floor(Math.random() * 5) + 1, // Заглушка для "онлайна"
-      total_events: 0,
-      page_views: 0,
+      total_events: 0, // Можно вычислить как сумму
       new_profiles: 0
     }
 
     // 2. Статистика по товарам
     const productsRes = await query(`
       SELECT 
-        product_id, 
-        product_name,
-        COUNT(*) FILTER (WHERE event_type = 'view') as views,
-        COUNT(*) FILTER (WHERE event_type = 'cart_add') as add_to_cart,
-        COUNT(*) FILTER (WHERE event_type = 'favorite_add') as add_to_favorites,
-        COUNT(*) FILTER (WHERE event_type = 'order_success') as order_submit,
-        COUNT(*) FILTER (WHERE event_type = 'ask_manager') as ask_manager
+        "productId" as product_id, 
+        name as product_name,
+        COUNT(*) FILTER (WHERE event = 'product_view') as views,
+        COUNT(*) FILTER (WHERE event = 'add_to_cart') as add_to_cart,
+        COUNT(*) FILTER (WHERE event = 'add_to_favorites') as add_to_favorites,
+        COUNT(*) FILTER (WHERE event = 'order_success' OR event = 'order_submit') as order_submit,
+        COUNT(*) FILTER (WHERE event = 'ask_manager') as ask_manager
       FROM analytics_events
-      WHERE ${timeFilter} AND product_id IS NOT NULL
-      GROUP BY product_id, product_name
+      WHERE ${timeFilter} AND "productId" IS NOT NULL AND "productId" != ''
+      GROUP BY "productId", name
       ORDER BY views DESC
       LIMIT 50
-    `).catch(() => ({ rows: [] }))
+    `).catch((e) => {
+      console.error('Products query failed:', e.message)
+      return { rows: [] }
+    })
 
     // 3. Данные для графиков (Series Data - по дням)
     const seriesRes = await query(`
       SELECT 
         TO_CHAR(created_at, 'YYYY-MM-DD') as date,
-        COUNT(*) FILTER (WHERE event_type = 'view') as views,
-        COUNT(*) FILTER (WHERE event_type = 'cart_add') as carts,
-        COUNT(*) FILTER (WHERE event_type = 'favorite_add') as favorites,
-        COUNT(*) FILTER (WHERE event_type = 'ask_manager') as manager
+        COUNT(*) FILTER (WHERE event = 'product_view' OR event = 'page_view') as views,
+        COUNT(*) FILTER (WHERE event = 'add_to_cart') as carts,
+        COUNT(*) FILTER (WHERE event = 'add_to_favorites') as favorites,
+        COUNT(*) FILTER (WHERE event = 'ask_manager') as manager
       FROM analytics_events
       WHERE ${timeFilter}
       GROUP BY date
       ORDER BY date ASC
     `).catch(() => ({ rows: [] }))
 
-    // 4. Отрационная система и страны
+    // 4. Операционная система и страны
     const osRes = await query(`
-      SELECT os as name, COUNT(DISTINCT session_id) as visitors
+      SELECT meta->>'os' as name, COUNT(DISTINCT session_id) as visitors
       FROM analytics_events
-      WHERE ${timeFilter} AND os IS NOT NULL
-      GROUP BY os ORDER BY visitors DESC LIMIT 5
+      WHERE ${timeFilter} AND meta->>'os' IS NOT NULL
+      GROUP BY name ORDER BY visitors DESC LIMIT 5
     `).catch(() => ({ rows: [] }))
 
     const countryRes = await query(`
-      SELECT country as name, COUNT(DISTINCT session_id) as visitors
+      SELECT meta->>'country' as name, COUNT(DISTINCT session_id) as visitors
       FROM analytics_events
-      WHERE ${timeFilter} AND country IS NOT NULL
-      GROUP BY country ORDER BY visitors DESC LIMIT 5
+      WHERE ${timeFilter} AND meta->>'country' IS NOT NULL
+      GROUP BY name ORDER BY visitors DESC LIMIT 5
     `).catch(() => ({ rows: [] }))
 
     const data = {
