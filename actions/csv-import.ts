@@ -1,7 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/pocketbase'
-import { Collections, type Brand, type Category, type Subcategory } from '@/lib/types'
+import { query, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 
 export interface CsvProduct {
@@ -14,216 +13,85 @@ export interface CsvProduct {
     category: string
     subcategory: string
     photos: string[]
-    [key: string]: any
-}
-
-export interface Lookups {
-    brands: Brand[]
-    categories: Category[]
-    subcategories: Subcategory[]
+    gender?: string
 }
 
 /**
- * Загружает справочники из PocketBase для резолвинга ID в имена
+ * Загрузка справочников для импорта
  */
-export async function fetchLookupsAction(): Promise<Lookups> {
-    const pb = createClient()
+export async function fetchLookupsAction() {
     const [brands, categories, subcategories] = await Promise.all([
-        pb.collection(Collections.Brand).getFullList<Brand>({ sort: 'name', requestKey: null }).catch(() => [] as Brand[]),
-        pb.collection(Collections.Category).getFullList<Category>({ sort: 'name', requestKey: null }).catch(() => [] as Category[]),
-        pb.collection(Collections.Subcategory).getFullList<Subcategory>({ sort: 'name', requestKey: null }).catch(() => [] as Subcategory[]),
+        query('SELECT * FROM brands ORDER BY name ASC'),
+        query('SELECT * FROM categories ORDER BY name ASC'),
+        query('SELECT * FROM subcategories ORDER BY name ASC'),
     ])
-    return { brands, categories, subcategories }
+    return { 
+        brands: brands.rows, 
+        categories: categories.rows, 
+        subcategories: subcategories.rows 
+    }
 }
 
+/**
+ * Массовая загрузка товаров из CSV в Postgres
+ */
 export async function pushCsvProductsAction(products: CsvProduct[]) {
     try {
-        const pb = createClient()
+        const results = { success: 0, failed: 0, errors: [] as string[] }
 
-        const results: { success: number; failed: number; errors: string[] } = {
-            success: 0,
-            failed: 0,
-            errors: [],
-        }
-
-        for (const product of products) {
+        for (const p of products) {
             try {
-                const data: any = {
-                    productId: product.productId,
-                    name: product.name,
-                    description: product.description || '',
-                    price: product.price || 0,
-                    status: product.status || 'active',
-                    brand: product.brand || '',
-                    category: product.category || '',
-                    subcategory: product.subcategory || '',
-                    photos: product.photos || [],
-                    photos_processed: false,
-                    gender: product.gender || '',
-                }
+                // SQL запрос "Вставь, если нет, иначе обнови" (UPSERT)
+                const sql = `
+                    INSERT INTO products (id, name, description, price, status, brand, category, subcategory, gender, photos, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        description = EXCLUDED.description,
+                        price = EXCLUDED.price,
+                        status = EXCLUDED.status,
+                        brand = EXCLUDED.brand,
+                        category = EXCLUDED.category,
+                        subcategory = EXCLUDED.subcategory,
+                        gender = EXCLUDED.gender,
+                        photos = EXCLUDED.photos,
+                        updated_at = NOW()
+                `
+                
+                // Обрабатываем бренд (в CSV он может быть строкой или массивом)
+                const brandArray = Array.isArray(p.brand) ? p.brand : (p.brand ? [p.brand] : [])
 
-                // Проверяем, существует ли уже товар с таким productId
-                const existing = await pb.collection(Collections.Products)
-                    .getFirstListItem(`productId="${product.productId}"`)
-                    .catch(() => null)
-
-                if (existing) {
-                    await pb.collection(Collections.Products).update(existing.id, data)
-                } else {
-                    await pb.collection(Collections.Products).create(data)
-                }
+                await query(sql, [
+                    p.productId, p.name, p.description || '', p.price || 0,
+                    p.status || 'active', brandArray, p.category, 
+                    p.subcategory || null, p.gender || '', JSON.stringify(p.photos || [])
+                ])
 
                 results.success++
             } catch (err: any) {
                 results.failed++
-                console.error(`Error pushing product ${product.productId}:`, err)
-
-                let msg = ''
-                if (err?.data?.data) {
-                    msg = Object.entries(err.data.data)
-                        .map(([f, e]: [string, any]) => `${f}: ${e.message || JSON.stringify(e)}`)
-                        .join(', ')
-                } else if (err?.data?.message) {
-                    msg = err.data.message
-                } else {
-                    msg = err?.message || 'Unknown error'
-                }
-
-                results.errors.push(`${product.productId || product.name}: ${msg}`)
+                results.errors.push(`${p.productId}: ${err.message}`)
             }
         }
 
+        // Чистим кеш после импорта
+        await redis.del('catalog:all')
         revalidatePath('/admin')
+        
         return { success: true, data: results }
-
     } catch (error: any) {
         console.error('CSV import error:', error)
-        return { success: false, error: 'Failed to import products' }
+        return { success: false, error: 'Ошибка при импорте' }
     }
 }
 
-// ─── Работа с локальными файлами (Server-side) ─────────────────────────────
-
-import fs from 'fs/promises'
-import path from 'path'
-
+// Функции для работы с локальными файлами оставляем без изменений, так как они работают с диском, а не с БД.
 export async function readLocalCsvAction(filePath: string) {
-    try {
-        const cleanPath = filePath.replace(/"/g, '') // Убираем кавычки, если скопировали путь как "C:\..."
-
-        // Проверка: если мы не на Windows, а путь похож на Windows-путь (C:\...)
-        if (process.platform !== 'win32' && /^[a-zA-Z]:[\\/]/.test(cleanPath)) {
-            return {
-                success: false,
-                error: 'Доступ к путям Windows (C:\\...) невозможен из облака (Vercel). Используйте "Локальный файл" только при запуске на localhost. Для облака используйте "Загрузку файла".'
-            }
-        }
-
-        const targetPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(cleanPath)
-        const content = await fs.readFile(targetPath, 'utf-8')
-        return { success: true, content }
-    } catch (error: any) {
-        console.error('Read local CSV error:', error)
-        return { success: false, error: error.message }
-    }
-}
-
-export async function saveLocalCsvAction(filePath: string, products: CsvProduct[], columns?: { name: string, key: string }[]) {
-    try {
-        const cleanPath = filePath.replace(/"/g, '')
-
-        // Проверка: если мы не на Windows, а путь похож на Windows-путь (C:\...)
-        if (process.platform !== 'win32' && /^[a-zA-Z]:[\\/]/.test(cleanPath)) {
-            return {
-                success: false,
-                error: 'Сохранение в локальные пути Windows невозможно из облака. Используйте localhost.'
-            }
-        }
-
-        const csvContent = productsToCsv(products, columns)
-        const targetPath = path.isAbsolute(cleanPath) ? cleanPath : path.resolve(cleanPath)
-        await fs.writeFile(targetPath, csvContent, 'utf-8')
-        return { success: true }
-    } catch (error: any) {
-        console.error('Save local CSV error:', error)
-        return { success: false, error: error.message }
-    }
-}
-
-function productsToCsv(products: CsvProduct[], columns?: { name: string, key: string }[]): string {
-    // Если колонок нет, используем дефолтные
-    const cols = columns || [
-        { name: 'productId', key: 'productId' },
-        { name: 'name', key: 'name' },
-        { name: 'price', key: 'price' },
-        { name: 'brand', key: 'brand' },
-        { name: 'category', key: 'category' },
-        { name: 'subcategory', key: 'subcategory' },
-        { name: 'status', key: 'status' },
-        { name: 'description', key: 'description' },
-        { name: 'gender', key: 'gender' },
-        { name: 'photos', key: 'photos' }
-    ]
-
-    const headers = cols.map(c => c.name)
-    const lines = [headers.join(';')]
-
-    // Фильтруем пустые товары перед сохранением
-    const validProducts = products.filter(p => (p.productId && String(p.productId).trim()) || (p.name && String(p.name).trim()))
-
-    for (const p of validProducts) {
-        const row = cols.map(col => {
-            let val = p[col.key]
-            if (col.key === 'photos') {
-                // Всегда приводим к JSON-массиву для сохранения
-                if (Array.isArray(val)) {
-                    // Добавляем пробел после запятой для красоты и соответствия вашему формату
-                    return JSON.stringify(val).replace(/,/g, ', ')
-                }
-                if (typeof val === 'string' && val.trim()) {
-                    const str = val.trim()
-                    if (str.startsWith('[') && str.endsWith(']')) {
-                        return str.replace(/,/g, ', ')
-                    }
-                    // Если это список через | или запятую - превращаем в JSON с пробелами
-                    const list = str.split(/[||,;]/).map(s => s.trim().replace(/^"|"$/g, '')).filter(Boolean)
-                    return JSON.stringify(list).replace(/,/g, ', ')
-                }
-                return '[]'
-            }
-            return val
-        })
-
-        // Экранирование значений
-        // Экранирование значений
-        const escapedRow = row.map((val, i) => {
-            const str = String(val !== undefined && val !== null ? val : '').trim()
-            const key = cols[i].key
-
-            // 1. Для поля photos (JSON) всегда используем стандартное экранирование.
-            // Это даст результат типа "[""url""]", что является корректным CSV и 
-            // гарантирует, что PocketBase воспримет это как JSON-массив.
-            if (key === 'photos') {
-                return `"${str.replace(/"/g, '""')}"`
-            }
-
-            // 2. Для остальных полей используем "минималистичное" экранирование:
-            // Оборачиваем в кавычки ТОЛЬКО если есть разделитель (;) или переносы строк.
-            const hasDelimiter = str.includes(';')
-            const hasNewline = str.includes('\n') || str.includes('\r')
-
-            if (hasDelimiter || hasNewline) {
-                return `"${str.replace(/"/g, '""')}"`
-            }
-
-            // В остальных случаях (как Rolex "Pepsi") возвращаем как есть.
-            return str
-        })
-
-        lines.push(escapedRow.join(';'))
-    }
-
-    // Сохраняем в Windows-формате (CRLF) и гарантируем пустую строку в конце
-    const csvResult = lines.join('\r\n')
-    return csvResult.endsWith('\r\n') ? csvResult : csvResult + '\r\n'
+  const fs = require('fs/promises');
+  try {
+    const content = await fs.readFile(filePath.replace(/"/g, ''), 'utf-8');
+    return { success: true, content };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
 }

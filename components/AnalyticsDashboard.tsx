@@ -51,6 +51,7 @@ interface SeriesData {
     views: number
     carts: number
     manager: number
+    favorites: number
 }
 
 interface AnalyticsDashboardProps {
@@ -252,7 +253,7 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
 
                 {/* Overview Cards */}
                 {overview && (
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-4 mb-8">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-3 mb-8">
                         <StatCard icon={<Users className="w-5 h-5" />} label="Гости (Сессии)" value={overview.unique_visitors} color="indigo" />
                         <StatCard icon={<UserPlus className="w-5 h-5" />} label="Новые лиды" value={overview.new_profiles} color="purple" />
                         <StatCard icon={<Clock className="w-5 h-5" />} label="Онлайн" value={overview.online_now} color="green" pulse />
@@ -260,44 +261,18 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
                         <StatCard icon={<Heart className="w-5 h-5" />} label="Избранное" value={overview.add_to_favorites} color="pink" />
                         <StatCard icon={<ShoppingCart className="w-5 h-5" />} label="В корзину" value={overview.add_to_cart} color="amber" />
                         <StatCard icon={<Package className="w-5 h-5" />} label="Заказов" value={overview.order_submit} color="emerald" />
+                        <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Просм. страниц" value={overview.page_views} color="teal" />
+                        {overview.product_views > 0 && (
+                            <StatCardPercent
+                                icon={<BarChart3 className="w-5 h-5" />}
+                                label="Конверсия"
+                                value={((overview.add_to_cart / overview.product_views) * 100).toFixed(1) + '%'}
+                                color="orange"
+                            />
+                        )}
                     </div>
                 )}
 
-                {/* Conversion Info */}
-                {overview && overview.product_views > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <TrendingUp className="w-4 h-4 text-emerald-400" />
-                                <span className="text-sm font-medium">Просмотры страниц</span>
-                            </div>
-                            <div className="text-3xl font-bold text-slate-100">{overview.page_views}</div>
-                        </div>
-                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <MessageCircle className="w-4 h-4 text-blue-400" />
-                                <span className="text-sm font-medium">Спросить у менеджера</span>
-                            </div>
-                            <div className="text-3xl font-bold text-slate-100">{overview.ask_manager}</div>
-                        </div>
-                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <BarChart3 className="w-4 h-4 text-indigo-400" />
-                                <span className="text-sm font-medium">Всего событий</span>
-                            </div>
-                            <div className="text-3xl font-bold text-slate-100">{overview.total_events}</div>
-                        </div>
-                        <div className="bg-slate-800/80 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <Eye className="w-4 h-4 text-amber-400" />
-                                <span className="text-sm font-medium">Конверсия в корзину</span>
-                            </div>
-                            <div className="text-3xl font-bold text-slate-100">
-                                {((overview.add_to_cart / overview.product_views) * 100).toFixed(1)}%
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* Charts Area */}
                 {overview && seriesData.length > 0 && (
@@ -433,6 +408,8 @@ function StatCard({ icon, label, value, color, pulse }: {
         pink: 'bg-pink-500/10 text-pink-400 border border-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.1)]',
         amber: 'bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.1)]',
         emerald: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]',
+        teal: 'bg-teal-500/10 text-teal-400 border border-teal-500/20 shadow-[0_0_15px_rgba(20,184,166,0.1)]',
+        orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]',
     }
 
     return (
@@ -450,6 +427,26 @@ function StatCard({ icon, label, value, color, pulse }: {
                     </span>
                 )}
             </div>
+        </div>
+    )
+}
+
+function StatCardPercent({ icon, label, value, color }: {
+    icon: React.ReactNode
+    label: string
+    value: string
+    color: string
+}) {
+    const colorMap: Record<string, string> = {
+        orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]',
+    }
+    return (
+        <div className={`${colorMap[color] || 'bg-slate-800/50 text-slate-400'} rounded-xl p-4 flex flex-col justify-between backdrop-blur-sm transition-all hover:scale-[1.02] duration-200`}>
+            <div className="flex items-center gap-2 mb-2 opacity-80">
+                {icon}
+                <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+            </div>
+            <span className="text-3xl font-bold">{value}</span>
         </div>
     )
 }
@@ -592,7 +589,17 @@ function StatsListCard({ title, data }: { title: string, data: { name: string, v
             'BY': '🇧🇾', 'Belarus': '🇧🇾',
             'KZ': '🇰🇿', 'Kazakhstan': '🇰🇿',
             'UA': '🇺🇦', 'Ukraine': '🇺🇦',
-            'CN': '🇨🇳', 'China': '🇨🇳'
+            'CN': '🇨🇳', 'China': '🇨🇳',
+            'AZ': '🇦🇿', 'Azerbaijan': '🇦🇿',
+            'VN': '🇻🇳', 'Vietnam': '🇻🇳',
+            'AT': '🇦🇹', 'Austria': '🇦🇹',
+            'PL': '🇵🇱', 'Poland': '🇵🇱',
+            'TR': '🇹🇷', 'Turkey': '🇹🇷',
+            'CZ': '🇨🇿', 'Czech Republic': '🇨🇿',
+            'SE': '🇸🇪', 'Sweden': '🇸🇪',
+            'FI': '🇫🇮', 'Finland': '🇫🇮',
+            'NO': '🇳🇴', 'Norway': '🇳🇴',
+            'DK': '🇩🇰', 'Denmark': '🇩🇰',
         };
         return map[country] || '🌍';
     };
@@ -601,6 +608,15 @@ function StatsListCard({ title, data }: { title: string, data: { name: string, v
         if (name === 'Unknown') return 'Неизвестно';
         if (name === 'Russian Federation') return 'Россия';
         if (name === 'Russia') return 'Россия';
+        if (name === 'United States') return 'США';
+        if (name === 'United Kingdom') return 'Великобритания';
+        if (name === 'Germany') return 'Германия';
+        if (name === 'Netherlands') return 'Нидерланды';
+        if (name === 'France') return 'Франция';
+        if (name === 'Ukraine') return 'Украина';
+        if (name === 'Azerbaijan') return 'Азербайджан';
+        if (name === 'Vietnam') return 'Вьетнам';
+        if (name === 'Austria') return 'Австрия';
         return name;
     };
 
@@ -622,7 +638,14 @@ function StatsListCard({ title, data }: { title: string, data: { name: string, v
                                 {title === 'Страны' && <span className="text-lg">{getFlag(item.name)}</span>}
                                 {getDisplayName(item.name)}
                             </span>
-                            <span className="text-slate-100 font-bold">{((item.visitors / totalVis) * 100).toFixed(0)}%</span>
+                            <div className="flex items-center gap-2">
+                                <span
+                                    className="text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-700/80 px-2 py-0.5 rounded"
+                                >
+                                    {item.visitors} чел.
+                                </span>
+                                <span className="text-slate-100 font-bold">{((item.visitors / totalVis) * 100).toFixed(0)}%</span>
+                            </div>
                         </div>
                     </div>
                 ))}

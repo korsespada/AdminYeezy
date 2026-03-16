@@ -1,33 +1,46 @@
 'use server'
 
-import { createClient } from '@/lib/pocketbase'
-import { Collections } from '@/lib/types'
+import { query, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 
+/**
+ * Массовое обновление (категория, пол и т.д.)
+ */
 export async function bulkUpdateProductsAction(ids: string[], updates: { category?: string, subcategory?: string, gender?: string }) {
     try {
-        const pb = createClient()
-        const data: any = {}
-        if (updates.category !== undefined) data.category = updates.category
-        if (updates.subcategory !== undefined) data.subcategory = updates.subcategory
-        if (updates.gender !== undefined) data.gender = updates.gender
+        const fields: string[] = []
+        const params: any[] = []
+        let pIdx = 1
 
-        // Special case: if subcategory is explicitly "__none__" or empty string, clear it
-        if (updates.subcategory === "__none__") {
-            data.subcategory = ""
+        if (updates.category !== undefined) {
+            fields.push(`category = $${pIdx++}`)
+            params.push(updates.category)
+        }
+        if (updates.subcategory !== undefined) {
+            fields.push(`subcategory = $${pIdx++}`)
+            params.push(updates.subcategory === "__none__" ? null : updates.subcategory)
+        }
+        if (updates.gender !== undefined) {
+            fields.push(`gender = $${pIdx++}`)
+            params.push(updates.gender === "__none__" ? null : updates.gender)
         }
 
-        const CHUNK_SIZE = 5;
-        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-            const chunk = ids.slice(i, i + CHUNK_SIZE);
-            const promises = chunk.map(id =>
-                pb.collection(Collections.Products).update(id, data)
-            );
-            await Promise.all(promises);
-            // Небольшая задержка между пачками (даст VPS время выдохнуть и очистить память)
-            if (i + CHUNK_SIZE < ids.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
+        if (fields.length === 0) return { success: true }
+
+        params.push(ids)
+        const sql = `UPDATE products SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ANY($${pIdx})`
+        await query(sql, params)
+
+        // Инвалидация кеша
+        await redis.del('catalog:all')
+        for (const id of ids) {
+            await redis.del(`product:${id}`)
+            // Обновляем в Elastic (упрощенно - только статус/категорию)
+            await elastic.update({
+                index: 'products',
+                id: id,
+                doc: { ...updates, updated_at: new Date() }
+            }).catch(() => null)
         }
 
         revalidatePath('/admin')
@@ -38,44 +51,18 @@ export async function bulkUpdateProductsAction(ids: string[], updates: { categor
     }
 }
 
-export async function bulkPatchObjectsAction(updates: { id: string, data: any }[]) {
-    try {
-        const pb = createClient()
-        const CHUNK_SIZE = 5;
-        for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
-            const chunk = updates.slice(i, i + CHUNK_SIZE);
-            const promises = chunk.map(u =>
-                pb.collection(Collections.Products).update(u.id, u.data)
-            );
-            await Promise.all(promises);
-            // Избегаем 100% RAM у PocketBase на недорогом VPS
-            if (i + CHUNK_SIZE < updates.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-        }
-
-        revalidatePath('/admin')
-        return { success: true }
-    } catch (error: any) {
-        console.error('Bulk patch error:', error)
-        return { success: false, error: 'Failed to mass replace products' }
-    }
-}
-
+/**
+ * Массовое удаление
+ */
 export async function bulkDeleteProductsAction(ids: string[]) {
     try {
-        const pb = createClient()
-        const CHUNK_SIZE = 5;
-        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-            const chunk = ids.slice(i, i + CHUNK_SIZE);
-            const promises = chunk.map(id =>
-                pb.collection(Collections.Products).delete(id)
-            );
-            await Promise.all(promises);
-            // Небольшая задержка между пачками
-            if (i + CHUNK_SIZE < ids.length) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
+        await query('DELETE FROM products WHERE id = ANY($1)', [ids])
+        
+        // Чистим кеш и Elastic
+        await redis.del('catalog:all')
+        for (const id of ids) {
+            await redis.del(`product:${id}`)
+            await elastic.delete({ index: 'products', id: id }).catch(() => null)
         }
 
         revalidatePath('/admin')
@@ -83,5 +70,35 @@ export async function bulkDeleteProductsAction(ids: string[]) {
     } catch (error: any) {
         console.error('Bulk delete error:', error)
         return { success: false, error: 'Failed to delete products' }
+    }
+}
+
+/**
+ * Массовое применение патчей (для сложных изменений)
+ */
+export async function bulkPatchObjectsAction(updates: { id: string, data: any }[]) {
+    try {
+        // Здесь лучше оставить цикл, так как данные у всех разные
+        for (const update of updates) {
+            const keys = Object.keys(update.data)
+            const fields = keys.map((k, i) => `${k} = $${i + 1}`).join(', ')
+            const values = Object.values(update.data)
+            
+            await query(`UPDATE products SET ${fields}, updated_at = NOW() WHERE id = $${keys.length + 1}`, [...values, update.id])
+            
+            await redis.del(`product:${update.id}`)
+            await elastic.index({
+              index: 'products',
+              id: update.id,
+              document: { ...update.data, id: update.id, updated_at: new Date() }
+            }).catch(() => null)
+        }
+        
+        await redis.del('catalog:all')
+        revalidatePath('/admin')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Bulk patch error:', error)
+        return { success: false, error: 'Failed to mass replace products' }
     }
 }

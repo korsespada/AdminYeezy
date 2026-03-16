@@ -3,8 +3,10 @@
 import React, { useState, useCallback } from 'react'
 import Image from 'next/image'
 import { type Product } from '@/lib/types'
-import { Square, CheckSquare, Search, ReplaceAll, RefreshCw } from 'lucide-react'
+import { Square, CheckSquare, Search, ReplaceAll, RefreshCw, Copy } from 'lucide-react'
 import { bulkPatchObjectsAction } from '@/actions/bulk-update'
+import { createProductAction } from '@/actions/products'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 interface ProductTableViewProps {
@@ -57,6 +59,8 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
     const [replaceText, setReplaceText] = useState('')
     const [replaceField, setReplaceField] = useState<FieldName>('name')
     const [isReplacing, setIsReplacing] = useState(false)
+    const [isCopying, setIsCopying] = useState<string | null>(null)
+    const router = useRouter()
 
     // Track dirty individual rows to show saving state or save on blur
     const [savingId, setSavingId] = useState<string | null>(null)
@@ -109,6 +113,54 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
             })
         }
         setSavingId(null)
+    }
+
+    const handleDuplicate = async (product: Product) => {
+        if (isCopying || !confirm('Дублировать этот товар?')) return;
+        setIsCopying(product.id);
+
+        try {
+            const newProductId = `SKU-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+            const formData = new FormData();
+            formData.append('productId', newProductId);
+            formData.append('name', `${product.name} (Копия)`);
+            formData.append('description', product.description || '');
+            formData.append('price', product.price.toString());
+            formData.append('status', product.status);
+            formData.append('gender', product.gender || '');
+
+            // Handle brands
+            const b = product.brand || product.expand?.brand;
+            if (Array.isArray(b)) {
+                b.forEach(id => {
+                    if (typeof id === 'string') formData.append('brand', id);
+                    else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
+                });
+            } else if (typeof b === 'string' && b) {
+                formData.append('brand', b);
+            } else if (b && typeof b === 'object' && 'id' in b) {
+                formData.append('brand', b.id);
+            }
+
+            formData.append('category', product.category || product.expand?.category?.id || '');
+            formData.append('subcategory', product.subcategory || product.expand?.subcategory?.id || '');
+
+            if (product.photos && product.photos.length > 0) {
+                formData.append('existingPhotos', JSON.stringify(product.photos));
+            }
+
+            const result = await createProductAction(formData);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert('Ошибка при дублировании: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Duplicate error:', error);
+            alert('Не удалось дублировать товар');
+        } finally {
+            setIsCopying(null);
+        }
     }
 
     const handleMassReplace = async () => {
@@ -251,6 +303,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                             <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider">
                                 <div className="min-w-[100px] max-w-[150px] resize-x overflow-hidden pr-2">Цена</div>
                             </th>
+                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider w-12 text-center">Действия</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700/50">
@@ -322,6 +375,16 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                             className="w-full min-w-[80px] bg-transparent border border-transparent hover:border-slate-600 focus:border-indigo-500 focus:bg-slate-800 rounded px-2 py-1.5 text-sm font-bold text-emerald-400 outline-none transition-all placeholder-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                             placeholder="0"
                                         />
+                                    </td>
+                                    <td className="p-2 align-top text-center">
+                                        <button
+                                            onClick={() => handleDuplicate(product)}
+                                            disabled={isCopying !== null}
+                                            className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-700 rounded transition-colors disabled:opacity-30"
+                                            title="Дублировать"
+                                        >
+                                            {isCopying === product.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
+                                        </button>
                                     </td>
                                 </tr>
                             )

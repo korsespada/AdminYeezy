@@ -3,8 +3,9 @@
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Product } from '@/lib/types';
-import { Trash2 } from 'lucide-react';
-import { updateProductAction } from '@/actions/products';
+import { Trash2, Copy } from 'lucide-react';
+import { updateProductAction, createProductAction } from '@/actions/products';
+import { useRouter } from 'next/navigation';
 
 interface ProductCardProps {
     product: Product;
@@ -19,6 +20,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [isCopying, setIsCopying] = useState(false);
+    const router = useRouter();
 
     const thumb = useMemo(() => {
         if (!product) return null
@@ -105,6 +108,55 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         setIsSaving(false);
     }
 
+    const handleDuplicate = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (isCopying || !confirm('Дублировать этот товар?')) return;
+        setIsCopying(true);
+
+        try {
+            const newProductId = `SKU-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+            const formData = new FormData();
+            formData.append('productId', newProductId);
+            formData.append('name', `${product.name} (Копия)`);
+            formData.append('description', product.description || '');
+            formData.append('price', product.price.toString());
+            formData.append('status', product.status);
+            formData.append('gender', product.gender || '');
+
+            // Handle brands
+            const b = product.brand || product.expand?.brand;
+            if (Array.isArray(b)) {
+                b.forEach(id => {
+                    if (typeof id === 'string') formData.append('brand', id);
+                    else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
+                });
+            } else if (typeof b === 'string' && b) {
+                formData.append('brand', b);
+            } else if (b && typeof b === 'object' && 'id' in b) {
+                formData.append('brand', b.id);
+            }
+
+            formData.append('category', product.category || product.expand?.category?.id || '');
+            formData.append('subcategory', product.subcategory || product.expand?.subcategory?.id || '');
+
+            if (product.photos && product.photos.length > 0) {
+                formData.append('existingPhotos', JSON.stringify(product.photos));
+            }
+
+            const result = await createProductAction(formData);
+            if (result.success) {
+                router.refresh();
+            } else {
+                alert('Ошибка при дублировании: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Duplicate error:', error);
+            alert('Не удалось дублировать товар');
+        } finally {
+            setIsCopying(false);
+        }
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             handleSave();
@@ -146,12 +198,21 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     />
                 </div>
                 {/* Delete button on hover */}
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2">
                     <button
                         onClick={(e) => { e.stopPropagation(); onDelete(product.id); }}
                         className="p-2 bg-slate-900/80 backdrop-blur-sm rounded-full shadow-lg hover:bg-red-600 text-slate-300 hover:text-white transition-colors"
+                        title="Удалить"
                     >
                         <Trash2 className="w-4 h-4" />
+                    </button>
+                    <button
+                        onClick={handleDuplicate}
+                        disabled={isCopying}
+                        className="p-2 bg-slate-900/80 backdrop-blur-sm rounded-full shadow-lg hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                        title="Дублировать"
+                    >
+                        <Copy className="w-4 h-4" />
                     </button>
                 </div>
 

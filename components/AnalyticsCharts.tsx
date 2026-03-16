@@ -20,6 +20,7 @@ interface SeriesData {
     views: number
     carts: number
     manager: number
+    favorites: number
 }
 
 interface AnalyticsChartsProps {
@@ -96,6 +97,10 @@ export default function AnalyticsCharts({ seriesData, overview }: AnalyticsChart
                                         <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                                         <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                                     </linearGradient>
+                                    <linearGradient id="colorFavorites" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#ec4899" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
+                                    </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                                 <XAxis dataKey="date" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} dy={10} />
@@ -105,6 +110,7 @@ export default function AnalyticsCharts({ seriesData, overview }: AnalyticsChart
                                 <Area type="monotone" dataKey="views" name="Просмотры" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorViews)" />
                                 <Area type="monotone" dataKey="carts" name="В корзину" stroke="#f59e0b" strokeWidth={2} fillOpacity={1} fill="url(#colorCarts)" />
                                 <Area type="monotone" dataKey="manager" name="Менеджер" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorManager)" />
+                                <Area type="monotone" dataKey="favorites" name="Избранное" stroke="#ec4899" strokeWidth={2} fillOpacity={1} fill="url(#colorFavorites)" />
                             </AreaChart>
                         </ResponsiveContainer>
                     ) : (

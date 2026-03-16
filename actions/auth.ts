@@ -2,150 +2,63 @@
 
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/pocketbase'
+import { query } from '@/lib/db'
 import type { ActionResponse } from '@/lib/types'
 
 /**
- * Login action - authenticates admin user with PocketBase
- * @param formData - Form data containing email and password
- * @returns ActionResponse with success status and optional error message
+ * Вход в админку
  */
 export async function loginAction(formData: FormData): Promise<ActionResponse> {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
+  const email = (formData.get('email') as string)?.trim()
+  const password = (formData.get('password') as string)?.trim()
 
-  // Validate inputs
   if (!email || !password) {
-    return {
-      success: false,
-      error: 'Email and password are required',
-    }
-  }
-
-  // Trim and validate non-empty
-  const trimmedEmail = email.trim()
-  const trimmedPassword = password.trim()
-
-  if (!trimmedEmail || !trimmedPassword) {
-    return {
-      success: false,
-      error: 'Email and password cannot be empty',
-    }
+    return { success: false, error: 'Email and password are required' }
   }
 
   try {
-    const pb = createClient()
+    // ВАЖНО: Мы ищем пользователя в таблице 'admins'. 
+    // Предполагается, что пароли пока лежат в открытом виде или вы проверите их совпадение.
+    // Для безопасности потом добавим хеширование (bcrypt).
+    const res = await query('SELECT * FROM admins WHERE email = $1 AND password = $2 LIMIT 1', [email, password])
 
-    console.log('PocketBase URL:', pb.baseUrl)
-    console.log('PocketBase version: 0.35')
-    console.log('Attempting login with email:', trimmedEmail)
-
-    let authData
-
-    // Try multiple authentication methods for PocketBase 0.35
-    try {
-      console.log('Method 1: Trying _superusers collection...')
-      authData = await pb.collection('_superusers').authWithPassword(trimmedEmail, trimmedPassword)
-      console.log('✓ _superusers auth successful')
-    } catch (superuserError: any) {
-      console.log('✗ _superusers auth failed:', superuserError?.message)
-
-      // Try old admins API
-      try {
-        console.log('Method 2: Trying pb.admins API...')
-        authData = await pb.admins.authWithPassword(trimmedEmail, trimmedPassword)
-        console.log('✓ admins API auth successful')
-      } catch (adminsError: any) {
-        console.log('✗ admins API failed:', adminsError?.message)
-
-        // Try regular users collection as last resort
-        try {
-          console.log('Method 3: Trying users collection...')
-          authData = await pb.collection('users').authWithPassword(trimmedEmail, trimmedPassword)
-          console.log('✓ users collection auth successful')
-        } catch (usersError: any) {
-          console.log('✗ users collection failed:', usersError?.message)
-          throw superuserError // Throw the first error
-        }
-      }
+    if (res.rows.length === 0) {
+      return { success: false, error: 'Неверный email или пароль. Убедитесь, что в таблице admins есть запись.' }
     }
 
-    console.log('Auth successful, token received:', !!authData.token)
+    const admin = res.rows[0]
 
-    if (!authData || !authData.token) {
-      return {
-        success: false,
-        error: 'Authentication failed',
-      }
-    }
-
-    // Store entire auth store as JSON in HTTP-only cookie
+    // Сохраняем данные сессии
     const cookieStore = cookies()
-    const authStoreData = JSON.stringify({
-      token: authData.token,
-      model: (authData as any).record || (authData as any).admin || authData,
+    const sessionData = JSON.stringify({
+      id: admin.id,
+      email: admin.email,
+      role: 'admin'
     })
 
-    cookieStore.set('pb_auth', authStoreData, {
+    // Используем то же имя куки для совместимости или меняем на новое
+    cookieStore.set('admin_auth', sessionData, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: 60 * 60 * 24 * 7, // 1 неделя
       path: '/',
     })
 
-    // We return success, and the component will handle the redirect, or we do it outside catch
-    // But since server actions can redirect, let's just break out of the try-catch
   } catch (error: any) {
-    // Next.js redirect throws an error that we shouldn't catch
-    if (error?.message === 'NEXT_REDIRECT') {
-      throw error;
-    }
-
-    console.error('Login error details:', {
-      message: error?.message,
-      status: error?.status,
-      data: error?.data,
-      response: error?.response,
-      url: error?.url,
-    })
-
-    // Handle specific PocketBase errors
-    if (error?.status === 404) {
-      return {
-        success: false,
-        error: 'Authentication endpoint not found. Please check PocketBase configuration.',
-      }
-    }
-
-    if (error?.status === 400) {
-      return {
-        success: false,
-        error: 'Invalid email or password',
-      }
-    }
-
-    if (error?.status === 0 || error?.message?.includes('fetch')) {
-      return {
-        success: false,
-        error: 'Unable to connect to server. Please try again.',
-      }
-    }
-
-    return {
-      success: false,
-      error: `An error occurred during login: ${error?.message || 'Unknown error'}`,
-    }
+    console.error('Login error:', error)
+    return { success: false, error: `Ошибка базы данных: ${error.message}` }
   }
 
   redirect('/admin')
 }
 
 /**
- * Logout action - clears the authentication cookie
+ * Выход
  */
 export async function logoutAction() {
   const cookieStore = cookies()
-  cookieStore.delete('pb_auth')
+  cookieStore.delete('admin_auth')
+  cookieStore.delete('pb_auth') // На всякий случай чистим старую
   redirect('/login')
 }

@@ -300,6 +300,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
           setIsModalOpen(false)
           setEditingProduct(null)
         }}
+        onSave={handleProductUpdate}
       />
 
       {/* Bulk Action Toolbar */}

@@ -25,9 +25,10 @@ interface ProductFormProps {
   subcategories: Subcategory[]
   isOpen: boolean
   onClose: () => void
+  onSave?: (updatedProduct: Product) => void
 }
 
-export default function ProductForm({ product, brands, categories, subcategories, isOpen, onClose }: ProductFormProps) {
+export default function ProductForm({ product, brands, categories, subcategories, isOpen, onClose, onSave }: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState('')
@@ -249,8 +250,26 @@ export default function ProductForm({ product, brands, categories, subcategories
         }
 
         if (result.success) {
-          router.refresh()
+          if (product && onSave) {
+            // Сразу обновляем данные в локальном стейте — без рефреша
+            onSave({
+              ...product,
+              productId: productId.trim(),
+              name: name.trim(),
+              description: description.trim(),
+              price: parseFloat(price),
+              status,
+              gender,
+              category,
+              subcategory,
+              photos: existingPhotos,
+            })
+          }
           onClose()
+          // Только при создании нового товара нужен рефреш (чтобы новый появился в списке)
+          if (!product) {
+            router.refresh()
+          }
         } else {
           setError(result.error || 'Failed to save product')
         }
