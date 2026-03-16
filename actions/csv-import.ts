@@ -102,12 +102,34 @@ export async function readLocalCsvAction(filePath: string) {
   }
 }
 
-export async function saveLocalCsvAction(filePath: string, content: string) {
+export async function saveLocalCsvAction(filePath: string, products: any[], columns: string[]) {
   const fs = require('fs/promises');
   try {
-    await fs.writeFile(filePath.replace(/"/g, ''), content, 'utf-8');
+    // Формируем CSV строку
+    // 1. Заголовки
+    const header = columns.join(',');
+    
+    // 2. Строки данных
+    const rows = products.map(p => {
+      return columns.map(col => {
+        let val = p[col];
+        if (val === undefined || val === null) val = '';
+        
+        // Если это массив (например, фото), превращаем в строку
+        if (Array.isArray(val)) val = JSON.stringify(val);
+        
+        // Экранируем кавычки и запятые
+        const str = String(val).replace(/"/g, '""');
+        return `"${str}"`;
+      }).join(',');
+    });
+
+    const csvContent = [header, ...rows].join('\n');
+    
+    await fs.writeFile(filePath.replace(/"/g, ''), csvContent, 'utf-8');
     return { success: true };
   } catch (err: any) {
+    console.error('Save CSV error:', err);
     return { success: false, error: err.message };
   }
 }
