@@ -95,3 +95,13 @@ export async function readLocalCsvAction(filePath: string) {
     return { success: false, error: err.message };
   }
 }
+
+export async function saveLocalCsvAction(filePath: string, content: string) {
+  const fs = require('fs/promises');
+  try {
+    await fs.writeFile(filePath.replace(/"/g, ''), content, 'utf-8');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
