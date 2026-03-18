@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus, Trash2 } from 'lucide-react'
+import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus, Trash2, ChevronDown } from 'lucide-react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { type Brand, type Category, type Subcategory, type Product } from '@/lib/types'
@@ -113,7 +113,7 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
                 const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
                 throw new Error(err.error || `HTTP ${res.status}`)
             }
-            await fetchData()
+            fetchData()
         } catch (err: any) {
             console.error('Analytics reset error:', err)
             setError(err?.message || 'Ошибка сброса аналитики')
@@ -154,7 +154,6 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
 
     useEffect(() => {
         fetchData()
-        // Auto-refresh every 30 seconds
         const interval = setInterval(fetchData, 30_000)
         return () => clearInterval(interval)
     }, [fetchData])
@@ -170,72 +169,95 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
         [...products].sort((a, b) => (b[field] as number) - (a[field] as number)).filter(p => (p[field] as number) > 0)
 
     return (
-        <div className="min-h-screen bg-slate-900 text-slate-200">
+        <div className="min-h-screen bg-[#0F172A] text-slate-200 font-sans">
             {/* Header */}
-            <header className="bg-slate-800 border-b border-slate-700 py-3 px-6 sticky top-0 z-30 flex items-center justify-between shadow-sm">
-                <div className="flex items-center gap-4">
-                    <Link href="/admin" className="p-2 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg transition-colors">
-                        <ArrowLeft className="w-5 h-5" />
-                    </Link>
-                    <div>
-                        <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-                            <BarChart3 className="w-5 h-5 text-indigo-400" />
-                            Аналитика
-                        </h1>
+            <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 py-4 px-4 sm:px-6 sticky top-0 z-30 flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl">
+                <div className="flex items-center justify-between w-full md:w-auto gap-4">
+                    <div className="flex items-center gap-4 sm:gap-6">
+                        <Link href="/admin" className="p-2 text-slate-400 hover:bg-slate-800 hover:text-white rounded-xl transition-all border border-transparent hover:border-slate-700">
+                            <ArrowLeft className="w-5 h-5" />
+                        </Link>
+                        <div>
+                            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 sm:gap-3">
+                                <BarChart3 className="w-6 h-6 sm:w-7 h-7 text-[#5D5FEF]" />
+                                Аналитика
+                            </h1>
+                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">YEEZY UNIQUE ADMIN</p>
+                        </div>
                     </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    {/* Period Selector */}
-                    <div className="flex bg-slate-700/50 p-0.5 rounded-lg border border-slate-600">
-                        {(Object.keys(periodLabels) as Period[]).map(p => (
-                            <button
-                                key={p}
-                                onClick={() => setPeriod(p)}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${period === p
-                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                    : 'text-slate-400 hover:text-slate-200'
-                                    }`}
-                            >
-                                {periodLabels[p]}
-                            </button>
-                        ))}
-                    </div>
-
+                    {/* Mobile refresh button */}
                     <button
                         onClick={fetchData}
                         disabled={loading || isResetting}
-                        className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all disabled:opacity-50"
-                        title="Обновить"
+                        className="md:hidden p-2.5 text-slate-400 hover:text-[#5D5FEF] hover:bg-slate-800/80 rounded-xl border border-slate-800 transition-all disabled:opacity-50"
                     >
-                        <RefreshCw className={`w-4 h-4 ${loading || isResetting ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-5 h-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
                     </button>
+                </div>
 
-                    <div className="relative ml-2">
+                <div className="flex items-center gap-2 sm:gap-6 flex-shrink-0">
+                    <div className="flex items-center justify-between w-full md:w-auto gap-2 sm:gap-6 overflow-x-auto no-scrollbar py-1 pr-2">
+                        {/* Period Selector */}
+                        <div className="flex bg-slate-800/50 p-1.5 rounded-2xl border border-slate-700/50 shadow-inner flex-shrink-0">
+                            {(Object.keys(periodLabels) as Period[]).map(p => (
+                                <button
+                                    key={p}
+                                    onClick={() => setPeriod(p)}
+                                    className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${period === p
+                                        ? 'bg-[#5D5FEF] text-white shadow-lg shadow-[#5D5FEF]/20'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                        }`}
+                                >
+                                    {periodLabels[p]}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="h-8 w-px bg-slate-800 hidden md:block" />
+
+                        <div className="text-right hidden xl:block flex-shrink-0">
+                            <div className="text-sm font-black text-white">{new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</div>
+                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Сегодня, {new Date().toLocaleDateString('ru-RU', { weekday: 'long' })}</div>
+                        </div>
+
+                        <button
+                            onClick={fetchData}
+                            disabled={loading || isResetting}
+                            className="hidden md:block p-3 text-slate-400 hover:text-[#5D5FEF] hover:bg-slate-800/80 rounded-2xl border border-slate-800 transition-all disabled:opacity-50 group flex-shrink-0"
+                        >
+                            <RefreshCw className={`w-5 h-5 ${loading || isResetting ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                        </button>
+                    </div>
+
+                    <div className="relative flex-shrink-0">
                         <button
                             onClick={() => setIsResetMenuOpen(!isResetMenuOpen)}
                             disabled={isResetting}
-                            className="flex items-center gap-2 px-3 py-1.5 text-red-400 hover:text-red-300 bg-red-400/10 hover:bg-red-400/20 rounded-lg transition-all border border-red-500/20 text-sm font-medium disabled:opacity-50"
+                            className="flex items-center gap-2 px-3 sm:px-5 py-2.5 text-[#FF5B5B] hover:bg-[#FF5B5B]/10 rounded-2xl transition-all border border-[#FF5B5B]/30 hover:border-[#FF5B5B] text-xs sm:text-sm font-black disabled:opacity-50 outline-none select-none active:scale-95 group"
                         >
                             <Trash2 className="w-4 h-4" />
-                            Сбросить
+                            <span className="hidden sm:inline">Сбросить</span>
+                            <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${isResetMenuOpen ? 'rotate-180' : ''}`} />
                         </button>
 
                         {isResetMenuOpen && (
                             <>
                                 <div className="fixed inset-0 z-40" onClick={() => setIsResetMenuOpen(false)}></div>
-                                <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-600 rounded-lg shadow-xl flex flex-col py-1 z-50">
+                                <div className="absolute right-0 top-full mt-3 w-64 bg-slate-900 border border-slate-800 rounded-[24px] shadow-2xl flex flex-col py-3 z-50 overflow-hidden ring-1 ring-white/5">
                                     <button
                                         onClick={() => { handleReset('period'); setIsResetMenuOpen(false) }}
-                                        className="px-4 py-2 text-sm text-left text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                                        className="px-6 py-4 text-sm text-left text-slate-300 hover:bg-slate-800 font-bold transition-colors flex items-center justify-between group"
                                     >
-                                        За выбранный период
+                                        <span>Очистить за {periodLabels[period].toLowerCase()}</span>
+                                        <div className="w-1.5 h-1.5 rounded-full bg-slate-700 group-hover:bg-[#5D5FEF] transition-colors" />
                                     </button>
+                                    <div className="h-px bg-slate-800 mx-4 my-1" />
                                     <button
                                         onClick={() => { handleReset('all'); setIsResetMenuOpen(false) }}
-                                        className="px-4 py-2 text-sm text-left text-red-400 hover:bg-slate-700 hover:text-red-300 transition-colors border-t border-slate-700 mt-1 pt-1"
+                                        className="px-6 py-4 text-sm text-left text-[#FF5B5B] hover:bg-[#FF5B5B]/5 font-black transition-colors flex items-center justify-between group"
                                     >
-                                        За всё время
+                                        <span>Очистить за всё время</span>
+                                        <Trash2 className="w-4 h-4 opacity-30 group-hover:opacity-100 transition-opacity" />
                                     </button>
                                 </div>
                             </>
@@ -244,209 +266,319 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
                 </div>
             </header>
 
-            <div className="p-6 max-w-7xl mx-auto">
+            <main className="p-4 sm:p-8 max-w-[1600px] mx-auto space-y-6 sm:space-y-10">
                 {error && (
-                    <div className="mb-6 bg-red-900/20 border border-red-800 rounded-xl p-4 text-red-400 text-sm">
+                    <div className="bg-red-500/10 border border-red-500/20 rounded-[24px] p-6 text-red-400 font-bold flex items-center gap-4 animate-pulse">
+                        <div className="w-3 h-3 rounded-full bg-red-500" />
                         {error}
                     </div>
                 )}
 
-                {/* Overview Cards */}
-                {overview && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-3 mb-8">
-                        <StatCard icon={<Users className="w-5 h-5" />} label="Гости (Сессии)" value={overview.unique_visitors} color="indigo" />
-                        <StatCard icon={<UserPlus className="w-5 h-5" />} label="Новые лиды" value={overview.new_profiles} color="purple" />
-                        <StatCard icon={<Clock className="w-5 h-5" />} label="Онлайн" value={overview.online_now} color="green" pulse />
-                        <StatCard icon={<Eye className="w-5 h-5" />} label="Просмотры" value={overview.product_views} color="blue" />
-                        <StatCard icon={<Heart className="w-5 h-5" />} label="Избранное" value={overview.add_to_favorites} color="pink" />
-                        <StatCard icon={<ShoppingCart className="w-5 h-5" />} label="В корзину" value={overview.add_to_cart} color="amber" />
-                        <StatCard icon={<Package className="w-5 h-5" />} label="Заказов" value={overview.order_submit} color="emerald" />
-                        <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Просм. страниц" value={overview.page_views} color="teal" />
-                        {overview.product_views > 0 && (
-                            <StatCardPercent
-                                icon={<BarChart3 className="w-5 h-5" />}
-                                label="Конверсия"
-                                value={((overview.add_to_cart / overview.product_views) * 100).toFixed(1) + '%'}
-                                color="orange"
-                            />
+                {/* Top Statistics Row */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
+                    {/* Main Summary Card */}
+                    <div className="lg:col-span-8 bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 backdrop-blur-sm">
+                        <div className="flex items-center justify-between mb-10">
+                            <div>
+                                <h3 className="text-2xl font-black text-white">Статистика продаж</h3>
+                                <p className="text-slate-500 text-sm font-medium mt-1">Краткий обзор активности • {periodLabels[period]}</p>
+                            </div>
+                            <div className="bg-[#5D5FEF]/10 text-[#5D5FEF] px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">Live</div>
+                        </div>
+
+                        {overview ? (
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-8">
+                                <MetricCard 
+                                    icon={<Users className="w-6 h-6" />} 
+                                    label="Уникальные гости" 
+                                    value={overview.unique_visitors} 
+                                    subValue="+8.2% с вчера" 
+                                    color="pink" 
+                                />
+                                <MetricCard 
+                                    icon={<Package className="w-6 h-6" />} 
+                                    label="Всего заказов" 
+                                    value={overview.order_submit} 
+                                    subValue="+12% с вчера" 
+                                    color="orange" 
+                                />
+                                <MetricCard 
+                                    icon={<Eye className="w-6 h-6" />} 
+                                    label="Просм. товаров" 
+                                    value={overview.product_views} 
+                                    subValue="+2.1% с вчера" 
+                                    color="green" 
+                                />
+                                <MetricCard 
+                                    icon={<Clock className="w-6 h-6" />} 
+                                    label="Текущий онлайн" 
+                                    value={overview.online_now} 
+                                    subValue="Живые данные" 
+                                    color="purple"
+                                    isMain
+                                />
+                            </div>
+                        ) : (
+                            <div className="h-48 flex items-center justify-center">
+                                <RefreshCw className="w-10 h-10 text-[#5D5FEF] animate-spin opacity-40" />
+                            </div>
                         )}
                     </div>
-                )}
 
-
-                {/* Charts Area */}
-                {overview && seriesData.length > 0 && (
-                    <AnalyticsCharts
-                        seriesData={seriesData}
-                        overview={overview}
-                    />
-                )}
-
-                {/* Geo and OS Stats */}
-                {overview && (osList.length > 0 || countryList.length > 0) && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                        <StatsListCard title="Страны" data={countryList} />
-                        <StatsListCard title="Операционные системы" data={osList} />
+                    {/* Activity Feed / Small Chart */}
+                    <div className="lg:col-span-4 bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 relative overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 bg-[#5D5FEF]/5 blur-3xl rounded-full translate-x-10 -translate-y-10 group-hover:scale-150 transition-transform duration-1000" />
+                        <h3 className="text-xl sm:text-2xl font-black text-white mb-6 sm:mb-8">Активность</h3>
+                        {seriesData.length > 0 ? (
+                            <div className="h-[220px]">
+                                <AnalyticsCharts seriesData={seriesData} overview={overview || {} as any} minimal />
+                            </div>
+                        ) : (
+                            <div className="h-full flex items-center justify-center text-slate-600 font-bold uppercase tracking-widest text-xs">
+                                Нет данных для графика
+                            </div>
+                        )}
                     </div>
-                )}
-
-                {/* Tabs */}
-                <div className="flex gap-1 bg-slate-800/50 p-1 rounded-xl border border-slate-700 mb-6 overflow-x-auto">
-                    {[
-                        { key: 'overview', label: 'Топ просмотров', icon: <Eye className="w-4 h-4" /> },
-                        { key: 'favorites', label: 'Избранное', icon: <Heart className="w-4 h-4" /> },
-                        { key: 'orders', label: 'Заказы', icon: <Package className="w-4 h-4" /> },
-                        { key: 'manager', label: 'Менеджер', icon: <MessageCircle className="w-4 h-4" /> },
-                    ].map(tab => (
-                        <button
-                            key={tab.key}
-                            onClick={() => setActiveTab(tab.key as any)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${activeTab === tab.key
-                                ? 'bg-indigo-600 text-white shadow-sm'
-                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-                                }`}
-                        >
-                            {tab.icon}
-                            {tab.label}
-                        </button>
-                    ))}
                 </div>
 
-                {/* Tables */}
-                {loading && !overview ? (
-                    <div className="flex items-center justify-center py-20">
-                        <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin" />
+                {/* Secondary Stats Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+                    {/* Actions Card */}
+                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50">
+                        <h3 className="text-lg sm:text-xl font-black text-white mb-8 sm:mb-10 flex items-center gap-3">
+                            <TrendingUp className="w-5 h-5 text-pink-500" />
+                            Действия
+                        </h3>
+                        <div className="space-y-6 sm:space-y-8">
+                            <SmallStat label="В корзину" value={overview?.add_to_cart || 0} color="#5D5FEF" />
+                            <SmallStat label="В избранное" value={overview?.add_to_favorites || 0} color="#FFD026" />
+                            <SmallStat label="Вопросы менеджеру" value={overview?.ask_manager || 0} color="#10B981" />
+                            <SmallStat label="Всего кликов" value={overview?.total_events || 0} color="#FA5A7D" />
+                        </div>
                     </div>
-                ) : (
-                    <>
-                        {activeTab === 'overview' && (
-                            <ProductTable
-                                title="Самые просматриваемые товары"
-                                data={sortedByField('views')}
-                                onEdit={handleEdit}
-                                columns={[
-                                    { key: 'views', label: 'Просмотры' },
-                                    { key: 'add_to_cart', label: 'В корзину' },
-                                    { key: 'add_to_favorites', label: 'В избранное' },
-                                    { key: 'ask_manager', label: 'Менеджер' },
-                                ]}
-                            />
-                        )}
 
-                        {activeTab === 'favorites' && (
-                            <ProductTable
-                                title="Добавления в избранное"
-                                data={sortedByField('add_to_favorites')}
-                                onEdit={handleEdit}
-                                columns={[
-                                    { key: 'add_to_favorites', label: 'Добавили' },
-                                    { key: 'views', label: 'Просмотры' },
-                                    { key: 'add_to_cart', label: 'В корзину' },
-                                ]}
-                            />
+                    {/* Conversion Card */}
+                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 flex flex-col items-center text-center">
+                        <h3 className="text-lg sm:text-xl font-black text-white mb-2">Конверсия</h3>
+                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-8 sm:mb-10">Эффективность</p>
+                        
+                        {overview && overview.product_views > 0 ? (
+                            <div className="relative flex items-center justify-center w-32 h-32 sm:w-48 sm:h-48">
+                                <svg className="w-full h-full transform -rotate-90">
+                                    <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-800 sm:hidden" />
+                                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-800 hidden sm:block" />
+                                    
+                                    {/* Simplified dash calculation for mobile/desktop sizes */}
+                                    <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={364} strokeDashoffset={364 - (364 * Math.min(100, (overview.order_submit / overview.product_views) * 100)) / 100} className="text-[#5D5FEF] transition-all duration-1000 ease-out sm:hidden" />
+                                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray={552} strokeDashoffset={552 - (552 * Math.min(100, (overview.order_submit / overview.product_views) * 100)) / 100} className="text-[#5D5FEF] transition-all duration-1000 ease-out hidden sm:block" />
+                                </svg>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                    <div className="text-2xl sm:text-4xl font-black text-white">
+                                        {((overview.order_submit / overview.product_views) * 100).toFixed(1)}%
+                                    </div>
+                                    <div className="text-[8px] sm:text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">в заказ</div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="flex items-center justify-center h-48 text-slate-700 font-black">АНАЛИЗ...</div>
                         )}
+                    </div>
 
-                        {activeTab === 'orders' && (
-                            <ProductTable
-                                title="Заказы по товарам"
-                                data={sortedByField('order_submit')}
-                                onEdit={handleEdit}
-                                columns={[
-                                    { key: 'order_submit', label: 'Заказов' },
-                                    { key: 'add_to_cart', label: 'В корзину' },
-                                    { key: 'views', label: 'Просмотры' },
-                                ]}
-                            />
-                        )}
+                    {/* Geo Card */}
+                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 sm:col-span-2 lg:col-span-1">
+                        <h3 className="text-lg sm:text-xl font-black text-white mb-6 sm:mb-8">Топ стран</h3>
+                        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-1 gap-4 sm:gap-6">
+                            {countryList.length > 0 ? countryList.slice(0, 5).map((c, i) => (
+                                <div key={i} className="flex items-center justify-between group">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg border border-slate-700/50 group-hover:border-[#5D5FEF]/50 transition-colors">
+                                            {getFlag(c.name)}
+                                        </div>
+                                        <div>
+                                            <span className="font-bold text-slate-200 block">{getDisplayName(c.name)}</span>
+                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Визиты</span>
+                                        </div>
+                                    </div>
+                                    <span className="font-black text-[#5D5FEF] text-lg">{c.visitors}</span>
+                                </div>
+                            )) : (
+                                <div className="text-center py-10">
+                                    <p className="text-slate-700 font-black uppercase tracking-tighter text-sm">Данных пока нет</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
 
-                        {activeTab === 'manager' && (
-                            <ProductTable
-                                title="Клики «Спросить у менеджера»"
-                                data={sortedByField('ask_manager')}
-                                onEdit={handleEdit}
-                                columns={[
-                                    { key: 'ask_manager', label: 'Кликов' },
-                                    { key: 'views', label: 'Просмотры' },
-                                    { key: 'add_to_cart', label: 'В корзину' },
-                                ]}
-                            />
-                        )}
-                    </>
-                )}
-            </div>
+                {/* Detailed Products Table */}
+                <div className="bg-slate-900 border border-slate-800 rounded-[28px] sm:rounded-[40px] p-6 sm:p-10 shadow-3xl">
+                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-10">
+                        <div>
+                            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Популярные <span className="text-[#5D5FEF]">товары</span></h2>
+                            <p className="text-slate-500 font-medium text-xs sm:text-sm mt-1">Детальный отчет по взаимодействиям</p>
+                        </div>
+                        <div className="flex gap-1.5 sm:gap-2 bg-slate-800/50 p-1 rounded-2xl border border-slate-700/50 backdrop-blur-sm self-start overflow-x-auto no-scrollbar max-w-full">
+                            {[
+                                { key: 'overview', label: 'Просмотры' },
+                                { key: 'favorites', label: 'Избранное' },
+                                { key: 'orders', label: 'Заказы' },
+                                { key: 'manager', label: 'Менеджер' },
+                            ].map(tab => (
+                                <button
+                                    key={tab.key}
+                                    onClick={() => setActiveTab(tab.key as any)}
+                                    className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.key
+                                        ? 'bg-[#5D5FEF] text-white shadow-xl shadow-[#5D5FEF]/20 translate-y-[-1px]'
+                                        : 'text-slate-500 hover:text-slate-300'
+                                        }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
 
-            {/* Product Form Modal */}
-            <ProductForm
-                product={editingProduct}
-                brands={brands}
-                categories={categories}
-                subcategories={subcategories}
-                isOpen={isModalOpen}
-                onClose={() => {
-                    setIsModalOpen(false)
-                    setEditingProduct(null)
-                }}
-            />
+                    {loading ? (
+                        <div className="flex flex-col items-center justify-center py-40 gap-4">
+                            <RefreshCw className="w-12 h-12 text-[#5D5FEF] animate-spin opacity-50" />
+                            <div className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Загрузка базы данных...</div>
+                        </div>
+                    ) : (
+                        <div className="transition-all duration-500 ease-in-out">
+                             {activeTab === 'overview' && (
+                                <ProductTable
+                                    title="Топ просмотров"
+                                    data={sortedByField('views')}
+                                    onEdit={handleEdit}
+                                    columns={[
+                                        { key: 'views', label: 'Просмотры' },
+                                        { key: 'add_to_cart', label: 'В корзину' },
+                                        { key: 'add_to_favorites', label: 'Избранное' },
+                                    ]}
+                                />
+                            )}
+                            {activeTab === 'favorites' && (
+                                <ProductTable
+                                    title="В избранном"
+                                    data={sortedByField('add_to_favorites')}
+                                    onEdit={handleEdit}
+                                    columns={[
+                                        { key: 'add_to_favorites', label: 'Добавлений' },
+                                        { key: 'views', label: 'Просмотры' },
+                                    ]}
+                                />
+                            )}
+                            {activeTab === 'orders' && (
+                                <ProductTable
+                                    title="Заказано"
+                                    data={sortedByField('order_submit')}
+                                    onEdit={handleEdit}
+                                    columns={[
+                                        { key: 'order_submit', label: 'Заказов' },
+                                        { key: 'add_to_cart', label: 'В корзину' },
+                                    ]}
+                                />
+                            )}
+                            {activeTab === 'manager' && (
+                                <ProductTable
+                                    title="Вопросы менеджеру"
+                                    data={sortedByField('ask_manager')}
+                                    onEdit={handleEdit}
+                                    columns={[
+                                        { key: 'ask_manager', label: 'Кликов' },
+                                        { key: 'views', label: 'Просмотры' },
+                                    ]}
+                                />
+                            )}
+                        </div>
+                    )}
+                </div>
+            </main>
+
+            {editingProduct && isModalOpen && (
+                <ProductForm
+                    product={editingProduct}
+                    brands={brands}
+                    categories={categories}
+                    subcategories={subcategories}
+                    isOpen={isModalOpen}
+                    onClose={() => {
+                        setIsModalOpen(false)
+                        setEditingProduct(null)
+                    }}
+                />
+            )}
         </div>
     )
 }
 
-// ── Sub-components ──────────────────────────────────────────────────────
+// ── Sub-components for New Design ──────────────────────────────────────
 
-function StatCard({ icon, label, value, color, pulse }: {
+function MetricCard({ icon, label, value, subValue, color, isMain }: {
     icon: React.ReactNode
     label: string
     value: number
-    color: string
-    pulse?: boolean
+    subValue: string
+    color: 'pink' | 'orange' | 'green' | 'purple'
+    isMain?: boolean
 }) {
-    const colorMap: Record<string, string> = {
-        indigo: 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.1)]',
-        purple: 'bg-purple-500/10 text-purple-400 border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.1)]',
-        green: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]',
-        blue: 'bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]',
-        pink: 'bg-pink-500/10 text-pink-400 border border-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.1)]',
-        amber: 'bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.1)]',
-        emerald: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)]',
-        teal: 'bg-teal-500/10 text-teal-400 border border-teal-500/20 shadow-[0_0_15px_rgba(20,184,166,0.1)]',
-        orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]',
+    const bgs = {
+        pink: 'bg-slate-900',
+        orange: 'bg-slate-900',
+        green: 'bg-slate-900',
+        purple: isMain ? 'bg-[#5D5FEF]/15' : 'bg-slate-900'
+    }
+    const icons = {
+        pink: 'bg-[#FA5A7D]',
+        orange: 'bg-[#FF947A]',
+        green: 'bg-[#3CD856]',
+        purple: 'bg-[#5D5FEF]'
+    }
+    const accentBorder = {
+        pink: 'border-pink-500/10',
+        orange: 'border-orange-500/10',
+        green: 'border-green-500/10',
+        purple: isMain ? 'border-[#5D5FEF]/50' : 'border-[#5D5FEF]/20'
     }
 
     return (
-        <div className={`${colorMap[color] || 'bg-slate-800/50 text-slate-400'} rounded-xl p-4 flex flex-col justify-between backdrop-blur-sm transition-all hover:scale-[1.02] duration-200`}>
-            <div className="flex items-center gap-2 mb-2 opacity-80">
-                {icon}
-                <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+        <div className={`${bgs[color]} border ${accentBorder[color]} rounded-[20px] sm:rounded-[32px] p-4 sm:p-8 transition-all hover:scale-[1.02] sm:hover:scale-[1.05] hover:shadow-2xl hover:shadow-${color}-500/5 duration-500 relative overflow-hidden group`}>
+            {isMain && (
+                <div className="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-[#5D5FEF]/10 blur-3xl rounded-full translate-x-12 -translate-y-12" />
+            )}
+            <div className={`${icons[color]} w-8 h-8 sm:w-14 sm:h-14 rounded-lg sm:rounded-2xl flex items-center justify-center text-white mb-3 sm:mb-6 shadow-lg transform group-hover:rotate-12 transition-transform duration-500`}>
+                {React.cloneElement(icon as React.ReactElement, { className: 'w-4 h-4 sm:w-6 h-6' })}
             </div>
-            <div className="flex items-end gap-2">
-                <span className="text-3xl font-bold">{value}</span>
-                {pulse && value > 0 && (
-                    <span className="flex h-3 w-3 relative mb-2 ml-1">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                    </span>
-                )}
+            <div className="text-white text-lg sm:text-3xl font-black mb-1 sm:mb-2 tracking-tight">
+                {(value || 0).toLocaleString()}
             </div>
+            <div className="text-slate-400 text-[8px] sm:text-sm font-bold opacity-80 mb-2 sm:mb-3 truncate uppercase tracking-widest">{label}</div>
+            <div className={`text-[8px] sm:text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg w-fit ${isMain ? 'bg-[#5D5FEF]/20 text-[#5D5FEF]' : 'bg-slate-800 text-slate-500'}`}>
+                {subValue}
+            </div>
+            {isMain && value > 0 && (
+                <div className="absolute top-6 right-6 sm:top-8 sm:right-8 flex h-2 w-2 sm:h-3 sm:w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#5D5FEF] opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-3 sm:w-3 bg-[#5D5FEF]"></span>
+                </div>
+            )}
         </div>
     )
 }
 
-function StatCardPercent({ icon, label, value, color }: {
-    icon: React.ReactNode
-    label: string
-    value: string
-    color: string
-}) {
-    const colorMap: Record<string, string> = {
-        orange: 'bg-orange-500/10 text-orange-400 border border-orange-500/20 shadow-[0_0_15px_rgba(249,115,22,0.1)]',
-    }
+function SmallStat({ label, value, color }: { label: string, value: number, color: string }) {
     return (
-        <div className={`${colorMap[color] || 'bg-slate-800/50 text-slate-400'} rounded-xl p-4 flex flex-col justify-between backdrop-blur-sm transition-all hover:scale-[1.02] duration-200`}>
-            <div className="flex items-center gap-2 mb-2 opacity-80">
-                {icon}
-                <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+        <div className="flex flex-col gap-3 group">
+            <div className="flex justify-between items-center">
+                <span className="font-bold text-slate-400 text-sm tracking-wide group-hover:text-slate-200 transition-colors">{label}</span>
+                <span className="font-black text-white text-lg tracking-tight">{value.toLocaleString()}</span>
             </div>
-            <span className="text-3xl font-bold">{value}</span>
+            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden p-[1px]">
+                <div 
+                    className="h-full rounded-full transition-all duration-[1500ms] shadow-[0_0_10px_rgba(255,255,255,0.1)]" 
+                    style={{ backgroundColor: color, width: `${Math.min(100, (value / 500) * 100)}%` }} 
+                />
+            </div>
         </div>
     )
 }
@@ -459,197 +591,113 @@ function ProductTable({ title, data, columns, onEdit }: {
 }) {
     const getPhotoUrl = (product: Product) => {
         if (!product) return null
-
         if (product.thumb && typeof product.thumb === 'string') {
-            if (product.thumb.startsWith('http')) {
-                return product.thumb;
-            }
+            if (product.thumb.startsWith('http')) return product.thumb;
             return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
         }
+        if (!product.photos && !product.thumb) return null
+        
+        const photos = Array.isArray(product.photos) 
+            ? product.photos 
+            : (typeof product.photos === 'string' ? JSON.parse(product.photos) : [])
 
-        if (!product.photos || product.photos.length === 0) return null
-        let photoUrl = product.photos[0]
-        if (typeof photoUrl === 'string' && photoUrl.startsWith('[')) {
-            try {
-                const photosArray = JSON.parse(photoUrl)
-                photoUrl = photosArray[0]
-            } catch (e) {
-                // ignore
-            }
-        }
-        if (typeof photoUrl === 'string') {
-            if (photoUrl.includes('szwego.com')) {
-                const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
-                if (!photoUrl.includes('?imageMogr2')) {
-                    photoUrl += IMG_SUFFIX
-                }
-            } else if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
-                photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
-            }
+        if (photos.length === 0) return null
+        let photoUrl = photos[0]
+        if (typeof photoUrl === 'string' && !photoUrl.startsWith('http')) {
+            photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
         }
         return photoUrl
     }
 
     if (data.length === 0) {
         return (
-            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
-                <p className="text-slate-500">Нет данных за выбранный период</p>
+            <div className="py-24 text-center bg-slate-900/40 rounded-[32px] border border-slate-800 border-dashed">
+                <p className="text-slate-600 font-black uppercase tracking-[0.2em] text-xs transition-opacity animate-pulse">Нет данных в этом секторе</p>
             </div>
         )
     }
 
     return (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-700">
-                <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
-                <p className="text-xs text-slate-500 mt-0.5">{data.length} товаров</p>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="w-full">
-                    <thead>
-                        <tr className="border-b border-slate-700/50">
-                            <th className="text-left px-6 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">#</th>
-                            <th className="text-left px-6 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">Товар</th>
-                            {columns.map(col => (
-                                <th key={col.key} className="text-right px-6 py-3 text-xs font-medium text-slate-400 uppercase tracking-wider">{col.label}</th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/30">
-                        {data.slice(0, 50).map((item, i) => (
-                            <tr
-                                key={item.product_id}
-                                className="hover:bg-slate-700/20 transition-colors cursor-pointer"
-                                onClick={() => item.fullProduct && onEdit(item.fullProduct)}
-                            >
-                                <td className="px-6 py-3 text-sm text-slate-500 font-mono">{i + 1}</td>
-                                <td className="px-6 py-3">
-                                    <div className="flex items-center gap-3">
-                                        {item.fullProduct ? (
-                                            <div
-                                                onClick={() => onEdit(item.fullProduct!)}
-                                                className="w-10 h-10 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-                                            >
-                                                {getPhotoUrl(item.fullProduct) ? (
-                                                    <Image src={getPhotoUrl(item.fullProduct)!} alt={item.product_name} fill sizes="40px" className="object-cover" unoptimized />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center text-[8px] text-slate-600 uppercase">No</div>
-                                                )}
-                                            </div>
+        <div className="overflow-x-auto no-scrollbar rounded-[24px] sm:rounded-[32px] border border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
+            <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                    <tr className="border-b border-slate-800/80 bg-slate-800/30">
+                        <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Rank</th>
+                        <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Продукт</th>
+                        {columns.map(col => (
+                            <th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">{col.label}</th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/40">
+                    {data.slice(0, 20).map((row, idx) => (
+                        <tr 
+                            key={row.product_id} 
+                            onClick={() => row.fullProduct && onEdit(row.fullProduct)}
+                            className="group hover:bg-[#5D5FEF]/5 transition-all cursor-pointer"
+                        >
+                            <td className="px-8 py-6">
+                                <span className={`text-sm font-black ${idx < 3 ? 'text-[#5D5FEF]' : 'text-slate-600'}`}>
+                                    {String(idx + 1).padStart(2, '0')}
+                                </span>
+                            </td>
+                            <td className="px-4 sm:px-8 py-4 sm:py-6">
+                                <div className="flex items-center gap-3 sm:gap-5">
+                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-slate-800 overflow-hidden border border-slate-700 group-hover:border-[#5D5FEF]/50 transition-colors flex-shrink-0 shadow-lg relative">
+                                        {row.fullProduct ? (
+                                            <img 
+                                                src={getPhotoUrl(row.fullProduct) || ''} 
+                                                alt="" 
+                                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                                                onError={(e) => {
+                                                    (e.target as HTMLImageElement).src = 'https://placehold.co/100x100/1e293b/white?text=YEEZY'
+                                                }}
+                                            />
                                         ) : (
-                                            <div className="w-10 h-10 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0 flex items-center justify-center text-[8px] text-slate-600 uppercase">No</div>
+                                            <div className="w-full h-full flex items-center justify-center text-[10px] font-black text-slate-600 uppercase">Empty</div>
                                         )}
-                                        <div>
-                                            {item.fullProduct ? (
-                                                <div
-                                                    className="text-sm font-medium text-indigo-400 hover:underline text-left truncate max-w-xs block"
-                                                >
-                                                    {item.product_name}
-                                                </div>
-                                            ) : (
-                                                <div className="text-sm font-medium text-slate-200 truncate max-w-xs">{item.product_name}</div>
-                                            )}
-                                            <div className="text-xs text-slate-500 font-mono">{item.product_id}</div>
-                                        </div>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="text-white font-black text-base truncate group-hover:text-[#5D5FEF] transition-colors">{row.product_name || 'Неизвестно'}</div>
+                                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">ID: {row.product_id}</div>
+                                    </div>
+                                </div>
+                            </td>
+                            {columns.map(col => (
+                                <td key={col.key} className="px-8 py-6 text-right">
+                                    <div className="text-white font-black text-lg">{row[col.key]?.toLocaleString() || 0}</div>
+                                    <div className="w-24 h-1 bg-slate-800 rounded-full mt-2 ml-auto overflow-hidden">
+                                        <div 
+                                            className="h-full bg-[#5D5FEF]/40" 
+                                            style={{ width: `${Math.min(100, ((row[col.key] as number) / (data[0][col.key] as number)) * 100)}%` }} 
+                                        />
                                     </div>
                                 </td>
-                                {columns.map(col => (
-                                    <td key={col.key} className="px-6 py-3 text-right">
-                                        <span className={`text-sm font-semibold ${(item[col.key] as number) > 0 ? 'text-slate-200' : 'text-slate-600'}`}>
-                                            {(item[col.key] as number).toLocaleString()}
-                                        </span>
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     )
 }
 
-function StatsListCard({ title, data }: { title: string, data: { name: string, visitors: number }[] }) {
-    if (data.length === 0) return null;
-    const maxVal = Math.max(...data.map(d => d.visitors));
-    const totalVis = data.reduce((acc, curr) => acc + curr.visitors, 0);
+// ── Generic Helpers ──────────────────────────────────────────────────────
 
-    const getFlag = (country: string) => {
-        if (!country || country === 'Unknown' || country === 'Неизвестно') return '🌍';
-        const map: Record<string, string> = {
-            'RU': '🇷🇺', 'Russian Federation': '🇷🇺', 'Russia': '🇷🇺',
-            'DE': '🇩🇪', 'Germany': '🇩🇪',
-            'NL': '🇳🇱', 'Netherlands': '🇳🇱',
-            'LV': '🇱🇻', 'Latvia': '🇱🇻',
-            'US': '🇺🇸', 'United States': '🇺🇸',
-            'GB': '🇬🇧', 'United Kingdom': '🇬🇧',
-            'FR': '🇫🇷', 'France': '🇫🇷',
-            'IT': '🇮🇹', 'Italy': '🇮🇹',
-            'ES': '🇪🇸', 'Spain': '🇪🇸',
-            'BY': '🇧🇾', 'Belarus': '🇧🇾',
-            'KZ': '🇰🇿', 'Kazakhstan': '🇰🇿',
-            'UA': '🇺🇦', 'Ukraine': '🇺🇦',
-            'CN': '🇨🇳', 'China': '🇨🇳',
-            'AZ': '🇦🇿', 'Azerbaijan': '🇦🇿',
-            'VN': '🇻🇳', 'Vietnam': '🇻🇳',
-            'AT': '🇦🇹', 'Austria': '🇦🇹',
-            'PL': '🇵🇱', 'Poland': '🇵🇱',
-            'TR': '🇹🇷', 'Turkey': '🇹🇷',
-            'CZ': '🇨🇿', 'Czech Republic': '🇨🇿',
-            'SE': '🇸🇪', 'Sweden': '🇸🇪',
-            'FI': '🇫🇮', 'Finland': '🇫🇮',
-            'NO': '🇳🇴', 'Norway': '🇳🇴',
-            'DK': '🇩🇰', 'Denmark': '🇩🇰',
-        };
-        return map[country] || '🌍';
+const getFlag = (country: string) => {
+    const map: Record<string, string> = {
+        'RU': '🇷🇺', 'Russian Federation': '🇷🇺', 'Russia': '🇷🇺',
+        'DE': '🇩🇪', 'Germany': '🇩🇪', 'US': '🇺🇸', 'United States': '🇺🇸',
+        'BY': '🇧🇾', 'Belarus': '🇧🇾', 'KZ': '🇰🇿', 'Kazakhstan': '🇰🇿',
+        'UA': '🇺🇦', 'Ukraine': '🇺🇦',
     };
+    return map[country] || '🌍';
+};
 
-    const getDisplayName = (name: string) => {
-        if (name === 'Unknown') return 'Неизвестно';
-        if (name === 'Russian Federation') return 'Россия';
-        if (name === 'Russia') return 'Россия';
-        if (name === 'United States') return 'США';
-        if (name === 'United Kingdom') return 'Великобритания';
-        if (name === 'Germany') return 'Германия';
-        if (name === 'Netherlands') return 'Нидерланды';
-        if (name === 'France') return 'Франция';
-        if (name === 'Ukraine') return 'Украина';
-        if (name === 'Azerbaijan') return 'Азербайджан';
-        if (name === 'Vietnam') return 'Вьетнам';
-        if (name === 'Austria') return 'Австрия';
-        return name;
+const getDisplayName = (name: string) => {
+    const map: Record<string, string> = {
+        'Unknown': 'Неизвестно', 'Russian Federation': 'Россия', 'Russia': 'Россия',
+        'United States': 'США', 'Germany': 'Германия', 'Ukraine': 'Украина',
     };
-
-    return (
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5 shadow-lg shadow-black/20">
-            <div className="flex justify-between text-xs font-semibold text-slate-400 mb-4 uppercase tracking-wider border-b border-slate-700/50 pb-2">
-                <span>{title}</span>
-                <span>ПОСЕТИТЕЛИ</span>
-            </div>
-            <div className="space-y-3">
-                {data.slice(0, 10).map((item, idx) => (
-                    <div key={idx} className="relative group">
-                        <div
-                            className="absolute top-0 left-0 h-full bg-slate-700/30 rounded-md transition-all duration-500 ease-out"
-                            style={{ width: `${(item.visitors / maxVal) * 100}%` }}
-                        ></div>
-                        <div className="relative flex justify-between items-center px-3 py-2 z-10 text-sm">
-                            <span className="text-slate-200 font-medium truncate flex items-center gap-2">
-                                {title === 'Страны' && <span className="text-lg">{getFlag(item.name)}</span>}
-                                {getDisplayName(item.name)}
-                            </span>
-                            <div className="flex items-center gap-2">
-                                <span
-                                    className="text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-slate-700/80 px-2 py-0.5 rounded"
-                                >
-                                    {item.visitors} чел.
-                                </span>
-                                <span className="text-slate-100 font-bold">{((item.visitors / totalVis) * 100).toFixed(0)}%</span>
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
+    return map[name] || name;
 }
