@@ -113,8 +113,8 @@ export default async function AdminPage({
     
     const products: Product[] = productsRes.rows.map(row => {
       // Ищем названия брендов по их ID
-      const brandIds = Array.isArray(row.brand) ? row.brand : [];
-      const expandedBrands = brandIds.map(id => {
+      const brandIds: string[] = Array.isArray(row.brand) ? row.brand : [];
+      const expandedBrands = brandIds.map((id: string) => {
         const found = allBrands.find(b => b.id === id);
         return found ? { id: found.id, name: found.name } : { id, name: 'Unknown Brand' };
       });
