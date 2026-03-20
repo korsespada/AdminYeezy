@@ -79,7 +79,6 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
 
     await syncExternalServices(id, 'update', { name, description, price, brand: brands, category, subcategory, gender, status });
     
-    revalidatePath('/admin');
     return { success: true };
   } catch (error: any) {
     console.error('Create product error:', error);
@@ -119,7 +118,6 @@ export async function updateProductAction(id: string, formData: FormData): Promi
 
     await syncExternalServices(id, 'update', { name, description, price, brand: brands, category, subcategory, gender, status });
 
-    revalidatePath('/admin');
     return { success: true };
   } catch (error: any) {
     console.error('Update product error:', error);
@@ -135,7 +133,6 @@ export async function deleteProductAction(id: string): Promise<ActionResponse> {
     await query('DELETE FROM products WHERE id = $1', [id]);
     await syncExternalServices(id, 'delete');
     
-    revalidatePath('/admin');
     return { success: true };
   } catch (error: any) {
     console.error('Delete product error:', error);

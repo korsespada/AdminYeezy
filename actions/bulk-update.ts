@@ -43,7 +43,6 @@ export async function bulkUpdateProductsAction(ids: string[], updates: { categor
             }).catch(() => null)
         }
 
-        revalidatePath('/admin')
         return { success: true }
     } catch (error: any) {
         console.error('Bulk update error:', error)
@@ -65,7 +64,6 @@ export async function bulkDeleteProductsAction(ids: string[]) {
             await elastic.delete({ index: 'products', id: id }).catch(() => null)
         }
 
-        revalidatePath('/admin')
         return { success: true }
     } catch (error: any) {
         console.error('Bulk delete error:', error)
@@ -95,7 +93,6 @@ export async function bulkPatchObjectsAction(updates: { id: string, data: any }[
         }
         
         await redis.del('catalog:all')
-        revalidatePath('/admin')
         return { success: true }
     } catch (error: any) {
         console.error('Bulk patch error:', error)

@@ -404,9 +404,10 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                   setIsBulkDeleting(true)
                   const res = await bulkDeleteProductsAction(selectedProductIds)
                   if (res.success) {
+                    // Update local state by removing deleted products
+                    setProducts(prev => prev.filter(p => !selectedProductIds.includes(p.id)))
                     setIsBulkDeleting(false)
                     setSelectedProductIds([])
-                    router.refresh()
                   } else {
                     alert('Ошибка при удалении товаров')
                     setIsBulkDeleting(false)

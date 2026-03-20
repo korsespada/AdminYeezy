@@ -99,7 +99,7 @@ export default async function AdminPage({
         LEFT JOIN categories c ON c.id = p.category
         LEFT JOIN subcategories s ON s.id = p.subcategory
         ${whereClause}
-        ORDER BY p.updated_at DESC
+        ORDER BY p.created_at DESC, p.id DESC
         LIMIT $${pIdx} OFFSET $${pIdx + 1}
       `, [...params, perPage, offset]),
       query(`SELECT COUNT(*) FROM products p ${whereClause}`, params)
@@ -109,21 +109,31 @@ export default async function AdminPage({
     const totalPages = Math.ceil(totalItems / perPage)
 
     // Преобразуем данные из Postgres в формат, который понимает React-компонент
-    const products: Product[] = productsRes.rows.map(row => ({
-      ...row,
-      // В Postgres фото лежат как JSON или массив, в JS это уже должен быть объект
-      photos: typeof row.photos === 'string' ? JSON.parse(row.photos) : (row.photos || []),
-      expand: {
-        category: row.category_name ? { name: row.category_name, id: row.category } : undefined,
-        subcategory: row.subcategory_name ? { name: row.subcategory_name, id: row.subcategory } : undefined,
-        // Бренды сложнее, так как их может быть несколько. Пока берем первый ID для простоты
-        brand: Array.isArray(row.brand) ? { id: row.brand[0], name: '' } : undefined 
+    const allBrands: Brand[] = brandsRes.rows
+    
+    const products: Product[] = productsRes.rows.map(row => {
+      // Ищем названия брендов по их ID
+      const brandIds = Array.isArray(row.brand) ? row.brand : [];
+      const expandedBrands = brandIds.map(id => {
+        const found = allBrands.find(b => b.id === id);
+        return found ? { id: found.id, name: found.name } : { id, name: 'Unknown Brand' };
+      });
+
+      return {
+        ...row,
+        // В Postgres фото лежат как JSON или массив, в JS это уже должен быть объект
+        photos: typeof row.photos === 'string' ? JSON.parse(row.photos) : (row.photos || []),
+        expand: {
+          category: row.category_name ? { name: row.category_name, id: row.category } : undefined,
+          subcategory: row.subcategory_name ? { name: row.subcategory_name, id: row.subcategory } : undefined,
+          // Передаем массив расширенных брендов
+          brand: expandedBrands.length > 0 ? expandedBrands : undefined
+        }
       }
-    }))
+    })
 
     const categories: Category[] = categoriesRes.rows
     const subcategories: Subcategory[] = subcategoriesRes.rows
-    const allBrands: Brand[] = brandsRes.rows
     
     // В админке бренды в сайдбаре обычно все, либо отфильтрованные
     const brands = allBrands 
