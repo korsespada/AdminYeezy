@@ -386,7 +386,49 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
   }
 }
 
+async function forwardScrapingToWorker(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse | null> {
+  const workerUrl = process.env.SCRAPER_WORKER_URL?.replace(/\/+$/, '')
+  if (!workerUrl) return null
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (process.env.SCRAPER_WORKER_SECRET) {
+      headers.Authorization = `Bearer ${process.env.SCRAPER_WORKER_SECRET}`
+    }
+
+    const response = await fetch(`${workerUrl}/api/scraping/start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ supplierId, endDate, overrideTag, overrideGroup }),
+      cache: 'no-store',
+    })
+
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      return {
+        success: false,
+        error: payload?.error || `Worker returned ${response.status}`,
+      }
+    }
+
+    return payload
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Не удалось отправить выгрузку на worker: ${err.message}`,
+    }
+  }
+}
+
 export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
+  const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
+  if (workerResult) return workerResult
+  return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup)
+}
+
+export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
   try {
     // 1. Получаем данные поставщика
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
