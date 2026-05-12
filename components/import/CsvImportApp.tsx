@@ -392,6 +392,7 @@ export default function CsvImportApp({
   initialAiPath = "",
   initialSupplierId = null,
   initialBatchId = null,
+  initialFallbackBatchId = null,
   initialSupplierName = null,
   initialSupplierAvatar = null,
   onClose,
@@ -401,6 +402,7 @@ export default function CsvImportApp({
   initialAiPath?: string;
   initialSupplierId?: number | null;
   initialBatchId?: string | null;
+  initialFallbackBatchId?: string | null;
   initialSupplierName?: string | null;
   initialSupplierAvatar?: string | null;
   onClose?: () => void;
@@ -626,7 +628,13 @@ export default function CsvImportApp({
       });
       setIsAiProcessed(allProcessed);
     } else {
-      setPathError(res.error || "Не удалось прочитать файл");
+      if (initialFallbackBatchId) {
+        setSaveMsg("Файл недоступен на сервере, открываю текущие товары партии из БД");
+        setBatchId(initialFallbackBatchId);
+        await handleLoadBatch(initialFallbackBatchId);
+      } else {
+        setPathError(res.error || "Не удалось прочитать файл");
+      }
     }
     setIsLoadingPath(false);
   };

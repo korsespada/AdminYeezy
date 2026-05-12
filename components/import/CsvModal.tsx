@@ -44,6 +44,7 @@ export default function CsvModal({
           initialAiPath={aiPath}
           initialSupplierId={supplierId}
           initialBatchId={forceFileMode ? null : batchId}
+          initialFallbackBatchId={forceFileMode ? batchId : null}
           initialSupplierName={supplierName}
           initialSupplierAvatar={supplierAvatar}
           onClose={onClose}
