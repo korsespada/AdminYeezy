@@ -6,6 +6,7 @@
     "dev": "concurrently \"next dev\" \"node scripts/telegram-bot.js\"",
     "build": "next build",
     "start": "next start",
+    "db:migrate:scraping": "node scripts/migrate-scraping-schema.js",
     "lint": "next lint",
     "test": "vitest",
     "test:ui": "vitest --ui"
