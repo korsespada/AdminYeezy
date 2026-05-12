@@ -1,5 +1,5 @@
 import { query } from '@/lib/db'
-import AnalyticsDashboard from '@/components/AnalyticsDashboard'
+import AnalyticsDashboard from '@/components/analytics/AnalyticsDashboard'
 import { unstable_noStore as noStore } from 'next/cache'
 
 export default async function AnalyticsPage() {

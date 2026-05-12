@@ -1,10 +1,10 @@
 import { query } from '@/lib/db'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
-import ProductList from '@/components/ProductList'
+import ProductList from '@/components/products/ProductList'
 import { unstable_noStore as noStore } from 'next/cache'
 import { logoutAction } from '@/actions/auth'
 import { LogOut } from 'lucide-react'
-import PerPageSelector from '@/components/PerPageSelector'
+import PerPageSelector from '@/components/ui/PerPageSelector'
 
 export default async function AdminPage({
   searchParams,

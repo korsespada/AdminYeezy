@@ -1,5 +1,5 @@
 import { query } from '@/lib/db'
-import BrandList from '@/components/BrandList'
+import BrandList from '@/components/inventory/BrandList'
 
 export const dynamic = 'force-dynamic'
 

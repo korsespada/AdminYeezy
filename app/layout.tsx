@@ -2,8 +2,16 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'PocketBase Admin Panel',
-  description: 'Product management admin panel',
+  title: 'Админка YeezyUnique',
+  description: 'Админка YeezyUnique',
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false,
+    },
+  },
 }
 
 export default function RootLayout({

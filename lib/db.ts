@@ -2,21 +2,26 @@ import { Pool } from 'pg';
 import { Redis } from 'ioredis';
 import { Client as ElasticClient } from '@elastic/elasticsearch';
 
-// 1. PostgreSQL подключение
+// 1. PostgreSQL - Боевая база (Vibe)
 const pool = new Pool({
-  host: process.env.PG_HOST,
-  port: Number(process.env.PG_PORT) || 5432,
-  user: process.env.PG_USER,
-  password: process.env.PG_PASSWORD,
-  database: process.env.PG_DATABASE,
   connectionString: process.env.DATABASE_URL,
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });
 
+// 2. PostgreSQL - Техническая база (Scraping)
+const scrapingPool = new Pool({
+  connectionString: process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL, // Если нет отдельной, используем основную
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
 export const query = (text: string, params?: any[]) => pool.query(text, params);
+export const scrapingQuery = (text: string, params?: any[]) => scrapingPool.query(text, params);
 export const getClient = () => pool.connect();
+export const getScrapingClient = () => scrapingPool.connect();
 
 // 2. Redis подключение (для сброса кеша)
 export const redis = new Redis({
@@ -26,7 +31,10 @@ export const redis = new Redis({
   lazyConnect: true, // не падать сразу, если нет соединения
 });
 
-redis.on('error', (err) => console.warn('Redis error in admin:', err.message));
+redis.on('error', (err) => {
+  if (err.message.toUpperCase().includes('NOAUTH')) return;
+  console.warn('Redis error in admin:', err.message);
+});
 
 // 3. Elasticsearch подключение (для обновления индекса поиска)
 export const elastic = new ElasticClient({
@@ -39,7 +47,9 @@ export const elastic = new ElasticClient({
 
 export default {
   query,
+  scrapingQuery,
   getClient,
+  getScrapingClient,
   redis,
   elastic
 };

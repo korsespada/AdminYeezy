@@ -3,7 +3,7 @@ import * as fc from 'fast-check'
 import PocketBase from 'pocketbase'
 
 /**
- * Feature: pocketbase-admin-panel
+ * Feature: yeezyunique-admin
  * Property-based tests for PocketBase client
  */
 

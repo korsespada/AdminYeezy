@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
 
 /**
- * Feature: pocketbase-admin-panel
+ * Feature: yeezyunique-admin
  * Property-based tests for authentication logic
  */
 

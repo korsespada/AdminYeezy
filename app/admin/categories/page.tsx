@@ -1,5 +1,5 @@
 import { query } from '@/lib/db'
-import CategoryList from '@/components/CategoryList'
+import CategoryList from '@/components/inventory/CategoryList'
 
 export const dynamic = 'force-dynamic'
 
