@@ -628,15 +628,17 @@ export default function CsvImportApp({
       });
       setIsAiProcessed(allProcessed);
     } else {
-      if (initialFallbackBatchId) {
-        setSaveMsg("Файл недоступен на сервере, открываю текущие товары партии из БД");
-        setBatchId(initialFallbackBatchId);
-        await handleLoadBatch(initialFallbackBatchId);
-      } else {
-        setPathError(res.error || "Не удалось прочитать файл");
-      }
+      setPathError(res.error || "Не удалось прочитать файл");
     }
     setIsLoadingPath(false);
+  };
+
+  const openFallbackBatch = async () => {
+    if (!initialFallbackBatchId) return;
+    setBatchId(initialFallbackBatchId);
+    setLocalPath("");
+    setImportMode("local");
+    await handleLoadBatch(initialFallbackBatchId);
   };
 
   const handleLoadBatch = async (nextBatchId: string) => {
@@ -1517,9 +1519,26 @@ export default function CsvImportApp({
                     </button>
                   </div>
                   {pathError && (
-                    <p className="mt-2 text-sm text-red-400 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" /> {pathError}
-                    </p>
+                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3">
+                      <p className="text-sm text-red-300 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" /> {pathError}
+                      </p>
+                      {initialFallbackBatchId && (
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                          <p className="text-xs text-slate-400">
+                            Этот исторический файл недоступен на текущем сервере. Можно открыть текущую версию партии из Scraping DB, но это не снимок выбранного CSV.
+                          </p>
+                          <button
+                            onClick={openFallbackBatch}
+                            disabled={isLoadingPath}
+                            className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-600 disabled:opacity-50"
+                          >
+                            <Database className="h-3.5 w-3.5" />
+                            Открыть текущую БД-версию
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <p className="mt-3 text-xs text-slate-500">
                     Редактируйте данные, затем нажмите кнопку «Сохранить в файл»
