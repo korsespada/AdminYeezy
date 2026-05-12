@@ -31,6 +31,7 @@ type ModalState = {
   batchId: string | null
   supplierName: string | null
   supplierAvatar: string | null
+  forceFileMode?: boolean
 }
 
 const statusStyles: Record<string, string> = {
@@ -120,6 +121,21 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
       batchId: file.batch_id,
       supplierName: file.supplier_name,
       supplierAvatar: file.supplier_avatar,
+      forceFileMode: Boolean(file.result_path),
+    })
+  }
+
+  const openBatchProducts = (batch: ExportHistoryBatch) => {
+    if (batch.isSynthetic) return
+    setModalState({
+      localPath: '',
+      rawPath: batch.raw_path,
+      aiPath: batch.ai_path,
+      supplierId: batch.supplier_id,
+      batchId: batch.id,
+      supplierName: batch.supplier_name,
+      supplierAvatar: batch.supplier_avatar,
+      forceFileMode: false,
     })
   }
 
@@ -237,6 +253,18 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                       </td>
                       <td className="relative px-6 py-5 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {!batch.isSynthetic && (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openBatchProducts(batch)
+                              }}
+                              className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                              title="Открыть текущие товары партии из БД"
+                            >
+                              БД
+                            </button>
+                          )}
                           <button
                             onClick={(event) => {
                               event.stopPropagation()
@@ -343,6 +371,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
         batchId={modalState?.batchId}
         supplierName={modalState?.supplierName}
         supplierAvatar={modalState?.supplierAvatar}
+        forceFileMode={modalState?.forceFileMode}
       />
     </div>
   )
