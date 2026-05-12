@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+tmp
+scratch
+.env
+.env.*
+*.log
+tsconfig.tsbuildinfo
+coverage
+__tests__
+.vscode

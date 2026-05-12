@@ -17,7 +17,7 @@ describe('Product Properties', () => {
   it('Property 12: Valid product data passes validation', () => {
     fc.assert(
       fc.property(
-        fc.string({ minLength: 1, maxLength: 100 }),
+        fc.string({ minLength: 1, maxLength: 100 }).filter((value) => value.trim().length > 0),
         fc.float({ min: Math.fround(0.01), max: Math.fround(10000), noNaN: true }),
         fc.boolean(),
         (name, price, active) => {
