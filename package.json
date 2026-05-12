@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "db:migrate:scraping": "node scripts/migrate-scraping-schema.js",
+    "db:backfill:batch-products": "node scripts/backfill-batch-products.js",
     "lint": "next lint",
     "test": "vitest",
     "test:ui": "vitest --ui"
