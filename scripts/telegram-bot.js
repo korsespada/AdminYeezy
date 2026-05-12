@@ -49,12 +49,14 @@ connectDB();
 // --- Utils ---
 
 async function notifyTelegram(chatId, supplierName, status, taskId, filePath) {
-  const message = status === 'completed' 
+  const isSuccess = status === 'completed' || status === 'Сырой CSV';
+  const adminUrl = `${process.env.VITE_API_URL || 'http://localhost:3000'}/admin/batches`;
+  const message = isSuccess 
     ? `✅ Выгрузка завершена!\nПоставщик: ${supplierName}\nЗадача: #${taskId}\n\nТеперь вы можете проверить товары в админке.`
     : `❌ Ошибка выгрузки!\nПоставщик: ${supplierName}\nЗадача: #${taskId}`;
 
-  await bot.telegram.sendMessage(chatId, message, status === 'completed' ? Markup.inlineKeyboard([
-    [Markup.button.url('Открыть в админке', `${process.env.VITE_API_URL}/admin/csv-import?localPath=${encodeURIComponent(filePath)}`)]
+  await bot.telegram.sendMessage(chatId, message, isSuccess ? Markup.inlineKeyboard([
+    [Markup.button.url('Открыть в админке', adminUrl)]
   ]) : null);
 }
 

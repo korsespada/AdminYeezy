@@ -50,7 +50,8 @@ function formatDate(value?: string | null) {
   return date.toLocaleDateString('ru-RU')
 }
 
-function fileName(filePath: string) {
+function fileName(filePath?: string | null) {
+  if (!filePath) return 'Товары партии'
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
@@ -112,7 +113,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
 
   const openFile = (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
     setModalState({
-      localPath: file.result_path,
+      localPath: file.result_path || '',
       rawPath: batch.raw_path,
       aiPath: batch.ai_path,
       supplierId: file.supplier_id,
@@ -156,7 +157,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
   }
 
   const handleDeleteFileFromAdmin = async (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
-    if (!confirm(`Удалить файл "${fileName(file.result_path)}" из админки?`)) return
+    if (!confirm(`Удалить этап "${fileName(file.result_path)}" из админки?`)) return
 
     setPendingAction(`file-${file.id}`)
     const res = await deleteExportFileFromAdminAction(file.id)

@@ -37,7 +37,7 @@ export default function CsvModal({
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/95 backdrop-blur-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
       <div className="flex-1 overflow-y-auto w-full h-full">
         <CsvImportApp 
-          initialLocalPath={localPath || aiPath || rawPath}
+          initialLocalPath={batchId ? "" : (localPath || aiPath || rawPath)}
           initialRawPath={rawPath}
           initialAiPath={aiPath}
           initialSupplierId={supplierId}

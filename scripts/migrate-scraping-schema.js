@@ -138,17 +138,18 @@ async function migrate() {
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
-        id TEXT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         external_id TEXT UNIQUE,
         name TEXT,
         description TEXT,
         price DECIMAL(10,2),
         status TEXT,
-        brand TEXT[],
+        brand TEXT,
         category TEXT,
         subcategory TEXT,
         gender TEXT,
         photos JSONB,
+        ai_processed BOOLEAN DEFAULT FALSE,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -162,11 +163,12 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS description TEXT,
         ADD COLUMN IF NOT EXISTS price DECIMAL(10,2),
         ADD COLUMN IF NOT EXISTS status TEXT,
-        ADD COLUMN IF NOT EXISTS brand TEXT[],
+        ADD COLUMN IF NOT EXISTS brand TEXT,
         ADD COLUMN IF NOT EXISTS category TEXT,
         ADD COLUMN IF NOT EXISTS subcategory TEXT,
         ADD COLUMN IF NOT EXISTS gender TEXT,
         ADD COLUMN IF NOT EXISTS photos JSONB,
+        ADD COLUMN IF NOT EXISTS ai_processed BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
@@ -176,6 +178,11 @@ async function migrate() {
       CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_idx
       ON products (external_id)
       WHERE external_id IS NOT NULL;
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS products_batch_id_idx
+      ON products (batch_id);
     `);
 
     await pool.query(`

@@ -27,12 +27,18 @@ import {
   Copy,
   Check,
   Zap,
+  Database,
 } from "lucide-react";
 import {
   pushCsvProductsAction,
   fetchLookupsAction,
   readLocalCsvAction,
   saveLocalCsvAction,
+  getBatchProductsAction,
+  saveBatchProductsAction,
+  updateBatchProductAction,
+  deleteBatchProductAction,
+  exportBatchProductsCsvAction,
   recordAiTaskAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
@@ -50,6 +56,20 @@ import Link from "next/link";
 
 const IMG_SUFFIX =
   "?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg";
+
+const DEFAULT_PRODUCT_COLUMNS = [
+  { name: "external_id", key: "external_id" },
+  { name: "name", key: "name" },
+  { name: "description", key: "description" },
+  { name: "price", key: "price" },
+  { name: "status", key: "status" },
+  { name: "brand", key: "brand" },
+  { name: "category", key: "category" },
+  { name: "subcategory", key: "subcategory" },
+  { name: "gender", key: "gender" },
+  { name: "photos", key: "photos" },
+  { name: "ai_processed", key: "ai_processed" },
+];
 
 // ─── CSV Parsing ───────────────────────────────────────────────────────
 
@@ -429,6 +449,7 @@ export default function CsvImportApp({
   const [bulkSubcategory, setBulkSubcategory] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialBatchId);
+  const isBatchSource = Boolean(batchId);
 
   const [isAiProcessed, setIsAiProcessed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -451,9 +472,10 @@ export default function CsvImportApp({
       setSupplierId(initialSupplierId);
       getSupplierDataAction(initialSupplierId).then(setSupplierData).catch(console.error);
     }
-    if (initialBatchId) setBatchId(initialBatchId);
-
-    if (initialLocalPath) {
+    if (initialBatchId) {
+      setBatchId(initialBatchId);
+      handleLoadBatch(initialBatchId);
+    } else if (initialLocalPath) {
       setLocalPath(initialLocalPath);
       setImportMode("local");
       handleLoadPath(initialLocalPath); // ЗАГРУЖАЕМ НАПРЯМУЮ
@@ -609,16 +631,78 @@ export default function CsvImportApp({
     setIsLoadingPath(false);
   };
 
+  const handleLoadBatch = async (nextBatchId: string) => {
+    setIsLoadingPath(true);
+    setPathError("");
+    setResult(null);
+    setSaveMsg(null);
+    setIsDirty(false);
+    const res = await getBatchProductsAction(nextBatchId);
+    if (res.success && res.data) {
+      setProducts(res.data.products);
+      setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
+      setDelimiter(res.data.delimiter || ";");
+      setFileName(`Партия ${nextBatchId.slice(0, 8)}`);
+      const allProcessed =
+        res.data.products.length > 0 &&
+        res.data.products.every((p: any) => p.ai_processed === true || p.ai_processed === "true");
+      setIsAiProcessed(allProcessed);
+      setImportMode("local");
+    } else {
+      setPathError(res.error || "Не удалось загрузить товары партии");
+    }
+    setIsLoadingPath(false);
+  };
+
+  const persistBatchProducts = async (nextProducts: CsvProduct[]) => {
+    if (!batchId) return true;
+    const res = await saveBatchProductsAction(batchId, nextProducts);
+    if (res.success) {
+      setIsDirty(false);
+      setSaveMsg("✓ Сохранено в БД");
+      setTimeout(() => setSaveMsg(null), 3000);
+      return true;
+    }
+    setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
+    return false;
+  };
+
+  const exportBatchCsv = async () => {
+    if (!batchId) return;
+    const res = await exportBatchProductsCsvAction(batchId);
+    if (!res.success || !res.data) {
+      setSaveMsg("✗ Ошибка экспорта: " + ((res as any).error || "unknown"));
+      return;
+    }
+    const exportData = res.data as { fileName: string; content: string };
+    const blob = new Blob([exportData.content], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = exportData.fileName;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const loadFromPath = async () => {
     await handleLoadPath(localPath);
   };
 
   // ─── Кнопка «Сохранить в файл» ───────────────────────────────────
   const handleSaveToFile = async () => {
-    if (!localPath || products.length === 0) return;
+    if (products.length === 0) return;
     setIsSaving(true);
     setSaveMsg(null);
     try {
+      if (batchId) {
+        await persistBatchProducts(products);
+        setIsSaving(false);
+        return;
+      }
+      if (!localPath) {
+        setIsSaving(false);
+        return;
+      }
       const res = await saveLocalCsvAction(
         localPath,
         products,
@@ -715,7 +799,13 @@ export default function CsvImportApp({
         setProducts([...currentProducts]);
         
         // --- СОХРАНЕНИЕ ПРОГРЕССА ПОСЛЕ КАЖДОЙ ПАЧКИ ---
-        if (localPath) {
+        if (batchId) {
+           try {
+             await saveBatchProductsAction(batchId, currentProducts);
+           } catch(e) {
+             console.warn("Failed to save intermediate DB state:", e);
+           }
+        } else if (localPath) {
            try {
              await saveLocalCsvAction(localPath, currentProducts, columns, delimiter);
            } catch(e) {
@@ -762,8 +852,8 @@ export default function CsvImportApp({
         setColumns(effectiveColumns);
     }
 
-    // Сначала создаем новую запись в истории (AI), если еще не в файле AI
-    if (!localPath.includes('task_ai_')) {
+    // В legacy file mode создаем новый AI CSV; в batch mode рабочее состояние сразу пишется в БД.
+    if (!batchId && !localPath.includes('task_ai_')) {
         try {
             const recordRes = await recordAiTaskAction({
                 supplierId,
@@ -834,7 +924,11 @@ export default function CsvImportApp({
                 setProducts([...effectiveProducts]);
                 
                 try {
-                    await saveLocalCsvAction(currentAiPath, effectiveProducts, effectiveColumns, delimiter);
+                    if (batchId) {
+                      await saveBatchProductsAction(batchId, effectiveProducts);
+                    } else {
+                      await saveLocalCsvAction(currentAiPath, effectiveProducts, effectiveColumns, delimiter);
+                    }
                 } catch(e) {
                     console.warn("Failed to save intermediate AI state:", e);
                 }
@@ -851,6 +945,9 @@ export default function CsvImportApp({
     });
     
     setIsAiProcessed(allProcessed);
+    if (batchId && allProcessed) {
+      await updateBatchStageAction(batchId, 'AI_PROCESSED');
+    }
     setIsDirty(false);
     setTimeout(() => setSaveMsg(null), 5000);
     setIsProcessing(false);
@@ -862,16 +959,20 @@ export default function CsvImportApp({
   };
 
   const handleCustomScriptProcess = async () => {
-    if (!supplierId || !localPath) return;
+    if (!supplierId || (!localPath && !batchId)) return;
     setIsRunningCustomScript(true);
     setSaveMsg("Запуск скрипта...");
     
-    const res = await runCustomSupplierScriptAction(localPath, supplierId, batchId);
+    const res = await runCustomSupplierScriptAction(localPath || null, supplierId, batchId);
     
     if (res.success && res.path) {
-        setLocalPath(res.path);
-        localStorage.setItem("csv_local_path", res.path);
-        await handleLoadPath(res.path);
+        if (batchId) {
+          await handleLoadBatch(batchId);
+        } else {
+          setLocalPath(res.path);
+          localStorage.setItem("csv_local_path", res.path);
+          await handleLoadPath(res.path);
+        }
         setSaveMsg("✓ Скрипт успешно отработал!");
         setTimeout(() => setSaveMsg(null), 5000);
     } else {
@@ -884,17 +985,52 @@ export default function CsvImportApp({
 
   const updateProduct = useCallback(
     (index: number, field: keyof CsvProduct, value: any) => {
+      const currentProduct = products[index];
       setProducts((prev) =>
         prev.map((p, i) => (i === index ? { ...p, [field]: value } : p)),
       );
       setIsDirty(true);
+      if (batchId && currentProduct) {
+        const identifier = currentProduct.id || currentProduct.external_id;
+        if (identifier) {
+          updateBatchProductAction(identifier, { [field]: value } as Partial<CsvProduct>, batchId)
+            .then((res) => {
+              if (res.success) {
+                setIsDirty(false);
+                setSaveMsg("✓ Сохранено в БД");
+                setTimeout(() => setSaveMsg(null), 2500);
+              } else {
+                setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
+              }
+            })
+            .catch((error) => setSaveMsg("✗ Ошибка БД: " + error.message));
+        }
+      }
     },
-    [],
+    [batchId, products],
   );
 
   const handleRemove = useCallback((index: number) => {
-    setProducts((prev) => prev.filter((_, i) => i !== index));
+    const productToRemove = products[index];
+    const nextProducts = products.filter((_, i) => i !== index);
+    setProducts(nextProducts);
     setIsDirty(true);
+    if (batchId && productToRemove) {
+      const identifier = productToRemove.id || productToRemove.external_id;
+      if (identifier) {
+        deleteBatchProductAction(identifier, batchId)
+          .then((res) => {
+            if (res.success) {
+              setIsDirty(false);
+              setSaveMsg("✓ Удалено из БД");
+              setTimeout(() => setSaveMsg(null), 2500);
+            } else {
+              setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
+            }
+          })
+          .catch((error) => setSaveMsg("✗ Ошибка БД: " + error.message));
+      }
+    }
     setSelectedIdx((prev) => {
       if (prev === index) return null;
       if (prev !== null && prev > index) return prev - 1;
@@ -907,7 +1043,7 @@ export default function CsvImportApp({
           selectedIndex > index ? selectedIndex - 1 : selectedIndex,
         ),
     );
-  }, []);
+  }, [batchId, products]);
 
   const handleClear = () => {
     setProducts([]);
@@ -948,9 +1084,13 @@ export default function CsvImportApp({
 
     setPreviousProducts([...products]);
     setProducts((prev) =>
-      prev.map((product, index) =>
-        selectedForMerge.includes(index) ? { ...product, ...updates } : product,
-      ),
+      {
+        const next = prev.map((product, index) =>
+          selectedForMerge.includes(index) ? { ...product, ...updates } : product,
+        );
+        if (batchId) persistBatchProducts(next);
+        return next;
+      },
     );
     setSelectedForMerge([]);
     setBulkBrand("");
@@ -986,6 +1126,7 @@ export default function CsvImportApp({
       sortedIndicesToRemove.forEach((idx) => {
         next.splice(idx, 1);
       });
+      if (batchId) persistBatchProducts(next);
       return next;
     });
 
@@ -998,6 +1139,7 @@ export default function CsvImportApp({
       setProducts(previousProducts);
       setPreviousProducts(null);
       setIsDirty(true);
+      if (batchId) persistBatchProducts(previousProducts);
     }
   };
 
@@ -1060,7 +1202,15 @@ export default function CsvImportApp({
         setProducts([...nextProducts]);
         setIsDirty(true);
 
-        if (localPath) {
+        if (batchId) {
+          const saveRes = await saveBatchProductsAction(batchId, nextProducts);
+          if (saveRes.success) {
+            setIsDirty(false);
+          } else {
+            errors.push(`Ошибка сохранения БД: ${saveRes.error || "unknown"}`);
+            break;
+          }
+        } else if (localPath) {
           const saveRes = await saveLocalCsvAction(localPath, nextProducts, columns, delimiter);
           if (saveRes.success) {
             setIsDirty(false);
@@ -1104,6 +1254,7 @@ export default function CsvImportApp({
         )}
         
         {/* Compact Mode Switchers */}
+        {!isBatchSource && (
         <div className="flex items-center gap-4 mb-8 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700/50 w-fit">
           <button
             onClick={() => handleModeChange("upload")}
@@ -1120,6 +1271,7 @@ export default function CsvImportApp({
             Локальный файл
           </button>
         </div>
+        )}
 
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
@@ -1178,7 +1330,7 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {importMode === "local" && (
+              {(importMode === "local" || isBatchSource) && (
                 <div className="flex flex-col items-center relative">
                   <button
                     onClick={handleSaveToFile}
@@ -1189,7 +1341,7 @@ export default function CsvImportApp({
                       }`}
                   >
                     <Save className="w-4 h-4" />
-                    {isSaving ? "Сохраняю..." : "Сохранить файл"}
+                    {isSaving ? "Сохраняю..." : isBatchSource ? "Сохранить БД" : "Сохранить файл"}
                   </button>
                   {saveMsg && (
                     <span className={`absolute -bottom-6 text-[10px] font-bold whitespace-nowrap animate-in fade-in slide-in-from-top-1 ${saveMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -1199,12 +1351,33 @@ export default function CsvImportApp({
                 </div>
               )}
 
-              <button
-                onClick={handleClear}
-                className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
-              >
-                Очистить
-              </button>
+              {isBatchSource && (
+                <button
+                  onClick={exportBatchCsv}
+                  className="px-4 py-2 text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 rounded-lg transition-all flex items-center gap-2"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Скачать CSV
+                </button>
+              )}
+
+              {isBatchSource ? (
+                <button
+                  onClick={() => batchId && handleLoadBatch(batchId)}
+                  disabled={isLoadingPath}
+                  className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingPath ? "animate-spin" : ""}`} />
+                  Обновить из БД
+                </button>
+              ) : (
+                <button
+                  onClick={handleClear}
+                  className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                >
+                  Очистить
+                </button>
+              )}
 
               {supplierData?.post_process_script && (
                 <button
@@ -1263,7 +1436,7 @@ export default function CsvImportApp({
           </div>
         )}
         {/* Input Area */}
-        {products.length === 0 && (
+        {products.length === 0 && !isBatchSource && (
           <div className="max-w-2xl mx-auto mb-10">
             {importMode === "upload" ? (
               <div
@@ -1443,12 +1616,12 @@ export default function CsvImportApp({
                 <h4 className="text-sm font-medium text-white">{fileName}</h4>
                 <p className="text-xs text-slate-500">
                   {importMode === "local"
-                    ? "Редактирование локального файла"
+                    ? isBatchSource ? "Редактирование товаров партии в Scraping DB" : "Редактирование локального файла"
                     : "Просмотр перед импортом"}
                 </p>
               </div>
             </div>
-            {importMode === "local" && isDirty && (
+            {(importMode === "local" || isBatchSource) && isDirty && (
               <div className="flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
                 <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                 <span className="text-xs font-medium text-amber-400">
@@ -1587,6 +1760,7 @@ export default function CsvImportApp({
                   {targetedAiMsg}
                 </div>
               )}
+
             </div>
 
             <label className="mb-3 inline-flex items-center gap-2 text-xs font-medium text-slate-300">
@@ -1625,6 +1799,26 @@ export default function CsvImportApp({
                 )}
               </button>
             </div>
+          </div>
+        )}
+
+        {products.length === 0 && isBatchSource && (
+          <div className="mx-auto mb-10 max-w-2xl rounded-2xl border border-slate-700 bg-slate-800 p-10 text-center shadow-xl">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900">
+              <Database className="h-7 w-7 text-slate-500" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold text-white">В партии нет товаров</h3>
+            <p className="text-sm text-slate-400">
+              Если товары были изменены через NocoDB, обновите партию из базы.
+            </p>
+            <button
+              onClick={() => batchId && handleLoadBatch(batchId)}
+              disabled={isLoadingPath}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isLoadingPath ? "animate-spin" : ""}`} />
+              Обновить из БД
+            </button>
           </div>
         )}
 
