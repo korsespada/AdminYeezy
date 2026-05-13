@@ -46,6 +46,7 @@ async function migrate() {
         ai_parallel_enabled BOOLEAN DEFAULT FALSE,
         ai_parallel_count INTEGER DEFAULT 5,
         parse_tags_enabled BOOLEAN DEFAULT FALSE,
+        is_favorite BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -80,6 +81,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS ai_parallel_enabled BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS ai_parallel_count INTEGER DEFAULT 5,
         ADD COLUMN IF NOT EXISTS parse_tags_enabled BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);
@@ -134,6 +136,59 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS end_date TEXT,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS scraping_files (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER UNIQUE REFERENCES scraping_tasks(id) ON DELETE CASCADE,
+        batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
+        supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+        status TEXT,
+        file_name TEXT NOT NULL,
+        result_path TEXT,
+        mime_type TEXT DEFAULT 'text/csv',
+        size_bytes INTEGER DEFAULT 0,
+        content TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      ALTER TABLE scraping_files
+        ADD COLUMN IF NOT EXISTS task_id INTEGER UNIQUE REFERENCES scraping_tasks(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
+        ADD COLUMN IF NOT EXISTS supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS status TEXT,
+        ADD COLUMN IF NOT EXISTS file_name TEXT,
+        ADD COLUMN IF NOT EXISTS result_path TEXT,
+        ADD COLUMN IF NOT EXISTS mime_type TEXT DEFAULT 'text/csv',
+        ADD COLUMN IF NOT EXISTS size_bytes INTEGER DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS content TEXT,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS scraping_files_batch_id_idx
+      ON scraping_files (batch_id);
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS scraping_files_task_id_idx
+      ON scraping_files (task_id)
+      WHERE task_id IS NOT NULL;
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS scraping_files_result_path_idx
+      ON scraping_files (result_path);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS scraping_files_file_name_idx
+      ON scraping_files (file_name);
     `);
 
     await pool.query(`

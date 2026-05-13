@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { Plus, Edit2, Trash2, Play, ExternalLink, Calendar, Search, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
-import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction } from '@/actions/suppliers'
+import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
 import { useRouter } from 'next/navigation'
 
 interface Supplier {
@@ -32,6 +32,7 @@ interface Supplier {
   ai_parallel_enabled: boolean
   ai_parallel_count: number
   parse_tags_enabled: boolean
+  is_favorite?: boolean
 }
 
 interface TagRow {
@@ -56,25 +57,17 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
   const [endDate, setEndDate] = useState('')
   const [overrideValue, setOverrideValue] = useState('') // Format: "type:id"
 
-  const [favorites, setFavorites] = useState<number[]>([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
 
-  React.useEffect(() => {
-    const saved = localStorage.getItem('supplierFavorites')
-    if (saved) {
-      try {
-        setFavorites(JSON.parse(saved))
-      } catch (e) {}
+  const toggleFavorite = async (id: number) => {
+    setSuppliers(prev => prev.map(s => s.id === id ? { ...s, is_favorite: !s.is_favorite } : s))
+    const res = await toggleSupplierFavoriteAction(id)
+    if (!res.success) {
+      setSuppliers(prev => prev.map(s => s.id === id ? { ...s, is_favorite: !s.is_favorite } : s))
+      alert(res.error)
+    } else {
+      setSuppliers(prev => prev.map(s => s.id === id ? { ...s, is_favorite: res.data } : s))
     }
-  }, [])
-
-  const toggleFavorite = (id: number) => {
-    setFavorites(prev => {
-      const isFav = prev.includes(id)
-      const newFavs = isFav ? prev.filter(f => f !== id) : [...prev, id]
-      localStorage.setItem('supplierFavorites', JSON.stringify(newFavs))
-      return newFavs
-    })
   }
 
   // Dynamic tags in modal
@@ -124,7 +117,8 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
         ai_photo_instructions: '',
         ai_parallel_enabled: false,
         ai_parallel_count: 5,
-        parse_tags_enabled: false
+        parse_tags_enabled: false,
+        is_favorite: false
       })
       setModalTags([])
     }
@@ -294,9 +288,9 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {suppliers.filter(s => showFavoritesOnly ? favorites.includes(s.id) : true).map(s => {
+        {suppliers.filter(s => showFavoritesOnly ? s.is_favorite : true).map(s => {
           const brandTags = parseBrandTags(s.brand_tags)
-          const isFav = favorites.includes(s.id)
+          const isFav = Boolean(s.is_favorite)
           return (
             <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg group flex flex-col h-full">
               <div className="flex-1">

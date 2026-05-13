@@ -11,6 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
+  Send,
   Trash2,
 } from 'lucide-react'
 import {
@@ -18,6 +19,7 @@ import {
   deleteExportBatchFromAdminAction,
   deleteExportFileFromAdminAction,
   getExportHistoryAction,
+  pushBatchToCatalogAction,
   type ExportHistoryBatch,
   type ExportHistoryFile,
 } from '@/actions/suppliers'
@@ -187,6 +189,23 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
     setPendingAction(null)
   }
 
+  const handlePushBatch = async (batch: ExportHistoryBatch) => {
+    if (batch.isSynthetic) return
+    if (!confirm(`Запушить товары выгрузки "${batch.name}" в каталог?`)) return
+
+    setPendingAction(`push-${batch.id}`)
+    const res = await pushBatchToCatalogAction(batch.id)
+    if (res.success) {
+      const pushed = res.data?.success || 0
+      const failed = res.data?.failed || 0
+      setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено' } : item))
+      alert(`Пуш завершен. Успешно: ${pushed}, ошибок: ${failed}`)
+    } else {
+      alert(`Ошибка пуша: ${res.error}`)
+    }
+    setPendingAction(null)
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -263,6 +282,20 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                               title="Открыть текущие товары партии из БД"
                             >
                               БД
+                            </button>
+                          )}
+                          {!batch.isSynthetic && batch.status !== 'Запушено' && batch.status !== 'Удалено из БД' && (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handlePushBatch(batch)
+                              }}
+                              disabled={pendingAction === `push-${batch.id}`}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-60"
+                              title="Запушить товары в каталог"
+                            >
+                              {pendingAction === `push-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                              Пуш
                             </button>
                           )}
                           <button

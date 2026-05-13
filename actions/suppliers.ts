@@ -10,6 +10,11 @@ import fs from 'fs'
 import crypto from 'crypto'
 import nodeFetch from 'node-fetch'
 import { HttpsProxyAgent } from 'https-proxy-agent'
+import {
+  deleteScrapingFileArtifactForTask,
+  deleteScrapingFileArtifactsForBatch,
+  saveScrapingFileArtifact,
+} from '@/lib/scraping-files'
 
 // --- Suppliers CRUD ---
 
@@ -422,6 +427,22 @@ async function forwardScrapingToWorker(supplierId: number, endDate?: string, ove
   }
 }
 
+export async function toggleSupplierFavoriteAction(id: number): Promise<ActionResponse> {
+  try {
+    const res = await scrapingQuery(
+      `UPDATE suppliers
+       SET is_favorite = NOT COALESCE(is_favorite, FALSE), updated_at = NOW()
+       WHERE id = $1
+       RETURNING is_favorite`,
+      [id],
+    )
+    revalidatePath('/admin/suppliers')
+    return { success: true, data: res.rows[0]?.is_favorite === true }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
   const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
   if (workerResult) return workerResult
@@ -506,6 +527,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     pythonProcess.on('close', async (code) => {
       const status = code === 0 ? 'Сырой CSV' : 'failed'
       const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`)
+      let batchId: string | null = null
       
       let itemsCount = 0
       if (code === 0 && fs.existsSync(outputPath)) {
@@ -536,7 +558,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
             const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`
             
             // 2. Создаем партию
-            const batchId = crypto.randomUUID()
+            batchId = crypto.randomUUID()
             await scrapingQuery(
                'INSERT INTO scraping_batches (id, name, supplier_id, items_count) VALUES ($1, $2, $3, $4)',
                [batchId, batchName, supplier.id, itemsCount]
@@ -610,6 +632,18 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
         } catch (importErr) {
           console.error(`[Scraper ${taskId}] Import failed:`, importErr)
         }
+
+        try {
+          await saveScrapingFileArtifact({
+            taskId,
+            supplierId: supplier.id,
+            batchId,
+            status,
+            filePath: outputPath,
+          })
+        } catch (fileErr) {
+          console.error(`[Scraper ${taskId}] Failed to store CSV artifact in DB:`, fileErr)
+        }
       }
 
       // Уведомление в Telegram
@@ -631,6 +665,7 @@ export async function deleteTaskAction(taskId: number): Promise<ActionResponse> 
   try {
     const res = await scrapingQuery('SELECT result_path FROM scraping_tasks WHERE id=$1', [taskId])
     const filePath = res.rows[0]?.result_path
+    await deleteScrapingFileArtifactForTask(taskId)
     
     if (filePath && fs.existsSync(filePath)) {
       try {
@@ -671,6 +706,7 @@ export async function deleteExportBatchFromAdminAction(batchId: string): Promise
         }
 
         await scrapingQuery('DELETE FROM scraping_tasks WHERE batch_id = $1', [batchId])
+        await deleteScrapingFileArtifactsForBatch(batchId)
         await scrapingQuery("UPDATE scraping_batches SET stage = 'ADMIN_DELETED' WHERE id = $1", [batchId])
 
         revalidatePath('/admin/scraping')
@@ -738,6 +774,24 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
         await scrapingQuery('UPDATE scraping_batches SET stage = $1 WHERE id = $2', [stage, batchId])
         revalidatePath('/admin/batches')
         return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
+export async function pushBatchToCatalogAction(batchId: string): Promise<ActionResponse> {
+    try {
+        const workflow = require('../scripts/batch-workflow')
+        const result = await workflow.pushBatchToCatalog(batchId)
+        try {
+            await redis.del('catalog:all')
+        } catch (redisErr: any) {
+            console.warn('Redis clear cache error:', redisErr.message)
+        }
+        revalidatePath('/admin')
+        revalidatePath('/admin/batches')
+        revalidatePath('/admin/scraping')
+        return { success: true, data: result }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

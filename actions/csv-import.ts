@@ -3,6 +3,7 @@
 import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { uploadToS3 } from '@/lib/s3'
+import { getScrapingFileArtifact, saveScrapingFileArtifact } from '@/lib/scraping-files'
 
 export interface CsvProduct {
     id?: string | number
@@ -281,7 +282,13 @@ export async function pushCsvProductsAction(products: CsvProduct[]) {
 export async function readLocalCsvAction(filePath: string) {
   const fs = require('fs/promises');
   try {
-    const buffer = await fs.readFile(filePath.replace(/"/g, ''));
+    const cleanPath = filePath.replace(/"/g, '');
+    const dbFile = await getScrapingFileArtifact(cleanPath);
+    if (dbFile?.content) {
+      return { success: true, content: dbFile.content, source: 'db' };
+    }
+
+    const buffer = await fs.readFile(cleanPath);
     
     // Пробуем разные кодировки
     const encodings = ['utf-8', 'gbk', 'windows-1251'];
@@ -564,7 +571,7 @@ export async function deleteBatchProductAction(identifier: string | number, batc
   }
 }
 
-export async function exportBatchProductsCsvAction(batchId: string) {
+export async function exportBatchProductsCsvAction(batchId: string): Promise<any> {
   try {
     const res = await getBatchProductsAction(batchId)
     if (!res.success || !res.data) return res
@@ -610,10 +617,19 @@ export async function recordAiTaskAction({
     if (!saveRes.success) throw new Error(saveRes.error);
 
     // 3. Создаем запись в технической БД (scraping_tasks)
-    await scrapingQuery(`
+    const taskRes = await scrapingQuery(`
       INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
+      RETURNING id
     `, [supplierId, batchId || null, 'Обработано ИИ', outputPath, products.length]);
+
+    await saveScrapingFileArtifact({
+      taskId: taskRes.rows[0].id,
+      supplierId,
+      batchId,
+      status: 'Обработано ИИ',
+      filePath: outputPath,
+    });
 
     // 4. Обновляем стадию партии (если она есть)
     if (batchId) {
@@ -705,10 +721,19 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
 
                 // Создаем запись в истории
                 try {
-                    await scrapingQuery(`
+                    const taskRes = await scrapingQuery(`
                         INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
                         VALUES ($1, $2, $3, $4, $5, NOW())
+                        RETURNING id
                     `, [supplierId, batchId || null, 'Обработано скриптом', outputPath, itemsCount]);
+
+                    await saveScrapingFileArtifact({
+                        taskId: taskRes.rows[0].id,
+                        supplierId,
+                        batchId,
+                        status: 'Обработано скриптом',
+                        filePath: outputPath,
+                    });
 
                     if (batchId && fs.existsSync(outputPath)) {
                         const processedText = fs.readFileSync(outputPath, 'utf-8');
