@@ -5,6 +5,7 @@ import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
 import { scrapingQuery } from '@/lib/db'
+import { getScrapingFileArtifact } from '@/lib/scraping-files'
 
 const execAsync = promisify(exec)
 
@@ -25,6 +26,11 @@ type SourceCsvContext = {
   sourcePath?: string
   byExternalId: Map<string, any>
   rows: any[]
+}
+
+type ResolvedSourcePath = {
+  filePath: string
+  taskId?: number | null
 }
 
 const DEFAULT_MODEL = 'google/gemini-2.0-flash-lite:free'
@@ -174,19 +180,37 @@ async function resolveSourcePath({
   batchId?: string | null
   currentPath?: string | null
   sourcePath?: string | null
-}) {
+}): Promise<ResolvedSourcePath | undefined> {
+  async function isReadableSource(filePath?: string | null, taskId?: number | null) {
+    if (!filePath) return false
+    if (fs.existsSync(filePath)) return true
+
+    try {
+      const artifact = await getScrapingFileArtifact(filePath, taskId)
+      return Boolean(artifact?.content)
+    } catch {
+      return false
+    }
+  }
+
   const cleanSourcePath = sourcePath?.replace(/"/g, '')
-  if (cleanSourcePath && fs.existsSync(cleanSourcePath)) return cleanSourcePath
+  if (cleanSourcePath && await isReadableSource(cleanSourcePath)) {
+    return { filePath: cleanSourcePath }
+  }
 
   const cleanCurrentPath = currentPath?.replace(/"/g, '')
-  if (cleanCurrentPath && fs.existsSync(cleanCurrentPath) && /task_custom_/i.test(path.basename(cleanCurrentPath))) {
-    return cleanCurrentPath
+  if (
+    cleanCurrentPath &&
+    /task_custom_/i.test(path.basename(cleanCurrentPath)) &&
+    await isReadableSource(cleanCurrentPath)
+  ) {
+    return { filePath: cleanCurrentPath }
   }
 
   if (batchId) {
     const res = await scrapingQuery(
       `
-        SELECT result_path, status, created_at
+        SELECT id, result_path, status, created_at
         FROM scraping_tasks
         WHERE batch_id = $1
           AND result_path IS NOT NULL
@@ -199,11 +223,17 @@ async function resolveSourcePath({
       `,
       [batchId],
     )
-    const candidate = res.rows[0]?.result_path?.replace(/"/g, '')
-    if (candidate && fs.existsSync(candidate)) return candidate
+    for (const row of res.rows) {
+      const candidate = row.result_path?.replace(/"/g, '')
+      if (candidate && await isReadableSource(candidate, row.id)) {
+        return { filePath: candidate, taskId: row.id }
+      }
+    }
   }
 
-  if (cleanCurrentPath && fs.existsSync(cleanCurrentPath)) return cleanCurrentPath
+  if (cleanCurrentPath && await isReadableSource(cleanCurrentPath)) {
+    return { filePath: cleanCurrentPath }
+  }
   return undefined
 }
 
@@ -212,21 +242,28 @@ async function loadSourceCsvContext(params: {
   currentPath?: string | null
   sourcePath?: string | null
 }): Promise<SourceCsvContext> {
-  const resolvedPath = await resolveSourcePath(params)
-  if (!resolvedPath) return { byExternalId: new Map(), rows: [] }
+  const resolved = await resolveSourcePath(params)
+  if (!resolved) return { byExternalId: new Map(), rows: [] }
 
   try {
-    const text = fs.readFileSync(resolvedPath, 'utf-8')
+    let text = ''
+    const artifact = await getScrapingFileArtifact(resolved.filePath, resolved.taskId)
+    if (artifact?.content) {
+      text = artifact.content
+    } else {
+      text = fs.readFileSync(resolved.filePath, 'utf-8')
+    }
+
     const rows = parseCsvText(text)
     const byExternalId = new Map<string, any>()
     rows.forEach((row, index) => {
       row.__source_index = index
       if (row.external_id) byExternalId.set(String(row.external_id), row)
     })
-    return { sourcePath: resolvedPath, byExternalId, rows }
+    return { sourcePath: resolved.filePath, byExternalId, rows }
   } catch (error) {
     console.warn('[targetedAiEdit] Failed to read source CSV:', error)
-    return { sourcePath: resolvedPath, byExternalId: new Map(), rows: [] }
+    return { sourcePath: resolved.filePath, byExternalId: new Map(), rows: [] }
   }
 }
 
