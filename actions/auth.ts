@@ -5,6 +5,25 @@ import { redirect } from 'next/navigation'
 import { query } from '@/lib/db'
 import type { ActionResponse } from '@/lib/types'
 
+const ADMIN_ENTRY_PATH = '/admin/batches'
+
+function setAdminSession(admin: { id: string | number; email: string }) {
+  const cookieStore = cookies()
+  const sessionData = JSON.stringify({
+    id: admin.id,
+    email: admin.email,
+    role: 'admin',
+  })
+
+  cookieStore.set('admin_auth', sessionData, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 7, // 1 неделя
+    path: '/',
+  })
+}
+
 /**
  * Вход в админку
  */
@@ -17,6 +36,15 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
   }
 
   try {
+    const localAdminEmail = process.env.LOCAL_ADMIN_EMAIL?.trim()
+    const localAdminPassword = process.env.LOCAL_ADMIN_PASSWORD?.trim()
+    const isLocalAdminEnabled = process.env.NODE_ENV !== 'production' && localAdminEmail && localAdminPassword
+
+    if (isLocalAdminEnabled && email === localAdminEmail && password === localAdminPassword) {
+      setAdminSession({ id: 'local-admin', email })
+      redirect(ADMIN_ENTRY_PATH)
+    }
+
     // ВАЖНО: Мы ищем пользователя в таблице 'admins'. 
     // Предполагается, что пароли пока лежат в открытом виде или вы проверите их совпадение.
     // Для безопасности потом добавим хеширование (bcrypt).
@@ -27,30 +55,18 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
     }
 
     const admin = res.rows[0]
-
-    // Сохраняем данные сессии
-    const cookieStore = cookies()
-    const sessionData = JSON.stringify({
-      id: admin.id,
-      email: admin.email,
-      role: 'admin'
-    })
-
-    // Используем то же имя куки для совместимости или меняем на новое
-    cookieStore.set('admin_auth', sessionData, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 1 неделя
-      path: '/',
-    })
+    setAdminSession({ id: admin.id, email: admin.email })
 
   } catch (error: any) {
+    if (error?.digest?.startsWith('NEXT_REDIRECT') || error?.message === 'NEXT_REDIRECT') {
+      throw error
+    }
+
     console.error('Login error:', error)
     return { success: false, error: `Ошибка базы данных: ${error.message}` }
   }
 
-  redirect('/admin')
+  redirect(ADMIN_ENTRY_PATH)
 }
 
 /**

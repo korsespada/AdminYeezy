@@ -10,6 +10,11 @@ import fs from 'fs'
 import crypto from 'crypto'
 import nodeFetch from 'node-fetch'
 import { HttpsProxyAgent } from 'https-proxy-agent'
+import {
+  deleteScrapingFileArtifactForTask,
+  deleteScrapingFileArtifactsForBatch,
+  saveScrapingFileArtifact,
+} from '@/lib/scraping-files'
 
 // --- Suppliers CRUD ---
 
@@ -202,7 +207,7 @@ export interface ExportHistoryFile {
   supplier_avatar: string | null
   batch_id: string | null
   status: string
-  result_path: string
+  result_path: string | null
   items_count: number
   error_message: string | null
   end_date: string | null
@@ -245,6 +250,39 @@ function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[]) 
   return 'Сырой CSV'
 }
 
+function parseDelimitedLine(line: string, delimiter = ';') {
+  const values: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    const nextChar = line[i + 1]
+    if (inQuotes) {
+      if (char === '"') {
+        if (nextChar === '"') {
+          current += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        current += char
+      }
+    } else if (char === '"') {
+      inQuotes = true
+    } else if (char === delimiter) {
+      values.push(current.trim())
+      current = ''
+    } else {
+      current += char
+    }
+  }
+
+  values.push(current.trim())
+  return values
+}
+
 export async function getExportHistoryAction(): Promise<ActionResponse> {
   try {
     const res = await scrapingQuery(`
@@ -269,9 +307,11 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       FROM scraping_tasks t
       LEFT JOIN suppliers s ON t.supplier_id = s.id
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
-      WHERE t.result_path IS NOT NULL
-        AND t.result_path <> ''
-        AND COALESCE(b.stage, '') <> 'ADMIN_DELETED'
+      WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
+        AND (
+          t.result_path IS NOT NULL
+          OR t.batch_id IS NOT NULL
+        )
       ORDER BY COALESCE(b.created_at, t.created_at) DESC, t.created_at DESC
       LIMIT 500
     `)
@@ -351,7 +391,65 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
   }
 }
 
+async function forwardScrapingToWorker(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse | null> {
+  const workerUrl = process.env.SCRAPER_WORKER_URL?.replace(/\/+$/, '')
+  if (!workerUrl) return null
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (process.env.SCRAPER_WORKER_SECRET) {
+      headers.Authorization = `Bearer ${process.env.SCRAPER_WORKER_SECRET}`
+    }
+
+    const response = await fetch(`${workerUrl}/api/scraping/start`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ supplierId, endDate, overrideTag, overrideGroup }),
+      cache: 'no-store',
+    })
+
+    const payload = await response.json().catch(() => null)
+    if (!response.ok) {
+      return {
+        success: false,
+        error: payload?.error || `Worker returned ${response.status}`,
+      }
+    }
+
+    return payload
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Не удалось отправить выгрузку на worker: ${err.message}`,
+    }
+  }
+}
+
+export async function toggleSupplierFavoriteAction(id: number): Promise<ActionResponse> {
+  try {
+    const res = await scrapingQuery(
+      `UPDATE suppliers
+       SET is_favorite = NOT COALESCE(is_favorite, FALSE), updated_at = NOW()
+       WHERE id = $1
+       RETURNING is_favorite`,
+      [id],
+    )
+    revalidatePath('/admin/suppliers')
+    return { success: true, data: res.rows[0]?.is_favorite === true }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
+  const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
+  if (workerResult) return workerResult
+  return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup)
+}
+
+export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
   try {
     // 1. Получаем данные поставщика
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
@@ -429,6 +527,7 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
     pythonProcess.on('close', async (code) => {
       const status = code === 0 ? 'Сырой CSV' : 'failed'
       const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`)
+      let batchId: string | null = null
       
       let itemsCount = 0
       if (code === 0 && fs.existsSync(outputPath)) {
@@ -459,7 +558,7 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
             const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`
             
             // 2. Создаем партию
-            const batchId = crypto.randomUUID()
+            batchId = crypto.randomUUID()
             await scrapingQuery(
                'INSERT INTO scraping_batches (id, name, supplier_id, items_count) VALUES ($1, $2, $3, $4)',
                [batchId, batchName, supplier.id, itemsCount]
@@ -473,10 +572,9 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
 
             // 3. Импортируем товары
             // Простой парсер CSV (учитывая кавычки в описании и разделитель ;)
-            const headers = lines[0].split(';')
+            const headers = parseDelimitedLine(lines[0], ';')
             for (let i = 1; i < lines.length; i++) {
-               // Используем regex для корректного разбиения CSV с учетом кавычек и ;
-               const row = lines[i].match(/(".*?"|[^";]+)(?=\s*;|\s*$)/g)?.map(v => v.replace(/^"|"$/g, '').trim()) || []
+               const row = parseDelimitedLine(lines[i], ';')
                if (row.length === 0) continue
 
                const item: any = {}
@@ -484,18 +582,19 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
                   item[h.trim()] = row[idx] || ''
                })
 
-               // Генерация ID
-               const id = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 9);
-
                // Мапим поля в БД
                const sql = `
-                  INSERT INTO products (id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, created_at, updated_at)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
+                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, created_at, updated_at)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW(), NOW())
                   ON CONFLICT (external_id) DO UPDATE SET
                       name = EXCLUDED.name,
                       description = EXCLUDED.description,
                       price = EXCLUDED.price,
+                      status = EXCLUDED.status,
                       brand = EXCLUDED.brand,
+                      category = EXCLUDED.category,
+                      subcategory = EXCLUDED.subcategory,
+                      gender = EXCLUDED.gender,
                       photos = EXCLUDED.photos,
                       batch_id = EXCLUDED.batch_id,
                       created_at = COALESCE(products.created_at, NOW()),
@@ -507,17 +606,20 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
                const cat = item.category || supplier.default_category || ''
                const sub = item.subcategory || supplier.default_subcategory || ''
                const brandStr = item.brand || supplier.default_brand || ''
-               const brands = brandStr ? [brandStr] : []
-               const photos = item.photos ? JSON.parse(item.photos) : []
+               let photos: string[] = []
+               try {
+                 photos = item.photos ? JSON.parse(item.photos) : []
+               } catch {
+                 photos = []
+               }
 
                await scrapingQuery(sql, [
-                  id,
                   item.external_id, 
                   item.name || 'Без названия',
                   item.description || '',
                   price,
                   'inactive',
-                  brands,
+                  brandStr,
                   cat,
                   sub || null,
                   gender,
@@ -529,6 +631,18 @@ export async function startScrapingAction(supplierId: number, endDate?: string, 
           }
         } catch (importErr) {
           console.error(`[Scraper ${taskId}] Import failed:`, importErr)
+        }
+
+        try {
+          await saveScrapingFileArtifact({
+            taskId,
+            supplierId: supplier.id,
+            batchId,
+            status,
+            filePath: outputPath,
+          })
+        } catch (fileErr) {
+          console.error(`[Scraper ${taskId}] Failed to store CSV artifact in DB:`, fileErr)
         }
       }
 
@@ -551,6 +665,7 @@ export async function deleteTaskAction(taskId: number): Promise<ActionResponse> 
   try {
     const res = await scrapingQuery('SELECT result_path FROM scraping_tasks WHERE id=$1', [taskId])
     const filePath = res.rows[0]?.result_path
+    await deleteScrapingFileArtifactForTask(taskId)
     
     if (filePath && fs.existsSync(filePath)) {
       try {
@@ -591,6 +706,7 @@ export async function deleteExportBatchFromAdminAction(batchId: string): Promise
         }
 
         await scrapingQuery('DELETE FROM scraping_tasks WHERE batch_id = $1', [batchId])
+        await deleteScrapingFileArtifactsForBatch(batchId)
         await scrapingQuery("UPDATE scraping_batches SET stage = 'ADMIN_DELETED' WHERE id = $1", [batchId])
 
         revalidatePath('/admin/scraping')
@@ -608,7 +724,8 @@ async function notifyTelegram(supplierName: string, status: string, taskId: numb
   
   if (!token || chatIds.length === 0) return
 
-  const message = status === 'completed' 
+  const isSuccess = status === 'completed' || status === 'Сырой CSV'
+  const message = isSuccess 
     ? `✅ Выгрузка завершена!\nПоставщик: ${supplierName}\nЗадача: #${taskId}\nВыгружено товаров: ${itemsCount}\n\nТеперь вы можете проверить товары в админке.`
     : `❌ Ошибка выгрузки!\nПоставщик: ${supplierName}\nЗадача: #${taskId}`
 
@@ -624,7 +741,7 @@ async function notifyTelegram(supplierName: string, status: string, taskId: numb
         body: JSON.stringify({
           chat_id: chatId.trim(),
           text: message,
-          reply_markup: status === 'completed' ? {
+          reply_markup: isSuccess ? {
             inline_keyboard: [[
               { text: 'Открыть в админке', url: `http://localhost:3000/admin/batches` }
             ]]
@@ -657,6 +774,24 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
         await scrapingQuery('UPDATE scraping_batches SET stage = $1 WHERE id = $2', [stage, batchId])
         revalidatePath('/admin/batches')
         return { success: true }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
+export async function pushBatchToCatalogAction(batchId: string): Promise<ActionResponse> {
+    try {
+        const workflow = require('../scripts/batch-workflow')
+        const result = await workflow.pushBatchToCatalog(batchId)
+        try {
+            await redis.del('catalog:all')
+        } catch (redisErr: any) {
+            console.warn('Redis clear cache error:', redisErr.message)
+        }
+        revalidatePath('/admin')
+        revalidatePath('/admin/batches')
+        revalidatePath('/admin/scraping')
+        return { success: true, data: result }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

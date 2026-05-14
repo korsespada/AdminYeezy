@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+const ADMIN_ENTRY_PATH = '/admin/batches'
+
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   
@@ -19,7 +21,7 @@ export function middleware(request: NextRequest) {
   // Если уже вошли и зашли на страницу логина — в админку
   if (pathname === '/login') {
     if (isAuthenticated) {
-      return NextResponse.redirect(new URL('/admin', request.url))
+      return NextResponse.redirect(new URL(ADMIN_ENTRY_PATH, request.url))
     }
     return NextResponse.next()
   }

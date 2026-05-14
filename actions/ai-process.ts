@@ -4,7 +4,9 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { scrapingQuery } from '@/lib/db'
+import { getScrapingFileArtifact } from '@/lib/scraping-files'
 
 const execAsync = promisify(exec)
 
@@ -27,7 +29,20 @@ type SourceCsvContext = {
   rows: any[]
 }
 
+type ResolvedSourcePath = {
+  filePath: string
+  taskId?: number | null
+}
+
 const DEFAULT_MODEL = 'google/gemini-2.0-flash-lite:free'
+
+function getWritableTmpDir() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return os.tmpdir()
+  }
+
+  return path.join(process.cwd(), 'scratch')
+}
 
 async function getAiModelForTargetedEdit(supplierId?: number | null) {
   try {
@@ -174,19 +189,37 @@ async function resolveSourcePath({
   batchId?: string | null
   currentPath?: string | null
   sourcePath?: string | null
-}) {
+}): Promise<ResolvedSourcePath | undefined> {
+  async function isReadableSource(filePath?: string | null, taskId?: number | null) {
+    if (!filePath) return false
+    if (fs.existsSync(filePath)) return true
+
+    try {
+      const artifact = await getScrapingFileArtifact(filePath, taskId)
+      return Boolean(artifact?.content)
+    } catch {
+      return false
+    }
+  }
+
   const cleanSourcePath = sourcePath?.replace(/"/g, '')
-  if (cleanSourcePath && fs.existsSync(cleanSourcePath)) return cleanSourcePath
+  if (cleanSourcePath && await isReadableSource(cleanSourcePath)) {
+    return { filePath: cleanSourcePath }
+  }
 
   const cleanCurrentPath = currentPath?.replace(/"/g, '')
-  if (cleanCurrentPath && fs.existsSync(cleanCurrentPath) && /task_custom_/i.test(path.basename(cleanCurrentPath))) {
-    return cleanCurrentPath
+  if (
+    cleanCurrentPath &&
+    /task_custom_/i.test(path.basename(cleanCurrentPath)) &&
+    await isReadableSource(cleanCurrentPath)
+  ) {
+    return { filePath: cleanCurrentPath }
   }
 
   if (batchId) {
     const res = await scrapingQuery(
       `
-        SELECT result_path, status, created_at
+        SELECT id, result_path, status, created_at
         FROM scraping_tasks
         WHERE batch_id = $1
           AND result_path IS NOT NULL
@@ -199,11 +232,17 @@ async function resolveSourcePath({
       `,
       [batchId],
     )
-    const candidate = res.rows[0]?.result_path?.replace(/"/g, '')
-    if (candidate && fs.existsSync(candidate)) return candidate
+    for (const row of res.rows) {
+      const candidate = row.result_path?.replace(/"/g, '')
+      if (candidate && await isReadableSource(candidate, row.id)) {
+        return { filePath: candidate, taskId: row.id }
+      }
+    }
   }
 
-  if (cleanCurrentPath && fs.existsSync(cleanCurrentPath)) return cleanCurrentPath
+  if (cleanCurrentPath && await isReadableSource(cleanCurrentPath)) {
+    return { filePath: cleanCurrentPath }
+  }
   return undefined
 }
 
@@ -212,21 +251,28 @@ async function loadSourceCsvContext(params: {
   currentPath?: string | null
   sourcePath?: string | null
 }): Promise<SourceCsvContext> {
-  const resolvedPath = await resolveSourcePath(params)
-  if (!resolvedPath) return { byExternalId: new Map(), rows: [] }
+  const resolved = await resolveSourcePath(params)
+  if (!resolved) return { byExternalId: new Map(), rows: [] }
 
   try {
-    const text = fs.readFileSync(resolvedPath, 'utf-8')
+    let text = ''
+    const artifact = await getScrapingFileArtifact(resolved.filePath, resolved.taskId)
+    if (artifact?.content) {
+      text = artifact.content
+    } else {
+      text = fs.readFileSync(resolved.filePath, 'utf-8')
+    }
+
     const rows = parseCsvText(text)
     const byExternalId = new Map<string, any>()
     rows.forEach((row, index) => {
       row.__source_index = index
       if (row.external_id) byExternalId.set(String(row.external_id), row)
     })
-    return { sourcePath: resolvedPath, byExternalId, rows }
+    return { sourcePath: resolved.filePath, byExternalId, rows }
   } catch (error) {
     console.warn('[targetedAiEdit] Failed to read source CSV:', error)
-    return { sourcePath: resolvedPath, byExternalId: new Map(), rows: [] }
+    return { sourcePath: resolved.filePath, byExternalId: new Map(), rows: [] }
   }
 }
 
@@ -312,14 +358,41 @@ export async function targetedAiEditAction({
 }) {
   try {
     const cleanInstruction = instruction.trim()
-    if (!cleanInstruction) return { success: false, error: 'Пустой запрос' }
-    if (!items.length) return { success: false, error: 'Нет товаров для правки' }
+    console.log('[targetedAiEdit] start', {
+      items: items.length,
+      supplierId: supplierId || null,
+      batchId: batchId || null,
+      currentPath: currentPath ? path.basename(currentPath) : null,
+      sourcePath: sourcePath ? path.basename(sourcePath) : null,
+      includePhotos,
+      instructionLength: cleanInstruction.length,
+    })
+
+    if (!cleanInstruction) {
+      console.warn('[targetedAiEdit] skipped: empty instruction')
+      return { success: false, error: 'Пустой запрос' }
+    }
+
+    if (!items.length) {
+      console.warn('[targetedAiEdit] skipped: no items')
+      return { success: false, error: 'Нет товаров для правки' }
+    }
 
     const model = await getAiModelForTargetedEdit(supplierId)
     const categories = compactLookup(lookups.categories)
     const subcategories = compactLookup(lookups.subcategories, ['category'])
     const brands = compactLookup(lookups.brands)
     const sourceContext = await loadSourceCsvContext({ batchId, currentPath, sourcePath })
+    console.log('[targetedAiEdit] context loaded', {
+      model,
+      sourcePath: sourceContext.sourcePath ? path.basename(sourceContext.sourcePath) : null,
+      sourceRows: sourceContext.rows.length,
+      sourceExternalIds: sourceContext.byExternalId.size,
+      categories: categories.length,
+      subcategories: subcategories.length,
+      brands: brands.length,
+    })
+
     const patches: { index: number; external_id?: string; patch: Record<string, any> }[] = []
     const errors: string[] = []
 
@@ -341,7 +414,9 @@ ${cleanInstruction}
 - Если меняешь category/subcategory, используй только id из справочника ниже.
 - Если значение не нужно менять, можешь не включать поле в patch.
 - name должен быть коротким: "Бренд + тип товара".
-- description пиши на русском, без китайского текста, эмодзи и рекламной воды.
+- description пиши на русском, без китайского текста и эмодзи.
+- description должен быть содержательным: 2-3 предложения, примерно 160-320 символов.
+- В description укажи модель/тип, цвет, материал или фактуру, фурнитуру/цепочку/ручки и сценарий носки, если это есть в исходнике или на фото.
 - Если в исходном тексте есть размеры, сохрани их в описании.
 - ${includePhotos ? 'Первое фото приложено к запросу, используй его для уточнения типа товара.' : 'Фото не приложено, опирайся только на текст и соседние строки.'}
 
@@ -382,6 +457,13 @@ ${JSON.stringify(subcategories)}
       }
 
       try {
+        console.log('[targetedAiEdit] openrouter request', {
+          model,
+          index: item.index,
+          external_id: product.external_id || null,
+          hasSource: Boolean(source.sourceProduct),
+          hasFirstPhoto: Boolean(firstPhoto),
+        })
         const result = await runOpenRouterJsonRequest(model, content)
         const patch = normalizePatch(result.patch || result, lookups)
         return {
@@ -393,6 +475,11 @@ ${JSON.stringify(subcategories)}
           },
         }
       } catch (error: any) {
+        console.error('[targetedAiEdit] item failed', {
+          index: item.index,
+          external_id: product.external_id || null,
+          message: error.message,
+        })
         return {
           ok: false,
           error: `${product.external_id || item.index}: ${error.message}`,
@@ -405,6 +492,11 @@ ${JSON.stringify(subcategories)}
       if (!result.ok && result.error) errors.push(result.error)
     }
 
+    console.log('[targetedAiEdit] done', {
+      patches: patches.length,
+      errors: errors.length,
+    })
+
     return {
       success: errors.length === 0,
       data: { patches, errors, model },
@@ -416,7 +508,8 @@ ${JSON.stringify(subcategories)}
 }
 
 export async function processAiAction(supplierId: number, products: any[], filePath?: string) {
-  const tempIn = path.join(process.cwd(), `scratch/ai_in_${Date.now()}.json`)
+  const tmpDir = getWritableTmpDir()
+  const tempIn = path.join(tmpDir, `ai_in_${Date.now()}.json`)
   
   try {
     // 1. Создаем бэкап, если передан путь к файлу
@@ -434,9 +527,9 @@ export async function processAiAction(supplierId: number, products: any[], fileP
 
     const productsJson = JSON.stringify(products)
     
-    // Ensure scratch exists
-    if (!fs.existsSync(path.join(process.cwd(), 'scratch'))) {
-        fs.mkdirSync(path.join(process.cwd(), 'scratch'))
+    // Ensure temp dir exists
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true })
     }
     
     // Пишем в UTF-8

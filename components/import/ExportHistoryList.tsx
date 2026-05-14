@@ -11,6 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
+  Send,
   Trash2,
 } from 'lucide-react'
 import {
@@ -18,6 +19,7 @@ import {
   deleteExportBatchFromAdminAction,
   deleteExportFileFromAdminAction,
   getExportHistoryAction,
+  pushBatchToCatalogAction,
   type ExportHistoryBatch,
   type ExportHistoryFile,
 } from '@/actions/suppliers'
@@ -31,6 +33,7 @@ type ModalState = {
   batchId: string | null
   supplierName: string | null
   supplierAvatar: string | null
+  forceFileMode?: boolean
 }
 
 const statusStyles: Record<string, string> = {
@@ -50,7 +53,8 @@ function formatDate(value?: string | null) {
   return date.toLocaleDateString('ru-RU')
 }
 
-function fileName(filePath: string) {
+function fileName(filePath?: string | null) {
+  if (!filePath) return 'Товары партии'
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
@@ -112,13 +116,28 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
 
   const openFile = (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
     setModalState({
-      localPath: file.result_path,
+      localPath: file.result_path || '',
       rawPath: batch.raw_path,
       aiPath: batch.ai_path,
       supplierId: file.supplier_id,
       batchId: file.batch_id,
       supplierName: file.supplier_name,
       supplierAvatar: file.supplier_avatar,
+      forceFileMode: Boolean(file.result_path),
+    })
+  }
+
+  const openBatchProducts = (batch: ExportHistoryBatch) => {
+    if (batch.isSynthetic) return
+    setModalState({
+      localPath: '',
+      rawPath: batch.raw_path,
+      aiPath: batch.ai_path,
+      supplierId: batch.supplier_id,
+      batchId: batch.id,
+      supplierName: batch.supplier_name,
+      supplierAvatar: batch.supplier_avatar,
+      forceFileMode: false,
     })
   }
 
@@ -156,7 +175,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
   }
 
   const handleDeleteFileFromAdmin = async (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
-    if (!confirm(`Удалить файл "${fileName(file.result_path)}" из админки?`)) return
+    if (!confirm(`Удалить этап "${fileName(file.result_path)}" из админки?`)) return
 
     setPendingAction(`file-${file.id}`)
     const res = await deleteExportFileFromAdminAction(file.id)
@@ -166,6 +185,23 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
         .filter((item) => item.files.length > 0))
     } else {
       alert(`Ошибка при удалении файла: ${res.error}`)
+    }
+    setPendingAction(null)
+  }
+
+  const handlePushBatch = async (batch: ExportHistoryBatch) => {
+    if (batch.isSynthetic) return
+    if (!confirm(`Запушить товары выгрузки "${batch.name}" в каталог?`)) return
+
+    setPendingAction(`push-${batch.id}`)
+    const res = await pushBatchToCatalogAction(batch.id)
+    if (res.success) {
+      const pushed = res.data?.success || 0
+      const failed = res.data?.failed || 0
+      setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено' } : item))
+      alert(`Пуш завершен. Успешно: ${pushed}, ошибок: ${failed}`)
+    } else {
+      alert(`Ошибка пуша: ${res.error}`)
     }
     setPendingAction(null)
   }
@@ -236,6 +272,32 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                       </td>
                       <td className="relative px-6 py-5 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {!batch.isSynthetic && (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                openBatchProducts(batch)
+                              }}
+                              className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                              title="Открыть текущие товары партии из БД"
+                            >
+                              БД
+                            </button>
+                          )}
+                          {!batch.isSynthetic && batch.status !== 'Запушено' && batch.status !== 'Удалено из БД' && (
+                            <button
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                handlePushBatch(batch)
+                              }}
+                              disabled={pendingAction === `push-${batch.id}`}
+                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-60"
+                              title="Запушить товары в каталог"
+                            >
+                              {pendingAction === `push-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                              Пуш
+                            </button>
+                          )}
                           <button
                             onClick={(event) => {
                               event.stopPropagation()
@@ -342,6 +404,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
         batchId={modalState?.batchId}
         supplierName={modalState?.supplierName}
         supplierAvatar={modalState?.supplierAvatar}
+        forceFileMode={modalState?.forceFileMode}
       />
     </div>
   )
