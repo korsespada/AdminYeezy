@@ -47,6 +47,7 @@ export default function CsvModal({
           initialFallbackBatchId={forceFileMode ? batchId : null}
           initialSupplierName={supplierName}
           initialSupplierAvatar={supplierAvatar}
+          initialSourceLabel={forceFileMode ? 'Снимок CSV из истории' : (batchId ? 'Текущая БД-версия партии' : null)}
           onClose={onClose}
         />
       </div>

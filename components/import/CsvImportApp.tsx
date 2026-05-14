@@ -395,6 +395,7 @@ export default function CsvImportApp({
   initialFallbackBatchId = null,
   initialSupplierName = null,
   initialSupplierAvatar = null,
+  initialSourceLabel = null,
   onClose,
 }: {
   initialLocalPath?: string;
@@ -405,12 +406,14 @@ export default function CsvImportApp({
   initialFallbackBatchId?: string | null;
   initialSupplierName?: string | null;
   initialSupplierAvatar?: string | null;
+  initialSourceLabel?: string | null;
   onClose?: () => void;
 }) {
   const [products, setProducts] = useState<CsvProduct[]>([]);
   const [columns, setColumns] = useState<{ name: string; key: string }[]>([]);
   const [delimiter, setDelimiter] = useState(",");
   const [fileName, setFileName] = useState("");
+  const [sourceLabel, setSourceLabel] = useState<string | null>(initialSourceLabel);
   const [isPushing, setIsPushing] = useState(false);
   const [result, setResult] = useState<{
     success: number;
@@ -619,6 +622,7 @@ export default function CsvImportApp({
       setColumns(columns);
       setDelimiter(delimiter);
       setFileName(path.split(/[/\\]/).pop() || "local.csv");
+      setSourceLabel(res.source === 'db' ? 'Снимок CSV из истории' : 'Локальный CSV-файл');
       localStorage.setItem("csv_local_path", path);
 
       // Проверяем, действительно ли ВСЕ товары обработаны
@@ -653,6 +657,7 @@ export default function CsvImportApp({
       setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
       setDelimiter(res.data.delimiter || ";");
       setFileName(`Партия ${nextBatchId.slice(0, 8)}`);
+      setSourceLabel('Текущая БД-версия партии');
       const allProcessed =
         res.data.products.length > 0 &&
         res.data.products.every((p: any) => p.ai_processed === true || p.ai_processed === "true");
@@ -1672,8 +1677,19 @@ export default function CsvImportApp({
                 )}
               </div>
               <div>
-                <h4 className="text-sm font-medium text-white">{fileName}</h4>
-                <p className="text-xs text-slate-500">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-medium text-white">{fileName}</h4>
+                  {sourceLabel && (
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${
+                      sourceLabel.includes('БД')
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                        : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    }`}>
+                      {sourceLabel}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
                   {importMode === "local"
                     ? isBatchSource ? "Редактирование товаров партии в Scraping DB" : "Редактирование локального файла"
                     : "Просмотр перед импортом"}
