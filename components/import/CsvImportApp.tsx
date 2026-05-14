@@ -1154,13 +1154,27 @@ export default function CsvImportApp({
   };
 
   const handleTargetedAiEdit = async () => {
-    if (!targetedAiInstruction.trim() || products.length === 0 || !lookups) return;
+    if (!targetedAiInstruction.trim() || products.length === 0 || !lookups) {
+      console.warn("[targetedAiEdit:client] skipped", {
+        hasInstruction: Boolean(targetedAiInstruction.trim()),
+        products: products.length,
+        hasLookups: Boolean(lookups),
+      });
+      return;
+    }
 
     const targetIndices = selectedForMerge.length > 0
       ? selectedForMerge
       : filteredProducts.map((product) => products.indexOf(product)).filter((index) => index >= 0);
 
-    if (targetIndices.length === 0) return;
+    if (targetIndices.length === 0) {
+      console.warn("[targetedAiEdit:client] skipped: no target indices", {
+        selected: selectedForMerge.length,
+        filtered: filteredProducts.length,
+        products: products.length,
+      });
+      return;
+    }
 
     if (
       selectedForMerge.length === 0 &&
@@ -1179,6 +1193,15 @@ export default function CsvImportApp({
     let appliedCount = 0;
     let nextProducts: CsvProduct[] = [...products];
     setPreviousProducts([...products]);
+    console.log("[targetedAiEdit:client] start", {
+      targetCount: targetIndices.length,
+      selected: selectedForMerge.length,
+      filtered: filteredProducts.length,
+      batchId,
+      localPath,
+      supplierId,
+      includePhotos: targetedAiUsePhoto,
+    });
 
     for (let offset = 0; offset < targetIndices.length; offset += CHUNK_SIZE) {
       const chunkIndices = targetIndices.slice(offset, offset + CHUNK_SIZE);
@@ -1197,6 +1220,15 @@ export default function CsvImportApp({
         includePhotos: targetedAiUsePhoto,
         batchId,
         currentPath: localPath,
+      });
+
+      console.log("[targetedAiEdit:client] chunk result", {
+        offset,
+        chunkSize: items.length,
+        success: res.success,
+        patches: res.data?.patches?.length || 0,
+        errors: res.data?.errors?.length || (res.error ? 1 : 0),
+        error: res.error || null,
       });
 
       const patches = res.data?.patches || [];

@@ -349,14 +349,41 @@ export async function targetedAiEditAction({
 }) {
   try {
     const cleanInstruction = instruction.trim()
-    if (!cleanInstruction) return { success: false, error: 'Пустой запрос' }
-    if (!items.length) return { success: false, error: 'Нет товаров для правки' }
+    console.log('[targetedAiEdit] start', {
+      items: items.length,
+      supplierId: supplierId || null,
+      batchId: batchId || null,
+      currentPath: currentPath ? path.basename(currentPath) : null,
+      sourcePath: sourcePath ? path.basename(sourcePath) : null,
+      includePhotos,
+      instructionLength: cleanInstruction.length,
+    })
+
+    if (!cleanInstruction) {
+      console.warn('[targetedAiEdit] skipped: empty instruction')
+      return { success: false, error: 'Пустой запрос' }
+    }
+
+    if (!items.length) {
+      console.warn('[targetedAiEdit] skipped: no items')
+      return { success: false, error: 'Нет товаров для правки' }
+    }
 
     const model = await getAiModelForTargetedEdit(supplierId)
     const categories = compactLookup(lookups.categories)
     const subcategories = compactLookup(lookups.subcategories, ['category'])
     const brands = compactLookup(lookups.brands)
     const sourceContext = await loadSourceCsvContext({ batchId, currentPath, sourcePath })
+    console.log('[targetedAiEdit] context loaded', {
+      model,
+      sourcePath: sourceContext.sourcePath ? path.basename(sourceContext.sourcePath) : null,
+      sourceRows: sourceContext.rows.length,
+      sourceExternalIds: sourceContext.byExternalId.size,
+      categories: categories.length,
+      subcategories: subcategories.length,
+      brands: brands.length,
+    })
+
     const patches: { index: number; external_id?: string; patch: Record<string, any> }[] = []
     const errors: string[] = []
 
@@ -419,6 +446,13 @@ ${JSON.stringify(subcategories)}
       }
 
       try {
+        console.log('[targetedAiEdit] openrouter request', {
+          model,
+          index: item.index,
+          external_id: product.external_id || null,
+          hasSource: Boolean(source.sourceProduct),
+          hasFirstPhoto: Boolean(firstPhoto),
+        })
         const result = await runOpenRouterJsonRequest(model, content)
         const patch = normalizePatch(result.patch || result, lookups)
         return {
@@ -430,6 +464,11 @@ ${JSON.stringify(subcategories)}
           },
         }
       } catch (error: any) {
+        console.error('[targetedAiEdit] item failed', {
+          index: item.index,
+          external_id: product.external_id || null,
+          message: error.message,
+        })
         return {
           ok: false,
           error: `${product.external_id || item.index}: ${error.message}`,
@@ -441,6 +480,11 @@ ${JSON.stringify(subcategories)}
       if (result.ok && result.patch) patches.push(result.patch)
       if (!result.ok && result.error) errors.push(result.error)
     }
+
+    console.log('[targetedAiEdit] done', {
+      patches: patches.length,
+      errors: errors.length,
+    })
 
     return {
       success: errors.length === 0,
