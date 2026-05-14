@@ -4,6 +4,7 @@ import { exec } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 import { scrapingQuery } from '@/lib/db'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
 
@@ -34,6 +35,14 @@ type ResolvedSourcePath = {
 }
 
 const DEFAULT_MODEL = 'google/gemini-2.0-flash-lite:free'
+
+function getWritableTmpDir() {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return os.tmpdir()
+  }
+
+  return path.join(process.cwd(), 'scratch')
+}
 
 async function getAiModelForTargetedEdit(supplierId?: number | null) {
   try {
@@ -499,7 +508,8 @@ ${JSON.stringify(subcategories)}
 }
 
 export async function processAiAction(supplierId: number, products: any[], filePath?: string) {
-  const tempIn = path.join(process.cwd(), `scratch/ai_in_${Date.now()}.json`)
+  const tmpDir = getWritableTmpDir()
+  const tempIn = path.join(tmpDir, `ai_in_${Date.now()}.json`)
   
   try {
     // 1. Создаем бэкап, если передан путь к файлу
@@ -517,9 +527,9 @@ export async function processAiAction(supplierId: number, products: any[], fileP
 
     const productsJson = JSON.stringify(products)
     
-    // Ensure scratch exists
-    if (!fs.existsSync(path.join(process.cwd(), 'scratch'))) {
-        fs.mkdirSync(path.join(process.cwd(), 'scratch'))
+    // Ensure temp dir exists
+    if (!fs.existsSync(tmpDir)) {
+        fs.mkdirSync(tmpDir, { recursive: true })
     }
     
     // Пишем в UTF-8
