@@ -98,6 +98,17 @@ function serializeProductsToCsv(products: any[], columns = BATCH_PRODUCT_COLUMNS
   return [header, ...rows].join('\n')
 }
 
+function getWritableTmpDir() {
+  const path = require('path')
+  const os = require('os')
+
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    return os.tmpdir()
+  }
+
+  return path.join(process.cwd(), 'tmp')
+}
+
 function parseServerCsv(text: string): CsvProduct[] {
   const normalizedText = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   const firstLine = normalizedText.split('\n')[0] || ''
@@ -608,13 +619,16 @@ export async function recordAiTaskAction({
 
     // 1. Генерируем путь для нового AI-файла
     const taskId = Math.floor(Math.random() * 1000000); // Генерим ID для имени файла
-    const tmpDir = require('path').join(process.cwd(), 'tmp');
+    const fs = require('fs/promises');
+    const path = require('path');
+    const tmpDir = getWritableTmpDir();
     const outputFileName = `task_ai_${taskId}.csv`;
-    const outputPath = require('path').join(tmpDir, outputFileName);
+    const outputPath = path.join(tmpDir, outputFileName);
+    const csvContent = serializeProductsToCsv(products, columns, delimiter);
 
-    // 2. Сохраняем файл через уже готовую функцию
-    const saveRes = await saveLocalCsvAction(outputPath, products, columns, delimiter);
-    if (!saveRes.success) throw new Error(saveRes.error);
+    // 2. Сохраняем файл во временную writable-директорию.
+    await fs.mkdir(tmpDir, { recursive: true });
+    await fs.writeFile(outputPath, csvContent, 'utf-8');
 
     // 3. Создаем запись в технической БД (scraping_tasks)
     const taskRes = await scrapingQuery(`
@@ -629,6 +643,7 @@ export async function recordAiTaskAction({
       batchId,
       status: 'Обработано ИИ',
       filePath: outputPath,
+      content: csvContent,
     });
 
     // 4. Обновляем стадию партии (если она есть)
@@ -672,7 +687,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     const path = require('path');
     const fs = require('fs');
     
-    const tmpDir = path.join(process.cwd(), 'tmp');
+    const tmpDir = getWritableTmpDir();
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
     const taskId = Math.floor(Math.random() * 1000000);
     let effectiveInputPath = inputPath;
