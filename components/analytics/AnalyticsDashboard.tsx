@@ -1,26 +1,28 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
-import { BarChart3, Users, Eye, ShoppingCart, Heart, MessageCircle, Package, RefreshCw, ArrowLeft, TrendingUp, Clock, Image as ImageIcon, UserPlus, Trash2, ChevronDown } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+    ArrowLeft,
+    BarChart3,
+    ChevronDown,
+    Clock,
+    Eye,
+    Globe2,
+    Heart,
+    MessageCircle,
+    RefreshCw,
+    ShoppingCart,
+    Trash2,
+    UserCheck,
+    UserPlus,
+    Users,
+    Wifi,
+} from 'lucide-react'
 import Link from 'next/link'
-import Image from 'next/image'
-import { type Brand, type Category, type Subcategory, type Product } from '@/lib/types'
-import ProductForm from '@/components/products/ProductForm'
 import AnalyticsCharts from './AnalyticsCharts'
+import { type Brand, type Category, type Subcategory } from '@/lib/types'
 
 type Period = 'today' | 'week' | 'month' | 'all'
-
-interface AnalyticsEvent {
-    id: string
-    event: string
-    productId: string
-    name: string
-    price: number
-    session_id: string
-    user_agent: string
-    meta: Record<string, unknown>
-    created: string
-}
 
 interface OverviewStats {
     unique_visitors: number
@@ -28,26 +30,24 @@ interface OverviewStats {
     total_events: number
     page_views: number
     product_views: number
-    add_to_cart: number
-    add_to_favorites: number
-    order_submit: number
+    unique_product_views: number
+    viewed_products: number
+    unique_product_viewers: number
     ask_manager: number
     new_profiles: number
-}
-
-interface ProductStat {
-    product_id: string
-    product_name: string
-    views: number
-    add_to_cart: number
-    add_to_favorites: number
-    order_submit: number
-    ask_manager: number
-    fullProduct?: Product
+    total_profiles: number
+    active_profiles: number
+    returning_profiles: number
+    returning_visitors: number
+    cart_profiles: number
+    cart_items: number
+    favorite_profiles: number
+    favorite_items: number
 }
 
 interface SeriesData {
     date: string
+    visitors?: number
     views: number
     carts: number
     manager: number
@@ -60,72 +60,54 @@ interface AnalyticsDashboardProps {
     subcategories?: Subcategory[]
 }
 
-function periodFilter(period: Period): string {
-    const now = new Date()
-    let since: Date
-
-    switch (period) {
-        case 'today':
-            since = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            break
-        case 'week':
-            since = new Date(now)
-            since.setDate(since.getDate() - 7)
-            break
-        case 'month':
-            since = new Date(now)
-            since.setMonth(since.getMonth() - 1)
-            break
-        case 'all':
-        default:
-            return ''
-    }
-
-    return `created >= "${since.toISOString().replace('T', ' ').replace('Z', '')}"`
+const periodLabels: Record<Period, string> = {
+    today: 'Сегодня',
+    week: '7 дней',
+    month: '30 дней',
+    all: 'Все время',
 }
 
-export default function AnalyticsDashboard({ brands = [], categories = [], subcategories = [] }: AnalyticsDashboardProps) {
+const emptyOverview: OverviewStats = {
+    unique_visitors: 0,
+    online_now: 0,
+    total_events: 0,
+    page_views: 0,
+    product_views: 0,
+    unique_product_views: 0,
+    viewed_products: 0,
+    unique_product_viewers: 0,
+    ask_manager: 0,
+    new_profiles: 0,
+    total_profiles: 0,
+    active_profiles: 0,
+    returning_profiles: 0,
+    returning_visitors: 0,
+    cart_profiles: 0,
+    cart_items: 0,
+    favorite_profiles: 0,
+    favorite_items: 0,
+}
+
+const formatNumber = (value: number) => value.toLocaleString('ru-RU')
+
+const formatPercent = (value: number, base: number) => {
+    if (!base) return '0%'
+    return `${((value / base) * 100).toFixed(1)}%`
+}
+
+export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
     const [period, setPeriod] = useState<Period>('today')
     const [overview, setOverview] = useState<OverviewStats | null>(null)
-    const [products, setProducts] = useState<ProductStat[]>([])
     const [seriesData, setSeriesData] = useState<SeriesData[]>([])
-    const [osList, setOsList] = useState<{ name: string, visitors: number }[]>([])
-    const [countryList, setCountryList] = useState<{ name: string, visitors: number }[]>([])
+    const [countryList, setCountryList] = useState<{ name: string; visitors: number }[]>([])
+    const [osList, setOsList] = useState<{ name: string; visitors: number }[]>([])
+    const [updatedAt, setUpdatedAt] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
-    const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'favorites' | 'orders' | 'manager'>('overview')
-    const [editingProduct, setEditingProduct] = useState<Product | null>(null)
-    const [isModalOpen, setIsModalOpen] = useState(false)
     const [isResetMenuOpen, setIsResetMenuOpen] = useState(false)
     const [isResetting, setIsResetting] = useState(false)
 
-    const handleReset = async (type: 'period' | 'all') => {
-        if (!confirm(`Вы уверены, что хотите сбросить аналитику ${type === 'all' ? 'за всё время' : 'за выбранный период'}? Это действие нельзя отменить.`)) {
-            return;
-        }
-
-        setIsResetting(true)
-        try {
-            const res = await fetch(`/api/analytics?type=${type}&period=${period}`, {
-                method: 'DELETE',
-            })
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
-                throw new Error(err.error || `HTTP ${res.status}`)
-            }
-            fetchData()
-        } catch (err: any) {
-            console.error('Analytics reset error:', err)
-            setError(err?.message || 'Ошибка сброса аналитики')
-        } finally {
-            setIsResetting(false)
-        }
-    }
-
-    const handleEdit = (product: Product) => {
-        setEditingProduct(product)
-        setIsModalOpen(true)
-    }
+    const data = overview || emptyOverview
 
     const fetchData = useCallback(async () => {
         setLoading(true)
@@ -138,12 +120,12 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
                 throw new Error(err.error || `HTTP ${res.status}`)
             }
 
-            const data = await res.json()
-            setOverview(data.overview)
-            setProducts(data.products || [])
-            setSeriesData(data.seriesData || [])
-            setOsList(data.osList || [])
-            setCountryList(data.countryList || [])
+            const payload = await res.json()
+            setOverview({ ...emptyOverview, ...(payload.overview || {}) })
+            setSeriesData(payload.seriesData || [])
+            setCountryList(payload.countryList || [])
+            setOsList(payload.osList || [])
+            setUpdatedAt(payload.updatedAt || new Date().toISOString())
         } catch (err: any) {
             console.error('Analytics fetch error:', err)
             setError(err?.message || 'Ошибка загрузки аналитики')
@@ -158,546 +140,338 @@ export default function AnalyticsDashboard({ brands = [], categories = [], subca
         return () => clearInterval(interval)
     }, [fetchData])
 
-    const periodLabels: Record<Period, string> = {
-        today: 'Сегодня',
-        week: 'Неделя',
-        month: 'Месяц',
-        all: 'Всё время',
+    const handleReset = async (type: 'period' | 'all') => {
+        const scope = type === 'all' ? 'за все время' : `за период "${periodLabels[period]}"`
+        if (!confirm(`Сбросить аналитику ${scope}? Это действие нельзя отменить.`)) return
+
+        setIsResetting(true)
+        try {
+            const res = await fetch(`/api/analytics?type=${type}&period=${period}`, { method: 'DELETE' })
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
+                throw new Error(err.error || `HTTP ${res.status}`)
+            }
+            await fetchData()
+        } catch (err: any) {
+            console.error('Analytics reset error:', err)
+            setError(err?.message || 'Ошибка сброса аналитики')
+        } finally {
+            setIsResetting(false)
+        }
     }
 
-    const sortedByField = (field: keyof ProductStat) =>
-        [...products].sort((a, b) => (b[field] as number) - (a[field] as number)).filter(p => (p[field] as number) > 0)
+    const updatedLabel = updatedAt
+        ? new Date(updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+        : 'нет данных'
+
+    const derived = useMemo(() => ({
+        returningShare: formatPercent(data.returning_profiles || data.returning_visitors, data.active_profiles || data.unique_visitors),
+        productDepth: data.unique_product_viewers ? (data.unique_product_views / data.unique_product_viewers).toFixed(1) : '0',
+        askRate: formatPercent(data.ask_manager, data.unique_product_views || data.product_views),
+        cartShare: formatPercent(data.cart_profiles, data.total_profiles),
+        favoriteShare: formatPercent(data.favorite_profiles, data.total_profiles),
+    }), [data])
 
     return (
-        <div className="min-h-screen bg-[#0F172A] text-slate-200 font-sans">
-            {/* Header */}
-            <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 py-4 px-4 sm:px-6 sticky top-0 z-30 flex flex-col md:flex-row items-center justify-between gap-4 shadow-2xl">
-                <div className="flex items-center justify-between w-full md:w-auto gap-4">
-                    <div className="flex items-center gap-4 sm:gap-6">
-                        <Link href="/admin" className="p-2 text-slate-400 hover:bg-slate-800 hover:text-white rounded-xl transition-all border border-transparent hover:border-slate-700">
-                            <ArrowLeft className="w-5 h-5" />
-                        </Link>
-                        <div>
-                            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 sm:gap-3">
-                                <BarChart3 className="w-6 h-6 sm:w-7 h-7 text-[#5D5FEF]" />
-                                Аналитика
-                            </h1>
-                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">YEEZY UNIQUE ADMIN</p>
+        <div className="min-h-screen bg-slate-950 text-slate-200">
+            <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur sm:px-6">
+                <div className="mx-auto flex max-w-[1600px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                    <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <Link href="/admin" className="rounded-lg border border-slate-800 p-2 text-slate-400 transition hover:border-slate-700 hover:bg-slate-900 hover:text-white" title="Назад">
+                                <ArrowLeft className="h-5 w-5" />
+                            </Link>
+                            <div>
+                                <h1 className="flex items-center gap-2 text-xl font-semibold text-white sm:text-2xl">
+                                    <BarChart3 className="h-6 w-6 text-blue-400" />
+                                    Аналитика аудитории
+                                </h1>
+                                <p className="text-xs text-slate-500">Онлайн, пользователи, просмотры товаров, обращения и география</p>
+                            </div>
                         </div>
-                    </div>
-                    {/* Mobile refresh button */}
-                    <button
-                        onClick={fetchData}
-                        disabled={loading || isResetting}
-                        className="md:hidden p-2.5 text-slate-400 hover:text-[#5D5FEF] hover:bg-slate-800/80 rounded-xl border border-slate-800 transition-all disabled:opacity-50"
-                    >
-                        <RefreshCw className={`w-5 h-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
-                    </button>
-                </div>
-
-                <div className="flex items-center gap-2 sm:gap-6 flex-shrink-0">
-                    <div className="flex items-center justify-between w-full md:w-auto gap-2 sm:gap-6 overflow-x-auto no-scrollbar py-1 pr-2">
-                        {/* Period Selector */}
-                        <div className="flex bg-slate-800/50 p-1.5 rounded-2xl border border-slate-700/50 shadow-inner flex-shrink-0">
-                            {(Object.keys(periodLabels) as Period[]).map(p => (
-                                <button
-                                    key={p}
-                                    onClick={() => setPeriod(p)}
-                                    className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all ${period === p
-                                        ? 'bg-[#5D5FEF] text-white shadow-lg shadow-[#5D5FEF]/20'
-                                        : 'text-slate-400 hover:text-slate-200'
-                                        }`}
-                                >
-                                    {periodLabels[p]}
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="h-8 w-px bg-slate-800 hidden md:block" />
-
-                        <div className="text-right hidden xl:block flex-shrink-0">
-                            <div className="text-sm font-black text-white">{new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</div>
-                            <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter">Сегодня, {new Date().toLocaleDateString('ru-RU', { weekday: 'long' })}</div>
-                        </div>
-
                         <button
                             onClick={fetchData}
                             disabled={loading || isResetting}
-                            className="hidden md:block p-3 text-slate-400 hover:text-[#5D5FEF] hover:bg-slate-800/80 rounded-2xl border border-slate-800 transition-all disabled:opacity-50 group flex-shrink-0"
+                            className="rounded-lg border border-slate-800 p-2 text-slate-400 transition hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300 disabled:opacity-50 xl:hidden"
+                            title="Обновить"
                         >
-                            <RefreshCw className={`w-5 h-5 ${loading || isResetting ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}`} />
+                            <RefreshCw className={`h-5 w-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
                         </button>
                     </div>
 
-                    <div className="relative flex-shrink-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex rounded-lg border border-slate-800 bg-slate-900 p-1">
+                            {(Object.keys(periodLabels) as Period[]).map(item => (
+                                <button
+                                    key={item}
+                                    onClick={() => setPeriod(item)}
+                                    className={`rounded-md px-3 py-2 text-sm font-medium transition ${period === item ? 'bg-blue-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+                                >
+                                    {periodLabels[item]}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="hidden items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-400 md:flex">
+                            <Clock className="h-4 w-4" />
+                            {updatedLabel}
+                        </div>
                         <button
-                            onClick={() => setIsResetMenuOpen(!isResetMenuOpen)}
-                            disabled={isResetting}
-                            className="flex items-center gap-2 px-3 sm:px-5 py-2.5 text-[#FF5B5B] hover:bg-[#FF5B5B]/10 rounded-2xl transition-all border border-[#FF5B5B]/30 hover:border-[#FF5B5B] text-xs sm:text-sm font-black disabled:opacity-50 outline-none select-none active:scale-95 group"
+                            onClick={fetchData}
+                            disabled={loading || isResetting}
+                            className="hidden rounded-lg border border-slate-800 p-2 text-slate-400 transition hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300 disabled:opacity-50 xl:block"
+                            title="Обновить"
                         >
-                            <Trash2 className="w-4 h-4" />
-                            <span className="hidden sm:inline">Сбросить</span>
-                            <ChevronDown className={`w-4 h-4 transition-transform duration-300 ${isResetMenuOpen ? 'rotate-180' : ''}`} />
+                            <RefreshCw className={`h-5 w-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
                         </button>
-
-                        {isResetMenuOpen && (
-                            <>
-                                <div className="fixed inset-0 z-40" onClick={() => setIsResetMenuOpen(false)}></div>
-                                <div className="absolute right-0 top-full mt-3 w-64 bg-slate-900 border border-slate-800 rounded-[24px] shadow-2xl flex flex-col py-3 z-50 overflow-hidden ring-1 ring-white/5">
-                                    <button
-                                        onClick={() => { handleReset('period'); setIsResetMenuOpen(false) }}
-                                        className="px-6 py-4 text-sm text-left text-slate-300 hover:bg-slate-800 font-bold transition-colors flex items-center justify-between group"
-                                    >
-                                        <span>Очистить за {periodLabels[period].toLowerCase()}</span>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-slate-700 group-hover:bg-[#5D5FEF] transition-colors" />
-                                    </button>
-                                    <div className="h-px bg-slate-800 mx-4 my-1" />
-                                    <button
-                                        onClick={() => { handleReset('all'); setIsResetMenuOpen(false) }}
-                                        className="px-6 py-4 text-sm text-left text-[#FF5B5B] hover:bg-[#FF5B5B]/5 font-black transition-colors flex items-center justify-between group"
-                                    >
-                                        <span>Очистить за всё время</span>
-                                        <Trash2 className="w-4 h-4 opacity-30 group-hover:opacity-100 transition-opacity" />
-                                    </button>
-                                </div>
-                            </>
-                        )}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsResetMenuOpen(!isResetMenuOpen)}
+                                disabled={isResetting}
+                                className="flex items-center gap-2 rounded-lg border border-red-500/30 px-3 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:opacity-50"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                                Сброс
+                                <ChevronDown className={`h-4 w-4 transition ${isResetMenuOpen ? 'rotate-180' : ''}`} />
+                            </button>
+                            {isResetMenuOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsResetMenuOpen(false)} />
+                                    <div className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-lg border border-slate-800 bg-slate-900 shadow-2xl">
+                                        <button
+                                            onClick={() => {
+                                                handleReset('period')
+                                                setIsResetMenuOpen(false)
+                                            }}
+                                            className="block w-full px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-800"
+                                        >
+                                            Очистить {periodLabels[period].toLowerCase()}
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                handleReset('all')
+                                                setIsResetMenuOpen(false)
+                                            }}
+                                            className="block w-full border-t border-slate-800 px-4 py-3 text-left text-sm font-semibold text-red-300 hover:bg-red-500/10"
+                                        >
+                                            Очистить все время
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </div>
                     </div>
                 </div>
             </header>
 
-            <main className="p-4 sm:p-8 max-w-[1600px] mx-auto space-y-6 sm:space-y-10">
+            <main className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
                 {error && (
-                    <div className="bg-red-500/10 border border-red-500/20 rounded-[24px] p-6 text-red-400 font-bold flex items-center gap-4 animate-pulse">
-                        <div className="w-3 h-3 rounded-full bg-red-500" />
+                    <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-sm font-medium text-red-300">
                         {error}
                     </div>
                 )}
 
-                {/* Top Statistics Row */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
-                    {/* Main Summary Card */}
-                    <div className="lg:col-span-8 bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 backdrop-blur-sm">
-                        <div className="flex items-center justify-between mb-10">
+                <section className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
+                    <KpiCard icon={<Wifi />} label="Текущий онлайн" value={data.online_now} detail="Активны за последние 5 минут" tone="emerald" loading={loading} />
+                    <KpiCard icon={<Users />} label="Уникальные пользователи" value={data.unique_visitors} detail={`${data.active_profiles ? `${formatNumber(data.active_profiles)} профилей активны` : 'По сессиям аналитики'}`} tone="blue" loading={loading} />
+                    <KpiCard icon={<UserCheck />} label="Постоянные пользователи" value={data.returning_profiles || data.returning_visitors} detail={`${derived.returningShare} от активной базы`} tone="violet" loading={loading} />
+                    <KpiCard icon={<Eye />} label="Уникальные просмотры товаров" value={data.unique_product_views} detail={`${formatNumber(data.viewed_products)} разных товаров`} tone="cyan" loading={loading} />
+                    <KpiCard icon={<MessageCircle />} label="Спросить у менеджера" value={data.ask_manager} detail={`${derived.askRate} от просмотров`} tone="amber" loading={loading} />
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl xl:col-span-8">
+                        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                                <h3 className="text-2xl font-black text-white">Статистика продаж</h3>
-                                <p className="text-slate-500 text-sm font-medium mt-1">Краткий обзор активности • {periodLabels[period]}</p>
+                                <h2 className="text-lg font-semibold text-white">Сводка за период</h2>
+                                <p className="text-sm text-slate-400">Фокус на людях и действиях, без товарного рейтинга.</p>
                             </div>
-                            <div className="bg-[#5D5FEF]/10 text-[#5D5FEF] px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest">Live</div>
+                            <span className="w-fit rounded-md bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-300">
+                                {periodLabels[period]}
+                            </span>
                         </div>
 
-                        {overview ? (
-                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-8">
-                                <MetricCard 
-                                    icon={<Users className="w-6 h-6" />} 
-                                    label="Уникальные гости" 
-                                    value={overview.unique_visitors} 
-                                    subValue="+8.2% с вчера" 
-                                    color="pink" 
-                                />
-                                <MetricCard 
-                                    icon={<Package className="w-6 h-6" />} 
-                                    label="Всего заказов" 
-                                    value={overview.order_submit} 
-                                    subValue="+12% с вчера" 
-                                    color="orange" 
-                                />
-                                <MetricCard 
-                                    icon={<Eye className="w-6 h-6" />} 
-                                    label="Просм. товаров" 
-                                    value={overview.product_views} 
-                                    subValue="+2.1% с вчера" 
-                                    color="green" 
-                                />
-                                <MetricCard 
-                                    icon={<Clock className="w-6 h-6" />} 
-                                    label="Текущий онлайн" 
-                                    value={overview.online_now} 
-                                    subValue="Живые данные" 
-                                    color="purple"
-                                    isMain
-                                />
-                            </div>
-                        ) : (
-                            <div className="h-48 flex items-center justify-center">
-                                <RefreshCw className="w-10 h-10 text-[#5D5FEF] animate-spin opacity-40" />
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Activity Feed / Small Chart */}
-                    <div className="lg:col-span-4 bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 w-32 h-32 bg-[#5D5FEF]/5 blur-3xl rounded-full translate-x-10 -translate-y-10 group-hover:scale-150 transition-transform duration-1000" />
-                        <h3 className="text-xl sm:text-2xl font-black text-white mb-6 sm:mb-8">Активность</h3>
-                        {seriesData.length > 0 ? (
-                            <div className="h-[220px]">
-                                <AnalyticsCharts seriesData={seriesData} overview={overview || {} as any} minimal />
-                            </div>
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-slate-600 font-bold uppercase tracking-widest text-xs">
-                                Нет данных для графика
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                {/* Secondary Stats Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-                    {/* Actions Card */}
-                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50">
-                        <h3 className="text-lg sm:text-xl font-black text-white mb-8 sm:mb-10 flex items-center gap-3">
-                            <TrendingUp className="w-5 h-5 text-pink-500" />
-                            Действия
-                        </h3>
-                        <div className="space-y-6 sm:space-y-8">
-                            <SmallStat label="В корзину" value={overview?.add_to_cart || 0} color="#5D5FEF" />
-                            <SmallStat label="В избранное" value={overview?.add_to_favorites || 0} color="#FFD026" />
-                            <SmallStat label="Вопросы менеджеру" value={overview?.ask_manager || 0} color="#10B981" />
-                            <SmallStat label="Всего кликов" value={overview?.total_events || 0} color="#FA5A7D" />
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                            <InsightItem label="Новые профили" value={formatNumber(data.new_profiles)} caption={`Всего профилей: ${formatNumber(data.total_profiles)}`} icon={<UserPlus className="h-4 w-4" />} />
+                            <InsightItem label="Глубина просмотра" value={derived.productDepth} caption="Уникальных товаров на зрителя" icon={<Eye className="h-4 w-4" />} />
+                            <InsightItem label="В корзине сейчас" value={formatNumber(data.cart_items)} caption={`${formatNumber(data.cart_profiles)} пользователей, ${derived.cartShare}`} icon={<ShoppingCart className="h-4 w-4" />} />
+                            <InsightItem label="В избранном сейчас" value={formatNumber(data.favorite_items)} caption={`${formatNumber(data.favorite_profiles)} пользователей, ${derived.favoriteShare}`} icon={<Heart className="h-4 w-4" />} />
                         </div>
                     </div>
 
-                    {/* Conversion Card */}
-                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 flex flex-col items-center text-center">
-                        <h3 className="text-lg sm:text-xl font-black text-white mb-2">Конверсия</h3>
-                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-8 sm:mb-10">Эффективность</p>
-                        
-                        {overview && overview.product_views > 0 ? (
-                            <div className="relative flex items-center justify-center w-32 h-32 sm:w-48 sm:h-48">
-                                <svg className="w-full h-full transform -rotate-90">
-                                    <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-800 sm:hidden" />
-                                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" className="text-slate-800 hidden sm:block" />
-                                    
-                                    {/* Simplified dash calculation for mobile/desktop sizes */}
-                                    <circle cx="64" cy="64" r="58" stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={364} strokeDashoffset={364 - (364 * Math.min(100, (overview.order_submit / overview.product_views) * 100)) / 100} className="text-[#5D5FEF] transition-all duration-1000 ease-out sm:hidden" />
-                                    <circle cx="96" cy="96" r="88" stroke="currentColor" strokeWidth="12" fill="transparent" strokeDasharray={552} strokeDashoffset={552 - (552 * Math.min(100, (overview.order_submit / overview.product_views) * 100)) / 100} className="text-[#5D5FEF] transition-all duration-1000 ease-out hidden sm:block" />
-                                </svg>
-                                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                    <div className="text-2xl sm:text-4xl font-black text-white">
-                                        {((overview.order_submit / overview.product_views) * 100).toFixed(1)}%
-                                    </div>
-                                    <div className="text-[8px] sm:text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">в заказ</div>
-                                </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl xl:col-span-4">
+                        <div className="mb-4 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-semibold text-white">Пульс</h2>
+                                <p className="text-sm text-slate-400">Посетители, просмотры и обращения.</p>
                             </div>
-                        ) : (
-                            <div className="flex items-center justify-center h-48 text-slate-700 font-black">АНАЛИЗ...</div>
-                        )}
-                    </div>
-
-                    {/* Geo Card */}
-                    <div className="bg-slate-900/50 rounded-[24px] sm:rounded-[32px] p-6 sm:p-10 shadow-2xl border border-slate-800/50 sm:col-span-2 lg:col-span-1">
-                        <h3 className="text-lg sm:text-xl font-black text-white mb-6 sm:mb-8">Топ стран</h3>
-                        <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-1 gap-4 sm:gap-6">
-                            {countryList.length > 0 ? countryList.slice(0, 5).map((c, i) => (
-                                <div key={i} className="flex items-center justify-between group">
-                                    <div className="flex items-center gap-4">
-                                        <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg border border-slate-700/50 group-hover:border-[#5D5FEF]/50 transition-colors">
-                                            {getFlag(c.name)}
-                                        </div>
-                                        <div>
-                                            <span className="font-bold text-slate-200 block">{getDisplayName(c.name)}</span>
-                                            <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Визиты</span>
-                                        </div>
-                                    </div>
-                                    <span className="font-black text-[#5D5FEF] text-lg">{c.visitors}</span>
-                                </div>
-                            )) : (
-                                <div className="text-center py-10">
-                                    <p className="text-slate-700 font-black uppercase tracking-tighter text-sm">Данных пока нет</p>
-                                </div>
+                            <RefreshCw className={`h-5 w-5 text-slate-500 ${loading ? 'animate-spin' : ''}`} />
+                        </div>
+                        <div className="h-[230px]">
+                            {seriesData.length ? (
+                                <AnalyticsCharts seriesData={seriesData} overview={data} minimal />
+                            ) : (
+                                <EmptyState text="Нет данных для графика" />
                             )}
                         </div>
                     </div>
-                </div>
+                </section>
 
-                {/* Detailed Products Table */}
-                <div className="bg-slate-900 border border-slate-800 rounded-[28px] sm:rounded-[40px] p-6 sm:p-10 shadow-3xl">
-                    <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 mb-10">
-                        <div>
-                            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">Популярные <span className="text-[#5D5FEF]">товары</span></h2>
-                            <p className="text-slate-500 font-medium text-xs sm:text-sm mt-1">Детальный отчет по взаимодействиям</p>
-                        </div>
-                        <div className="flex gap-1.5 sm:gap-2 bg-slate-800/50 p-1 rounded-2xl border border-slate-700/50 backdrop-blur-sm self-start overflow-x-auto no-scrollbar max-w-full">
-                            {[
-                                { key: 'overview', label: 'Просмотры' },
-                                { key: 'favorites', label: 'Избранное' },
-                                { key: 'orders', label: 'Заказы' },
-                                { key: 'manager', label: 'Менеджер' },
-                            ].map(tab => (
-                                <button
-                                    key={tab.key}
-                                    onClick={() => setActiveTab(tab.key as any)}
-                                    className={`px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap ${activeTab === tab.key
-                                        ? 'bg-[#5D5FEF] text-white shadow-xl shadow-[#5D5FEF]/20 translate-y-[-1px]'
-                                        : 'text-slate-500 hover:text-slate-300'
-                                        }`}
-                                >
-                                    {tab.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                <AnalyticsCharts seriesData={seriesData} overview={data} />
 
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-40 gap-4">
-                            <RefreshCw className="w-12 h-12 text-[#5D5FEF] animate-spin opacity-50" />
-                            <div className="text-xs font-black text-slate-600 uppercase tracking-[0.2em]">Загрузка базы данных...</div>
-                        </div>
-                    ) : (
-                        <div className="transition-all duration-500 ease-in-out">
-                             {activeTab === 'overview' && (
-                                <ProductTable
-                                    title="Топ просмотров"
-                                    data={sortedByField('views')}
-                                    onEdit={handleEdit}
-                                    columns={[
-                                        { key: 'views', label: 'Просмотры' },
-                                        { key: 'add_to_cart', label: 'В корзину' },
-                                        { key: 'add_to_favorites', label: 'Избранное' },
-                                    ]}
-                                />
-                            )}
-                            {activeTab === 'favorites' && (
-                                <ProductTable
-                                    title="В избранном"
-                                    data={sortedByField('add_to_favorites')}
-                                    onEdit={handleEdit}
-                                    columns={[
-                                        { key: 'add_to_favorites', label: 'Добавлений' },
-                                        { key: 'views', label: 'Просмотры' },
-                                    ]}
-                                />
-                            )}
-                            {activeTab === 'orders' && (
-                                <ProductTable
-                                    title="Заказано"
-                                    data={sortedByField('order_submit')}
-                                    onEdit={handleEdit}
-                                    columns={[
-                                        { key: 'order_submit', label: 'Заказов' },
-                                        { key: 'add_to_cart', label: 'В корзину' },
-                                    ]}
-                                />
-                            )}
-                            {activeTab === 'manager' && (
-                                <ProductTable
-                                    title="Вопросы менеджеру"
-                                    data={sortedByField('ask_manager')}
-                                    onEdit={handleEdit}
-                                    columns={[
-                                        { key: 'ask_manager', label: 'Кликов' },
-                                        { key: 'views', label: 'Просмотры' },
-                                    ]}
-                                />
-                            )}
-                        </div>
-                    )}
-                </div>
+                <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <CountryList items={countryList.map(item => ({ ...item, name: getDisplayName(item.name) }))} />
+                    <SimpleList title="Устройства" items={osList} empty="Нет данных по устройствам" />
+                    <ProfileState overview={data} />
+                </section>
             </main>
-
-            {editingProduct && isModalOpen && (
-                <ProductForm
-                    product={editingProduct}
-                    brands={brands}
-                    categories={categories}
-                    subcategories={subcategories}
-                    isOpen={isModalOpen}
-                    onClose={() => {
-                        setIsModalOpen(false)
-                        setEditingProduct(null)
-                    }}
-                />
-            )}
         </div>
     )
 }
 
-// ── Sub-components for New Design ──────────────────────────────────────
-
-function MetricCard({ icon, label, value, subValue, color, isMain }: {
+function KpiCard({ icon, label, value, detail, tone, loading }: {
     icon: React.ReactNode
     label: string
     value: number
-    subValue: string
-    color: 'pink' | 'orange' | 'green' | 'purple'
-    isMain?: boolean
+    detail: string
+    tone: 'emerald' | 'blue' | 'violet' | 'cyan' | 'amber'
+    loading?: boolean
 }) {
-    const bgs = {
-        pink: 'bg-slate-900',
-        orange: 'bg-slate-900',
-        green: 'bg-slate-900',
-        purple: isMain ? 'bg-[#5D5FEF]/15' : 'bg-slate-900'
-    }
-    const icons = {
-        pink: 'bg-[#FA5A7D]',
-        orange: 'bg-[#FF947A]',
-        green: 'bg-[#3CD856]',
-        purple: 'bg-[#5D5FEF]'
-    }
-    const accentBorder = {
-        pink: 'border-pink-500/10',
-        orange: 'border-orange-500/10',
-        green: 'border-green-500/10',
-        purple: isMain ? 'border-[#5D5FEF]/50' : 'border-[#5D5FEF]/20'
+    const tones = {
+        emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+        blue: 'bg-blue-500/10 text-blue-300 border-blue-500/20',
+        violet: 'bg-violet-500/10 text-violet-300 border-violet-500/20',
+        cyan: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+        amber: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
     }
 
     return (
-        <div className={`${bgs[color]} border ${accentBorder[color]} rounded-[20px] sm:rounded-[32px] p-4 sm:p-8 transition-all hover:scale-[1.02] sm:hover:scale-[1.05] hover:shadow-2xl hover:shadow-${color}-500/5 duration-500 relative overflow-hidden group`}>
-            {isMain && (
-                <div className="absolute top-0 right-0 w-24 h-24 sm:w-32 sm:h-32 bg-[#5D5FEF]/10 blur-3xl rounded-full translate-x-12 -translate-y-12" />
-            )}
-            <div className={`${icons[color]} w-8 h-8 sm:w-14 sm:h-14 rounded-lg sm:rounded-2xl flex items-center justify-center text-white mb-3 sm:mb-6 shadow-lg transform group-hover:rotate-12 transition-transform duration-500`}>
-                {React.cloneElement(icon as React.ReactElement, { className: 'w-4 h-4 sm:w-6 h-6' })}
-            </div>
-            <div className="text-white text-lg sm:text-3xl font-black mb-1 sm:mb-2 tracking-tight">
-                {(value || 0).toLocaleString()}
-            </div>
-            <div className="text-slate-400 text-[8px] sm:text-sm font-bold opacity-80 mb-2 sm:mb-3 truncate uppercase tracking-widest">{label}</div>
-            <div className={`text-[8px] sm:text-[10px] font-black uppercase tracking-tighter px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg w-fit ${isMain ? 'bg-[#5D5FEF]/20 text-[#5D5FEF]' : 'bg-slate-800 text-slate-500'}`}>
-                {subValue}
-            </div>
-            {isMain && value > 0 && (
-                <div className="absolute top-6 right-6 sm:top-8 sm:right-8 flex h-2 w-2 sm:h-3 sm:w-3">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#5D5FEF] opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 sm:h-3 sm:w-3 bg-[#5D5FEF]"></span>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+                <div className={`rounded-lg border p-2 ${tones[tone]}`}>
+                    {React.cloneElement(icon as React.ReactElement, { className: 'h-5 w-5' })}
                 </div>
+                {loading && <RefreshCw className="h-4 w-4 animate-spin text-slate-600" />}
+            </div>
+            <div className="text-3xl font-semibold text-white">{formatNumber(value)}</div>
+            <div className="mt-1 text-sm font-medium text-slate-300">{label}</div>
+            <div className="mt-3 text-xs text-slate-500">{detail}</div>
+        </div>
+    )
+}
+
+function InsightItem({ label, value, caption, icon }: { label: string; value: string; caption: string; icon: React.ReactNode }) {
+    return (
+        <div className="rounded-lg border border-slate-800 bg-slate-950/60 p-4">
+            <div className="mb-3 flex items-center justify-between text-slate-500">
+                <span className="text-sm">{label}</span>
+                {icon}
+            </div>
+            <div className="text-2xl font-semibold text-white">{value}</div>
+            <div className="mt-1 text-xs text-slate-500">{caption}</div>
+        </div>
+    )
+}
+
+function CountryList({ items }: { items: { name: string; visitors: number }[] }) {
+    const total = Math.max(1, items.reduce((sum, item) => sum + Number(item.visitors || 0), 0))
+
+    return (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+                <h3 className="text-lg font-semibold text-white">Посещения по странам</h3>
+                <Globe2 className="h-5 w-5 text-blue-300" />
+            </div>
+            {items.length ? (
+                <div className="space-y-4">
+                    {items.slice(0, 10).map((item, index) => (
+                        <ProgressRow key={`${item.name}-${index}`} label={item.name || 'Неизвестно'} value={Number(item.visitors || 0)} total={total} />
+                    ))}
+                </div>
+            ) : (
+                <EmptyState text="Нет данных по странам" />
             )}
         </div>
     )
 }
 
-function SmallStat({ label, value, color }: { label: string, value: number, color: string }) {
-    return (
-        <div className="flex flex-col gap-3 group">
-            <div className="flex justify-between items-center">
-                <span className="font-bold text-slate-400 text-sm tracking-wide group-hover:text-slate-200 transition-colors">{label}</span>
-                <span className="font-black text-white text-lg tracking-tight">{value.toLocaleString()}</span>
-            </div>
-            <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden p-[1px]">
-                <div 
-                    className="h-full rounded-full transition-all duration-[1500ms] shadow-[0_0_10px_rgba(255,255,255,0.1)]" 
-                    style={{ backgroundColor: color, width: `${Math.min(100, (value / 500) * 100)}%` }} 
-                />
-            </div>
-        </div>
-    )
-}
-
-function ProductTable({ title, data, columns, onEdit }: {
+function SimpleList({ title, items, empty }: {
     title: string
-    data: ProductStat[]
-    columns: { key: keyof ProductStat; label: string }[]
-    onEdit: (product: Product) => void
+    empty: string
+    items: { name: string; visitors: number }[]
 }) {
-    const getPhotoUrl = (product: Product) => {
-        if (!product) return null
-        if (product.thumb && typeof product.thumb === 'string') {
-            if (product.thumb.startsWith('http')) return product.thumb;
-            return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
-        }
-        if (!product.photos && !product.thumb) return null
-        
-        const photos = Array.isArray(product.photos) 
-            ? product.photos 
-            : (typeof product.photos === 'string' ? JSON.parse(product.photos) : [])
-
-        if (photos.length === 0) return null
-        let photoUrl = photos[0]
-        if (typeof photoUrl === 'string' && !photoUrl.startsWith('http')) {
-            photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
-        }
-        return photoUrl
-    }
-
-    if (data.length === 0) {
-        return (
-            <div className="py-24 text-center bg-slate-900/40 rounded-[32px] border border-slate-800 border-dashed">
-                <p className="text-slate-600 font-black uppercase tracking-[0.2em] text-xs transition-opacity animate-pulse">Нет данных в этом секторе</p>
-            </div>
-        )
-    }
+    const total = Math.max(1, items.reduce((sum, item) => sum + Number(item.visitors || 0), 0))
 
     return (
-        <div className="overflow-x-auto no-scrollbar rounded-[24px] sm:rounded-[32px] border border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
-            <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                    <tr className="border-b border-slate-800/80 bg-slate-800/30">
-                        <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Rank</th>
-                        <th className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Продукт</th>
-                        {columns.map(col => (
-                            <th key={col.key} className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">{col.label}</th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                    {data.slice(0, 20).map((row, idx) => (
-                        <tr 
-                            key={row.product_id} 
-                            onClick={() => row.fullProduct && onEdit(row.fullProduct)}
-                            className="group hover:bg-[#5D5FEF]/5 transition-all cursor-pointer"
-                        >
-                            <td className="px-8 py-6">
-                                <span className={`text-sm font-black ${idx < 3 ? 'text-[#5D5FEF]' : 'text-slate-600'}`}>
-                                    {String(idx + 1).padStart(2, '0')}
-                                </span>
-                            </td>
-                            <td className="px-4 sm:px-8 py-4 sm:py-6">
-                                <div className="flex items-center gap-3 sm:gap-5">
-                                    <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-slate-800 overflow-hidden border border-slate-700 group-hover:border-[#5D5FEF]/50 transition-colors flex-shrink-0 shadow-lg relative">
-                                        {row.fullProduct ? (
-                                            <img 
-                                                src={getPhotoUrl(row.fullProduct) || ''} 
-                                                alt="" 
-                                                className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                                                onError={(e) => {
-                                                    (e.target as HTMLImageElement).src = 'https://placehold.co/100x100/1e293b/white?text=YEEZY'
-                                                }}
-                                            />
-                                        ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-[10px] font-black text-slate-600 uppercase">Empty</div>
-                                        )}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="text-white font-black text-base truncate group-hover:text-[#5D5FEF] transition-colors">{row.product_name || 'Неизвестно'}</div>
-                                        <div className="text-[10px] text-slate-500 font-bold uppercase tracking-tighter mt-1">ID: {row.product_id}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            {columns.map(col => (
-                                <td key={col.key} className="px-8 py-6 text-right">
-                                    <div className="text-white font-black text-lg">{row[col.key]?.toLocaleString() || 0}</div>
-                                    <div className="w-24 h-1 bg-slate-800 rounded-full mt-2 ml-auto overflow-hidden">
-                                        <div 
-                                            className="h-full bg-[#5D5FEF]/40" 
-                                            style={{ width: `${Math.min(100, ((row[col.key] as number) / (data[0][col.key] as number)) * 100)}%` }} 
-                                        />
-                                    </div>
-                                </td>
-                            ))}
-                        </tr>
+        <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+            <h3 className="mb-4 text-lg font-semibold text-white">{title}</h3>
+            {items.length ? (
+                <div className="space-y-4">
+                    {items.slice(0, 5).map((item, index) => (
+                        <ProgressRow key={`${item.name}-${index}`} label={item.name || 'Неизвестно'} value={Number(item.visitors || 0)} total={total} />
                     ))}
-                </tbody>
-            </table>
+                </div>
+            ) : (
+                <EmptyState text={empty} />
+            )}
         </div>
     )
 }
 
-// ── Generic Helpers ──────────────────────────────────────────────────────
+function ProfileState({ overview }: { overview: OverviewStats }) {
+    const total = Math.max(1, overview.total_profiles)
 
-const getFlag = (country: string) => {
-    const map: Record<string, string> = {
-        'RU': '🇷🇺', 'Russian Federation': '🇷🇺', 'Russia': '🇷🇺',
-        'DE': '🇩🇪', 'Germany': '🇩🇪', 'US': '🇺🇸', 'United States': '🇺🇸',
-        'BY': '🇧🇾', 'Belarus': '🇧🇾', 'KZ': '🇰🇿', 'Kazakhstan': '🇰🇿',
-        'UA': '🇺🇦', 'Ukraine': '🇺🇦',
-    };
-    return map[country] || '🌍';
-};
+    return (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl">
+            <h3 className="mb-4 text-lg font-semibold text-white">Состояние клиентской базы</h3>
+            <div className="space-y-4">
+                <ProgressRow label="Активные профили" value={overview.active_profiles} total={total} />
+                <ProgressRow label="Постоянные профили" value={overview.returning_profiles} total={total} />
+                <ProgressRow label="Есть корзина" value={overview.cart_profiles} total={total} />
+                <ProgressRow label="Есть избранное" value={overview.favorite_profiles} total={total} />
+            </div>
+        </div>
+    )
+}
 
-const getDisplayName = (name: string) => {
+function ProgressRow({ label, value, total }: { label: string; value: number; total: number }) {
+    return (
+        <div>
+            <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                <span className="truncate text-slate-300">{label}</span>
+                <span className="font-semibold text-white">{formatNumber(value)}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-blue-400" style={{ width: `${Math.min(100, (value / total) * 100)}%` }} />
+            </div>
+        </div>
+    )
+}
+
+function EmptyState({ text }: { text: string }) {
+    return (
+        <div className="flex h-full min-h-32 items-center justify-center rounded-lg border border-dashed border-slate-800 bg-slate-950/40 p-6 text-center text-sm font-medium text-slate-500">
+            {text}
+        </div>
+    )
+}
+
+function getDisplayName(name: string) {
     const map: Record<string, string> = {
-        'Unknown': 'Неизвестно', 'Russian Federation': 'Россия', 'Russia': 'Россия',
-        'United States': 'США', 'Germany': 'Германия', 'Ukraine': 'Украина',
-    };
-    return map[name] || name;
+        Unknown: 'Неизвестно',
+        'Russian Federation': 'Россия',
+        Russia: 'Россия',
+        RU: 'Россия',
+        'United States': 'США',
+        US: 'США',
+        Germany: 'Германия',
+        DE: 'Германия',
+        Belarus: 'Беларусь',
+        BY: 'Беларусь',
+        Kazakhstan: 'Казахстан',
+        KZ: 'Казахстан',
+        Ukraine: 'Украина',
+        UA: 'Украина',
+    }
+
+    return map[name] || name || 'Неизвестно'
 }
