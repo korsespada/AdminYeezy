@@ -6,10 +6,11 @@ const crypto = require('crypto');
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
-const MAIN_DB = process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
+const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
 
 const scrapingPool = new Pool({ connectionString: SCRAPING_DB });
-const mainPool = new Pool({ connectionString: MAIN_DB });
+const legacyCatalogPool = new Pool({ connectionString: LEGACY_CATALOG_DB });
+let cachedRailsAdminToken = null;
 
 const PRODUCT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
@@ -23,6 +24,19 @@ const PRODUCT_COLUMNS = [
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
   { name: 'ai_processed', key: 'ai_processed' },
+];
+
+const RAILS_IMPORT_COLUMNS = [
+  { name: 'external_id', key: 'external_id' },
+  { name: 'name', key: 'name' },
+  { name: 'description', key: 'description' },
+  { name: 'price', key: 'price' },
+  { name: 'status', key: 'status' },
+  { name: 'brand', key: 'brand' },
+  { name: 'category', key: 'category' },
+  { name: 'subcategory', key: 'subcategory' },
+  { name: 'gender', key: 'gender' },
+  { name: 'photos', key: 'photos' },
 ];
 
 function ensureDir(dir) {
@@ -89,6 +103,124 @@ function serializeProductsToCsv(products, columns = PRODUCT_COLUMNS, delimiter =
     return str.includes(delimiter) || str.includes('"') ? `"${str}"` : str;
   }).join(delimiter));
   return [header, ...rows].join('\n');
+}
+
+function railsApiUrl(pathname) {
+  const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL;
+  if (!rawBase) throw new Error('RAILS_API_URL is required to publish batches to Rails');
+
+  let base = rawBase.replace(/\/+$/, '');
+  if (!base.endsWith('/api/v1')) base = `${base}/api/v1`;
+  return `${base}${pathname.startsWith('/') ? pathname : `/${pathname}`}`;
+}
+
+function jwtExpiresAt(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1] || '', 'base64url').toString('utf-8'));
+    return Number(payload.exp || 0) * 1000;
+  } catch {
+    return 0;
+  }
+}
+
+async function railsAdminToken() {
+  const staticToken = process.env.RAILS_ADMIN_TOKEN || process.env.ADMIN_RAILS_TOKEN;
+  if (staticToken) return staticToken;
+
+  if (cachedRailsAdminToken && cachedRailsAdminToken.expiresAt > Date.now() + 60_000) {
+    return cachedRailsAdminToken.token;
+  }
+
+  const email = process.env.RAILS_ADMIN_EMAIL;
+  const password = process.env.RAILS_ADMIN_PASSWORD;
+  if (!email || !password) {
+    throw new Error('RAILS_ADMIN_EMAIL and RAILS_ADMIN_PASSWORD are required to publish batches to Rails');
+  }
+
+  const response = await fetch(railsApiUrl('/admin/auth/login'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.token) {
+    throw new Error(payload.message || payload.error || `Rails admin login failed with ${response.status}`);
+  }
+
+  cachedRailsAdminToken = {
+    token: payload.token,
+    expiresAt: jwtExpiresAt(payload.token) || Date.now() + 60 * 60 * 1000,
+  };
+  return cachedRailsAdminToken.token;
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+async function safeLookup(tableName) {
+  try {
+    const result = await legacyCatalogPool.query(`SELECT id::text, name FROM ${tableName}`);
+    return new Map(result.rows.map((row) => [String(row.id), row.name]));
+  } catch (error) {
+    console.warn(`Lookup ${tableName} unavailable:`, error.message);
+    return new Map();
+  }
+}
+
+async function loadLegacyLookupMaps() {
+  const [brands, categories, subcategories] = await Promise.all([
+    safeLookup('brands'),
+    safeLookup('categories'),
+    safeLookup('subcategories'),
+  ]);
+  return { brands, categories, subcategories };
+}
+
+function lookupName(map, value) {
+  if (value === undefined || value === null) return '';
+  if (Array.isArray(value)) return lookupName(map, value.filter(Boolean)[0]);
+  const key = String(value).trim();
+  if (!key) return '';
+  return map.get(key) || key;
+}
+
+function productToRailsCsvRow(product, lookups) {
+  return {
+    external_id: product.external_id || '',
+    name: product.name || '',
+    description: product.description || '',
+    price: product.price || 0,
+    status: product.status === 'inactive' ? 'hidden' : 'active',
+    brand: lookupName(lookups.brands, product.brand),
+    category: lookupName(lookups.categories, product.category),
+    subcategory: lookupName(lookups.subcategories, product.subcategory),
+    gender: product.gender || '',
+    photos: normalizePhotos(product.photos).join('|'),
+  };
+}
+
+async function postRailsImportBatch({ name, products }) {
+  const response = await fetch(railsApiUrl('/admin/import_batches'), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await railsAdminToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      source: 'csv',
+      name,
+      csv_text: serializeProductsToCsv(products, RAILS_IMPORT_COLUMNS, ','),
+    }),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || payload.error || `Rails import failed with ${response.status}`);
+  }
+  return payload;
 }
 
 function parseCsvText(text) {
@@ -626,9 +758,12 @@ async function pushBatchToCatalog(batchId, onProgress) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
 
+  const batch = await getBatch(batchId);
+  const lookups = await loadLegacyLookupMaps();
   const updatedProducts = [];
   const errors = [];
-  let success = 0;
+  let prepared = 0;
+  let imported = 0;
 
   for (let i = 0; i < products.length; i += 1) {
     const product = { ...products[i], batchId };
@@ -639,55 +774,45 @@ async function pushBatchToCatalog(batchId, onProgress) {
         photos.push(await uploadPhotoIfNeeded(product.photos[photoIndex], key));
       }
       product.photos = photos.filter(Boolean);
-
-      const id = Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 9);
-      const brandArray = Array.isArray(product.brand) ? product.brand : (product.brand ? [product.brand] : []);
-      await mainPool.query(`
-        INSERT INTO products (id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())
-        ON CONFLICT (external_id) DO UPDATE SET
-          name = EXCLUDED.name,
-          description = EXCLUDED.description,
-          price = EXCLUDED.price,
-          status = EXCLUDED.status,
-          brand = EXCLUDED.brand,
-          category = EXCLUDED.category,
-          subcategory = EXCLUDED.subcategory,
-          gender = EXCLUDED.gender,
-          photos = EXCLUDED.photos,
-          batch_id = COALESCE(EXCLUDED.batch_id, products.batch_id),
-          created_at = COALESCE(products.created_at, NOW()),
-          updated_at = NOW()
-      `, [
-        id,
-        product.external_id,
-        product.name,
-        product.description || '',
-        product.price || 0,
-        product.status || 'active',
-        brandArray,
-        product.category,
-        product.subcategory || null,
-        product.gender || '',
-        JSON.stringify(product.photos || []),
-        batchId,
-      ]);
       updatedProducts.push(product);
-      success += 1;
+      prepared += 1;
     } catch (error) {
       errors.push(`${product.external_id || product.name}: ${error.message}`);
       updatedProducts.push(product);
     }
 
-    if (onProgress) await onProgress({ current: i + 1, total: products.length, success, failed: errors.length });
+    if (onProgress) await onProgress({ current: i + 1, total: products.length, success: prepared, failed: errors.length });
   }
 
   await saveBatchProducts(batchId, updatedProducts);
-  if (success > 0) {
+
+  const railsRows = updatedProducts
+    .filter((product) => product.external_id || product.name)
+    .map((product) => productToRailsCsvRow(product, lookups));
+  const importBatches = [];
+  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 200)).entries()) {
+    const payload = await postRailsImportBatch({
+      name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
+      products: chunk,
+    });
+    importBatches.push(payload.import_batch?.id);
+    imported += Number(payload.result?.products_imported || 0);
+    if (payload.result?.products_failed) {
+      for (const error of payload.result.errors || []) errors.push(`Rails line ${error.line}: ${error.error}`);
+    }
+  }
+
+  if (importBatches.length > 0) {
     await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
   }
 
-  return { success, failed: errors.length, errors, total: products.length };
+  return {
+    success: imported,
+    failed: errors.length,
+    errors,
+    total: products.length,
+    railsImportBatchIds: importBatches.filter(Boolean),
+  };
 }
 
 async function closePools() {

@@ -24,6 +24,36 @@ function setAdminSession(admin: { id: string | number; email: string }) {
   })
 }
 
+function railsApiUrl(pathname: string) {
+  const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL
+  if (!rawBase) return null
+
+  let base = rawBase.replace(/\/+$/, '')
+  if (!base.endsWith('/api/v1')) base = `${base}/api/v1`
+  return `${base}${pathname.startsWith('/') ? pathname : `/${pathname}`}`
+}
+
+async function loginViaRails(email: string, password: string) {
+  const url = railsApiUrl('/admin/auth/login')
+  if (!url) return null
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+    cache: 'no-store',
+  })
+  const payload = await response.json().catch(() => ({}))
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) return false
+    throw new Error(payload.message || payload.error || `Rails admin login failed with ${response.status}`)
+  }
+
+  if (!payload.admin?.email) return false
+  return payload.admin
+}
+
 /**
  * Вход в админку
  */
@@ -36,6 +66,12 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
   }
 
   try {
+    const railsAdmin = await loginViaRails(email, password)
+    if (railsAdmin) {
+      setAdminSession({ id: railsAdmin.id, email: railsAdmin.email })
+      redirect(ADMIN_ENTRY_PATH)
+    }
+
     const localAdminEmail = process.env.LOCAL_ADMIN_EMAIL?.trim()
     const localAdminPassword = process.env.LOCAL_ADMIN_PASSWORD?.trim()
     const isLocalAdminEnabled = process.env.NODE_ENV !== 'production' && localAdminEmail && localAdminPassword

@@ -6,30 +6,34 @@ from botocore.exceptions import ClientError
 import psycopg2
 from dotenv import load_dotenv
 
-# --- НАСТРОЙКИ S3 BEGET ---
-S3_ENDPOINT = "https://s3.ru1.storage.beget.cloud"
-S3_REGION = "ru-1"
-S3_ACCESS_KEY = "HAZ3Y4SJA3IO5FF4W3E3"
-S3_SECRET_KEY = "e5PuCtCmWkxl7aAJ74JlEgZLviS9kWpFAM8MBlPB"
-S3_BUCKET = "85758a34b2c7-yeezyunique-static"
-S3_PUBLIC_DOMAIN = "https://static.yeezyunique.ru"
-# --------------------------
+load_dotenv()
 
 # --- НАСТРОЙКИ ---
-# Просто замени путь ниже на нужный файл
-CSV_PATH = r"C:\Users\redmi\Desktop\Parsing\LV сумки и кошельки\szwego_ai_processed.csv"
-COLUMN_NAME = "productId"  # Название колонки в CSV
-DB_COLUMN = "external_id"  # Название колонки в базе данных (в таблице products)
+CSV_PATH = os.getenv("DELETE_PRODUCTS_CSV_PATH", "")
+COLUMN_NAME = os.getenv("DELETE_PRODUCTS_CSV_COLUMN", "productId")
+DB_COLUMN = os.getenv("DELETE_PRODUCTS_DB_COLUMN", "external_id")
 # -----------------
+
+
+def env_required(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+def sql_identifier(name):
+    if not name or not name.replace("_", "").isalnum() or name[0].isdigit():
+        raise RuntimeError(f"Unsafe SQL identifier: {name}")
+    return name
 
 def get_s3_client():
     """Создание S3 клиента для Beget"""
     return boto3.client(
         's3',
-        endpoint_url=S3_ENDPOINT,
-        region_name=S3_REGION,
-        aws_access_key_id=S3_ACCESS_KEY,
-        aws_secret_access_key=S3_SECRET_KEY
+        endpoint_url=env_required("S3_ENDPOINT"),
+        region_name=os.getenv("S3_REGION", "ru-1"),
+        aws_access_key_id=env_required("S3_ACCESS_KEY"),
+        aws_secret_access_key=env_required("S3_SECRET_KEY")
     )
 
 def extract_s3_key(url):
@@ -37,8 +41,9 @@ def extract_s3_key(url):
     if not url:
         return None
     # Убираем домен из URL
-    if url.startswith(S3_PUBLIC_DOMAIN):
-        return url.replace(S3_PUBLIC_DOMAIN + "/", "")
+    public_domain = os.getenv("S3_PUBLIC_DOMAIN", "").rstrip("/")
+    if public_domain and url.startswith(public_domain):
+        return url.replace(public_domain + "/", "")
     return None
 
 def delete_photos_from_s3(photos_json):
@@ -72,7 +77,7 @@ def delete_photos_from_s3(photos_json):
         batch = keys[i:i + 1000]
         try:
             s3.delete_objects(
-                Bucket=S3_BUCKET,
+                Bucket=env_required("S3_BUCKET"),
                 Delete={'Objects': batch, 'Quiet': True}
             )
             deleted_count += len(batch)
@@ -83,18 +88,21 @@ def delete_photos_from_s3(photos_json):
     return deleted_count
 
 def delete_products():
-    # Загружаем переменные окружения из .env (там лежит DATABASE_URL)
-    load_dotenv()
-    db_url = os.getenv("DATABASE_URL")
+    db_url = os.getenv("LEGACY_CATALOG_DATABASE_URL") or os.getenv("DATABASE_URL")
+    db_column = sql_identifier(DB_COLUMN)
     
     if not db_url:
-        print("Ошибка: DATABASE_URL не найден в .env файле")
+        print("Ошибка: LEGACY_CATALOG_DATABASE_URL не найден в .env файле")
         return
 
     # 1. Читаем ID из CSV
     ids_to_delete = []
     try:
         # Пробуем открыть файл
+        if not CSV_PATH:
+            print("Ошибка: DELETE_PRODUCTS_CSV_PATH не задан в .env")
+            return
+
         if not os.path.exists(CSV_PATH):
             print(f"Ошибка: Файл не найден по пути {CSV_PATH}")
             return
@@ -146,7 +154,7 @@ def delete_products():
         
         for i in range(0, len(ids_to_delete), 500):
             chunk = ids_to_delete[i:i + 500]
-            cur.execute(f"SELECT {DB_COLUMN}, photos FROM products WHERE {DB_COLUMN} IN %s", (tuple(chunk),))
+            cur.execute(f"SELECT {db_column}, photos FROM products WHERE {db_column} IN %s", (tuple(chunk),))
             for row in cur.fetchall():
                 product_id, photos = row
                 if photos:
@@ -171,7 +179,7 @@ def delete_products():
         for i in range(0, len(ids_to_delete), chunk_size):
             chunk = ids_to_delete[i:i + chunk_size]
             # SQL запрос на удаление
-            cur.execute(f"DELETE FROM products WHERE {DB_COLUMN} IN %s", (tuple(chunk),))
+            cur.execute(f"DELETE FROM products WHERE {db_column} IN %s", (tuple(chunk),))
             total_deleted += cur.rowcount
             print(f"Процесс: {i + len(chunk)} / {len(ids_to_delete)}...")
         

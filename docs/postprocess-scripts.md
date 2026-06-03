@@ -1,6 +1,6 @@
 # Post-Processing Scripts Guide
 
-This project uses Python post-processing scripts to transform supplier CSV rows before AI processing or push to the main shop.
+This project uses Python post-processing scripts to transform supplier CSV rows before AI processing or publication through Rails API.
 
 ## Where Scripts Live
 
@@ -69,7 +69,7 @@ Rules:
 
 - `external_id` must remain stable. Do not invent a new one unless the source row truly lacks it.
 - `photos` must be a JSON array string, for example `["https://.../1.jpg","https://.../2.jpg"]`.
-- `brand`, `category`, and `subcategory` should use IDs from the main shop dictionaries when known.
+- `brand`, `category`, and `subcategory` should use the current staging dictionary IDs when known. The Rails publication adapter is responsible for mapping them to Rails catalog records.
 - `price` should be numeric text, without currency symbols.
 - `status` should be `active` or `inactive` if emitted.
 - Keep unknown columns only if they are harmless; the importer ignores fields it does not understand.
@@ -183,8 +183,8 @@ if __name__ == "__main__":
 - Do not write output next to the script unless it is the explicit `output.csv` argument.
 - Do not rely on packages missing from `requirements.txt`.
 - Do not mutate the input file in place.
-- Do not call the production shop DB from a post-process script. The script should only transform CSV rows.
-- Do not upload photos to S3 here. S3 upload happens during push to the main shop.
+- Do not call the legacy `shop` DB or Rails CRM Postgres from a post-process script. The script should only transform CSV rows staged in `yeezy_scraping`.
+- Do not upload photos to S3 here. Media handling happens during the publication pipeline.
 - Do not remove `external_id` unless the row is intentionally being deleted.
 
 ## Dependencies
@@ -224,3 +224,11 @@ Then inspect:
 6. Open a batch and click `Пост-обработка скриптом`.
 
 The admin will use the script through the DB-backed batch flow: `scraping.products -> temporary CSV -> script -> output CSV -> scraping.products`.
+
+Publication is a separate step:
+
+```text
+yeezy_scraping.products -> AdminYeezy publication adapter -> Rails API -> Rails CRM Postgres -> storefront
+```
+
+The legacy `shop` database is not the source of truth for the new storefront.
