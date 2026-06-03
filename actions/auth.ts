@@ -66,12 +66,6 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
   }
 
   try {
-    const railsAdmin = await loginViaRails(email, password)
-    if (railsAdmin) {
-      setAdminSession({ id: railsAdmin.id, email: railsAdmin.email })
-      redirect(ADMIN_ENTRY_PATH)
-    }
-
     const localAdminEmail = process.env.LOCAL_ADMIN_EMAIL?.trim()
     const localAdminPassword = process.env.LOCAL_ADMIN_PASSWORD?.trim()
     const isLocalAdminEnabled = process.env.NODE_ENV !== 'production' && localAdminEmail && localAdminPassword
@@ -79,6 +73,16 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
     if (isLocalAdminEnabled && email === localAdminEmail && password === localAdminPassword) {
       setAdminSession({ id: 'local-admin', email })
       redirect(ADMIN_ENTRY_PATH)
+    }
+
+    const railsAdmin = await loginViaRails(email, password)
+    if (railsAdmin) {
+      setAdminSession({ id: railsAdmin.id, email: railsAdmin.email })
+      redirect(ADMIN_ENTRY_PATH)
+    }
+
+    if (railsAdmin === false) {
+      return { success: false, error: 'Неверный email или пароль Rails admin.' }
     }
 
     // ВАЖНО: Мы ищем пользователя в таблице 'admins'. 
