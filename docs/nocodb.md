@@ -38,12 +38,23 @@ pg_dump -Fc -h HOST -U USER DB_NAME > nocodb-meta.backup
 |---|---|---|
 | `yeezy_scraping` | Read/write | Сохранить существующие поставщики, задачи и партии |
 | `rails_crm_readonly` | `SELECT` | Просмотр CRM и опубликованного каталога |
-| `rails_catalog_editor` | Ограниченные views | Будущее контролируемое редактирование каталога |
+| `rails_catalog_editor` | Ограниченный write | Редактирование только безопасных таблиц опубликованного каталога |
+
+`rails_catalog_editor` может менять только:
+
+- `products`;
+- `product_media`;
+- `product_variants`.
+
+Rails CRM ставит search outbox jobs PostgreSQL-триггерами, поэтому правки этих таблиц из NocoDB автоматически попадут в Elasticsearch после обработки worker-ом `catalog:process_search_jobs_forever`.
+
+`brands` и `categories` держать read-only: смена справочников может менять URL, фильтры и SEO-посадки.
 
 ## Ограничения
 
 Через NocoDB нельзя напрямую менять:
 
+- brands/categories без отдельного плана миграции URL и индекса;
 - заказы и позиции заказов;
 - платежи и payment events;
 - возвраты;

@@ -1,4 +1,4 @@
-import { type Brand, type Category, type Product, type Subcategory } from './types'
+import { type Brand, type Category, type Product, type ProductMedia, type Subcategory } from './types'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 
@@ -118,26 +118,81 @@ function flattenCategories(items: any[], parentId = ''): { categories: Category[
   return { categories, subcategories }
 }
 
-function mapRailsProduct(product: any): Product {
+function normalizeRailsMedia(product: any): ProductMedia[] {
+  const rawMedia = Array.isArray(product.media) ? product.media : []
+  if (rawMedia.length > 0) {
+    return rawMedia
+      .filter((item: any) => item?.original_url || item?.preview_url || item?.thumb_url)
+      .map((item: any, index: number) => ({
+        original_url: String(item.original_url || item.preview_url || item.thumb_url || ''),
+        thumb_url: item.thumb_url || item.preview_url || item.original_url || '',
+        preview_url: item.preview_url || item.original_url || item.thumb_url || '',
+        og_image_url: item.og_image_url || item.preview_url || item.original_url || '',
+        alt_text: item.alt_text || '',
+        sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : index,
+        processing_status: ['pending', 'processed', 'failed'].includes(String(item.processing_status))
+          ? item.processing_status
+          : 'processed',
+      }))
+      .sort((a: ProductMedia, b: ProductMedia) => a.sort_order - b.sort_order)
+  }
+
+  const urls = Array.isArray(product.images)
+    ? product.images.filter(Boolean)
+    : (product.image_url ? [product.image_url] : [])
+
+  return urls.map((url: string, index: number) => ({
+    original_url: String(url),
+    thumb_url: String(url),
+    preview_url: String(url),
+    og_image_url: String(url),
+    alt_text: product.name || '',
+    sort_order: index,
+    processing_status: 'processed',
+  }))
+}
+
+export function mapRailsProduct(product: any): Product {
   const category = product.category || {}
   const categoryId = category.parent_id ? String(category.parent_id) : String(category.id || '')
   const subcategoryId = category.parent_id ? String(category.id || '') : ''
-  const photos = Array.isArray(product.images) ? product.images.filter(Boolean) : (product.image_url ? [product.image_url] : [])
+  const media = normalizeRailsMedia(product)
+  const photos = media.map((item) => item.preview_url || item.original_url).filter(Boolean)
+  const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {}
 
   return {
     id: String(product.id),
     productId: product.external_id || product.sku || String(product.id),
+    external_id: product.external_id || '',
+    sku: product.sku || '',
+    slug: product.slug || '',
     name: product.name || '',
     description: product.description || '',
     price: Number(product.price_cents || 0) / 100,
-    status: product.status === 'active' ? 'active' : 'inactive',
+    price_cents: Number(product.price_cents || 0),
+    price_on_request: Boolean(product.price_on_request || metadata.price_on_request),
+    status: ['draft', 'active', 'hidden', 'archived'].includes(String(product.status)) ? product.status : 'hidden',
     brand: product.brand?.id ? String(product.brand.id) : '',
     category: categoryId,
     subcategory: subcategoryId,
     photos,
+    media,
     photos_processed: true,
-    gender: product.gender || product.metadata?.gender || '',
+    gender: product.gender || metadata.gender || '',
     thumb: product.image_url || photos[0] || '',
+    fulfillment_mode: product.fulfillment_mode || 'requires_confirmation',
+    availability_confidence: product.availability_confidence || 'unknown',
+    indexing_status: product.indexing_status || 'indexable',
+    currency: product.currency || 'RUB',
+    production_min_days: product.production_min_days ?? null,
+    production_max_days: product.production_max_days ?? null,
+    office_delivery_min_days: product.office_delivery_min_days ?? null,
+    office_delivery_max_days: product.office_delivery_max_days ?? null,
+    seo_title: product.seo_title || '',
+    seo_description: product.seo_description || '',
+    h1: product.h1 || '',
+    canonical_url: product.canonical_url || '',
+    metadata,
     created: product.created_at || '',
     updated: product.updated_at || '',
     collectionId: '',
@@ -204,53 +259,130 @@ export async function listRailsAdminProducts(options: {
   }
 }
 
-export function productFormDataToRailsPayload(formData: FormData) {
-  const price = parseFloat(String(formData.get('price') || '0')) || 0
-  const rawPhotos = String(formData.get('existingPhotos') || '[]')
-  let photoUrls: string[] = []
+function parseJsonArray(value: FormDataEntryValue | null): any[] {
+  if (!value) return []
   try {
-    const parsed = JSON.parse(rawPhotos)
-    if (Array.isArray(parsed)) photoUrls = parsed.filter(Boolean).map(String)
+    const parsed = JSON.parse(String(value))
+    return Array.isArray(parsed) ? parsed : []
   } catch {
-    photoUrls = []
+    return []
   }
+}
 
-  const categoryId = String(formData.get('subcategory') || formData.get('category') || '')
-  const brandId = String(formData.getAll('brand')[0] || '')
-  const status = String(formData.get('status') || 'active') === 'active' ? 'active' : 'hidden'
-  const gender = String(formData.get('gender') || '')
+function parseJsonObject(value: FormDataEntryValue | null): Record<string, any> {
+  if (!value) return {}
+  try {
+    const parsed = JSON.parse(String(value))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
 
-  return {
-    product: {
-      external_id: String(formData.get('productId') || ''),
-      sku: String(formData.get('productId') || ''),
-      name: String(formData.get('name') || ''),
-      description: String(formData.get('description') || ''),
-      price_cents: Math.round(price * 100),
-      status,
-      brand_id: brandId || null,
-      category_id: categoryId,
-      currency: 'RUB',
-      fulfillment_mode: 'requires_confirmation',
-      indexing_status: 'indexable',
-      availability_confidence: 'unknown',
-      metadata: gender ? { gender } : {},
-      media: photoUrls.map((url, index) => ({
-        original_url: url,
-        thumb_url: url,
-        preview_url: url,
-        og_image_url: url,
+function optionalInt(value: FormDataEntryValue | null) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formBoolean(value: FormDataEntryValue | null) {
+  return String(value || '') === 'true'
+}
+
+function normalizeMediaForPayload(formData: FormData) {
+  const rawMedia = formData.has('media')
+    ? parseJsonArray(formData.get('media'))
+    : parseJsonArray(formData.get('existingPhotos')).map((url) => ({ original_url: url }))
+
+  if (!formData.has('media') && !formData.has('existingPhotos')) return undefined
+
+  return rawMedia
+    .filter((item) => item && (item.original_url || item.preview_url || item.thumb_url))
+    .map((item, index) => {
+      const originalUrl = String(item.original_url || item.preview_url || item.thumb_url || '')
+      const previewUrl = String(item.preview_url || item.original_url || item.thumb_url || originalUrl)
+      const thumbUrl = String(item.thumb_url || previewUrl || originalUrl)
+      return {
+        original_url: originalUrl,
+        thumb_url: thumbUrl,
+        preview_url: previewUrl,
+        og_image_url: String(item.og_image_url || previewUrl || originalUrl),
+        alt_text: String(item.alt_text || ''),
         sort_order: index,
-        processing_status: 'processed',
-      })),
-    },
+        processing_status: ['pending', 'processed', 'failed'].includes(String(item.processing_status))
+          ? String(item.processing_status)
+          : 'processed',
+      }
+    })
+}
+
+export function productFormDataToRailsPayload(formData: FormData, options: { applyDefaults?: boolean } = {}) {
+  const applyDefaults = options.applyDefaults !== false
+  const product: Record<string, any> = {}
+
+  if (formData.has('productId') || formData.has('external_id')) {
+    product.external_id = String(formData.get('external_id') || formData.get('productId') || '')
   }
+  if (formData.has('sku') || formData.has('productId')) {
+    product.sku = String(formData.get('sku') || formData.get('productId') || '')
+  }
+  if (formData.has('name')) product.name = String(formData.get('name') || '')
+  if (formData.has('description')) product.description = String(formData.get('description') || '')
+  if (formData.has('price')) {
+    const price = parseFloat(String(formData.get('price') || '0')) || 0
+    product.price_cents = Math.round(price * 100)
+  }
+  if (formData.has('status')) product.status = String(formData.get('status') || 'hidden')
+
+  const brandId = String(formData.getAll('brand')[0] || '')
+  if (formData.has('brand')) product.brand_id = brandId || null
+  if (formData.has('category') || formData.has('subcategory')) {
+    product.category_id = String(formData.get('subcategory') || formData.get('category') || '')
+  }
+
+  if (formData.has('currency')) product.currency = String(formData.get('currency') || 'RUB')
+  if (formData.has('fulfillment_mode')) product.fulfillment_mode = String(formData.get('fulfillment_mode') || 'requires_confirmation')
+  if (formData.has('indexing_status')) product.indexing_status = String(formData.get('indexing_status') || 'indexable')
+  if (formData.has('availability_confidence')) product.availability_confidence = String(formData.get('availability_confidence') || 'unknown')
+  if (formData.has('production_min_days')) product.production_min_days = optionalInt(formData.get('production_min_days'))
+  if (formData.has('production_max_days')) product.production_max_days = optionalInt(formData.get('production_max_days'))
+  if (formData.has('office_delivery_min_days')) product.office_delivery_min_days = optionalInt(formData.get('office_delivery_min_days'))
+  if (formData.has('office_delivery_max_days')) product.office_delivery_max_days = optionalInt(formData.get('office_delivery_max_days'))
+  if (formData.has('seo_title')) product.seo_title = String(formData.get('seo_title') || '')
+  if (formData.has('seo_description')) product.seo_description = String(formData.get('seo_description') || '')
+  if (formData.has('h1')) product.h1 = String(formData.get('h1') || '')
+  if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
+
+  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request')) {
+    const metadata = parseJsonObject(formData.get('productMetadata'))
+    if (formData.has('gender')) {
+      const gender = String(formData.get('gender') || '')
+      if (gender) metadata.gender = gender
+      else delete metadata.gender
+    }
+    if (formData.has('price_on_request')) metadata.price_on_request = formBoolean(formData.get('price_on_request'))
+    product.metadata = metadata
+  }
+
+  const media = normalizeMediaForPayload(formData)
+  if (media !== undefined) product.media = media
+
+  if (applyDefaults) {
+    product.currency ||= 'RUB'
+    product.status ||= 'active'
+    product.fulfillment_mode ||= 'requires_confirmation'
+    product.indexing_status ||= 'indexable'
+    product.availability_confidence ||= 'unknown'
+  }
+
+  return { product }
 }
 
 export async function createRailsAdminProduct(formData: FormData) {
   const result = await railsFetch<{ product: any }>('/admin/products', {
     method: 'POST',
-    body: JSON.stringify(productFormDataToRailsPayload(formData)),
+    body: JSON.stringify(productFormDataToRailsPayload(formData, { applyDefaults: true })),
   })
   return mapRailsProduct(result.product)
 }
@@ -258,7 +390,7 @@ export async function createRailsAdminProduct(formData: FormData) {
 export async function updateRailsAdminProduct(id: string, formData: FormData) {
   const result = await railsFetch<{ product: any }>(`/admin/products/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(productFormDataToRailsPayload(formData)),
+    body: JSON.stringify(productFormDataToRailsPayload(formData, { applyDefaults: false })),
   })
   return mapRailsProduct(result.product)
 }
@@ -278,7 +410,13 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
     product.category_id = String(data.subcategory || data.category || '')
   }
   if (data.gender !== undefined) {
-    product.metadata = { gender: data.gender === '__none__' ? '' : String(data.gender || '') }
+    const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
+    const metadata = current.product?.metadata && typeof current.product.metadata === 'object'
+      ? { ...current.product.metadata }
+      : {}
+    if (data.gender === '__none__' || data.gender === '') delete metadata.gender
+    else metadata.gender = String(data.gender || '')
+    product.metadata = metadata
   }
 
   const result = await railsFetch<{ product: any }>(`/admin/products/${id}`, {

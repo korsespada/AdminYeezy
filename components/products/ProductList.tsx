@@ -89,9 +89,11 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
       const result = await deleteProductAction(id)
       if (result.success) {
         setProducts(prev => prev.filter(p => p.id !== id))
+      } else {
+        alert(result.error || 'Ошибка при удалении товара')
       }
     } catch (error) {
-      // delete failed
+      alert('Ошибка при удалении товара')
     }
   }, [])
 

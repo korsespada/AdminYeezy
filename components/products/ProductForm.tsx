@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition } from 'react'
 import Image from 'next/image'
-import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
+import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
 import { X, Upload, Trash2, GripVertical, Download } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -34,9 +34,23 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [error, setError] = useState('')
 
   const [productId, setProductId] = useState('')
+  const [sku, setSku] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState('')
+  const [status, setStatus] = useState<Product['status']>('active')
+  const [fulfillmentMode, setFulfillmentMode] = useState<Product['fulfillment_mode']>('requires_confirmation')
+  const [availabilityConfidence, setAvailabilityConfidence] = useState<Product['availability_confidence']>('unknown')
+  const [indexingStatus, setIndexingStatus] = useState<Product['indexing_status']>('indexable')
+  const [priceOnRequest, setPriceOnRequest] = useState(false)
+  const [productionMinDays, setProductionMinDays] = useState('')
+  const [productionMaxDays, setProductionMaxDays] = useState('')
+  const [officeDeliveryMinDays, setOfficeDeliveryMinDays] = useState('')
+  const [officeDeliveryMaxDays, setOfficeDeliveryMaxDays] = useState('')
+  const [seoTitle, setSeoTitle] = useState('')
+  const [seoDescription, setSeoDescription] = useState('')
+  const [h1, setH1] = useState('')
+  const [canonicalUrl, setCanonicalUrl] = useState('')
   const [brandIds, setBrandIds] = useState<string[]>([])
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
@@ -45,6 +59,7 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
+  const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
 
   const handleDownload = async (url: string, index: number) => {
@@ -89,9 +104,23 @@ export default function ProductForm({ product, brands, categories, subcategories
     if (isOpen) {
       if (product) {
         setProductId(product.productId || '')
+        setSku(product.sku || product.productId || '')
         setName(product.name)
         setDescription(product.description || '')
         setPrice(Number(product.price).toString())
+        setStatus(product.status || 'active')
+        setFulfillmentMode(product.fulfillment_mode || 'requires_confirmation')
+        setAvailabilityConfidence(product.availability_confidence || 'unknown')
+        setIndexingStatus(product.indexing_status || 'indexable')
+        setPriceOnRequest(Boolean(product.price_on_request || product.metadata?.price_on_request))
+        setProductionMinDays(product.production_min_days == null ? '' : String(product.production_min_days))
+        setProductionMaxDays(product.production_max_days == null ? '' : String(product.production_max_days))
+        setOfficeDeliveryMinDays(product.office_delivery_min_days == null ? '' : String(product.office_delivery_min_days))
+        setOfficeDeliveryMaxDays(product.office_delivery_max_days == null ? '' : String(product.office_delivery_max_days))
+        setSeoTitle(product.seo_title || '')
+        setSeoDescription(product.seo_description || '')
+        setH1(product.h1 || '')
+        setCanonicalUrl(product.canonical_url || '')
         // Handle brand as array or single value
         const b = product.brand || product.expand?.brand
         if (Array.isArray(b)) {
@@ -114,7 +143,20 @@ export default function ProductForm({ product, brands, categories, subcategories
         setPhotoUrlsToAdd('')
 
         // Set existing photos (they are external URLs, not PocketBase files)
-        if (product.photos && product.photos.length > 0) {
+        const media = product.media && product.media.length > 0
+          ? product.media
+          : (product.photos || []).map((url, index) => ({
+            original_url: String(url),
+            thumb_url: String(url),
+            preview_url: String(url),
+            og_image_url: String(url),
+            alt_text: product.name || '',
+            sort_order: index,
+            processing_status: 'processed' as const,
+          }))
+        setExistingMedia(media)
+
+        if (media.length > 0 || (product.photos && product.photos.length > 0)) {
           let photoUrls: any = product.photos
 
           // If photos is stored as JSON string, parse it
@@ -127,22 +169,40 @@ export default function ProductForm({ product, brands, categories, subcategories
             }
           }
 
-          setExistingPhotos(Array.isArray(photoUrls) ? photoUrls : [])
+          setExistingPhotos(media.length > 0
+            ? media.map((item) => item.preview_url || item.original_url).filter(Boolean)
+            : (Array.isArray(photoUrls) ? photoUrls : []))
         } else {
           setExistingPhotos([])
+          setExistingMedia([])
         }
       } else {
         // Reset for new product
         setProductId('')
+        setSku('')
         setName('')
         setDescription('')
         setPrice('')
+        setStatus('active')
+        setFulfillmentMode('requires_confirmation')
+        setAvailabilityConfidence('unknown')
+        setIndexingStatus('indexable')
+        setPriceOnRequest(false)
+        setProductionMinDays('')
+        setProductionMaxDays('')
+        setOfficeDeliveryMinDays('')
+        setOfficeDeliveryMaxDays('')
+        setSeoTitle('')
+        setSeoDescription('')
+        setH1('')
+        setCanonicalUrl('')
         setBrandIds([])
         setCategory(categories[0]?.id || '')
         setSubcategory('')
         setGender('')
         setPhotoUrlsToAdd('')
         setExistingPhotos([])
+        setExistingMedia([])
       }
       setError('')
     }
@@ -187,6 +247,26 @@ export default function ProductForm({ product, brands, categories, subcategories
     setDraggedIndex(null)
   }
 
+  const buildMediaPayload = () => {
+    return existingPhotos.map((url, index) => {
+      const media = existingMedia.find((item) =>
+        item.original_url === url ||
+        item.preview_url === url ||
+        item.thumb_url === url ||
+        item.og_image_url === url
+      )
+      return {
+        original_url: media?.original_url || url,
+        thumb_url: media?.thumb_url || media?.preview_url || media?.original_url || url,
+        preview_url: media?.preview_url || media?.original_url || url,
+        og_image_url: media?.og_image_url || media?.preview_url || media?.original_url || url,
+        alt_text: media?.alt_text || name.trim(),
+        sort_order: index,
+        processing_status: media?.processing_status || 'processed',
+      }
+    })
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
@@ -217,10 +297,25 @@ export default function ProductForm({ product, brands, categories, subcategories
 
     const formData = new FormData()
     formData.append('productId', productId.trim())
+    formData.append('sku', sku.trim())
     formData.append('name', name.trim())
     formData.append('description', description.trim())
     formData.append('price', priceNum.toString())
-    formData.append('status', 'active')
+    formData.append('status', status === 'inactive' ? 'hidden' : status)
+    formData.append('currency', 'RUB')
+    formData.append('fulfillment_mode', fulfillmentMode || 'requires_confirmation')
+    formData.append('availability_confidence', availabilityConfidence || 'unknown')
+    formData.append('indexing_status', indexingStatus || 'indexable')
+    formData.append('production_min_days', productionMinDays)
+    formData.append('production_max_days', productionMaxDays)
+    formData.append('office_delivery_min_days', officeDeliveryMinDays)
+    formData.append('office_delivery_max_days', officeDeliveryMaxDays)
+    formData.append('seo_title', seoTitle.trim())
+    formData.append('seo_description', seoDescription.trim())
+    formData.append('h1', h1.trim())
+    formData.append('canonical_url', canonicalUrl.trim())
+    formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
+    formData.append('productMetadata', JSON.stringify(product?.metadata || {}))
 
     // Append each brand ID
     brandIds.forEach(id => {
@@ -231,10 +326,8 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('subcategory', subcategory)
     formData.append('gender', gender)
 
-    // Add existing photos in new order (as JSON) - this now includes newly added URLs
-    if (existingPhotos.length > 0) {
-      formData.append('existingPhotos', JSON.stringify(existingPhotos))
-    }
+    // Always send media, including an empty array when all photos were removed.
+    formData.append('media', JSON.stringify(buildMediaPayload()))
 
     startTransition(async () => {
       try {
@@ -251,14 +344,34 @@ export default function ProductForm({ product, brands, categories, subcategories
             onSave({
               ...product,
               productId: productId.trim(),
+              external_id: productId.trim(),
+              sku: sku.trim(),
               name: name.trim(),
               description: description.trim(),
               price: parseFloat(price),
-              status: 'active',
+              status,
+              fulfillment_mode: fulfillmentMode,
+              availability_confidence: availabilityConfidence,
+              indexing_status: indexingStatus,
+              production_min_days: productionMinDays ? Number(productionMinDays) : null,
+              production_max_days: productionMaxDays ? Number(productionMaxDays) : null,
+              office_delivery_min_days: officeDeliveryMinDays ? Number(officeDeliveryMinDays) : null,
+              office_delivery_max_days: officeDeliveryMaxDays ? Number(officeDeliveryMaxDays) : null,
+              seo_title: seoTitle.trim(),
+              seo_description: seoDescription.trim(),
+              h1: h1.trim(),
+              canonical_url: canonicalUrl.trim(),
+              price_on_request: priceOnRequest,
+              metadata: {
+                ...(product.metadata || {}),
+                gender,
+                price_on_request: priceOnRequest,
+              },
               gender,
               category,
               subcategory,
               photos: existingPhotos,
+              media: buildMediaPayload(),
             })
           }
           onClose()
@@ -415,6 +528,39 @@ export default function ProductForm({ product, brands, categories, subcategories
               />
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  SKU
+                </label>
+                <input
+                  type="text"
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  placeholder="SKU товара"
+                  disabled={isPending}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Статус
+                </label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as Product['status'])}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="draft">Черновик</option>
+                  <option value="active">Активен</option>
+                  <option value="hidden">Скрыт</option>
+                  <option value="archived">Архив</option>
+                </select>
+              </div>
+            </div>
+
             {/* Name */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -546,6 +692,125 @@ export default function ProductForm({ product, brands, categories, subcategories
                   required
                   disabled={isPending}
                 />
+                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <input
+                    type="checkbox"
+                    checked={priceOnRequest}
+                    onChange={(e) => setPriceOnRequest(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    disabled={isPending}
+                  />
+                  Цена по запросу
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Исполнение
+                </label>
+                <select
+                  value={fulfillmentMode}
+                  onChange={(e) => setFulfillmentMode(e.target.value as Product['fulfillment_mode'])}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="ready_to_ship">В наличии</option>
+                  <option value="requires_confirmation">Подтвердить наличие</option>
+                  <option value="made_to_order">Под заказ</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Доступность
+                </label>
+                <select
+                  value={availabilityConfidence}
+                  onChange={(e) => setAvailabilityConfidence(e.target.value as Product['availability_confidence'])}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="unknown">Неизвестно</option>
+                  <option value="low">Низкая</option>
+                  <option value="medium">Средняя</option>
+                  <option value="high">Высокая</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Индексация
+                </label>
+                <select
+                  value={indexingStatus}
+                  onChange={(e) => setIndexingStatus(e.target.value as Product['indexing_status'])}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
+                  disabled={isPending}
+                >
+                  <option value="indexable">Indexable</option>
+                  <option value="noindex">Noindex</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="thin_content">Thin content</option>
+                  <option value="duplicate">Duplicate</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Производство от
+                </label>
+                <input type="number" min="0" value={productionMinDays} onChange={(e) => setProductionMinDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Производство до
+                </label>
+                <input type="number" min="0" value={productionMaxDays} onChange={(e) => setProductionMaxDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Офис от
+                </label>
+                <input type="number" min="0" value={officeDeliveryMinDays} onChange={(e) => setOfficeDeliveryMinDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Офис до
+                </label>
+                <input type="number" min="0" value={officeDeliveryMaxDays} onChange={(e) => setOfficeDeliveryMaxDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    SEO title
+                  </label>
+                  <input type="text" value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    H1
+                  </label>
+                  <input type="text" value={h1} onChange={(e) => setH1(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  SEO description
+                </label>
+                <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} rows={3} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Canonical URL
+                </label>
+                <input type="url" value={canonicalUrl} onChange={(e) => setCanonicalUrl(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
               </div>
             </div>
           </form>

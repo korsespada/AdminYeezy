@@ -79,6 +79,9 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
         formData.append('description', product.description || '');
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
+        formData.append('gender', product.gender || '');
+        formData.append('productMetadata', JSON.stringify(product.metadata || {}));
+        formData.append('price_on_request', product.price_on_request ? 'true' : 'false');
 
         // Handle multiple brands
         const b = product.brand || product.expand?.brand;
@@ -95,9 +98,14 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
 
         formData.append('category', categoryId);
         formData.append('subcategory', subcategoryId);
-        if (product.photos && product.photos.length > 0) {
-            formData.append('existingPhotos', JSON.stringify(product.photos));
-        }
+        formData.append('media', JSON.stringify(product.media || product.photos.map((url, index) => ({
+            original_url: url,
+            preview_url: url,
+            thumb_url: url,
+            og_image_url: url,
+            sort_order: index,
+            processing_status: 'processed',
+        }))));
 
         try {
             const result = await updateProductAction(product.id, formData);
@@ -129,6 +137,11 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
             formData.append('price', product.price.toString());
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
+            formData.append('productMetadata', JSON.stringify(product.metadata || {}));
+            formData.append('price_on_request', product.price_on_request ? 'true' : 'false');
+            if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
+            if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
+            if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
 
             // Handle brands
             const b = product.brand || product.expand?.brand;
@@ -146,9 +159,14 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
             formData.append('category', product.category || product.expand?.category?.id || '');
             formData.append('subcategory', product.subcategory || product.expand?.subcategory?.id || '');
 
-            if (product.photos && product.photos.length > 0) {
-                formData.append('existingPhotos', JSON.stringify(product.photos));
-            }
+            formData.append('media', JSON.stringify(product.media || product.photos.map((url, index) => ({
+                original_url: url,
+                preview_url: url,
+                thumb_url: url,
+                og_image_url: url,
+                sort_order: index,
+                processing_status: 'processed',
+            }))));
 
             const result = await createProductAction(formData);
             if (result.success) {
