@@ -1,9 +1,9 @@
 import { query } from '@/lib/db'
 import AnalyticsDashboard from '@/components/analytics/AnalyticsDashboard'
-import { unstable_noStore as noStore } from 'next/cache'
+import { connection } from 'next/server'
 
 export default async function AnalyticsPage() {
-    noStore()
+    await connection()
 
     try {
         const [categoriesRes, subcategoriesRes, brandsRes] = await Promise.all([

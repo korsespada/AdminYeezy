@@ -1,11 +1,16 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { X, Filter, Search, LogOut, FileSpreadsheet } from 'lucide-react'
-import Link from 'next/link'
+import { X, Filter, Search } from 'lucide-react'
 import { type Brand, type Category, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { logoutAction } from '@/actions/auth'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
 
 interface SidebarProps {
     brands: Brand[]
@@ -95,23 +100,23 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                             <Filter className="w-5 h-5 text-indigo-400" />
                             Фильтры
                         </h2>
-                        <button onClick={onClose} className="lg:hidden p-1 text-slate-400 hover:text-slate-200">
+                        <Button variant="ghost" size="icon" onClick={onClose} className="lg:hidden text-slate-400 hover:text-slate-200">
                             <X className="w-6 h-6" />
-                        </button>
+                        </Button>
                     </div>
 
                     <div className="space-y-6">
 
                         {/* Search (Modern) */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Поиск</label>
+                            <Label className="mb-2 block text-slate-300">Поиск</Label>
                             <div className="relative">
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="Поиск..."
                                     value={searchValue}
                                     onChange={(e) => setSearchValue(e.target.value)}
-                                    className="w-full pl-9 pr-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                    className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500"
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                             </div>
@@ -119,103 +124,112 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
 
                         {/* Category Filter */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Категория</label>
-                            <select
-                                value={currentCategory}
-                                onChange={(e) => applyFilter('category', e.target.value || null)}
-                                className="w-full rounded-lg border-slate-600 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 py-2.5 px-3 bg-slate-700 text-slate-200 border"
+                            <Label className="mb-2 block text-slate-300">Категория</Label>
+                            <Select
+                                value={currentCategory || '__all__'}
+                                onValueChange={(value) => applyFilter('category', value === '__all__' ? null : value)}
                             >
-                                <option value="">Все категории</option>
+                                <SelectTrigger className="bg-slate-700 text-slate-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                <SelectItem value="__all__">Все категории</SelectItem>
                                 {categories.map(cat => (
-                                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                                 ))}
-                            </select>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Subcategory Filter (Conditional) */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Подкатегория</label>
-                            <select
-                                value={currentSubcategory}
-                                onChange={(e) => applyFilter('subcategory', e.target.value || null)}
-                                className="w-full rounded-lg border-slate-600 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 py-2.5 px-3 bg-slate-700 text-slate-200 border"
+                            <Label className="mb-2 block text-slate-300">Подкатегория</Label>
+                            <Select
+                                value={currentSubcategory || '__all__'}
+                                onValueChange={(value) => applyFilter('subcategory', value === '__all__' ? null : value)}
                             >
-                                <option value="">Все подкатегории</option>
-                                <option value="__none__">Без подкатегории</option>
+                                <SelectTrigger className="bg-slate-700 text-slate-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                <SelectItem value="__all__">Все подкатегории</SelectItem>
+                                <SelectItem value="__none__">Без подкатегории</SelectItem>
                                 {availableSubcategories.map(sub => {
                                     const isForeign = sub.category !== currentCategory
                                     const foreignCategoryName = isForeign
                                         ? categories.find(c => c.id === sub.category)?.name || 'Другое'
                                         : '';
                                     return (
-                                        <option key={sub.id} value={sub.id}>
+                                        <SelectItem key={sub.id} value={sub.id}>
                                             {sub.name} {isForeign ? `(из: ${foreignCategoryName})` : ''}
-                                        </option>
+                                        </SelectItem>
                                     )
                                 })}
-                            </select>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Gender Filter */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Пол</label>
+                            <Label className="mb-2 block text-slate-300">Пол</Label>
                             <div className="flex flex-wrap gap-2">
-                                <button
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={!currentGender ? 'default' : 'outline'}
                                     onClick={() => applyFilter('gender', null)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${!currentGender
-                                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
-                                        }`}
+                                    className={!currentGender ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
                                 >
                                     Все
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={currentGender === 'Для мужчин' ? 'default' : 'outline'}
                                     onClick={() => applyFilter('gender', 'Для мужчин')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === 'Для мужчин'
-                                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
-                                        }`}
+                                    className={currentGender === 'Для мужчин' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
                                 >
                                     Мужчинам
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={currentGender === 'Для женщин' ? 'default' : 'outline'}
                                     onClick={() => applyFilter('gender', 'Для женщин')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === 'Для женщин'
-                                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
-                                        }`}
+                                    className={currentGender === 'Для женщин' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
                                 >
                                     Женщинам
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant={currentGender === '__none__' ? 'default' : 'outline'}
                                     onClick={() => applyFilter('gender', '__none__')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${currentGender === '__none__'
-                                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                                        : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'
-                                        }`}
+                                    className={currentGender === '__none__' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
                                 >
                                     Без гендера
-                                </button>
+                                </Button>
                             </div>
                         </div>
 
                         {/* Brand Filter with Search */}
                         <div>
-                            <label className="block text-sm font-medium text-slate-300 mb-2">Бренды</label>
+                            <Label className="mb-2 block text-slate-300">Бренды</Label>
                             {/* Brand Search Input */}
                             <div className="relative mb-2">
-                                <input
+                                <Input
                                     type="text"
                                     placeholder="Поиск бренда..."
                                     value={brandSearch}
                                     onChange={(e) => setBrandSearch(e.target.value)}
-                                    className="w-full pl-8 pr-3 py-1.5 bg-slate-700 border border-slate-600 rounded-lg text-xs text-slate-200 placeholder-slate-500 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                    className="h-8 bg-slate-700 pl-8 text-xs text-slate-200 placeholder:text-slate-500"
                                 />
                                 <Search className="w-3 h-3 text-slate-500 absolute left-3 top-2" />
                             </div>
 
                             {/* Brand List */}
-                            <div className="space-y-0.5 max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800">
+                            <ScrollArea className="h-60 pr-2">
+                            <div className="space-y-0.5">
                                 {(() => {
                                     const selectedIds = currentBrand ? currentBrand.split(',') : []
 
@@ -232,10 +246,9 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                                         const isSelected = selectedIds.includes(brand.id)
                                         return (
                                             <label key={brand.id} className={`flex items-center gap-2 cursor-pointer group py-1 px-1.5 rounded-md transition-colors ${isSelected ? 'bg-indigo-500/10' : 'hover:bg-slate-700/50'}`}>
-                                                <input
-                                                    type="checkbox"
+                                                <Checkbox
                                                     checked={isSelected}
-                                                    onChange={() => {
+                                                    onCheckedChange={() => {
                                                         let newIds: string[]
                                                         if (isSelected) {
                                                             newIds = selectedIds.filter(id => id !== brand.id)
@@ -244,7 +257,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                                                         }
                                                         applyFilter('brand', newIds.length > 0 ? newIds.join(',') : null)
                                                     }}
-                                                    className="w-3.5 h-3.5 text-indigo-500 border-slate-500 bg-slate-700 focus:ring-indigo-500 focus:ring-offset-slate-800 rounded"
+                                                    className="h-3.5 w-3.5 border-slate-500 bg-slate-700"
                                                 />
                                                 <span className={`text-sm transition-colors ${isSelected ? 'text-indigo-400 font-medium' : 'text-slate-400 group-hover:text-slate-200'}`}>
                                                     {brand.name}
@@ -258,20 +271,24 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                                     <p className="text-xs text-slate-500 py-2">Бренды не найдены</p>
                                 )}
                             </div>
+                            </ScrollArea>
                         </div>
                     </div>
 
-                    <div className="mt-8 pt-6 border-t border-slate-700">
+                    <div className="mt-8 pt-6">
+                        <Separator className="mb-6 bg-slate-700" />
                         <div className="flex items-center justify-between text-sm text-slate-400 mb-4">
                             <span>Найдено:</span>
                             <span className="font-semibold text-slate-200">{count} товаров</span>
                         </div>
-                        <button
+                        <Button
+                            type="button"
+                            variant="outline"
                             onClick={handleReset}
-                            className="w-full py-2 px-4 bg-slate-700 border border-slate-600 text-slate-300 rounded-lg hover:bg-slate-600 hover:text-white transition-colors text-sm font-medium"
+                            className="w-full border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white"
                         >
                             Сбросить фильтры
-                        </button>
+                        </Button>
                     </div>
 
                 </div>

@@ -1,22 +1,25 @@
 import ProductList from '@/components/products/ProductList'
-import { unstable_noStore as noStore } from 'next/cache'
 import PerPageSelector from '@/components/ui/PerPageSelector'
 import { getRailsCatalogLookups, listRailsAdminProducts } from '@/lib/rails-admin'
+import { connection } from 'next/server'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: { page?: string; search?: string; brand?: string; category?: string; subcategory?: string; gender?: string; perPage?: string }
+  searchParams: Promise<{ page?: string; search?: string; brand?: string; category?: string; subcategory?: string; gender?: string; perPage?: string }>
 }) {
-  noStore()
-  const page = Number(searchParams.page) || 1
-  const perPage = Number(searchParams.perPage) || 40
+  await connection()
+  const params = await searchParams
+  const page = Number(params.page) || 1
+  const perPage = Number(params.perPage) || 40
   const offset = (page - 1) * perPage
-  const searchTerm = searchParams.search || ''
-  const brandFilter = searchParams.brand || ''
-  const categoryFilter = searchParams.category || ''
-  const subcategoryFilter = searchParams.subcategory || ''
-  const genderFilter = searchParams.gender || ''
+  const searchTerm = params.search || ''
+  const brandFilter = params.brand || ''
+  const categoryFilter = params.category || ''
+  const subcategoryFilter = params.subcategory || ''
+  const genderFilter = params.gender || ''
 
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
@@ -67,18 +70,22 @@ export default async function AdminPage({
               </div>
 
               {totalPages > 1 && (
-                <nav className="isolate inline-flex -space-x-px rounded-lg shadow-sm border border-slate-700">
-                  <a href={buildPaginationUrl(Math.max(1, page - 1))} className="px-3 py-2 text-slate-400 bg-slate-800 hover:bg-slate-700 rounded-l-lg border-r border-slate-700">«</a>
+                <nav className="isolate inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 p-1 shadow-sm">
+                  <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700 hover:text-slate-100">
+                    <a href={buildPaginationUrl(Math.max(1, page - 1))}>«</a>
+                  </Button>
                   {[...Array(totalPages)].map((_, i) => {
                     const p = i + 1
                     if (p < page - 2 || p > page + 2) return null
                     return (
-                      <a key={p} href={buildPaginationUrl(p)} className={`px-4 py-2 text-sm font-semibold transition-colors ${p === page ? 'bg-indigo-600 text-white' : 'text-slate-300 bg-slate-800 hover:bg-slate-700'}`}>
-                        {p}
-                      </a>
+                      <Button key={p} asChild variant={p === page ? 'default' : 'ghost'} size="sm" className={p === page ? '' : 'text-slate-300 hover:bg-slate-700'}>
+                        <a href={buildPaginationUrl(p)}>{p}</a>
+                      </Button>
                     )
                   })}
-                  <a href={buildPaginationUrl(Math.min(totalPages, page + 1))} className="px-3 py-2 text-slate-400 bg-slate-800 hover:bg-slate-700 rounded-r-lg border-l border-slate-700">»</a>
+                  <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700 hover:text-slate-100">
+                    <a href={buildPaginationUrl(Math.min(totalPages, page + 1))}>»</a>
+                  </Button>
                 </nav>
               )}
             </div>
@@ -89,11 +96,13 @@ export default async function AdminPage({
   } catch (err: any) {
     console.error('Admin page error:', err)
     return (
-      <div className="p-8 bg-red-900/20 border border-red-800 rounded-lg text-red-400">
-        <h2 className="text-xl font-bold mb-2">Ошибка подключения к Rails API</h2>
+      <Alert variant="destructive" className="m-8 border-red-800 bg-red-900/20 text-red-400">
+        <AlertTitle className="text-xl font-bold">Ошибка подключения к Rails API</AlertTitle>
+        <AlertDescription>
         <p>{err.message}</p>
         <p className="mt-4 text-sm opacity-70">Проверьте `RAILS_API_URL`, `RAILS_ADMIN_EMAIL` и `RAILS_ADMIN_PASSWORD`.</p>
-      </div>
+        </AlertDescription>
+      </Alert>
     )
   }
 }

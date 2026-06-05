@@ -12,6 +12,7 @@ import {
     XAxis,
     YAxis,
 } from 'recharts'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 interface SeriesData {
     date: string
@@ -151,15 +152,15 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
 
     return (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl sm:p-6 xl:col-span-8">
-                <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-8">
+                <CardHeader className="flex flex-col gap-1 space-y-0 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6 sm:pb-5">
                     <div>
-                        <h3 className="text-lg font-semibold text-white">Динамика аудитории</h3>
-                        <p className="text-sm text-slate-400">Уникальные посетители, просмотры товаров и обращения к менеджеру.</p>
+                        <CardTitle className="text-lg text-white">Динамика аудитории</CardTitle>
+                        <CardDescription>Уникальные посетители, просмотры товаров и обращения к менеджеру.</CardDescription>
                     </div>
                     <div className="text-xs font-medium text-slate-500">Автообновление каждые 30 секунд</div>
-                </div>
-                <div className="h-[340px] w-full">
+                </CardHeader>
+                <CardContent className="h-[340px] w-full p-5 pt-0 sm:p-6 sm:pt-0">
                     {safeSeries.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={safeSeries} margin={{ top: 8, right: 12, left: -18, bottom: 8 }}>
@@ -188,15 +189,15 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                             Недостаточно данных для графика
                         </div>
                     )}
-                </div>
-            </section>
+                </CardContent>
+            </Card>
 
-            <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-5 shadow-xl sm:p-6 xl:col-span-4">
-                <div className="mb-5">
-                    <h3 className="text-lg font-semibold text-white">Ключевые показатели</h3>
-                    <p className="text-sm text-slate-400">Сравнение самых важных счетчиков на одном графике.</p>
-                </div>
-                <div className="h-[340px] w-full">
+            <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-4">
+                <CardHeader className="p-5 sm:p-6 sm:pb-5">
+                    <CardTitle className="text-lg text-white">Ключевые показатели</CardTitle>
+                    <CardDescription>Сравнение самых важных счетчиков на одном графике.</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[340px] w-full p-5 pt-0 sm:p-6 sm:pt-0">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={summaryBars} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
                             <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" horizontal={false} />
@@ -218,8 +219,8 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                             </Bar>
                         </BarChart>
                     </ResponsiveContainer>
-                </div>
-            </section>
+                </CardContent>
+            </Card>
         </div>
     )
 }

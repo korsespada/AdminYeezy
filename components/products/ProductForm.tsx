@@ -4,9 +4,21 @@ import { useState, useEffect, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
-import { X, Upload, Trash2, GripVertical, Download } from 'lucide-react'
+import { Upload, Trash2, GripVertical, Download } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Textarea } from '@/components/ui/textarea'
 
 const getOptimizedPhotoUrl = (url: string) => {
   if (typeof url === 'string' && url.includes('szwego.com')) {
@@ -391,35 +403,22 @@ export default function ProductForm({ product, brands, categories, subcategories
   if (!isOpen) return null
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 transition-opacity"
-        onClick={onClose}
-      />
-
-      {/* Slide-over Drawer */}
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl transform transition-transform duration-300 ease-in-out overflow-y-auto">
-        <div className="h-full flex flex-col">
-          {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+    <Sheet open={isOpen} onOpenChange={(open) => {
+      if (!open) onClose()
+    }}>
+      <SheetContent side="right" className="flex w-full max-w-2xl flex-col overflow-y-auto bg-gray-800 p-0 sm:max-w-2xl">
+          <SheetHeader className="sticky top-0 z-10 border-b border-gray-700 bg-gray-900 px-6 py-4">
+            <SheetTitle>
               {product ? 'Изменить товар' : 'Новый товар'}
-            </h2>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-            >
-              <X size={20} />
-            </button>
-          </div>
+            </SheetTitle>
+          </SheetHeader>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="flex-1 p-6 space-y-6">
             {error && (
-              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
-                {error}
-              </div>
+              <Alert variant="destructive" className="border-red-800 bg-red-900/20 text-red-400">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
 
             {/* Photos Upload */}
@@ -430,25 +429,27 @@ export default function ProductForm({ product, brands, categories, subcategories
                 </label>
                 <div className="flex gap-2 ml-auto">
                   {existingPhotos.length > 0 && (
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       onClick={handleDownloadAll}
-                      className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors border border-green-200 dark:border-green-800/50"
+                      className="border-green-800/50 bg-green-900/20 text-green-400 hover:bg-green-900/30 hover:text-green-300"
                       disabled={isPending || isDownloading}
                     >
                       <Download size={16} />
                       {isDownloading ? 'Скачивание...' : 'Скачать все фото'}
-                    </button>
+                    </Button>
                   )}
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     onClick={() => setIsPhotoModalOpen(true)}
-                    className="flex items-center gap-2 px-3 py-2 h-fit text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors border border-blue-200 dark:border-blue-800/50"
+                    className="h-fit border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/30 hover:text-blue-300"
                     disabled={isPending}
                   >
                     <Upload size={16} />
                     Добавить фото по ссылкам
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -480,25 +481,28 @@ export default function ProductForm({ product, brands, categories, subcategories
                           <GripVertical size={14} />
                         </div>
                         <div className="absolute top-1 right-1 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
+                          <Button
                             type="button"
+                            variant="destructive"
+                            size="icon"
                             onClick={() => removeExistingPhoto(index)}
-                            className="p-1 bg-red-500 text-white rounded-full shadow hover:bg-red-600 transition-colors"
+                            className="h-7 w-7 rounded-full shadow"
                             title="Удалить"
                           >
                             <Trash2 size={14} />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
+                            size="icon"
                             onClick={(e) => {
                               e.preventDefault();
                               handleDownload(url, index);
                             }}
-                            className="p-1 bg-blue-500 text-white rounded-full shadow hover:bg-blue-600 transition-colors"
+                            className="h-7 w-7 rounded-full shadow"
                             title="Скачать исходное фото"
                           >
                             <Download size={14} />
-                          </button>
+                          </Button>
                         </div>
                         <div className="absolute bottom-1 right-1 px-2 py-0.5 bg-gray-800/70 text-white text-xs rounded">
                           {index + 1}
@@ -816,81 +820,64 @@ export default function ProductForm({ product, brands, categories, subcategories
           </form>
 
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex justify-end space-x-3 sticky bottom-0">
-            <button
+          <div className="sticky bottom-0 flex justify-end space-x-3 border-t border-gray-700 bg-gray-900 px-6 py-4">
+            <Button
               type="button"
+              variant="outline"
               onClick={onClose}
               disabled={isPending}
-              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+              className="border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
             >
               Отмена
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               onClick={handleSubmit}
               disabled={isPending}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
             >
               {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
-            </button>
+            </Button>
           </div>
-        </div>
-      </div>
+      </SheetContent>
 
       {/* Photo URL Modal */}
-      {isPhotoModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
-            onClick={() => setIsPhotoModalOpen(false)}
-          />
-          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all">
-            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                Добавить фото по ссылкам
-              </h3>
-              <button
-                onClick={() => setIsPhotoModalOpen(false)}
-                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+      <Dialog open={isPhotoModalOpen} onOpenChange={setIsPhotoModalOpen}>
+          <DialogContent className="bg-gray-800 sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Добавить фото по ссылкам</DialogTitle>
+              <DialogDescription>
                 Вставьте ссылки на фотографии товара. Каждая ссылка должна быть с новой строки.
-              </p>
-              <textarea
+              </DialogDescription>
+            </DialogHeader>
+              <Textarea
                 value={photoUrlsToAdd}
                 onChange={(e) => setPhotoUrlsToAdd(e.target.value)}
                 placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.jpg"
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-900 dark:text-white font-mono text-sm resize-y min-h-[150px]"
+                className="min-h-[150px] resize-y bg-gray-900 font-mono text-sm"
                 rows={6}
                 disabled={isPending}
                 autoFocus
               />
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex justify-end gap-3">
-              <button
+            <DialogFooter>
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => setIsPhotoModalOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+                className="border-gray-600 bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white"
               >
                 Отмена
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handleAddUrls}
                 disabled={!photoUrlsToAdd.trim()}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
               >
                 <Upload size={16} />
                 Добавить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+      </Dialog>
+    </Sheet>
   )
 }

@@ -4,6 +4,8 @@ import React from 'react'
 import Link from 'next/link'
 import { Menu, RefreshCw, BarChart3, LogOut, FileSpreadsheet } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
+import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 
 interface AdminHeaderProps {
   onMenuClick?: () => void
@@ -14,12 +16,14 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
     <header className="bg-slate-800 border-b border-slate-700 py-3 px-6 sticky top-0 z-30 flex items-center justify-between shadow-sm">
       <div className="flex items-center gap-4">
         {onMenuClick && (
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onMenuClick}
-            className="lg:hidden p-2 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg"
+            className="lg:hidden text-slate-400 hover:bg-slate-700 hover:text-white"
           >
             <Menu className="w-5 h-5" />
-          </button>
+          </Button>
         )}
         <div className="hidden sm:block">
           <Link href="/admin" className="hover:opacity-80 transition-opacity">
@@ -33,25 +37,21 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
-        <Link
-          href="/admin/batches"
-          className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all"
-          title="Выгрузка и парсинг"
-        >
-          <RefreshCw size={20} className="text-orange-400" />
-          <span className="hidden md:inline">Выгрузка</span>
-        </Link>
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Выгрузка и парсинг">
+          <Link href="/admin/batches">
+            <RefreshCw size={20} className="text-orange-400" />
+            <span className="hidden md:inline">Выгрузка</span>
+          </Link>
+        </Button>
 
-        <Link
-          href="/admin/analytics"
-          className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-700/50 rounded-lg transition-all"
-          title="Аналитика"
-        >
-          <BarChart3 size={20} className="text-indigo-400" />
-          <span className="hidden md:inline">Аналитика</span>
-        </Link>
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Аналитика">
+          <Link href="/admin/analytics">
+            <BarChart3 size={20} className="text-indigo-400" />
+            <span className="hidden md:inline">Аналитика</span>
+          </Link>
+        </Button>
 
-        <div className="h-6 w-px bg-slate-700 mx-1"></div>
+        <Separator orientation="vertical" className="mx-1 h-6 bg-slate-700" />
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-700/30 border border-slate-700">
@@ -62,13 +62,15 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           </div>
 
           <form action={logoutAction} className="flex items-center">
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               type="submit"
               title="Выйти"
-              className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+              className="text-slate-400 hover:bg-red-400/10 hover:text-red-400"
             >
               <LogOut size={20} />
-            </button>
+            </Button>
           </form>
         </div>
       </div>

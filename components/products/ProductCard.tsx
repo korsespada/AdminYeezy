@@ -6,6 +6,11 @@ import { type Product } from '@/lib/types';
 import { Trash2, Copy } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
 
 interface ProductCardProps {
     product: Product;
@@ -183,7 +188,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     }
 
     return (
-        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden hover:shadow-xl hover:shadow-black/20 hover:border-slate-600 transition-all duration-300 group flex flex-col h-full">
+        <Card className="group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 transition-all duration-300 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20">
             {/* Image area - clickable to edit */}
             <div
                 className="relative aspect-square overflow-hidden bg-slate-900 cursor-pointer"
@@ -206,42 +211,47 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 {/* Selection Checkbox */}
                 <div className="absolute top-3 left-3 z-10">
-                    <input
-                        type="checkbox"
+                    <Checkbox
                         checked={selected}
-                        onChange={() => onToggleSelect(product.id)}
-                        className="w-5 h-5 rounded border-slate-700 bg-slate-900/80 text-indigo-600 focus:ring-indigo-500 cursor-pointer shadow-lg backdrop-blur-sm"
+                        onCheckedChange={() => onToggleSelect(product.id)}
+                        className="h-5 w-5 border-slate-700 bg-slate-900/80 shadow-lg backdrop-blur-sm"
                         onClick={(e) => e.stopPropagation()}
                     />
                 </div>
                 {/* Delete button on hover */}
                 <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2">
-                    <button
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
                         onClick={(e) => { e.stopPropagation(); onDelete(product.id); }}
-                        className="p-2 bg-slate-900/80 backdrop-blur-sm rounded-full shadow-lg hover:bg-red-600 text-slate-300 hover:text-white transition-colors"
+                        className="h-8 w-8 rounded-full bg-slate-900/80 text-slate-300 shadow-lg backdrop-blur-sm hover:bg-red-600 hover:text-white"
                         title="Удалить"
                     >
                         <Trash2 className="w-4 h-4" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
                         onClick={handleDuplicate}
                         disabled={isCopying}
-                        className="p-2 bg-slate-900/80 backdrop-blur-sm rounded-full shadow-lg hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+                        className="h-8 w-8 rounded-full bg-slate-900/80 text-slate-300 shadow-lg backdrop-blur-sm hover:bg-indigo-600 hover:text-white"
                         title="Дублировать"
                     >
                         <Copy className="w-4 h-4" />
-                    </button>
+                    </Button>
                 </div>
 
                 {/* Photo Count Tag */}
                 {product.photos && product.photos.length > 0 && (
-                    <div className="absolute bottom-3 right-3 px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md text-[10px] font-bold text-slate-300 z-10 border border-slate-700/50">
+                    <Badge variant="outline" className="absolute bottom-3 right-3 z-10 border-slate-700/50 bg-slate-900/80 text-[10px] text-slate-300 backdrop-blur-sm">
                         {product.photos.length} фото
-                    </div>
+                    </Badge>
                 )}
             </div>
 
-            <div className="p-5 flex-1 flex flex-col">
+            <CardContent className="flex flex-1 flex-col p-5">
                 {/* Product ID under the photo */}
                 <div className="mb-2">
                     <div className="text-[10px] text-slate-500 font-mono">{product.productId}</div>
@@ -272,14 +282,14 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 {/* Editable Name */}
                 {editingField === 'name' ? (
-                    <input
+                    <Input
                         type="text"
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
                         onBlur={handleSave}
                         onKeyDown={handleKeyDown}
                         autoFocus
-                        className="text-base font-bold text-slate-100 mb-2 leading-tight bg-slate-700 border border-indigo-500 rounded px-2 py-1 outline-none"
+                        className="mb-2 h-auto bg-slate-700 px-2 py-1 text-base font-bold leading-tight text-slate-100"
                         onClick={(e) => e.stopPropagation()}
                     />
                 ) : (
@@ -300,14 +310,14 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 <div className="flex items-center justify-between pt-4 border-t border-slate-700 mt-auto">
                     {/* Editable Price */}
                     {editingField === 'price' ? (
-                        <input
+                        <Input
                             type="number"
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
                             onBlur={handleSave}
                             onKeyDown={handleKeyDown}
                             autoFocus
-                            className="font-bold text-lg text-slate-200 bg-slate-700 border border-indigo-500 rounded px-2 py-1 w-28 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="h-auto w-28 bg-slate-700 px-2 py-1 text-lg font-bold text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                             onClick={(e) => e.stopPropagation()}
                         />
                     ) : (
@@ -319,8 +329,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         </div>
                     )}
                 </div>
-            </div>
-        </div>
+            </CardContent>
+        </Card>
     );
 });
 

@@ -7,8 +7,8 @@ import type { ActionResponse } from '@/lib/types'
 
 const ADMIN_ENTRY_PATH = '/admin/batches'
 
-function setAdminSession(admin: { id: string | number; email: string }) {
-  const cookieStore = cookies()
+async function setAdminSession(admin: { id: string | number; email: string }) {
+  const cookieStore = await cookies()
   const sessionData = JSON.stringify({
     id: admin.id,
     email: admin.email,
@@ -71,13 +71,13 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
     const isLocalAdminEnabled = process.env.NODE_ENV !== 'production' && localAdminEmail && localAdminPassword
 
     if (isLocalAdminEnabled && email === localAdminEmail && password === localAdminPassword) {
-      setAdminSession({ id: 'local-admin', email })
+      await setAdminSession({ id: 'local-admin', email })
       redirect(ADMIN_ENTRY_PATH)
     }
 
     const railsAdmin = await loginViaRails(email, password)
     if (railsAdmin) {
-      setAdminSession({ id: railsAdmin.id, email: railsAdmin.email })
+      await setAdminSession({ id: railsAdmin.id, email: railsAdmin.email })
       redirect(ADMIN_ENTRY_PATH)
     }
 
@@ -95,7 +95,7 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
     }
 
     const admin = res.rows[0]
-    setAdminSession({ id: admin.id, email: admin.email })
+    await setAdminSession({ id: admin.id, email: admin.email })
 
   } catch (error: any) {
     if (error?.digest?.startsWith('NEXT_REDIRECT') || error?.message === 'NEXT_REDIRECT') {
@@ -113,7 +113,7 @@ export async function loginAction(formData: FormData): Promise<ActionResponse> {
  * Выход
  */
 export async function logoutAction() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   cookieStore.delete('admin_auth')
   cookieStore.delete('pb_auth') // На всякий случай чистим старую
   redirect('/login')

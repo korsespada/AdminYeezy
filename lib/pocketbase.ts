@@ -22,7 +22,8 @@ export function createClient(): PocketBase {
   if (typeof window === 'undefined') {
     try {
       // Load auth token from cookies on server
-      const cookieStore = cookies()
+      const cookieStore = cookies() as unknown as { get?: (name: string) => { value?: string } | undefined }
+      if (!cookieStore.get) return pb
       const authCookie = cookieStore.get('pb_auth')
 
       if (authCookie?.value) {

@@ -3,14 +3,12 @@ import type { NextRequest } from 'next/server'
 
 const ADMIN_ENTRY_PATH = '/admin/batches'
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
-  
-  // Проверяем новую куку admin_auth (или старую pb_auth для совместимости)
+
   const authCookie = request.cookies.get('admin_auth') || request.cookies.get('pb_auth')
   const isAuthenticated = !!authCookie?.value
 
-  // Если пытаемся зайти в админку без авторизации — на логин
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {
       return NextResponse.redirect(new URL('/login', request.url))
@@ -18,7 +16,6 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
-  // Если уже вошли и зашли на страницу логина — в админку
   if (pathname === '/login') {
     if (isAuthenticated) {
       return NextResponse.redirect(new URL(ADMIN_ENTRY_PATH, request.url))

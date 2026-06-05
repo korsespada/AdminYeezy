@@ -1,15 +1,16 @@
 'use client'
 
 import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export default function PerPageSelector({ currentPerPage }: { currentPerPage: number }) {
     const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
 
-    const onChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const onChange = (value: string) => {
         const params = new URLSearchParams(searchParams.toString())
-        params.set('perPage', e.target.value)
+        params.set('perPage', value)
         params.set('page', '1') // reset to page 1
         router.push(pathname + '?' + params.toString())
     }
@@ -17,15 +18,19 @@ export default function PerPageSelector({ currentPerPage }: { currentPerPage: nu
     return (
         <div className="flex items-center gap-2">
             <span className="text-sm text-slate-400 whitespace-nowrap">Товаров на стр:</span>
-            <select
+            <Select
                 value={currentPerPage.toString()}
-                onChange={onChange}
-                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-md focus:ring-indigo-500 focus:border-indigo-500 block py-1 pl-2 pr-8"
+                onValueChange={onChange}
             >
-                <option value="40">40</option>
-                <option value="100">100</option>
-                <option value="500">500</option>
-            </select>
+                <SelectTrigger className="h-8 w-24 bg-slate-700 text-slate-200">
+                    <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="40">40</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                    <SelectItem value="500">500</SelectItem>
+                </SelectContent>
+            </Select>
         </div>
     )
 }

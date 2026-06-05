@@ -3,11 +3,17 @@
 import React, { useState, useCallback } from 'react'
 import Image from 'next/image'
 import { type Product } from '@/lib/types'
-import { Square, CheckSquare, Search, ReplaceAll, RefreshCw, Copy } from 'lucide-react'
+import { ReplaceAll, RefreshCw, Copy } from 'lucide-react'
 import { bulkPatchObjectsAction } from '@/actions/bulk-update'
 import { createProductAction } from '@/actions/products'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Textarea } from '@/components/ui/textarea'
 
 interface ProductTableViewProps {
     products: Product[]
@@ -242,7 +248,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
     }
 
     return (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden shadow-sm mb-8 flex flex-col h-[calc(100vh-280px)]">
+        <Card className="mb-8 flex h-[calc(100vh-280px)] flex-col overflow-hidden border-slate-700 bg-slate-800 shadow-sm">
             {/* Mass Replace Toolbar */}
             <div className="p-4 border-b border-slate-700 bg-slate-800/50 shrink-0">
                 <div className="flex flex-col sm:flex-row items-center gap-4">
@@ -252,87 +258,89 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 flex-1">
-                        <select
+                        <Select
                             value={replaceField}
-                            onChange={e => setReplaceField(e.target.value as FieldName)}
-                            className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none"
+                            onValueChange={value => setReplaceField(value as FieldName)}
                         >
-                            <option value="name">Название</option>
-                            <option value="description">Описание</option>
-                            <option value="price">Цена</option>
-                        </select>
-                        <input
+                            <SelectTrigger className="h-9 w-36 bg-slate-700 text-slate-200">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="name">Название</SelectItem>
+                                <SelectItem value="description">Описание</SelectItem>
+                                <SelectItem value="price">Цена</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Input
                             type="text"
                             placeholder="Найти (или *)..."
                             value={findText}
                             onChange={e => setFindText(e.target.value)}
-                            className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none flex-1 min-w-[120px]"
+                            className="h-9 min-w-[120px] flex-1 bg-slate-700 text-slate-200"
                         />
-                        <input
+                        <Input
                             type="text"
                             placeholder="Заменить на..."
                             value={replaceText}
                             onChange={e => setReplaceText(e.target.value)}
-                            className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-200 focus:ring-1 focus:ring-indigo-500 outline-none flex-1 min-w-[120px]"
+                            className="h-9 min-w-[120px] flex-1 bg-slate-700 text-slate-200"
                         />
-                        <button
+                        <Button
+                            type="button"
                             onClick={handleMassReplace}
                             disabled={isReplacing || selectedIds.length === 0}
-                            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 whitespace-nowrap"
+                            className="h-9 whitespace-nowrap"
                         >
                             {isReplacing ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Заменить в выбранных'}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             </div>
 
             {/* Table Container */}
             <div className="flex-1 overflow-auto custom-scrollbar relative">
-                <table className="w-full text-left border-collapse min-w-[800px]">
-                    <thead className="sticky top-0 z-10 bg-slate-800 shadow-md">
-                        <tr>
-                            <th className="p-3 w-12 border-b border-slate-700 text-center">
-                                <button className="text-slate-400 hover:text-white transition-colors" onClick={onToggleSelectAll}>
-                                    {selectedIds.length === products.length && products.length > 0 ? (
-                                        <CheckSquare className="w-4 h-4 text-indigo-500" />
-                                    ) : (
-                                        <Square className="w-4 h-4" />
-                                    )}
-                                </button>
-                            </th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider w-16">Фото</th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider">
+                <Table className="min-w-[800px] border-collapse text-left">
+                    <TableHeader className="sticky top-0 z-10 bg-slate-800 shadow-md">
+                        <TableRow>
+                            <TableHead className="w-12 border-b border-slate-700 p-3 text-center">
+                                <Checkbox
+                                    checked={selectedIds.length === products.length && products.length > 0}
+                                    onCheckedChange={onToggleSelectAll}
+                                    className="border-slate-600 bg-slate-700"
+                                />
+                            </TableHead>
+                            <TableHead className="w-16 border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">Фото</TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[120px] max-w-xs resize-x overflow-hidden pr-2" title="Потяните за правый край, чтобы изменить ширину">Product ID</div>
-                            </th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider">
+                            </TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[200px] max-w-md resize-x overflow-hidden pr-2">Название</div>
-                            </th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider">
+                            </TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[250px] max-w-xl resize-x overflow-hidden pr-2">Описание</div>
-                            </th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider">
+                            </TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[100px] max-w-[150px] resize-x overflow-hidden pr-2">Цена</div>
-                            </th>
-                            <th className="p-3 border-b border-slate-700 font-medium text-xs text-slate-400 uppercase tracking-wider w-12 text-center">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/50">
+                            </TableHead>
+                            <TableHead className="w-12 border-b border-slate-700 p-3 text-center text-xs uppercase tracking-wider text-slate-400">Действия</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody className="divide-y divide-slate-700/50">
                         {products.map(product => {
                             const isSelected = selectedIds.includes(product.id)
                             const thumb = getPhotoUrl(product)
                             const isSaving = savingId === product.id
 
                             return (
-                                <tr key={product.id} className={`hover:bg-slate-700/20 transition-colors ${isSelected ? 'bg-indigo-500/5' : ''}`}>
-                                    <td className="p-3 text-center align-top">
-                                        <input
-                                            type="checkbox"
+                                <TableRow key={product.id} className={`border-slate-700/50 transition-colors hover:bg-slate-700/20 ${isSelected ? 'bg-indigo-500/5' : ''}`}>
+                                    <TableCell className="p-3 text-center align-top">
+                                        <Checkbox
                                             checked={isSelected}
-                                            onChange={() => onToggleSelect(product.id)}
-                                            className="mt-2 w-4 h-4 rounded border-slate-600 bg-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                            onCheckedChange={() => onToggleSelect(product.id)}
+                                            className="mt-2 border-slate-600 bg-slate-700"
                                         />
-                                    </td>
-                                    <td className="p-3 align-top">
+                                    </TableCell>
+                                    <TableCell className="p-3 align-top">
                                         <div className="w-12 h-12 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0">
                                             {thumb ? (
                                                 <Image src={thumb} alt={product.name} fill sizes="48px" className="object-cover" unoptimized />
@@ -345,63 +353,66 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                                 </div>
                                             )}
                                         </div>
-                                    </td>
-                                    <td className="p-2 align-top">
-                                        <input
+                                    </TableCell>
+                                    <TableCell className="p-2 align-top">
+                                        <Input
                                             type="text"
                                             value={getValue(product, 'productId')}
                                             onChange={(e) => handleLocalChange(product.id, 'productId', e.target.value)}
                                             onBlur={() => handleSaveField(product, 'productId')}
-                                            className="w-full min-w-[100px] bg-transparent border border-transparent hover:border-slate-600 focus:border-indigo-500 focus:bg-slate-800 rounded px-2 py-1.5 text-sm text-slate-300 font-mono outline-none transition-all placeholder-slate-600"
+                                            className="h-auto min-w-[100px] border-transparent bg-transparent px-2 py-1.5 font-mono text-sm text-slate-300 placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800"
                                             placeholder="SKU"
                                         />
-                                    </td>
-                                    <td className="p-2 align-top">
-                                        <textarea
+                                    </TableCell>
+                                    <TableCell className="p-2 align-top">
+                                        <Textarea
                                             value={getValue(product, 'name')}
                                             onChange={(e) => handleLocalChange(product.id, 'name', e.target.value)}
                                             onBlur={() => handleSaveField(product, 'name')}
                                             rows={2}
-                                            className="w-full min-w-[180px] bg-transparent border border-transparent hover:border-slate-600 focus:border-indigo-500 focus:bg-slate-800 rounded px-2 py-1.5 text-sm text-slate-200 font-medium outline-none transition-all placeholder-slate-600 resize-y"
+                                            className="min-h-0 min-w-[180px] resize-y border-transparent bg-transparent px-2 py-1.5 text-sm font-medium text-slate-200 placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800"
                                             placeholder="Название"
                                         />
-                                    </td>
-                                    <td className="p-2 align-top">
-                                        <textarea
+                                    </TableCell>
+                                    <TableCell className="p-2 align-top">
+                                        <Textarea
                                             value={getValue(product, 'description')}
                                             onChange={(e) => handleLocalChange(product.id, 'description', e.target.value)}
                                             onBlur={() => handleSaveField(product, 'description')}
                                             rows={2}
-                                            className="w-full min-w-[200px] bg-transparent border border-transparent hover:border-slate-600 focus:border-indigo-500 focus:bg-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 outline-none transition-all placeholder-slate-600 shadow-none resize-y"
+                                            className="min-h-0 min-w-[200px] resize-y border-transparent bg-transparent px-2 py-1.5 text-xs text-slate-400 shadow-none placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800"
                                             placeholder="Описание отсутствует"
                                         />
-                                    </td>
-                                    <td className="p-2 align-top">
-                                        <input
+                                    </TableCell>
+                                    <TableCell className="p-2 align-top">
+                                        <Input
                                             type="number"
                                             value={getValue(product, 'price')}
                                             onChange={(e) => handleLocalChange(product.id, 'price', e.target.value)}
                                             onBlur={() => handleSaveField(product, 'price')}
-                                            className="w-full min-w-[80px] bg-transparent border border-transparent hover:border-slate-600 focus:border-indigo-500 focus:bg-slate-800 rounded px-2 py-1.5 text-sm font-bold text-emerald-400 outline-none transition-all placeholder-slate-600 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            className="h-auto min-w-[80px] border-transparent bg-transparent px-2 py-1.5 text-sm font-bold text-emerald-400 placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                             placeholder="0"
                                         />
-                                    </td>
-                                    <td className="p-2 align-top text-center">
-                                        <button
+                                    </TableCell>
+                                    <TableCell className="p-2 align-top text-center">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="icon"
                                             onClick={() => handleDuplicate(product)}
                                             disabled={isCopying !== null}
-                                            className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-700 rounded transition-colors disabled:opacity-30"
+                                            className="h-8 w-8 text-slate-400 hover:bg-slate-700 hover:text-indigo-400"
                                             title="Дублировать"
                                         >
                                             {isCopying === product.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Copy className="w-4 h-4" />}
-                                        </button>
-                                    </td>
-                                </tr>
+                                        </Button>
+                                    </TableCell>
+                                </TableRow>
                             )
                         })}
-                    </tbody>
-                </table>
+                    </TableBody>
+                </Table>
             </div>
-        </div>
+        </Card>
     )
 }

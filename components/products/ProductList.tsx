@@ -6,13 +6,13 @@ import { type Product, type Brand, type Category, type Subcategory } from '@/lib
 import { deleteProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
-import { LayoutGrid, List, Search, Plus, Menu, X, CheckSquare, Square, LogOut, FileSpreadsheet, BarChart3, Users, RefreshCw } from 'lucide-react'
+import { LayoutGrid, List, Search, Plus, CheckSquare, Square } from 'lucide-react'
 import Sidebar from '@/components/ui/Sidebar'
-import AdminHeader from '@/components/ui/AdminHeader'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
-import Link from 'next/link'
-import { logoutAction } from '@/actions/auth'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface ProductListProps {
   initialData: Product[]
@@ -137,27 +137,34 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
 
               <div className="flex items-center gap-3">
                 <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-sm shrink-0">
-                  <button
+                  <Button
+                    type="button"
+                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                    size="icon"
                     onClick={() => handleViewModeChange('grid')}
-                    className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={viewMode === 'grid' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
                   >
                     <LayoutGrid className="w-4 h-4" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={viewMode === 'list' ? 'default' : 'ghost'}
+                    size="icon"
                     onClick={() => handleViewModeChange('list')}
-                    className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                    className={viewMode === 'list' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
                   >
                     <List className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
 
-                <button
+                <Button
+                  type="button"
                   onClick={handleCreate}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all active:scale-95 shrink-0 font-medium"
+                  className="shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Добавить</span>
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -175,7 +182,9 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                 {viewMode === 'grid' ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between px-1">
-                      <button
+                      <Button
+                        type="button"
+                        variant="ghost"
                         onClick={() => {
                           if (selectedProductIds.length === products.length) {
                             setSelectedProductIds([])
@@ -183,7 +192,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                             setSelectedProductIds(products.map(p => p.id))
                           }
                         }}
-                        className="flex items-center gap-2 text-sm font-medium text-slate-400 hover:text-indigo-400 transition-colors"
+                        className="h-auto px-0 text-sm font-medium text-slate-400 hover:bg-transparent hover:text-indigo-400"
                       >
                         {selectedProductIds.length === products.length && products.length > 0 ? (
                           <CheckSquare className="w-5 h-5 text-indigo-500" />
@@ -191,7 +200,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                           <Square className="w-5 h-5" />
                         )}
                         <span>{selectedProductIds.length === products.length ? 'Снять всё' : 'Выбрать все на странице'}</span>
-                      </button>
+                      </Button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
                       {products.map(product => (
@@ -249,69 +258,85 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
       <div className={`fixed bottom-0 left-0 lg:left-72 right-0 bg-slate-800 border-t border-slate-700 p-4 transform transition-transform duration-300 z-40 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4 text-sm text-slate-300">
-            <span className="bg-indigo-600 text-white px-2 py-0.5 rounded text-xs font-bold">{selectedProductIds.length}</span>
+            <Badge>{selectedProductIds.length}</Badge>
             <span>выбрано</span>
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setSelectedProductIds([])}
-              className="text-slate-500 hover:text-slate-300 ml-2"
+              className="ml-2 text-slate-500 hover:text-slate-300"
             >
               Сбросить
-            </button>
+            </Button>
           </div>
 
           <div className="flex flex-1 w-full sm:w-auto items-center gap-4 justify-end">
             {/* Gender Select */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <span className="text-sm text-slate-400 whitespace-nowrap">Гендер:</span>
-              <select
-                value={selectedGender}
-                onChange={(e) => setSelectedGender(e.target.value)}
-                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
+              <Select
+                value={selectedGender || '__unchanged__'}
+                onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
               >
-                <option value="">Без изменений</option>
-                <option value="Для мужчин">Для мужчин</option>
-                <option value="Для женщин">Для женщин</option>
-                <option value="Унисекс">Унисекс</option>
-              </select>
+                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-44">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__unchanged__">Без изменений</SelectItem>
+                  <SelectItem value="Для мужчин">Для мужчин</SelectItem>
+                  <SelectItem value="Для женщин">Для женщин</SelectItem>
+                  <SelectItem value="Унисекс">Унисекс</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Category Select */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <span className="text-sm text-slate-400 whitespace-nowrap">Категория:</span>
-              <select
-                value={selectedCategory}
-                onChange={(e) => {
-                  setSelectedCategory(e.target.value)
+              <Select
+                value={selectedCategory || '__select__'}
+                onValueChange={(value) => {
+                  setSelectedCategory(value === '__select__' ? '' : value)
                   setSelectedSubcategory('') // Reset subcategory when category changes
                 }}
-                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2"
               >
-                <option value="">Выберите категорию...</option>
+                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-56">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                <SelectItem value="__select__">Выберите категорию...</SelectItem>
                 {categories.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
-              </select>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Subcategory Select */}
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <span className="text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
-              <select
-                value={selectedSubcategory}
-                onChange={(e) => setSelectedSubcategory(e.target.value)}
+              <Select
+                value={selectedSubcategory || '__unchanged__'}
+                onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
                 disabled={!selectedCategory}
-                className="bg-slate-700 border border-slate-600 text-slate-200 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <option value="">Без изменений</option>
-                <option value="__none__">Без подкатегории (сбросить)</option>
+                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                <SelectItem value="__unchanged__">Без изменений</SelectItem>
+                <SelectItem value="__none__">Без подкатегории (сбросить)</SelectItem>
                 {subcategories
                   .filter(s => s.category === selectedCategory)
-                  .map(s => <option key={s.id} value={s.id}>{s.name}</option>)
+                  .map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)
                 }
-              </select>
+                </SelectContent>
+              </Select>
             </div>
 
-            <button
+            <Button
+              type="button"
               onClick={async () => {
                 if (!selectedCategory && !selectedSubcategory && !selectedGender) return
                 if (confirm(`Обновить ${selectedProductIds.length} товаров?`)) {
@@ -336,11 +361,13 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                 }
               }}
               disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating || isBulkDeleting}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
+              className="whitespace-nowrap"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
-            </button>
-            <button
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
               onClick={async () => {
                 if (confirm(`Вы уверены, что хотите удалить ${selectedProductIds.length} товаров? Это действие нельзя отменить.`)) {
                   setIsBulkDeleting(true)
@@ -357,10 +384,10 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                 }
               }}
               disabled={isBulkUpdating || isBulkDeleting}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-lg text-sm font-medium transition-colors"
+              className="whitespace-nowrap"
             >
               {isBulkDeleting ? 'Удаление...' : 'Удалить'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
