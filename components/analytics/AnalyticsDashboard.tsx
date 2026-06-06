@@ -9,8 +9,10 @@ import {
     Globe2,
     Heart,
     MessageCircle,
+    Monitor,
     RefreshCw,
     ShoppingCart,
+    Smartphone,
     Trash2,
     UserCheck,
     UserPlus,
@@ -34,6 +36,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type Period = 'today' | 'week' | 'month' | 'all'
+type Channel = 'all' | 'site' | 'telegram'
 
 interface OverviewStats {
     unique_visitors: number
@@ -78,6 +81,12 @@ const periodLabels: Record<Period, string> = {
     all: 'Все время',
 }
 
+const channelLabels: Record<Channel, string> = {
+    all: 'Все',
+    site: 'Сайт',
+    telegram: 'TG Mini App',
+}
+
 const emptyOverview: OverviewStats = {
     unique_visitors: 0,
     online_now: 0,
@@ -107,7 +116,10 @@ const formatPercent = (value: number, base: number) => {
 }
 
 export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
+    void _props
+
     const [period, setPeriod] = useState<Period>('today')
+    const [channel, setChannel] = useState<Channel>('all')
     const [overview, setOverview] = useState<OverviewStats | null>(null)
     const [seriesData, setSeriesData] = useState<SeriesData[]>([])
     const [countryList, setCountryList] = useState<{ name: string; visitors: number }[]>([])
@@ -125,7 +137,8 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
         setError(null)
 
         try {
-            const res = await fetch(`/api/analytics?period=${period}`)
+            const params = new URLSearchParams({ period, channel })
+            const res = await fetch(`/api/analytics?${params.toString()}`)
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
                 throw new Error(err.error || `HTTP ${res.status}`)
@@ -143,7 +156,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
         } finally {
             setLoading(false)
         }
-    }, [period])
+    }, [channel, period])
 
     useEffect(() => {
         fetchData()
@@ -153,11 +166,13 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
 
     const handleReset = async (type: 'period' | 'all') => {
         const scope = type === 'all' ? 'за все время' : `за период "${periodLabels[period]}"`
-        if (!confirm(`Сбросить аналитику ${scope}? Это действие нельзя отменить.`)) return
+        const channelScope = channel === 'all' ? 'по всем каналам' : `для канала "${channelLabels[channel]}"`
+        if (!confirm(`Сбросить аналитику ${scope} ${channelScope}? Это действие нельзя отменить.`)) return
 
         setIsResetting(true)
         try {
-            const res = await fetch(`/api/analytics?type=${type}&period=${period}`, { method: 'DELETE' })
+            const params = new URLSearchParams({ type, period, channel })
+            const res = await fetch(`/api/analytics?${params.toString()}`, { method: 'DELETE' })
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
                 throw new Error(err.error || `HTTP ${res.status}`)
@@ -184,101 +199,89 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
     }), [data])
 
     return (
-        <div className="min-h-screen bg-slate-950 text-slate-200">
-            <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/95 px-4 py-3 backdrop-blur sm:px-6">
-                <div className="mx-auto flex max-w-[1600px] flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                    <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                            <Button asChild variant="outline" size="icon" className="border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900 hover:text-white" title="Назад">
-                                <Link href="/admin">
-                                    <ArrowLeft className="h-5 w-5" />
-                                </Link>
-                            </Button>
-                            <div>
-                                <h1 className="flex items-center gap-2 text-xl font-semibold text-white sm:text-2xl">
-                                    <BarChart3 className="h-6 w-6 text-blue-400" />
-                                    Аналитика аудитории
-                                </h1>
-                                <p className="text-xs text-slate-500">Онлайн, пользователи, просмотры товаров, обращения и география</p>
-                            </div>
-                        </div>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={fetchData}
-                            disabled={loading || isResetting}
-                            className="border-slate-800 text-slate-400 hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300 xl:hidden"
-                            title="Обновить"
-                        >
-                            <RefreshCw className={`h-5 w-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
-                        </Button>
+        <div className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
+            <section className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex items-start gap-3">
+                    <Button asChild variant="outline" size="icon" title="Назад">
+                        <Link href="/admin">
+                            <ArrowLeft className="h-5 w-5" />
+                        </Link>
+                    </Button>
+                    <div>
+                        <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
+                            <BarChart3 className="h-6 w-6 text-primary" />
+                            Аналитика каталога
+                        </h1>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Сайт и Telegram Mini App: онлайн, просмотры товаров, корзины, избранное и обращения.
+                        </p>
                     </div>
+                </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Tabs value={period} onValueChange={(value) => setPeriod(value as Period)}>
-                        <TabsList className="border border-slate-800 bg-slate-900">
+                <div className="flex flex-wrap items-center gap-2">
+                    <Tabs value={channel} onValueChange={(value) => setChannel(value as Channel)}>
+                        <TabsList className="border border-border bg-muted">
+                            {(Object.keys(channelLabels) as Channel[]).map(item => (
+                                <TabsTrigger key={item} value={item} className="gap-1.5 data-[state=active]:bg-background">
+                                    {item === 'site' && <Monitor className="h-4 w-4" />}
+                                    {item === 'telegram' && <Smartphone className="h-4 w-4" />}
+                                    {channelLabels[item]}
+                                </TabsTrigger>
+                            ))}
+                        </TabsList>
+                    </Tabs>
+                    <Tabs value={period} onValueChange={(value) => setPeriod(value as Period)}>
+                        <TabsList className="border border-border bg-muted">
                             {(Object.keys(periodLabels) as Period[]).map(item => (
-                                <TabsTrigger
-                                    key={item}
-                                    value={item}
-                                    className="data-[state=active]:bg-blue-500 data-[state=active]:text-white"
-                                >
+                                <TabsTrigger key={item} value={item} className="data-[state=active]:bg-background">
                                     {periodLabels[item]}
                                 </TabsTrigger>
                             ))}
                         </TabsList>
-                        </Tabs>
-                        <div className="hidden items-center gap-2 rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-400 md:flex">
-                            <Clock className="h-4 w-4" />
-                            {updatedLabel}
-                        </div>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={fetchData}
-                            disabled={loading || isResetting}
-                            className="hidden border-slate-800 text-slate-400 hover:border-blue-500/40 hover:bg-blue-500/10 hover:text-blue-300 xl:inline-flex"
-                            title="Обновить"
-                        >
-                            <RefreshCw className={`h-5 w-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
-                        </Button>
-                        <DropdownMenu open={isResetMenuOpen} onOpenChange={setIsResetMenuOpen}>
-                            <DropdownMenuTrigger asChild>
+                    </Tabs>
+                    <div className="hidden items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted-foreground md:flex">
+                        <Clock className="h-4 w-4" />
+                        {updatedLabel}
+                    </div>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={fetchData}
+                        disabled={loading || isResetting}
+                        title="Обновить"
+                    >
+                        <RefreshCw className={`h-5 w-5 ${loading || isResetting ? 'animate-spin' : ''}`} />
+                    </Button>
+                    <DropdownMenu open={isResetMenuOpen} onOpenChange={setIsResetMenuOpen}>
+                        <DropdownMenuTrigger asChild>
                             <Button
                                 type="button"
                                 variant="outline"
                                 disabled={isResetting}
-                                className="border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200"
+                                className="border-destructive/30 text-destructive hover:bg-destructive/10"
                             >
                                 <Trash2 className="h-4 w-4" />
                                 Сброс
                             </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-64 border-slate-800 bg-slate-900">
-                                <DropdownMenuItem
-                                    onClick={() => handleReset('period')}
-                                    className="text-slate-200 focus:bg-slate-800"
-                                >
-                                    Очистить {periodLabels[period].toLowerCase()}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator className="bg-slate-800" />
-                                <DropdownMenuItem
-                                    onClick={() => handleReset('all')}
-                                    className="font-semibold text-red-300 focus:bg-red-500/10 focus:text-red-200"
-                                >
-                                    Очистить все время
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                    </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-64">
+                            <DropdownMenuItem onClick={() => handleReset('period')}>
+                                Очистить {periodLabels[period].toLowerCase()}
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                                onClick={() => handleReset('all')}
+                                className="font-semibold text-destructive focus:text-destructive"
+                            >
+                                Очистить все время
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
-            </header>
-
-            <main className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
+            </section>
                 {error && (
-                    <Alert variant="destructive" className="border-red-500/20 bg-red-500/10 text-red-300">
+                    <Alert variant="destructive">
                         <AlertDescription>{error}</AlertDescription>
                     </Alert>
                 )}
@@ -292,14 +295,14 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-                    <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-8">
+                    <Card className="xl:col-span-8">
                         <CardHeader className="flex flex-col gap-2 space-y-0 p-5 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                                <CardTitle className="text-lg text-white">Сводка за период</CardTitle>
+                                <CardTitle className="text-lg">Сводка за период</CardTitle>
                                 <CardDescription>Фокус на людях и действиях, без товарного рейтинга.</CardDescription>
                             </div>
-                            <span className="w-fit rounded-md bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-300">
-                                {periodLabels[period]}
+                            <span className="w-fit rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                                {channelLabels[channel]} / {periodLabels[period]}
                             </span>
                         </CardHeader>
 
@@ -311,13 +314,13 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                         </CardContent>
                     </Card>
 
-                    <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-4">
+                    <Card className="xl:col-span-4">
                         <CardHeader className="flex flex-row items-start justify-between space-y-0 p-5 pb-4">
                             <div>
-                                <CardTitle className="text-lg text-white">Пульс</CardTitle>
+                                <CardTitle className="text-lg">Пульс</CardTitle>
                                 <CardDescription>Посетители, просмотры и обращения.</CardDescription>
                             </div>
-                            <RefreshCw className={`h-5 w-5 text-slate-500 ${loading ? 'animate-spin' : ''}`} />
+                            <RefreshCw className={`h-5 w-5 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
                         </CardHeader>
                         <CardContent className="h-[230px] p-5 pt-0">
                             {seriesData.length ? (
@@ -336,7 +339,6 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                     <SimpleList title="Устройства" items={osList} empty="Нет данных по устройствам" />
                     <ProfileState overview={data} />
                 </section>
-            </main>
         </div>
     )
 }
@@ -358,17 +360,17 @@ function KpiCard({ icon, label, value, detail, tone, loading }: {
     }
 
     return (
-        <Card className="border-slate-800 bg-slate-900/70 shadow-xl">
+        <Card>
             <CardContent className="p-5">
             <div className="mb-4 flex items-center justify-between">
                 <div className={`rounded-lg border p-2 [&_svg]:h-5 [&_svg]:w-5 ${tones[tone]}`}>
                     {icon}
                 </div>
-                {loading && <RefreshCw className="h-4 w-4 animate-spin text-slate-600" />}
+                {loading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
             </div>
-            {loading ? <Skeleton className="h-9 w-24 bg-slate-800" /> : <div className="text-3xl font-semibold text-white">{formatNumber(value)}</div>}
-            <div className="mt-1 text-sm font-medium text-slate-300">{label}</div>
-            <div className="mt-3 text-xs text-slate-500">{detail}</div>
+            {loading ? <Skeleton className="h-9 w-24" /> : <div className="text-3xl font-semibold text-foreground">{formatNumber(value)}</div>}
+            <div className="mt-1 text-sm font-medium text-foreground/80">{label}</div>
+            <div className="mt-3 text-xs text-muted-foreground">{detail}</div>
             </CardContent>
         </Card>
     )
@@ -376,14 +378,14 @@ function KpiCard({ icon, label, value, detail, tone, loading }: {
 
 function InsightItem({ label, value, caption, icon }: { label: string; value: string; caption: string; icon: React.ReactNode }) {
     return (
-        <Card className="border-slate-800 bg-slate-950/60">
+        <Card className="bg-background/40">
             <CardContent className="p-4">
-            <div className="mb-3 flex items-center justify-between text-slate-500">
+            <div className="mb-3 flex items-center justify-between text-muted-foreground">
                 <span className="text-sm">{label}</span>
                 {icon}
             </div>
-            <div className="text-2xl font-semibold text-white">{value}</div>
-            <div className="mt-1 text-xs text-slate-500">{caption}</div>
+            <div className="text-2xl font-semibold text-foreground">{value}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{caption}</div>
             </CardContent>
         </Card>
     )
@@ -393,10 +395,10 @@ function CountryList({ items }: { items: { name: string; visitors: number }[] })
     const total = Math.max(1, items.reduce((sum, item) => sum + Number(item.visitors || 0), 0))
 
     return (
-        <Card className="border-slate-800 bg-slate-900/70 shadow-xl">
+        <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-4">
-                <CardTitle className="text-lg text-white">Посещения по странам</CardTitle>
-                <Globe2 className="h-5 w-5 text-blue-300" />
+                <CardTitle className="text-lg">Посещения по странам</CardTitle>
+                <Globe2 className="h-5 w-5 text-primary" />
             </CardHeader>
             <CardContent className="p-5 pt-0">
             {items.length ? (
@@ -421,9 +423,9 @@ function SimpleList({ title, items, empty }: {
     const total = Math.max(1, items.reduce((sum, item) => sum + Number(item.visitors || 0), 0))
 
     return (
-        <Card className="border-slate-800 bg-slate-900/70 shadow-xl">
+        <Card>
             <CardHeader className="p-5 pb-4">
-                <CardTitle className="text-lg text-white">{title}</CardTitle>
+                <CardTitle className="text-lg">{title}</CardTitle>
             </CardHeader>
             <CardContent className="p-5 pt-0">
             {items.length ? (
@@ -444,9 +446,9 @@ function ProfileState({ overview }: { overview: OverviewStats }) {
     const total = Math.max(1, overview.total_profiles)
 
     return (
-        <Card className="border-slate-800 bg-slate-900/70 shadow-xl">
+        <Card>
             <CardHeader className="p-5 pb-4">
-                <CardTitle className="text-lg text-white">Состояние клиентской базы</CardTitle>
+                <CardTitle className="text-lg">Состояние клиентской базы</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 p-5 pt-0">
             <div className="space-y-4">
@@ -464,11 +466,11 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
     return (
         <div>
             <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                <span className="truncate text-slate-300">{label}</span>
-                <span className="font-semibold text-white">{formatNumber(value)}</span>
+                <span className="truncate text-muted-foreground">{label}</span>
+                <span className="font-semibold text-foreground">{formatNumber(value)}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
-                <div className="h-full rounded-full bg-blue-400" style={{ width: `${Math.min(100, (value / total) * 100)}%` }} />
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, (value / total) * 100)}%` }} />
             </div>
         </div>
     )
@@ -476,7 +478,7 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
 
 function EmptyState({ text }: { text: string }) {
     return (
-        <Card className="flex h-full min-h-32 items-center justify-center border-dashed border-slate-800 bg-slate-950/40 p-6 text-center text-sm font-medium text-slate-500">
+        <Card className="flex h-full min-h-32 items-center justify-center border-dashed bg-background/40 p-6 text-center text-sm font-medium text-muted-foreground">
             {text}
         </Card>
     )

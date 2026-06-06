@@ -131,18 +131,18 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
         if (!active || !payload?.length) return null
 
         return (
-            <div className="rounded-lg border border-slate-700 bg-slate-950/95 p-4 shadow-xl">
-                <div className="mb-3 border-b border-slate-800 pb-2 text-sm font-semibold text-white">
+            <div className="rounded-lg border border-border bg-popover p-4 shadow-lg">
+                <div className="mb-3 border-b border-border pb-2 text-sm font-semibold text-popover-foreground">
                     {formatDate(label)}
                 </div>
                 <div className="space-y-2">
                     {payload.map((entry: any) => (
                         <div key={entry.dataKey} className="flex min-w-52 items-center justify-between gap-4 text-xs">
-                            <span className="flex items-center gap-2 text-slate-400">
+                            <span className="flex items-center gap-2 text-muted-foreground">
                                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
                                 {entry.name}
                             </span>
-                            <span className="font-semibold text-white">{Number(entry.value || 0).toLocaleString('ru-RU')}</span>
+                            <span className="font-semibold text-foreground">{Number(entry.value || 0).toLocaleString('ru-RU')}</span>
                         </div>
                     ))}
                 </div>
@@ -152,13 +152,13 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
 
     return (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-            <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-8">
+            <Card className="xl:col-span-8">
                 <CardHeader className="flex flex-col gap-1 space-y-0 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6 sm:pb-5">
                     <div>
-                        <CardTitle className="text-lg text-white">Динамика аудитории</CardTitle>
+                        <CardTitle className="text-lg">Динамика аудитории</CardTitle>
                         <CardDescription>Уникальные посетители, просмотры товаров и обращения к менеджеру.</CardDescription>
                     </div>
-                    <div className="text-xs font-medium text-slate-500">Автообновление каждые 30 секунд</div>
+                    <div className="text-xs font-medium text-muted-foreground">Автообновление каждые 30 секунд</div>
                 </CardHeader>
                 <CardContent className="h-[340px] w-full p-5 pt-0 sm:p-6 sm:pt-0">
                     {safeSeries.length > 0 ? (
@@ -178,23 +178,23 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                                 <XAxis dataKey="dateLabel" stroke="#94A3B8" fontSize={12} tickLine={false} axisLine={{ stroke: '#334155' }} interval="preserveStartEnd" minTickGap={20} />
                                 <YAxis stroke="#94A3B8" fontSize={12} tickLine={false} axisLine={{ stroke: '#334155' }} width={46} allowDecimals={false} tickFormatter={formatAxisNumber} />
                                 <Tooltip content={<CustomTooltip />} />
-                                <Legend formatter={(value) => <span className="text-xs font-medium text-slate-400">{value}</span>} />
+                                <Legend formatter={(value) => <span className="text-xs font-medium text-muted-foreground">{value}</span>} />
                                 <Area type="monotone" dataKey="visitors" name="Посетители" stroke={colors.visitors} strokeWidth={3} fill="url(#visitorsGradient)" />
                                 <Area type="monotone" dataKey="views" name="Уникальные просмотры" stroke={colors.views} strokeWidth={3} fill="url(#viewsGradient)" />
                                 <Area type="monotone" dataKey="manager" name="Спросить у менеджера" stroke={colors.manager} strokeWidth={2} fill="none" />
                             </AreaChart>
                         </ResponsiveContainer>
                     ) : (
-                        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-slate-800 text-sm font-medium text-slate-500">
+                        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm font-medium text-muted-foreground">
                             Недостаточно данных для графика
                         </div>
                     )}
                 </CardContent>
             </Card>
 
-            <Card className="border-slate-800 bg-slate-900/70 shadow-xl xl:col-span-4">
+            <Card className="xl:col-span-4">
                 <CardHeader className="p-5 sm:p-6 sm:pb-5">
-                    <CardTitle className="text-lg text-white">Ключевые показатели</CardTitle>
+                    <CardTitle className="text-lg">Ключевые показатели</CardTitle>
                     <CardDescription>Сравнение самых важных счетчиков на одном графике.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[340px] w-full p-5 pt-0 sm:p-6 sm:pt-0">

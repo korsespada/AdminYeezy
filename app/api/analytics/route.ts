@@ -3,6 +3,21 @@ import { legacyCatalogQuery } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
+type AnalyticsChannel = "all" | "site" | "telegram";
+
+function getAnalyticsChannel(channel: string | null): AnalyticsChannel {
+  if (channel === "telegram") return "telegram";
+  if (channel === "site") return "site";
+  return "all";
+}
+
+function getChannelSql(channel: AnalyticsChannel, alias?: string) {
+  if (channel === "all") return "1=1";
+
+  const prefix = alias ? `${alias}.` : "";
+  return `COALESCE(NULLIF(${prefix}meta->>'channel', ''), NULLIF(${prefix}meta->>'source', ''), 'site') = '${channel}'`;
+}
+
 function getPeriodSql(period: string) {
   if (period === "week") {
     return {
@@ -35,13 +50,17 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "today";
+    const channel = getAnalyticsChannel(searchParams.get("channel"));
     const { timeFilter, periodStart } = getPeriodSql(period);
+    const channelFilter = getChannelSql(channel);
+    const onlineChannelFilter = getChannelSql(channel);
 
     const returningSessionsSql =
       period === "all"
         ? `SELECT session_id
            FROM analytics_events
            WHERE session_id IS NOT NULL AND session_id != ''
+             AND ${channelFilter}
            GROUP BY session_id
            HAVING COUNT(DISTINCT DATE(created_at)) > 1`
         : `SELECT ps.session_id
@@ -58,6 +77,7 @@ export async function GET(request: Request) {
         SELECT *
         FROM analytics_events
         WHERE ${timeFilter}
+          AND ${channelFilter}
       ),
       period_sessions AS (
         SELECT DISTINCT session_id
@@ -87,7 +107,7 @@ export async function GET(request: Request) {
         COUNT(*) as total_events,
         (SELECT COUNT(*) FROM returning_sessions) as returning_visitors,
         GREATEST(COUNT(DISTINCT pe.session_id) - (SELECT COUNT(*) FROM returning_sessions), 0) as new_visitors,
-        (SELECT COUNT(DISTINCT session_id) FROM analytics_events WHERE created_at >= NOW() - INTERVAL '5 minutes') as online_now
+        (SELECT COUNT(DISTINCT session_id) FROM analytics_events WHERE created_at >= NOW() - INTERVAL '5 minutes' AND ${onlineChannelFilter}) as online_now
       FROM period_events pe
     `).catch((e) => {
       console.error("Overview query failed:", e.message);
@@ -185,6 +205,7 @@ export async function GET(request: Request) {
         COUNT(*) FILTER (WHERE event = 'ask_manager') as manager
       FROM analytics_events
       WHERE ${timeFilter}
+        AND ${channelFilter}
       GROUP BY date
       ORDER BY date ASC
     `).catch(() => ({ rows: [] }));
@@ -193,6 +214,7 @@ export async function GET(request: Request) {
       SELECT COALESCE(NULLIF(meta->>'country', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
       FROM analytics_events
       WHERE ${timeFilter}
+        AND ${channelFilter}
       GROUP BY COALESCE(NULLIF(meta->>'country', ''), 'Unknown')
       ORDER BY visitors DESC
       LIMIT 10
@@ -202,6 +224,7 @@ export async function GET(request: Request) {
       SELECT COALESCE(NULLIF(meta->>'os', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
       FROM analytics_events
       WHERE ${timeFilter}
+        AND ${channelFilter}
       GROUP BY COALESCE(NULLIF(meta->>'os', ''), 'Unknown')
       ORDER BY visitors DESC
       LIMIT 5
@@ -287,12 +310,14 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "period";
     const period = searchParams.get("period") || "today";
+    const channel = getAnalyticsChannel(searchParams.get("channel"));
+    const channelFilter = getChannelSql(channel);
 
     if (type === "all") {
-      await legacyCatalogQuery("DELETE FROM analytics_events");
+      await legacyCatalogQuery(channel === "all" ? "DELETE FROM analytics_events" : `DELETE FROM analytics_events WHERE ${channelFilter}`);
     } else {
       const { timeFilter } = getPeriodSql(period);
-      await legacyCatalogQuery(`DELETE FROM analytics_events WHERE ${timeFilter}`);
+      await legacyCatalogQuery(`DELETE FROM analytics_events WHERE ${timeFilter} AND ${channelFilter}`);
     }
 
     return NextResponse.json({
