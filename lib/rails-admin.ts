@@ -275,6 +275,28 @@ export async function listRailsAdminProducts(options: {
   }
 }
 
+export async function searchRailsAdminProductsExact(search: string, statuses: Product['status'][] = ['active', 'hidden', 'draft']) {
+  const products: Product[] = []
+
+  for (const status of statuses) {
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 20,
+      search,
+      status,
+    })
+    const payload = await railsFetch<{ products: any[] }>(`/admin/products?${params}`)
+    products.push(...(payload.products || []).map(mapRailsProduct))
+  }
+
+  return products
+}
+
+export async function getRailsAdminProduct(id: string) {
+  const result = await railsFetch<{ product: any }>(`/admin/products/${id}`)
+  return mapRailsProduct(result.product)
+}
+
 function countProductsWithoutGender(payload: { meta?: { total?: number }; facets?: { genders?: { count?: number }[] } }) {
   const total = Number(payload.meta?.total || 0)
   const withGender = (payload.facets?.genders || []).reduce((sum, item) => sum + Number(item.count || 0), 0)

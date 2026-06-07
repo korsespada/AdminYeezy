@@ -1,0 +1,104 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Product } from '@/lib/types'
+
+const mocks = vi.hoisted(() => ({
+  searchRailsAdminProductsExact: vi.fn(),
+  getRailsAdminProduct: vi.fn(),
+  patchRailsAdminProduct: vi.fn(),
+  revalidatePath: vi.fn(),
+}))
+
+vi.mock('next/cache', () => ({
+  revalidatePath: mocks.revalidatePath,
+}))
+
+vi.mock('@/lib/rails-admin', () => ({
+  searchRailsAdminProductsExact: mocks.searchRailsAdminProductsExact,
+  getRailsAdminProduct: mocks.getRailsAdminProduct,
+  patchRailsAdminProduct: mocks.patchRailsAdminProduct,
+}))
+
+function product(overrides: Partial<Product> = {}): Product {
+  return {
+    id: 'p1',
+    productId: 'ext-1',
+    external_id: 'ext-1',
+    sku: 'sku-1',
+    name: 'CRM Product',
+    description: 'Тип обуви: Кроссовки Размеры: 35-41',
+    price: 0,
+    status: 'active',
+    brand: '',
+    category: '',
+    subcategory: '',
+    photos: [],
+    photos_processed: true,
+    gender: '',
+    thumb: '',
+    created: '',
+    updated: '',
+    collectionId: '',
+    collectionName: 'products',
+    ...overrides,
+  }
+}
+
+describe('gender backfill actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('parses CSV rows', async () => {
+    const { parseGenderCsvAction } = await import('@/actions/gender-backfill')
+
+    const res = await parseGenderCsvAction('productId;name;description\next-1;Product;Desc')
+
+    expect(res.success).toBe(true)
+    expect(res.data?.rows[0]).toMatchObject({ productId: 'ext-1', name: 'Product' })
+  })
+
+  it('builds preview without patching Rails products', async () => {
+    const { previewGenderMatchesAction } = await import('@/actions/gender-backfill')
+    mocks.searchRailsAdminProductsExact.mockResolvedValueOnce([product()])
+
+    const res = await previewGenderMatchesAction([
+      {
+        rowNumber: 2,
+        productId: 'ext-1',
+        name: 'Sneaker',
+        description: 'Размеры: 35-41',
+        raw: {},
+      },
+    ])
+
+    expect(res.success).toBe(true)
+    expect(res.data?.rows[0]).toMatchObject({
+      status: 'ready',
+      selectedGender: 'Для женщин',
+    })
+    expect(mocks.patchRailsAdminProduct).not.toHaveBeenCalled()
+  })
+
+  it('applies only selected updates with valid gender', async () => {
+    const { applyGenderUpdatesAction } = await import('@/actions/gender-backfill')
+    mocks.getRailsAdminProduct.mockResolvedValueOnce(product())
+    mocks.patchRailsAdminProduct.mockResolvedValueOnce(product({ gender: 'Для женщин' }))
+
+    const res = await applyGenderUpdatesAction([{ productId: 'p1', gender: 'Для женщин' }])
+
+    expect(res.success).toBe(true)
+    expect(res.data).toMatchObject({ updated: 1, skipped: 0, failed: 0 })
+    expect(mocks.patchRailsAdminProduct).toHaveBeenCalledWith('p1', { gender: 'Для женщин' })
+  })
+
+  it('does not overwrite products that already have gender during apply', async () => {
+    const { applyGenderUpdatesAction } = await import('@/actions/gender-backfill')
+    mocks.getRailsAdminProduct.mockResolvedValueOnce(product({ gender: 'Для мужчин' }))
+
+    const res = await applyGenderUpdatesAction([{ productId: 'p1', gender: 'Для женщин' }])
+
+    expect(res.success).toBe(true)
+    expect(res.data).toMatchObject({ updated: 0, skipped: 1, failed: 0 })
+    expect(mocks.patchRailsAdminProduct).not.toHaveBeenCalled()
+  })
+})
