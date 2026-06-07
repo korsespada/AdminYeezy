@@ -256,7 +256,12 @@ export async function listRailsAdminProducts(options: {
   subcategory?: string
   gender?: string
   status?: Product['status']
+  noGender?: boolean
 }) {
+  if (options.noGender && !options.status) {
+    return listRailsCatalogProductsWithoutGender(options)
+  }
+
   const params = buildRailsAdminProductsParams(options)
   const fetchProducts = options.status ? railsFetch : publicRailsFetch
   const pathname = options.status ? `/admin/products?${params}` : `/catalog/products?${params}`
@@ -270,6 +275,56 @@ export async function listRailsAdminProducts(options: {
   }
 }
 
+function countProductsWithoutGender(payload: { meta?: { total?: number }; facets?: { genders?: { count?: number }[] } }) {
+  const total = Number(payload.meta?.total || 0)
+  const withGender = (payload.facets?.genders || []).reduce((sum, item) => sum + Number(item.count || 0), 0)
+  return Math.max(0, total - withGender)
+}
+
+async function listRailsCatalogProductsWithoutGender(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+}) {
+  const pageSize = 60
+  const offset = (options.page - 1) * options.perPage
+  const needed = offset + options.perPage
+  const collected: Product[] = []
+  let sourcePage = 1
+  let sourcePages = 1
+  let totalItems = 0
+
+  while (sourcePage <= sourcePages && collected.length < needed) {
+    const params = buildRailsAdminProductsParams({
+      ...options,
+      page: sourcePage,
+      perPage: pageSize,
+    })
+    const payload = await publicRailsFetch<{
+      products: any[]
+      facets?: { genders?: { count?: number }[] }
+      meta: { total: number; pages: number }
+    }>(`/catalog/products?${params}`)
+
+    if (sourcePage === 1) {
+      sourcePages = Number(payload.meta?.pages || 1)
+      totalItems = countProductsWithoutGender(payload)
+    }
+
+    collected.push(...(payload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
+    sourcePage += 1
+  }
+
+  return {
+    products: collected.slice(offset, needed),
+    totalItems,
+    totalPages: Math.ceil(totalItems / options.perPage),
+  }
+}
+
 export function buildRailsAdminProductsParams(options: {
   page: number
   perPage: number
@@ -279,6 +334,7 @@ export function buildRailsAdminProductsParams(options: {
   subcategory?: string
   gender?: string
   status?: Product['status']
+  noGender?: boolean
 }) {
   const params = new URLSearchParams()
   params.set('page', String(options.page))

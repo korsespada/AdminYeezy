@@ -38,9 +38,7 @@ export default async function AdminPage({
     const brandSlug = brands.find((brand) => brand.id === brandFilter)?.slug || brandFilter
     const categorySlug = categories.find((category) => category.id === categoryFilter)?.slug || categoryFilter
     const subcategorySlug = subcategories.find((subcategory) => subcategory.id === subcategoryFilter)?.slug || subcategoryFilter
-    const genderParam = genderFilter === '__none__'
-      ? ''
-      : genderFilter === 'Для мужчин'
+    const genderParam = genderFilter === 'Для мужчин'
       ? 'male'
       : genderFilter === 'Для женщин'
         ? 'female'
@@ -55,7 +53,8 @@ export default async function AdminPage({
       brand: brandSlug,
       category: categorySlug,
       subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
-      gender: genderParam,
+      gender: genderFilter === '__none__' ? '' : genderParam,
+      noGender: genderFilter === '__none__',
     })
 
     const products = productPage.products
