@@ -1,9 +1,77 @@
 import { NextResponse } from "next/server";
-import { legacyCatalogQuery } from "@/lib/db";
+import { analyticsQuery } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 type AnalyticsChannel = "all" | "site" | "telegram";
+
+const emptyOverviewRow = {
+  unique_visitors: "0",
+  unique_product_viewers: "0",
+  viewed_products: "0",
+  unique_product_views: "0",
+  product_views: "0",
+  add_to_cart: "0",
+  add_to_favorites: "0",
+  order_submit: "0",
+  ask_manager: "0",
+  page_views: "0",
+  total_events: "0",
+  returning_visitors: "0",
+  new_visitors: "0",
+  online_now: "0",
+};
+
+const emptyProfileRow = {
+  total_profiles: "0",
+  new_profiles: "0",
+  returning_profiles: "0",
+  active_profiles: "0",
+  cart_profiles: "0",
+  cart_items: "0",
+  favorite_profiles: "0",
+  favorite_items: "0",
+};
+
+function isDatabaseConnectionError(error: any) {
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    message.includes("connection terminated due to connection timeout") ||
+    message.includes("connection timeout") ||
+    message.includes("timeout expired") ||
+    message.includes("econnrefused") ||
+    message.includes("enotfound") ||
+    message.includes("etimedout")
+  );
+}
+
+function getAnalyticsDatabaseConfigError() {
+  if (!process.env.ANALYTICS_DATABASE_URL && !process.env.DATABASE_URL) {
+    return "Не задан DATABASE_URL или ANALYTICS_DATABASE_URL для базы аналитики.";
+  }
+
+  return null;
+}
+
+async function safeAnalyticsQuery<T extends { rows: any[] }>(
+  label: string,
+  sql: string,
+  fallbackRows: T["rows"],
+  required = false,
+) {
+  try {
+    return await analyticsQuery(sql);
+  } catch (error: any) {
+    console.error(`${label} query failed:`, error.message);
+
+    if (required || isDatabaseConnectionError(error)) {
+      throw error;
+    }
+
+    return { rows: fallbackRows };
+  }
+}
 
 function getAnalyticsChannel(channel: string | null): AnalyticsChannel {
   if (channel === "telegram") return "telegram";
@@ -48,6 +116,11 @@ function getPeriodSql(period: string) {
 
 export async function GET(request: Request) {
   try {
+    const configError = getAnalyticsDatabaseConfigError();
+    if (configError) {
+      return NextResponse.json({ error: configError }, { status: 500 });
+    }
+
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "today";
     const channel = getAnalyticsChannel(searchParams.get("channel"));
@@ -72,7 +145,7 @@ export async function GET(request: Request) {
                AND previous.created_at < ${periodStart}
            )`;
 
-    const overviewRes = await legacyCatalogQuery(`
+    const overviewSql = `
       WITH period_events AS (
         SELECT *
         FROM analytics_events
@@ -109,32 +182,9 @@ export async function GET(request: Request) {
         GREATEST(COUNT(DISTINCT pe.session_id) - (SELECT COUNT(*) FROM returning_sessions), 0) as new_visitors,
         (SELECT COUNT(DISTINCT session_id) FROM analytics_events WHERE created_at >= NOW() - INTERVAL '5 minutes' AND ${onlineChannelFilter}) as online_now
       FROM period_events pe
-    `).catch((e) => {
-      console.error("Overview query failed:", e.message);
-      return {
-        rows: [
-          {
-            unique_visitors: "0",
-            unique_product_viewers: "0",
-            viewed_products: "0",
-            unique_product_views: "0",
-            product_views: "0",
-            add_to_cart: "0",
-            add_to_favorites: "0",
-            order_submit: "0",
-            ask_manager: "0",
-            page_views: "0",
-            total_events: "0",
-            returning_visitors: "0",
-            new_visitors: "0",
-            online_now: "0",
-          },
-        ],
-      };
-    });
+    `;
 
-    const row = overviewRes.rows[0];
-    const profilesRes = await legacyCatalogQuery(`
+    const profilesSql = `
       SELECT
         COUNT(*) as total_profiles,
         COUNT(*) FILTER (${period === "all" ? "WHERE TRUE" : `WHERE created_at >= ${periodStart}`}) as new_profiles,
@@ -145,25 +195,59 @@ export async function GET(request: Request) {
         COUNT(*) FILTER (WHERE jsonb_typeof(favorites) = 'array' AND jsonb_array_length(favorites) > 0) as favorite_profiles,
         COALESCE(SUM(CASE WHEN jsonb_typeof(favorites) = 'array' THEN jsonb_array_length(favorites) ELSE 0 END), 0) as favorite_items
       FROM profiles
-    `).catch((e) => {
-      console.error("Profiles query failed:", e.message);
-      return {
-        rows: [
-          {
-            total_profiles: "0",
-            new_profiles: "0",
-            returning_profiles: "0",
-            active_profiles: "0",
-            cart_profiles: "0",
-            cart_items: "0",
-            favorite_profiles: "0",
-            favorite_items: "0",
-          },
-        ],
-      };
-    });
+    `;
 
-    const profileRow = profilesRes.rows[0];
+    const seriesSql = `
+      SELECT 
+        TO_CHAR(created_at, 'YYYY-MM-DD') as date,
+        COUNT(DISTINCT session_id) as visitors,
+        COUNT(DISTINCT CONCAT(session_id, ':', "productId")) FILTER (
+          WHERE event = 'product_view'
+            AND session_id IS NOT NULL
+            AND session_id != ''
+            AND "productId" IS NOT NULL
+            AND "productId" != ''
+        ) as views,
+        COUNT(*) FILTER (WHERE event = 'add_to_cart') as carts,
+        COUNT(*) FILTER (WHERE event = 'add_to_favorites') as favorites,
+        COUNT(*) FILTER (WHERE event = 'ask_manager') as manager
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+      GROUP BY date
+      ORDER BY date ASC
+    `;
+
+    const countrySql = `
+      SELECT COALESCE(NULLIF(meta->>'country', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+      GROUP BY COALESCE(NULLIF(meta->>'country', ''), 'Unknown')
+      ORDER BY visitors DESC
+      LIMIT 10
+    `;
+
+    const osSql = `
+      SELECT COALESCE(NULLIF(meta->>'os', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+      GROUP BY COALESCE(NULLIF(meta->>'os', ''), 'Unknown')
+      ORDER BY visitors DESC
+      LIMIT 5
+    `;
+
+    const [overviewRes, profilesRes, seriesRes, countryRes, osRes] = await Promise.all([
+      safeAnalyticsQuery("Overview", overviewSql, [emptyOverviewRow], true),
+      safeAnalyticsQuery("Profiles", profilesSql, [emptyProfileRow]),
+      safeAnalyticsQuery("Series", seriesSql, []),
+      safeAnalyticsQuery("Country", countrySql, []),
+      safeAnalyticsQuery("OS", osSql, []),
+    ]);
+
+    const row = overviewRes.rows[0] || emptyOverviewRow;
+    const profileRow = profilesRes.rows[0] || emptyProfileRow;
     const overview = {
       unique_visitors: parseInt(row.unique_visitors || 0),
       unique_product_viewers: parseInt(row.unique_product_viewers || 0),
@@ -189,47 +273,6 @@ export async function GET(request: Request) {
       new_profiles: parseInt(profileRow.new_profiles || 0),
     };
 
-    const seriesRes = await legacyCatalogQuery(`
-      SELECT 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as date,
-        COUNT(DISTINCT session_id) as visitors,
-        COUNT(DISTINCT CONCAT(session_id, ':', "productId")) FILTER (
-          WHERE event = 'product_view'
-            AND session_id IS NOT NULL
-            AND session_id != ''
-            AND "productId" IS NOT NULL
-            AND "productId" != ''
-        ) as views,
-        COUNT(*) FILTER (WHERE event = 'add_to_cart') as carts,
-        COUNT(*) FILTER (WHERE event = 'add_to_favorites') as favorites,
-        COUNT(*) FILTER (WHERE event = 'ask_manager') as manager
-      FROM analytics_events
-      WHERE ${timeFilter}
-        AND ${channelFilter}
-      GROUP BY date
-      ORDER BY date ASC
-    `).catch(() => ({ rows: [] }));
-
-    const countryRes = await legacyCatalogQuery(`
-      SELECT COALESCE(NULLIF(meta->>'country', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
-      FROM analytics_events
-      WHERE ${timeFilter}
-        AND ${channelFilter}
-      GROUP BY COALESCE(NULLIF(meta->>'country', ''), 'Unknown')
-      ORDER BY visitors DESC
-      LIMIT 10
-    `).catch(() => ({ rows: [] }));
-
-    const osRes = await legacyCatalogQuery(`
-      SELECT COALESCE(NULLIF(meta->>'os', ''), 'Unknown') as name, COUNT(DISTINCT session_id) as visitors
-      FROM analytics_events
-      WHERE ${timeFilter}
-        AND ${channelFilter}
-      GROUP BY COALESCE(NULLIF(meta->>'os', ''), 'Unknown')
-      ORDER BY visitors DESC
-      LIMIT 5
-    `).catch(() => ({ rows: [] }));
-
     return NextResponse.json({
       overview,
       seriesData: seriesRes.rows,
@@ -239,12 +282,24 @@ export async function GET(request: Request) {
     });
   } catch (error: any) {
     console.error("Analytics error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const message = isDatabaseConnectionError(error)
+      ? "Не удалось подключиться к базе аналитики. Проверь DATABASE_URL/ANALYTICS_DATABASE_URL и доступность Postgres из окружения админки."
+      : error.message;
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   try {
+    const configError = getAnalyticsDatabaseConfigError();
+    if (configError) {
+      return NextResponse.json(
+        { error: configError },
+        { status: 500, headers: corsHeaders() },
+      );
+    }
+
     const body = await request.json();
     const {
       event,
@@ -263,7 +318,7 @@ export async function POST(request: Request) {
       );
     }
 
-    await legacyCatalogQuery(
+    await analyticsQuery(
       `
         INSERT INTO analytics_events (
           event, "productId", name, price, session_id, user_agent, meta, created_at, updated_at
@@ -307,6 +362,11 @@ function corsHeaders() {
 
 export async function DELETE(request: Request) {
   try {
+    const configError = getAnalyticsDatabaseConfigError();
+    if (configError) {
+      return NextResponse.json({ error: configError }, { status: 500 });
+    }
+
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "period";
     const period = searchParams.get("period") || "today";
@@ -314,10 +374,10 @@ export async function DELETE(request: Request) {
     const channelFilter = getChannelSql(channel);
 
     if (type === "all") {
-      await legacyCatalogQuery(channel === "all" ? "DELETE FROM analytics_events" : `DELETE FROM analytics_events WHERE ${channelFilter}`);
+      await analyticsQuery(channel === "all" ? "DELETE FROM analytics_events" : `DELETE FROM analytics_events WHERE ${channelFilter}`);
     } else {
       const { timeFilter } = getPeriodSql(period);
-      await legacyCatalogQuery(`DELETE FROM analytics_events WHERE ${timeFilter} AND ${channelFilter}`);
+      await analyticsQuery(`DELETE FROM analytics_events WHERE ${timeFilter} AND ${channelFilter}`);
     }
 
     return NextResponse.json({

@@ -17,6 +17,13 @@ const legacyCatalogPool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+const analyticsPool = new Pool({
+  connectionString: process.env.ANALYTICS_DATABASE_URL || process.env.DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
 // 2. PostgreSQL - Техническая база (Scraping)
 const scrapingPool = new Pool({
   connectionString: process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL, // Если нет отдельной, используем основную
@@ -27,9 +34,11 @@ const scrapingPool = new Pool({
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);
 export const legacyCatalogQuery = (text: string, params?: any[]) => legacyCatalogPool.query(text, params);
+export const analyticsQuery = (text: string, params?: any[]) => analyticsPool.query(text, params);
 export const scrapingQuery = (text: string, params?: any[]) => scrapingPool.query(text, params);
 export const getClient = () => pool.connect();
 export const getLegacyCatalogClient = () => legacyCatalogPool.connect();
+export const getAnalyticsClient = () => analyticsPool.connect();
 export const getScrapingClient = () => scrapingPool.connect();
 
 // 2. Redis подключение (для сброса кеша)
@@ -57,9 +66,11 @@ export const elastic = new ElasticClient({
 export default {
   query,
   legacyCatalogQuery,
+  analyticsQuery,
   scrapingQuery,
   getClient,
   getLegacyCatalogClient,
+  getAnalyticsClient,
   getScrapingClient,
   redis,
   elastic

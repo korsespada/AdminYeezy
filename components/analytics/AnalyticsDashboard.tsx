@@ -115,6 +115,8 @@ const formatPercent = (value: number, base: number) => {
     return `${((value / base) * 100).toFixed(1)}%`
 }
 
+const analyticsFetchTimeoutMs = 12_000
+
 export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
     void _props
 
@@ -138,10 +140,15 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
 
         try {
             const params = new URLSearchParams({ period, channel })
-            const res = await fetch(`/api/analytics?${params.toString()}`)
+            const controller = new AbortController()
+            const timeout = window.setTimeout(() => controller.abort(), analyticsFetchTimeoutMs)
+            const res = await fetch(`/api/analytics?${params.toString()}`, { signal: controller.signal })
+                .finally(() => window.clearTimeout(timeout))
+
             if (!res.ok) {
                 const err = await res.json().catch(() => ({ error: 'Ошибка сервера' }))
-                throw new Error(err.error || `HTTP ${res.status}`)
+                setError(err.error || `HTTP ${res.status}`)
+                return
             }
 
             const payload = await res.json()
@@ -151,8 +158,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
             setOsList(payload.osList || [])
             setUpdatedAt(payload.updatedAt || new Date().toISOString())
         } catch (err: any) {
-            console.error('Analytics fetch error:', err)
-            setError(err?.message || 'Ошибка загрузки аналитики')
+            setError(err?.name === 'AbortError' ? 'Таймаут загрузки аналитики' : err?.message || 'Ошибка загрузки аналитики')
         } finally {
             setLoading(false)
         }
