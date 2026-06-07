@@ -83,17 +83,17 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
-    if (!confirm('Вы уверены, что хотите удалить этот товар?')) return
+    if (!confirm('Переместить этот товар в корзину?')) return
 
     try {
       const result = await deleteProductAction(id)
       if (result.success) {
         setProducts(prev => prev.filter(p => p.id !== id))
       } else {
-        alert(result.error || 'Ошибка при удалении товара')
+        alert(result.error || 'Ошибка при переносе товара в корзину')
       }
     } catch (error) {
-      alert('Ошибка при удалении товара')
+      alert('Ошибка при переносе товара в корзину')
     }
   }, [])
 
@@ -212,6 +212,8 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                           onUpdate={handleProductUpdate}
                           selected={selectedProductIds.includes(product.id)}
                           onToggleSelect={handleToggleSelect}
+                          categories={categories}
+                          subcategories={subcategories}
                         />
                       ))}
                     </div>
@@ -348,6 +350,15 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
 
                   const res = await bulkUpdateProductsAction(selectedProductIds, updates)
                   if (res.success) {
+                    setProducts(prev => prev.map(product => {
+                      if (!selectedProductIds.includes(product.id)) return product
+                      return {
+                        ...product,
+                        ...(selectedCategory ? { category: selectedCategory } : {}),
+                        ...(selectedSubcategory ? { subcategory: selectedSubcategory === '__none__' ? '' : selectedSubcategory } : {}),
+                        ...(selectedGender ? { gender: selectedGender } : {}),
+                      }
+                    }))
                     setIsBulkUpdating(false)
                     setSelectedProductIds([])
                     setSelectedSubcategory('')
@@ -369,16 +380,16 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
               type="button"
               variant="destructive"
               onClick={async () => {
-                if (confirm(`Вы уверены, что хотите удалить ${selectedProductIds.length} товаров? Это действие нельзя отменить.`)) {
+                if (confirm(`Переместить ${selectedProductIds.length} товаров в корзину?`)) {
                   setIsBulkDeleting(true)
                   const res = await bulkDeleteProductsAction(selectedProductIds)
                   if (res.success) {
-                    // Update local state by removing deleted products
+                    // Update local state by removing trashed products
                     setProducts(prev => prev.filter(p => !selectedProductIds.includes(p.id)))
                     setIsBulkDeleting(false)
                     setSelectedProductIds([])
                   } else {
-                    alert('Ошибка при удалении товаров')
+                    alert('Ошибка при переносе товаров в корзину')
                     setIsBulkDeleting(false)
                   }
                 }
@@ -386,7 +397,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
               disabled={isBulkUpdating || isBulkDeleting}
               className="whitespace-nowrap"
             >
-              {isBulkDeleting ? 'Удаление...' : 'Удалить'}
+              {isBulkDeleting ? 'Перенос...' : 'В корзину'}
             </Button>
           </div>
         </div>

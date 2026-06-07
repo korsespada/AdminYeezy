@@ -6,6 +6,7 @@ import { type Product } from '@/lib/types';
 import { Trash2, Copy, RefreshCw } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
+import { normalizeDescription } from '@/components/products/ProductDescription';
 
 interface ProductListItemProps {
     product: Product;
@@ -76,7 +77,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
         const formData = new FormData();
         formData.append('productId', product.productId);
         formData.append('name', editingField === 'name' ? editValue.trim() : product.name);
-        formData.append('description', product.description || '');
+        formData.append('description', normalizeDescription(product.description));
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
         formData.append('gender', product.gender || '');
@@ -133,7 +134,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
             const formData = new FormData();
             formData.append('productId', newProductId);
             formData.append('name', `${product.name} (Копия)`);
-            formData.append('description', product.description || '');
+            formData.append('description', normalizeDescription(product.description));
             formData.append('price', product.price.toString());
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
@@ -266,10 +267,10 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
             {/* Category Info */}
             <div className="col-span-8 sm:col-span-4 flex flex-col justify-center">
                 <span className="text-xs font-medium text-slate-300">
-                    {product.expand?.category?.name || 'No Category'}
+                    {product.expand?.category?.name || (product.category ? 'Категория' : 'Без категории')}
                 </span>
                 <span className="text-[10px] text-slate-500">
-                    {product.expand?.subcategory?.name || 'No Subcategory'}
+                    {product.expand?.subcategory?.name || 'Без подкатегории'}
                 </span>
             </div>
 

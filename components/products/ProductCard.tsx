@@ -2,7 +2,7 @@
 
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
-import { type Product } from '@/lib/types';
+import { type Category, type Product, type Subcategory } from '@/lib/types';
 import { Trash2, Copy } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import ProductDescription, { normalizeDescription } from '@/components/products/ProductDescription';
 
 interface ProductCardProps {
     product: Product;
@@ -19,9 +20,11 @@ interface ProductCardProps {
     onUpdate: (product: Product) => void;
     selected: boolean;
     onToggleSelect: (id: string) => void;
+    categories?: Category[];
+    subcategories?: Subcategory[];
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [] }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -57,6 +60,20 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         return photoUrl
     }, [product.id, product.thumb, product.photos])
 
+    const categoryLabel = useMemo(() => {
+        const categoryName = product.expand?.category?.name
+            || categories.find((category) => category.id === product.category)?.name
+            || ''
+        const subcategoryName = product.expand?.subcategory?.name
+            || subcategories.find((subcategory) => subcategory.id === product.subcategory)?.name
+            || ''
+
+        return {
+            category: categoryName || (product.category ? 'Категория' : 'Без категории'),
+            subcategory: subcategoryName,
+        }
+    }, [product.category, product.subcategory, product.expand?.category?.name, product.expand?.subcategory?.name, categories, subcategories])
+
     const startEdit = (field: 'name' | 'price', e: React.MouseEvent) => {
         e.stopPropagation();
         setEditingField(field);
@@ -73,7 +90,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         const formData = new FormData();
         formData.append('productId', product.productId);
         formData.append('name', editingField === 'name' ? editValue.trim() : product.name);
-        formData.append('description', product.description || '');
+        formData.append('description', normalizeDescription(product.description));
         formData.append('price', editingField === 'price' ? editValue : product.price.toString());
         formData.append('status', product.status);
         formData.append('gender', product.gender || '');
@@ -130,7 +147,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             const formData = new FormData();
             formData.append('productId', newProductId);
             formData.append('name', `${product.name} (Копия)`);
-            formData.append('description', product.description || '');
+            formData.append('description', normalizeDescription(product.description));
             formData.append('price', product.price.toString());
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
@@ -267,12 +284,14 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 <div className="mb-2">
                     <div className="text-xs text-slate-500">
-                        {product.expand?.category?.name || 'No Category'}
-                        {product.expand?.subcategory?.name && ` • ${product.expand.subcategory.name}`}
+                        {categoryLabel.category}
+                        {categoryLabel.subcategory && ` • ${categoryLabel.subcategory}`}
                         {product.gender && (
                             <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${product.gender === 'Для мужчин'
                                 ? 'bg-blue-900/30 text-blue-400'
-                                : 'bg-pink-900/30 text-pink-400'
+                                : product.gender === 'Для женщин'
+                                    ? 'bg-pink-900/30 text-pink-400'
+                                    : 'bg-violet-900/30 text-violet-300'
                                 }`}>
                                 {product.gender.replace('Для ', '')}
                             </span>
@@ -303,7 +322,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 <div className="flex-1">
                     {product.description && (
-                        <p className="text-sm text-slate-400 mb-4 line-clamp-2">{product.description}</p>
+                        <p className="mb-4 line-clamp-2 text-sm text-slate-400">
+                            <ProductDescription text={product.description} />
+                        </p>
                     )}
                 </div>
 

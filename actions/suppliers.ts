@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache'
-import { query, scrapingQuery, redis } from '@/lib/db'
+import { query, scrapingQuery, redis, describeScrapingDatabaseConnection } from '@/lib/db'
 import { deleteS3Folder } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
 import { spawn } from 'child_process'
@@ -283,6 +283,43 @@ function parseDelimitedLine(line: string, delimiter = ';') {
   return values
 }
 
+function isScrapingConnectionError(err: any) {
+  const message = String(err?.message || '').toLowerCase()
+  const code = String(err?.code || '').toLowerCase()
+
+  return (
+    code === 'etimeout' ||
+    code === 'econnrefused' ||
+    code === 'enotfound' ||
+    code === 'econnreset' ||
+    message.includes('connection terminated due to connection timeout') ||
+    message.includes('connection timeout') ||
+    message.includes('connection refused') ||
+    message.includes('connect etimedout') ||
+    message.includes('getaddrinfo enotfound')
+  )
+}
+
+function formatScrapingConnectionError(err: any) {
+  const db = describeScrapingDatabaseConnection()
+  const original = err?.message || 'неизвестная ошибка подключения'
+
+  console.error('scraping db unreachable', {
+    source: db.source,
+    host: db.host,
+    port: db.port,
+    database: db.database,
+    code: err?.code,
+    message: original,
+  })
+
+  return [
+    `Не удалось подключиться к технической базе выгрузок ${db.database} (${db.source}: ${db.host}:${db.port}).`,
+    'Проверьте env AdminYeezy в Coolify, доступ контейнера к Postgres, firewall/allowlist и внутреннюю сеть сервиса.',
+    `Postgres вернул: ${original}`,
+  ].join(' ')
+}
+
 export async function getExportHistoryAction(): Promise<ActionResponse> {
   try {
     const res = await scrapingQuery(`
@@ -387,6 +424,14 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
 
     return { success: true, data }
   } catch (err: any) {
+    if (isScrapingConnectionError(err)) {
+      return {
+        success: false,
+        error: formatScrapingConnectionError(err),
+        data: { kind: 'scraping_db_unreachable', db: describeScrapingDatabaseConnection() },
+      }
+    }
+
     return { success: false, error: err.message }
   }
 }

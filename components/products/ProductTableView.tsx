@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { normalizeDescription } from '@/components/products/ProductDescription'
 
 interface ProductTableViewProps {
     products: Product[]
@@ -88,7 +89,8 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
         if (localValues[product.id] && localValues[product.id][field] !== undefined) {
             return localValues[product.id][field]
         }
-        return product[field] || ''
+        const value = product[field] || ''
+        return field === 'description' ? normalizeDescription(String(value)) : value
     }
 
     const handleSaveField = async (product: Product, field: FieldName) => {
@@ -130,7 +132,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
             const formData = new FormData();
             formData.append('productId', newProductId);
             formData.append('name', `${product.name} (Копия)`);
-            formData.append('description', product.description || '');
+            formData.append('description', normalizeDescription(product.description));
             formData.append('price', product.price.toString());
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');

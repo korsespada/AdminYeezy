@@ -1,7 +1,39 @@
-import { describe, expect, it } from 'vitest'
-import { mapRailsProduct, productFormDataToRailsPayload } from '@/lib/rails-admin'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  buildRailsAdminProductsParams,
+  mapRailsProduct,
+  productFormDataToRailsPayload,
+  restoreRailsAdminProductFromTrash,
+} from '@/lib/rails-admin'
 
 describe('rails admin product adapter', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+  })
+
+  it('builds product list query params for filters', () => {
+    const params = buildRailsAdminProductsParams({
+      page: 2,
+      perPage: 100,
+      search: 'mules',
+      brand: 'brand-id',
+      category: 'category-id',
+      subcategory: 'subcategory-id',
+      gender: 'Унисекс',
+      status: 'archived',
+    })
+
+    expect(params.toString()).toContain('page=2')
+    expect(params.toString()).toContain('per_page=100')
+    expect(params.get('q')).toBe('mules')
+    expect(params.get('brand')).toBe('brand-id')
+    expect(params.get('category')).toBe('subcategory-id')
+    expect(params.get('gender')).toBe('Унисекс')
+    expect(params.get('status')).toBe('archived')
+  })
+
   it('builds update payload without defaulting Rails fields and preserves metadata', () => {
     const formData = new FormData()
     formData.append('productId', 'ext-1')
@@ -80,6 +112,18 @@ describe('rails admin product adapter', () => {
     ])
   })
 
+  it('keeps archived status and uses subcategory as Rails category id', () => {
+    const formData = new FormData()
+    formData.append('status', 'archived')
+    formData.append('category', 'category-id')
+    formData.append('subcategory', 'subcategory-id')
+
+    const payload = productFormDataToRailsPayload(formData, { applyDefaults: false })
+
+    expect(payload.product.status).toBe('archived')
+    expect(payload.product.category_id).toBe('subcategory-id')
+  })
+
   it('maps Rails product media and CRM fields into UI product', () => {
     const product = mapRailsProduct({
       id: 'product-id',
@@ -134,5 +178,45 @@ describe('rails admin product adapter', () => {
       thumb: 'a-preview.jpg',
     })
     expect(product.media?.map((item) => item.original_url)).toEqual(['a.jpg', 'b.jpg'])
+  })
+
+  it('restores a trashed product to previous status and clears trash metadata', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          product: {
+            id: 'product-id',
+            status: 'archived',
+            metadata: {
+              admin_previous_status: 'active',
+              admin_trashed_at: '2026-06-07T00:00:00.000Z',
+              source: 'test',
+            },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          product: {
+            id: 'product-id',
+            name: 'Restored',
+            status: 'active',
+            metadata: { source: 'test' },
+            price_cents: 0,
+            media: [],
+          },
+        }),
+      })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    await restoreRailsAdminProductFromTrash('product-id')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const patchBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(patchBody.product.status).toBe('active')
+    expect(patchBody.product.metadata).toEqual({ source: 'test' })
   })
 })

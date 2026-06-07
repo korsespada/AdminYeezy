@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { deleteRailsAdminProduct, patchRailsAdminProduct } from '@/lib/rails-admin'
+import { deleteRailsAdminProduct, moveRailsAdminProductToTrash, patchRailsAdminProduct } from '@/lib/rails-admin'
 
 export async function bulkUpdateProductsAction(ids: string[], updates: { category?: string, subcategory?: string, gender?: string }) {
   try {
@@ -17,15 +17,33 @@ export async function bulkUpdateProductsAction(ids: string[], updates: { categor
 }
 
 export async function bulkDeleteProductsAction(ids: string[]) {
+  return bulkMoveProductsToTrashAction(ids)
+}
+
+export async function bulkMoveProductsToTrashAction(ids: string[]) {
+  try {
+    for (const id of ids) {
+      await moveRailsAdminProductToTrash(id)
+    }
+    revalidatePath('/admin')
+    revalidatePath('/admin/trash')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Bulk move to trash error:', error)
+    return { success: false, error: error.message || 'Failed to move products to trash' }
+  }
+}
+
+export async function bulkDeleteProductsPermanentlyAction(ids: string[]) {
   try {
     for (const id of ids) {
       await deleteRailsAdminProduct(id)
     }
-    revalidatePath('/admin')
+    revalidatePath('/admin/trash')
     return { success: true }
   } catch (error: any) {
-    console.error('Bulk delete error:', error)
-    return { success: false, error: error.message || 'Failed to delete products' }
+    console.error('Bulk permanent delete error:', error)
+    return { success: false, error: error.message || 'Failed to permanently delete products' }
   }
 }
 

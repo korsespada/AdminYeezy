@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Menu, RefreshCw, BarChart3, LogOut, FileSpreadsheet } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2 } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -48,6 +48,13 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           <Link href="/admin/analytics">
             <BarChart3 size={20} className="text-indigo-400" />
             <span className="hidden md:inline">Аналитика</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Корзина">
+          <Link href="/admin/trash">
+            <Trash2 size={20} className="text-red-400" />
+            <span className="hidden md:inline">Корзина</span>
           </Link>
         </Button>
 

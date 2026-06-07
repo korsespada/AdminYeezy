@@ -243,6 +243,29 @@ export async function listRailsAdminProducts(options: {
   brand?: string
   category?: string
   subcategory?: string
+  gender?: string
+  status?: Product['status']
+}) {
+  const params = buildRailsAdminProductsParams(options)
+  const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
+  const products = (payload.products || []).map(mapRailsProduct)
+
+  return {
+    products: options.status ? products : products.filter((product) => product.status !== 'archived'),
+    totalItems: Number(payload.meta?.total || 0),
+    totalPages: Number(payload.meta?.pages || 0),
+  }
+}
+
+export function buildRailsAdminProductsParams(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: Product['status']
 }) {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
@@ -250,13 +273,9 @@ export async function listRailsAdminProducts(options: {
   if (options.search) params.set('q', options.search)
   if (options.brand) params.set('brand', options.brand)
   if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
-
-  const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
-  return {
-    products: (payload.products || []).map(mapRailsProduct),
-    totalItems: Number(payload.meta?.total || 0),
-    totalPages: Number(payload.meta?.pages || 0),
-  }
+  if (options.gender) params.set('gender', options.gender)
+  if (options.status) params.set('status', options.status)
+  return params
 }
 
 function parseJsonArray(value: FormDataEntryValue | null): any[] {
@@ -405,9 +424,15 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
   if (data.name !== undefined) product.name = String(data.name)
   if (data.description !== undefined) product.description = String(data.description)
   if (data.price !== undefined) product.price_cents = Math.round((Number(data.price) || 0) * 100)
-  if (data.status !== undefined) product.status = data.status === 'active' ? 'active' : 'hidden'
+  if (data.status !== undefined) {
+    const status = String(data.status || 'hidden')
+    product.status = ['draft', 'active', 'hidden', 'archived'].includes(status) ? status : 'hidden'
+  }
   if (data.category !== undefined || data.subcategory !== undefined) {
-    product.category_id = String(data.subcategory || data.category || '')
+    product.category_id = String(data.subcategory && data.subcategory !== '__none__' ? data.subcategory : data.category || '')
+  }
+  if (data.metadata !== undefined) {
+    product.metadata = data.metadata && typeof data.metadata === 'object' ? data.metadata : {}
   }
   if (data.gender !== undefined) {
     const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
@@ -424,6 +449,43 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
     body: JSON.stringify({ product }),
   })
   return mapRailsProduct(result.product)
+}
+
+export async function moveRailsAdminProductToTrash(id: string) {
+  const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
+  const currentProduct = current.product || {}
+  const metadata = currentProduct.metadata && typeof currentProduct.metadata === 'object'
+    ? { ...currentProduct.metadata }
+    : {}
+
+  metadata.admin_previous_status = ['draft', 'active', 'hidden'].includes(String(currentProduct.status))
+    ? String(currentProduct.status)
+    : 'hidden'
+  metadata.admin_trashed_at = new Date().toISOString()
+
+  return patchRailsAdminProduct(id, {
+    status: 'archived',
+    metadata,
+  })
+}
+
+export async function restoreRailsAdminProductFromTrash(id: string) {
+  const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
+  const currentProduct = current.product || {}
+  const metadata = currentProduct.metadata && typeof currentProduct.metadata === 'object'
+    ? { ...currentProduct.metadata }
+    : {}
+  const previousStatus = ['draft', 'active', 'hidden'].includes(String(metadata.admin_previous_status))
+    ? String(metadata.admin_previous_status)
+    : 'hidden'
+
+  delete metadata.admin_previous_status
+  delete metadata.admin_trashed_at
+
+  return patchRailsAdminProduct(id, {
+    status: previousStatus,
+    metadata,
+  })
 }
 
 export async function deleteRailsAdminProduct(id: string) {

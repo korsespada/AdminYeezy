@@ -22,7 +22,7 @@ interface SidebarProps {
     count: number
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, activeSubcategoryIds, isOpen, onClose, count }) => {
+const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, isOpen, onClose, count }) => {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
@@ -73,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
     }
 
     const availableSubcategories = currentCategory
-        ? subcategories.filter(sub => sub.category === currentCategory || activeSubcategoryIds.includes(sub.id))
+        ? subcategories.filter(sub => sub.category === currentCategory)
         : []
 
     // Filter brands by search
@@ -95,11 +95,16 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
                 <div className="p-6">
-                    <div className="flex items-center justify-between mb-8">
-                        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-                            <Filter className="w-5 h-5 text-indigo-400" />
-                            Фильтры
-                        </h2>
+                    <div className="mb-8 flex items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                                <Filter className="w-5 h-5 text-indigo-400" />
+                                Фильтры
+                            </h2>
+                            <div className="mt-2 text-sm text-slate-400">
+                                <span className="font-semibold text-slate-200">{count}</span> товаров
+                            </div>
+                        </div>
                         <Button variant="ghost" size="icon" onClick={onClose} className="lg:hidden text-slate-400 hover:text-slate-200">
                             <X className="w-6 h-6" />
                         </Button>
@@ -147,6 +152,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                             <Select
                                 value={currentSubcategory || '__all__'}
                                 onValueChange={(value) => applyFilter('subcategory', value === '__all__' ? null : value)}
+                                disabled={!currentCategory}
                             >
                                 <SelectTrigger className="bg-slate-700 text-slate-200">
                                     <SelectValue />
@@ -154,17 +160,11 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                                 <SelectContent>
                                 <SelectItem value="__all__">Все подкатегории</SelectItem>
                                 <SelectItem value="__none__">Без подкатегории</SelectItem>
-                                {availableSubcategories.map(sub => {
-                                    const isForeign = sub.category !== currentCategory
-                                    const foreignCategoryName = isForeign
-                                        ? categories.find(c => c.id === sub.category)?.name || 'Другое'
-                                        : '';
-                                    return (
-                                        <SelectItem key={sub.id} value={sub.id}>
-                                            {sub.name} {isForeign ? `(из: ${foreignCategoryName})` : ''}
-                                        </SelectItem>
-                                    )
-                                })}
+                                {availableSubcategories.map(sub => (
+                                    <SelectItem key={sub.id} value={sub.id}>
+                                        {sub.name}
+                                    </SelectItem>
+                                ))}
                                 </SelectContent>
                             </Select>
                         </div>
@@ -203,6 +203,15 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                                 <Button
                                     type="button"
                                     size="sm"
+                                    variant={currentGender === 'Унисекс' ? 'default' : 'outline'}
+                                    onClick={() => applyFilter('gender', 'Унисекс')}
+                                    className={currentGender === 'Унисекс' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
+                                >
+                                    Унисекс
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
                                     variant={currentGender === '__none__' ? 'default' : 'outline'}
                                     onClick={() => applyFilter('gender', '__none__')}
                                     className={currentGender === '__none__' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
@@ -231,31 +240,25 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
                             <ScrollArea className="h-60 pr-2">
                             <div className="space-y-0.5">
                                 {(() => {
-                                    const selectedIds = currentBrand ? currentBrand.split(',') : []
+                                    const selectedId = currentBrand
 
                                     // 1. Sort brands: selected first, then by name
                                     const sortedBrands = [...filteredBrands].sort((a, b) => {
-                                        const aSelected = selectedIds.includes(a.id)
-                                        const bSelected = selectedIds.includes(b.id)
+                                        const aSelected = selectedId === a.id
+                                        const bSelected = selectedId === b.id
                                         if (aSelected && !bSelected) return -1
                                         if (!aSelected && bSelected) return 1
                                         return a.name.localeCompare(b.name)
                                     })
 
                                     return sortedBrands.map(brand => {
-                                        const isSelected = selectedIds.includes(brand.id)
+                                        const isSelected = selectedId === brand.id
                                         return (
                                             <label key={brand.id} className={`flex items-center gap-2 cursor-pointer group py-1 px-1.5 rounded-md transition-colors ${isSelected ? 'bg-indigo-500/10' : 'hover:bg-slate-700/50'}`}>
                                                 <Checkbox
                                                     checked={isSelected}
                                                     onCheckedChange={() => {
-                                                        let newIds: string[]
-                                                        if (isSelected) {
-                                                            newIds = selectedIds.filter(id => id !== brand.id)
-                                                        } else {
-                                                            newIds = [...selectedIds, brand.id]
-                                                        }
-                                                        applyFilter('brand', newIds.length > 0 ? newIds.join(',') : null)
+                                                        applyFilter('brand', isSelected ? null : brand.id)
                                                     }}
                                                     className="h-3.5 w-3.5 border-slate-500 bg-slate-700"
                                                 />
@@ -277,10 +280,6 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, ac
 
                     <div className="mt-8 pt-6">
                         <Separator className="mb-6 bg-slate-700" />
-                        <div className="flex items-center justify-between text-sm text-slate-400 mb-4">
-                            <span>Найдено:</span>
-                            <span className="font-semibold text-slate-200">{count} товаров</span>
-                        </div>
                         <Button
                             type="button"
                             variant="outline"

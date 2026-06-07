@@ -1,49 +1,35 @@
-import ProductList from '@/components/products/ProductList'
+import ProductTrashList from '@/components/products/ProductTrashList'
 import PerPageSelector from '@/components/ui/PerPageSelector'
 import { getRailsCatalogLookups, listRailsAdminProducts } from '@/lib/rails-admin'
 import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 
-export default async function AdminPage({
+export default async function AdminTrashPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; search?: string; brand?: string; category?: string; subcategory?: string; gender?: string; perPage?: string }>
+  searchParams: Promise<{ page?: string; perPage?: string }>
 }) {
   await connection()
   const params = await searchParams
   const page = Number(params.page) || 1
   const perPage = Number(params.perPage) || 40
   const offset = (page - 1) * perPage
-  const searchTerm = params.search || ''
-  const brandFilter = params.brand || ''
-  const categoryFilter = params.category || ''
-  const subcategoryFilter = params.subcategory || ''
-  const genderFilter = params.gender || ''
 
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
     if (p !== 1) params.set('page', p.toString())
-    if (searchTerm) params.set('search', searchTerm)
-    if (brandFilter) params.set('brand', brandFilter)
-    if (categoryFilter) params.set('category', categoryFilter)
-    if (subcategoryFilter) params.set('subcategory', subcategoryFilter)
-    if (genderFilter) params.set('gender', genderFilter)
     if (perPage !== 40) params.set('perPage', perPage.toString())
-    return `/admin?${params.toString()}`
+    return `/admin/trash?${params.toString()}`
   }
 
   try {
-    const [{ brands, categories, subcategories }, productPage] = await Promise.all([
+    const [{ categories, subcategories }, productPage] = await Promise.all([
       getRailsCatalogLookups(),
       listRailsAdminProducts({
         page,
         perPage,
-        search: searchTerm,
-        brand: brandFilter,
-        category: categoryFilter,
-        subcategory: subcategoryFilter === '__none__' ? '' : subcategoryFilter,
-        gender: genderFilter,
+        status: 'archived',
       }),
     ])
 
@@ -52,17 +38,17 @@ export default async function AdminPage({
     const totalPages = productPage.totalPages
 
     return (
-      <ProductList
-        initialData={products}
-        brands={brands}
-        allBrands={brands}
-        categories={categories}
-        subcategories={subcategories}
-        activeSubcategoryIds={[]}
-        totalItems={totalItems}
-        pagination={
-          totalItems > 0 && (
-            <div className="mt-6 flex flex-col md:flex-row items-center justify-between border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 rounded-xl gap-4">
+      <main className="min-h-screen bg-slate-900 p-6 text-slate-200">
+        <div className="mx-auto max-w-7xl">
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-slate-100">Корзина</h1>
+            <p className="mt-1 text-sm text-slate-400">Товары, удалённые из каталога. Их можно восстановить или удалить навсегда.</p>
+          </div>
+
+          <ProductTrashList initialData={products} categories={categories} subcategories={subcategories} />
+
+          {totalItems > 0 && (
+            <div className="mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 md:flex-row">
               <div className="flex items-center gap-4">
                 <p className="text-sm text-slate-400">
                   Показано <span className="font-medium text-slate-200">{offset + 1}</span> - <span className="font-medium text-slate-200">{Math.min(offset + perPage, totalItems)}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
@@ -90,18 +76,18 @@ export default async function AdminPage({
                 </nav>
               )}
             </div>
-          )
-        }
-      />
+          )}
+        </div>
+      </main>
     )
   } catch (err: any) {
-    console.error('Admin page error:', err)
+    console.error('Admin trash page error:', err)
     return (
       <Alert variant="destructive" className="m-8 border-red-800 bg-red-900/20 text-red-400">
         <AlertTitle className="text-xl font-bold">Ошибка подключения к Rails API</AlertTitle>
         <AlertDescription>
-        <p>{err.message}</p>
-        <p className="mt-4 text-sm opacity-70">Проверьте `RAILS_API_URL`, `RAILS_ADMIN_EMAIL` и `RAILS_ADMIN_PASSWORD`.</p>
+          <p>{err.message}</p>
+          <p className="mt-4 text-sm opacity-70">Проверьте `RAILS_API_URL`, `RAILS_ADMIN_EMAIL` и `RAILS_ADMIN_PASSWORD`.</p>
         </AlertDescription>
       </Alert>
     )

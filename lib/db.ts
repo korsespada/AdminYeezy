@@ -32,6 +32,39 @@ const scrapingPool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+export function describePostgresConnection(connectionString?: string) {
+  if (!connectionString) {
+    return {
+      host: 'не задан',
+      port: 'не задан',
+      database: 'не задан',
+    }
+  }
+
+  try {
+    const url = new URL(connectionString)
+    return {
+      host: url.hostname || 'не задан',
+      port: url.port || '5432',
+      database: url.pathname.replace(/^\//, '') || 'не задан',
+    }
+  } catch {
+    return {
+      host: 'некорректный URL',
+      port: 'неизвестно',
+      database: 'неизвестно',
+    }
+  }
+}
+
+export function describeScrapingDatabaseConnection() {
+  const source = process.env.SCRAPING_DATABASE_URL ? 'SCRAPING_DATABASE_URL' : 'DATABASE_URL'
+  return {
+    source,
+    ...describePostgresConnection(process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL),
+  }
+}
+
 export const query = (text: string, params?: any[]) => pool.query(text, params);
 export const legacyCatalogQuery = (text: string, params?: any[]) => legacyCatalogPool.query(text, params);
 export const analyticsQuery = (text: string, params?: any[]) => analyticsPool.query(text, params);

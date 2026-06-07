@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
+import { normalizeDescription } from '@/components/products/ProductDescription'
 
 const getOptimizedPhotoUrl = (url: string) => {
   if (typeof url === 'string' && url.includes('szwego.com')) {
@@ -118,7 +119,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         setProductId(product.productId || '')
         setSku(product.sku || product.productId || '')
         setName(product.name)
-        setDescription(product.description || '')
+        setDescription(normalizeDescription(product.description))
         setPrice(Number(product.price).toString())
         setStatus(product.status || 'active')
         setFulfillmentMode(product.fulfillment_mode || 'requires_confirmation')
@@ -677,6 +678,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                   <option value="">Не указано</option>
                   <option value="Для мужчин">Для мужчин</option>
                   <option value="Для женщин">Для женщин</option>
+                  <option value="Унисекс">Унисекс</option>
                 </select>
               </div>
 
