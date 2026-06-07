@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
@@ -80,6 +81,7 @@ export default function GenderBackfillApp() {
   const [applying, setApplying] = useState(false)
   const [progress, setProgress] = useState({ current: 0, total: 0 })
   const [message, setMessage] = useState('')
+  const [detailRow, setDetailRow] = useState<GenderBackfillPreviewRow | null>(null)
 
   const stats = useMemo(() => {
     return rows.reduce((acc, row) => {
@@ -134,7 +136,7 @@ export default function GenderBackfillApp() {
         if (preview.data.done) break
       }
 
-      setMessage(`Готово: найдено ${nextRows.filter((row) => row.product).length} из ${parsed.data.rows.length}`)
+      setMessage('')
     } catch (error: any) {
       setMessage(error.message || 'Ошибка анализа')
     } finally {
@@ -172,7 +174,7 @@ export default function GenderBackfillApp() {
         selected: true,
         selectedGender: bulkGender,
         status: row.status === 'needs_review' ? 'ready' : row.status,
-        reason: row.reason || 'Назначено массово',
+        reason: `Назначено массово: ${bulkGender}`,
       }
     }))
   }
@@ -184,6 +186,7 @@ export default function GenderBackfillApp() {
         ...row,
         selectedGender: bulkGender,
         status: row.status === 'needs_review' ? 'ready' : row.status,
+        reason: `Назначено выбранным: ${bulkGender}`,
       }
     }))
   }
@@ -358,7 +361,7 @@ export default function GenderBackfillApp() {
           ))}
         </div>
 
-        {(loading || progress.total > 0) && (
+        {loading && progress.total > 0 && (
           <div className="overflow-hidden rounded-full bg-slate-800">
             <div
               className="h-2 bg-indigo-500 transition-all"
@@ -401,8 +404,15 @@ export default function GenderBackfillApp() {
                 </thead>
                 <tbody className="divide-y divide-slate-800 bg-slate-900">
                   {filteredRows.map((row) => (
-                    <tr key={rowKey(row)} className="align-top hover:bg-slate-800/50">
-                      <td className="px-3 py-4">
+                    <tr
+                      key={rowKey(row)}
+                      className={row.product ? 'cursor-pointer align-top hover:bg-slate-800/50' : 'align-top hover:bg-slate-800/50'}
+                      onClick={(event) => {
+                        if ((event.target as HTMLElement).closest('[data-row-control]')) return
+                        if (row.product) setDetailRow(row)
+                      }}
+                    >
+                      <td className="px-3 py-4" data-row-control>
                         <Checkbox
                           checked={row.selected}
                           disabled={!canSelect(row)}
@@ -428,7 +438,7 @@ export default function GenderBackfillApp() {
                         <div className="mt-1 text-slate-500">{row.csvProductId}</div>
                       </td>
                       <td className="px-3 py-4 text-slate-300">{row.product?.gender || '—'}</td>
-                      <td className="min-w-[180px] px-3 py-4">
+                      <td className="min-w-[180px] px-3 py-4" data-row-control>
                         <Select
                           value={row.selectedGender || '__none__'}
                           disabled={!canSelect(row)}
@@ -438,6 +448,7 @@ export default function GenderBackfillApp() {
                               selectedGender,
                               selected: Boolean(selectedGender),
                               status: selectedGender && row.status === 'needs_review' ? 'ready' : row.status,
+                              reason: selectedGender ? `Выбрано вручную: ${selectedGender}` : row.reason,
                             })
                           }}
                         >
@@ -470,6 +481,58 @@ export default function GenderBackfillApp() {
             </div>
           </div>
         )}
+
+        <Dialog open={Boolean(detailRow)} onOpenChange={(open) => !open && setDetailRow(null)}>
+          <DialogContent className="max-w-3xl border-slate-700 bg-slate-900 text-slate-100">
+            <DialogHeader>
+              <DialogTitle>{detailRow?.product?.name || 'Товар'}</DialogTitle>
+            </DialogHeader>
+            {detailRow?.product && (
+              <div className="grid gap-5 md:grid-cols-[140px_1fr]">
+                <div>
+                  {detailRow.product.thumb ? (
+                    <Image
+                      src={detailRow.product.thumb}
+                      alt=""
+                      width={140}
+                      height={140}
+                      unoptimized
+                      className="h-[140px] w-[140px] rounded-md object-cover"
+                    />
+                  ) : (
+                    <div className="h-[140px] w-[140px] rounded-md bg-slate-800" />
+                  )}
+                </div>
+                <div className="space-y-4">
+                  <div className="grid gap-2 text-sm text-slate-400 sm:grid-cols-2">
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">SKU</div>
+                      <div className="font-mono text-slate-200">{detailRow.product.sku || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">External ID</div>
+                      <div className="font-mono text-slate-200">{detailRow.product.external_id || detailRow.product.productId || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">Текущий gender</div>
+                      <div className="text-slate-200">{detailRow.product.gender || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs uppercase text-slate-500">Статус</div>
+                      <div className="text-slate-200">{detailRow.product.status}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-xs uppercase text-slate-500">Описание из БД</div>
+                    <div className="max-h-[420px] overflow-y-auto whitespace-pre-wrap rounded-md border border-slate-800 bg-slate-950 p-4 text-sm leading-6 text-slate-200">
+                      {detailRow.product.description || 'Описание пустое'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )
