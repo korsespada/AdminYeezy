@@ -4,6 +4,7 @@
 export interface Brand {
   id: string
   name: string
+  slug?: string
   description: string
   created: string
   updated: string
@@ -17,6 +18,7 @@ export interface Brand {
 export interface Category {
   id: string
   name: string
+  slug?: string
   description: string
   created: string
   updated: string
@@ -30,6 +32,7 @@ export interface Category {
 export interface Subcategory {
   id: string
   name: string
+  slug?: string
   category: string // Category ID
   description: string
   created: string

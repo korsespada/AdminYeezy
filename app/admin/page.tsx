@@ -34,18 +34,29 @@ export default async function AdminPage({
   }
 
   try {
-    const [{ brands, categories, subcategories }, productPage] = await Promise.all([
-      getRailsCatalogLookups(),
-      listRailsAdminProducts({
-        page,
-        perPage,
-        search: searchTerm,
-        brand: brandFilter,
-        category: categoryFilter,
-        subcategory: subcategoryFilter === '__none__' ? '' : subcategoryFilter,
-        gender: genderFilter,
-      }),
-    ])
+    const { brands, categories, subcategories } = await getRailsCatalogLookups()
+    const brandSlug = brands.find((brand) => brand.id === brandFilter)?.slug || brandFilter
+    const categorySlug = categories.find((category) => category.id === categoryFilter)?.slug || categoryFilter
+    const subcategorySlug = subcategories.find((subcategory) => subcategory.id === subcategoryFilter)?.slug || subcategoryFilter
+    const genderParam = genderFilter === '__none__'
+      ? ''
+      : genderFilter === 'Для мужчин'
+      ? 'male'
+      : genderFilter === 'Для женщин'
+        ? 'female'
+        : genderFilter === 'Унисекс'
+          ? 'unisex'
+          : genderFilter
+
+    const productPage = await listRailsAdminProducts({
+      page,
+      perPage,
+      search: searchTerm,
+      brand: brandSlug,
+      category: categorySlug,
+      subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
+      gender: genderParam,
+    })
 
     const products = productPage.products
     const totalItems = productPage.totalItems

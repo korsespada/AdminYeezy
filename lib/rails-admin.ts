@@ -52,6 +52,13 @@ async function railsAdminToken() {
   return cachedRailsAdminToken.token
 }
 
+function mapRailsGenderToUi(gender: string) {
+  if (gender === 'male') return 'Для мужчин'
+  if (gender === 'female') return 'Для женщин'
+  if (gender === 'unisex') return 'Унисекс'
+  return gender
+}
+
 async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<T> {
   const token = await railsAdminToken()
   const response = await fetch(railsApiUrl(pathname), {
@@ -81,6 +88,7 @@ function mapBrand(brand: any): Brand {
   return {
     id: String(brand.id),
     name: brand.name || '',
+    slug: brand.slug || '',
     description: brand.description || '',
     created: brand.created_at || '',
     updated: brand.updated_at || '',
@@ -97,6 +105,7 @@ function flattenCategories(items: any[], parentId = ''): { categories: Category[
     const mapped = {
       id: String(item.id),
       name: item.name || '',
+      slug: item.slug || '',
       description: item.description || '',
       created: item.created_at || '',
       updated: item.updated_at || '',
@@ -178,7 +187,7 @@ export function mapRailsProduct(product: any): Product {
     photos,
     media,
     photos_processed: true,
-    gender: product.gender || metadata.gender || '',
+    gender: mapRailsGenderToUi(product.gender || metadata.gender || ''),
     thumb: product.image_url || photos[0] || '',
     fulfillment_mode: product.fulfillment_mode || 'requires_confirmation',
     availability_confidence: product.availability_confidence || 'unknown',
@@ -202,6 +211,7 @@ export function mapRailsProduct(product: any): Product {
       category: category.id ? {
         id: categoryId || String(category.id),
         name: category.parent_id ? '' : category.name,
+        slug: category.parent_id ? '' : category.slug || '',
         description: '',
         created: '',
         updated: '',
@@ -211,6 +221,7 @@ export function mapRailsProduct(product: any): Product {
       subcategory: subcategoryId ? {
         id: subcategoryId,
         name: category.name || '',
+        slug: category.slug || '',
         category: categoryId,
         description: '',
         created: '',
@@ -247,7 +258,9 @@ export async function listRailsAdminProducts(options: {
   status?: Product['status']
 }) {
   const params = buildRailsAdminProductsParams(options)
-  const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
+  const fetchProducts = options.status ? railsFetch : publicRailsFetch
+  const pathname = options.status ? `/admin/products?${params}` : `/catalog/products?${params}`
+  const payload = await fetchProducts<{ products: any[]; meta: { total: number; pages: number } }>(pathname)
   const products = (payload.products || []).map(mapRailsProduct)
 
   return {
