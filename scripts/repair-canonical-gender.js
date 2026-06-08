@@ -18,7 +18,8 @@ function usage() {
     '  node scripts/repair-canonical-gender.js          # dry-run',
     '  node scripts/repair-canonical-gender.js --apply  # patch Rails products',
     '',
-    'Repairs products where metadata.gender exists but product.gender is empty.',
+    'Repairs products where product.gender or metadata.gender is stored as Russian/UI text',
+    'or exists only in metadata, converting it to male/female/unisex.',
   ].join('\n'))
 }
 
@@ -74,6 +75,21 @@ function normalizeGender(value) {
   return ''
 }
 
+function shouldRepair(product) {
+  const productGender = product.gender == null ? '' : String(product.gender)
+  const metadataGender = product.metadata?.gender == null ? '' : String(product.metadata.gender)
+  const normalized = normalizeGender(productGender) || normalizeGender(metadataGender)
+
+  if (!normalized) return null
+  const productNeedsRepair = productGender && productGender !== normalized
+  const metadataNeedsRepair = metadataGender && metadataGender !== normalized
+  const metadataOnlyNeedsRepair = !productGender && metadataGender
+
+  if (productNeedsRepair || metadataNeedsRepair || metadataOnlyNeedsRepair) return normalized
+
+  return null
+}
+
 function productLabel(product) {
   return [
     product.id,
@@ -121,14 +137,14 @@ async function main() {
       pages = Number(payload.meta?.pages || 1)
 
       for (const product of payload.products || []) {
-        const metadataGender = normalizeGender(product.metadata?.gender)
-        if (product.gender || !metadataGender) continue
+        const canonicalGender = shouldRepair(product)
+        if (!canonicalGender) continue
 
-        candidates.push({ product, gender: metadataGender })
+        candidates.push({ product, gender: canonicalGender })
         if (DRY_RUN) continue
 
         try {
-          await patchGender(product, metadataGender)
+          await patchGender(product, canonicalGender)
           updated.push(product.id)
         } catch (error) {
           skipped.push({ product, error: error.message || 'Unknown error' })
