@@ -2,6 +2,7 @@ import { type Brand, type Category, type Product, type ProductMedia, type Subcat
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
+const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
 
 function railsApiUrl(pathname: string) {
   const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL
@@ -298,6 +299,10 @@ async function listRailsCatalogProducts(options: {
   subcategory?: string
   gender?: string
 }) {
+  if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
+    return listRailsCatalogProductsInChunks(options)
+  }
+
   const params = buildRailsAdminProductsParams(options)
   const payload = await publicRailsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/catalog/products?${params}`)
   const products = (payload.products || []).map(mapRailsProduct)
@@ -306,6 +311,48 @@ async function listRailsCatalogProducts(options: {
     products: products.filter((product) => product.status !== 'archived'),
     totalItems: Number(payload.meta?.total || 0),
     totalPages: Number(payload.meta?.pages || 0),
+  }
+}
+
+async function listRailsCatalogProductsInChunks(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+}) {
+  const requestedOffset = (options.page - 1) * options.perPage
+  const firstSourcePage = Math.floor(requestedOffset / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) + 1
+  const firstPageSkip = requestedOffset % CATALOG_PRODUCTS_PAGE_CHUNK_SIZE
+  const products: Product[] = []
+  let sourcePage = firstSourcePage
+  let sourcePages = firstSourcePage
+  let totalItems = 0
+
+  while (sourcePage <= sourcePages && products.length < options.perPage) {
+    const params = buildRailsAdminProductsParams({
+      ...options,
+      page: sourcePage,
+      perPage: CATALOG_PRODUCTS_PAGE_CHUNK_SIZE,
+    })
+    const payload = await publicRailsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/catalog/products?${params}`)
+
+    if (sourcePage === firstSourcePage) {
+      totalItems = Number(payload.meta?.total || 0)
+      sourcePages = Number(payload.meta?.pages || Math.ceil(totalItems / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) || firstSourcePage)
+    }
+
+    const pageProducts = (payload.products || []).map(mapRailsProduct).filter((product) => product.status !== 'archived')
+    products.push(...(sourcePage === firstSourcePage ? pageProducts.slice(firstPageSkip) : pageProducts))
+    sourcePage += 1
+  }
+
+  return {
+    products: products.slice(0, options.perPage),
+    totalItems,
+    totalPages: Math.ceil(totalItems / options.perPage),
   }
 }
 

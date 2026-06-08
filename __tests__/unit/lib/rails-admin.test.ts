@@ -156,6 +156,56 @@ describe('rails admin product adapter', () => {
     )
   })
 
+  it('loads 500-product filtered catalog pages in chunks', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const requestUrl = new URL(url)
+      const page = Number(requestUrl.searchParams.get('page') || 1)
+      const perPage = Number(requestUrl.searchParams.get('per_page') || 40)
+      const start = (page - 1) * perPage + 1
+
+      return {
+        ok: true,
+        json: async () => ({
+          products: Array.from({ length: perPage }, (_, index) => ({
+            id: `filtered-product-${start + index}`,
+            external_id: `filtered-ext-${start + index}`,
+            name: `Filtered Product ${start + index}`,
+            status: 'active',
+            gender: 'unisex',
+            price_cents: 0,
+            media: [],
+          })),
+          meta: { total: 620, pages: Math.ceil(620 / perPage) },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 500,
+      gender: 'unisex',
+      brand: 'hermes',
+    })
+
+    expect(result.products).toHaveLength(500)
+    expect(result.products[0].id).toBe('filtered-product-1')
+    expect(result.products[499].id).toBe('filtered-product-500')
+    expect(result.totalItems).toBe(620)
+    expect(result.totalPages).toBe(2)
+    expect(fetchMock).toHaveBeenCalledTimes(13)
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/catalog/products?'))).toBe(true)
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(
+      Array.from({ length: 13 }, () => '40')
+    )
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender'))).toEqual(
+      Array.from({ length: 13 }, () => 'unisex')
+    )
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(
+      Array.from({ length: 13 }, () => 'hermes')
+    )
+  })
+
   it('builds update payload without defaulting Rails fields and preserves metadata', () => {
     const formData = new FormData()
     formData.append('productId', 'ext-1')
