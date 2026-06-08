@@ -284,10 +284,10 @@ export default function GenderBackfillApp() {
           </div>
         </div>
 
-        <div className="grid gap-4 rounded-lg border border-slate-800 bg-slate-800/40 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div className="grid gap-3 sm:grid-cols-[220px_1fr] lg:grid-cols-[220px_220px_1fr]">
+        <div className="rounded-lg border border-slate-800 bg-slate-800/40 p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
             <Select value={bulkGender} onValueChange={(value) => setBulkGender(value as GenderValue)}>
-              <SelectTrigger className="border-slate-700 bg-slate-900 text-slate-100">
+              <SelectTrigger className="w-full border-slate-700 bg-slate-900 text-slate-100 xl:w-56">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -297,47 +297,49 @@ export default function GenderBackfillApp() {
               </SelectContent>
             </Select>
 
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                onClick={assignFound}
-                disabled={rows.length === 0}
-                className="flex-1"
-              >
-                <Users className="mr-2 h-4 w-4" />
-                Всем найденным
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={assignSelected}
-                disabled={rows.length === 0}
-                className="flex-1 border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-700"
-              >
-                Выбранным
-              </Button>
-            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                <Button
+                  type="button"
+                  onClick={assignFound}
+                  disabled={rows.length === 0}
+                  className="min-w-[190px] flex-1 whitespace-nowrap"
+                >
+                  <Users className="mr-2 h-4 w-4" />
+                  Всем найденным
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={assignSelected}
+                  disabled={rows.length === 0}
+                  className="min-w-[160px] flex-1 whitespace-nowrap border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-700"
+                >
+                  Выбранным
+                </Button>
+              </div>
 
-            <div className="relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск"
-                className="border-slate-700 bg-slate-900 pl-9 text-slate-100"
-              />
+              <div className="relative min-w-0 flex-1 lg:max-w-[420px]">
+                <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Поиск"
+                  className="border-slate-700 bg-slate-900 pl-9 text-slate-100"
+                />
+              </div>
+
+              <Button
+                type="button"
+                onClick={applySelected}
+                disabled={applying || rows.filter(canApply).length === 0}
+                className="w-full shrink-0 bg-emerald-600 text-white hover:bg-emerald-500 lg:w-auto"
+              >
+                <Check className="mr-2 h-4 w-4" />
+                {applying ? 'Применение...' : 'Apply selected'}
+              </Button>
             </div>
           </div>
-
-          <Button
-            type="button"
-            onClick={applySelected}
-            disabled={applying || rows.filter(canApply).length === 0}
-            className="bg-emerald-600 text-white hover:bg-emerald-500"
-          >
-            <Check className="mr-2 h-4 w-4" />
-            {applying ? 'Применение...' : 'Apply selected'}
-          </Button>
         </div>
 
         <div className="flex flex-wrap gap-2">
