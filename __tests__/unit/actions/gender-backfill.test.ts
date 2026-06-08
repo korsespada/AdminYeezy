@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Product } from '@/lib/types'
 
 const mocks = vi.hoisted(() => ({
-  searchRailsAdminProductsExact: vi.fn(),
+  listRailsAdminProducts: vi.fn(),
   getRailsAdminProduct: vi.fn(),
   patchRailsAdminProduct: vi.fn(),
   revalidatePath: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('next/cache', () => ({
 }))
 
 vi.mock('@/lib/rails-admin', () => ({
-  searchRailsAdminProductsExact: mocks.searchRailsAdminProductsExact,
+  listRailsAdminProducts: mocks.listRailsAdminProducts,
   getRailsAdminProduct: mocks.getRailsAdminProduct,
   patchRailsAdminProduct: mocks.patchRailsAdminProduct,
 }))
@@ -57,26 +57,19 @@ describe('gender backfill actions', () => {
     expect(res.data?.rows[0]).toMatchObject({ productId: 'ext-1', name: 'Product' })
   })
 
-  it('builds preview without patching Rails products', async () => {
-    const { previewGenderMatchesAction } = await import('@/actions/gender-backfill')
-    mocks.searchRailsAdminProductsExact.mockResolvedValueOnce([product()])
+  it('bulk loads rails products for preview without patching anything', async () => {
+    const { lookupGenderBackfillProductsAction } = await import('@/actions/gender-backfill')
+    mocks.listRailsAdminProducts.mockResolvedValue({
+      products: [product()],
+      totalItems: 1,
+      totalPages: 1,
+    })
 
-    const res = await previewGenderMatchesAction([
-      {
-        rowNumber: 2,
-        productId: 'ext-1',
-        name: 'Sneaker',
-        description: 'Размеры: 35-41',
-        raw: {},
-      },
-    ])
+    const res = await lookupGenderBackfillProductsAction(['ext-1', 'ext-1'])
 
     expect(res.success).toBe(true)
-    expect(res.data?.rows[0]).toMatchObject({
-      status: 'ready',
-      selectedGender: 'Для женщин',
-    })
-    expect(mocks.patchRailsAdminProduct).not.toHaveBeenCalled()
+    expect(res.data?.matched).toBe(1)
+    expect(res.data?.matches['ext-1']).toMatchObject({ id: 'p1', productId: 'ext-1' })
   })
 
   it('applies only selected updates with valid gender', async () => {

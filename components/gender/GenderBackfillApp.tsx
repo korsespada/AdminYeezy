@@ -6,13 +6,15 @@ import { Check, Download, FileSpreadsheet, Search, Upload, Users } from 'lucide-
 import {
   applyGenderUpdatesAction,
   exportGenderBackfillReportAction,
-  parseGenderCsvAction,
-  previewGenderMatchesAction,
+  lookupGenderBackfillProductsAction,
 } from '@/actions/gender-backfill'
 import {
   GENDER_VALUES,
+  buildPreviewRow,
+  parseGenderCsv,
   type GenderBackfillPreviewRow,
   type GenderBackfillStatus,
+  type GenderCsvRow,
   type GenderValue,
 } from '@/lib/gender-backfill'
 import { Badge } from '@/components/ui/badge'
@@ -21,8 +23,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-
-const CHUNK_SIZE = 40
 
 const STATUS_LABELS: Record<GenderBackfillStatus | 'all' | 'found', string> = {
   all: 'Все',
@@ -118,24 +118,18 @@ export default function GenderBackfillApp() {
     setProgress({ current: 0, total: 0 })
 
     try {
-      const parsed = await parseGenderCsvAction(text)
-      if (!parsed.success || !parsed.data) throw new Error(parsed.error || 'CSV не прочитан')
+      setMessage('Читаю CSV локально...')
+      const parsedRows: GenderCsvRow[] = parseGenderCsv(text)
+      if (parsedRows.length === 0) throw new Error('CSV не содержит товаров')
 
-      setProgress({ current: 0, total: parsed.data.totalRows })
+      const uniqueIds = Array.from(new Set(parsedRows.map((row) => row.productId).filter(Boolean)))
+      setMessage(`Ищу ${uniqueIds.length} уникальных SKU/productId в Rails CRM...`)
+      const lookup = await lookupGenderBackfillProductsAction(uniqueIds)
+      if (!lookup.success || !lookup.data) throw new Error(lookup.error || 'Не удалось загрузить товары из Rails CRM')
 
-      let cursor = 0
-      const nextRows: GenderBackfillPreviewRow[] = []
-      while (cursor < parsed.data.rows.length) {
-        const preview = await previewGenderMatchesAction(parsed.data.rows, cursor, CHUNK_SIZE)
-        if (!preview.success || !preview.data) throw new Error(preview.error || 'Preview не построен')
-
-        nextRows.push(...preview.data.rows)
-        setRows([...nextRows])
-        cursor = preview.data.nextCursor
-        setProgress({ current: cursor, total: parsed.data.totalRows })
-        if (preview.data.done) break
-      }
-
+      const nextRows = parsedRows.map((row) => buildPreviewRow(row, lookup.data.matches[row.productId]))
+      setProgress({ current: nextRows.length, total: nextRows.length })
+      setRows(nextRows)
       setMessage('')
     } catch (error: any) {
       setMessage(error.message || 'Ошибка анализа')

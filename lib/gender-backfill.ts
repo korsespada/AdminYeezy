@@ -37,6 +37,7 @@ export interface GenderBackfillPreviewRow {
     productId: string
     external_id?: string
     sku?: string
+    category?: string
     name: string
     description: string
     gender: string
@@ -50,6 +51,19 @@ export interface GenderBackfillPreviewRow {
   status: GenderBackfillStatus
   selected: boolean
   message?: string
+}
+
+export interface GenderBackfillProductSummary {
+  id: string
+  productId: string
+  external_id?: string
+  sku?: string
+  name: string
+  description: string
+  gender: string
+  thumb: string
+  status: Product['status']
+  category?: string
 }
 
 const SHOES_CATEGORY_IDS = new Set(['nzg3vsvajpiv1e8'])
@@ -163,14 +177,14 @@ function explicitGenderFromText(text: string): GenderSuggestion | null {
   return null
 }
 
-function isLikelyShoes(row: GenderCsvRow, product?: Product) {
+function isLikelyShoes(row: GenderCsvRow, product?: Pick<Product, 'name' | 'description' | 'category'> | GenderBackfillProductSummary) {
   const text = `${row.name} ${row.description} ${product?.name || ''} ${product?.description || ''}`
   const category = String(row.raw.category || product?.category || '')
   if (SHOES_CATEGORY_IDS.has(category)) return true
   return /(обув|кроссов|лофер|ботин|сапог|сандал|туфл|балет|мюли|кеды|sneaker|shoe|boot|loafer|sandal|heel|鞋|靴|凉鞋)/i.test(text)
 }
 
-function shoeSizeGenderFromText(text: string, row: GenderCsvRow, product?: Product): GenderSuggestion | null {
+function shoeSizeGenderFromText(text: string, row: GenderCsvRow, product?: Pick<Product, 'name' | 'description' | 'category'> | GenderBackfillProductSummary): GenderSuggestion | null {
   if (!isLikelyShoes(row, product)) return null
 
   const ranges = [...text.matchAll(/(?:размеры?|sizes?|size|码数|尺码)?\s*[:：]?\s*(3[4-9]|4[0-9])\s*[-–—]\s*(3[5-9]|4[0-9])/gi)]
@@ -197,7 +211,7 @@ function shoeSizeGenderFromText(text: string, row: GenderCsvRow, product?: Produ
   return null
 }
 
-export function suggestGender(row: GenderCsvRow, product?: Product): GenderSuggestion {
+export function suggestGender(row: GenderCsvRow, product?: Pick<Product, 'name' | 'description' | 'category'> | GenderBackfillProductSummary): GenderSuggestion {
   const text = normalizeText(`${row.name}\n${row.description}\n${product?.name || ''}\n${product?.description || ''}`)
   return explicitGenderFromText(text)
     || shoeSizeGenderFromText(text, row, product)
@@ -215,7 +229,7 @@ export function findExactProductMatch(products: Product[], productId: string) {
   return products.find((product) => productMatchIds(product).includes(needle))
 }
 
-export function buildPreviewRow(row: GenderCsvRow, product?: Product): GenderBackfillPreviewRow {
+export function buildPreviewRow(row: GenderCsvRow, product?: Product | GenderBackfillProductSummary): GenderBackfillPreviewRow {
   if (!product) {
     return {
       rowNumber: row.rowNumber,
@@ -281,12 +295,28 @@ export function buildPreviewRow(row: GenderCsvRow, product?: Product): GenderBac
   }
 }
 
-export function compactProduct(product: Product): GenderBackfillPreviewRow['product'] {
+export function compactProduct(product: Product | GenderBackfillProductSummary): GenderBackfillPreviewRow['product'] {
   return {
     id: product.id,
     productId: product.productId,
     external_id: product.external_id,
     sku: product.sku,
+    category: product.category,
+    name: product.name,
+    description: product.description,
+    gender: product.gender,
+    thumb: product.thumb,
+    status: product.status,
+  }
+}
+
+export function compactProductSummary(product: Product): GenderBackfillProductSummary {
+  return {
+    id: product.id,
+    productId: product.productId,
+    external_id: product.external_id,
+    sku: product.sku,
+    category: product.category,
     name: product.name,
     description: product.description,
     gender: product.gender,
