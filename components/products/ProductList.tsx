@@ -125,7 +125,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Scrollable Content */}
-        <div className="flex-1 p-6 scroll-smooth">
+        <div className={`flex-1 p-6 scroll-smooth ${selectedProductIds.length > 0 ? 'pb-56 lg:pb-40 2xl:pb-32' : ''}`}>
           <div className="max-w-7xl mx-auto">
 
             {/* Page Header & Controls */}
@@ -257,9 +257,9 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
       />
 
       {/* Bulk Action Toolbar */}
-      <div className={`fixed bottom-0 left-0 lg:left-72 right-0 bg-slate-800 border-t border-slate-700 p-4 transform transition-transform duration-300 z-40 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-sm text-slate-300">
+      <div className={`fixed bottom-0 left-0 lg:left-72 right-0 max-h-[55vh] overflow-y-auto bg-slate-800 border-t border-slate-700 p-3 sm:p-4 transform transition-transform duration-300 z-40 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="max-w-7xl mx-auto flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div className="flex shrink-0 flex-wrap items-center gap-3 text-sm text-slate-300">
             <Badge>{selectedProductIds.length}</Badge>
             <span>выбрано</span>
             <Button
@@ -267,21 +267,21 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
               variant="ghost"
               size="sm"
               onClick={() => setSelectedProductIds([])}
-              className="ml-2 text-slate-500 hover:text-slate-300"
+              className="text-slate-500 hover:text-slate-300"
             >
               Сбросить
             </Button>
           </div>
 
-          <div className="flex flex-1 w-full sm:w-auto items-center gap-4 justify-end">
+          <div className="grid w-full min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(190px,220px)_minmax(240px,290px)_minmax(260px,320px)_auto_auto] 2xl:flex 2xl:flex-1 2xl:flex-wrap 2xl:justify-end">
             {/* Gender Select */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-sm text-slate-400 whitespace-nowrap">Гендер:</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Гендер:</span>
               <Select
                 value={selectedGender || '__unchanged__'}
                 onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
               >
-                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-44">
+                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-44">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -294,8 +294,8 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
             </div>
 
             {/* Category Select */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-sm text-slate-400 whitespace-nowrap">Категория:</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Категория:</span>
               <Select
                 value={selectedCategory || '__select__'}
                 onValueChange={(value) => {
@@ -303,7 +303,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                   setSelectedSubcategory('') // Reset subcategory when category changes
                 }}
               >
-                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-56">
+                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-56">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -316,14 +316,14 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
             </div>
 
             {/* Subcategory Select */}
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
+            <div className="flex min-w-0 items-center gap-2 sm:col-span-2 xl:col-span-1">
+              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
               <Select
                 value={selectedSubcategory || '__unchanged__'}
                 onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
                 disabled={!selectedCategory}
               >
-                <SelectTrigger className="w-full bg-slate-700 text-slate-200 sm:w-60">
+                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-60">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -372,7 +372,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                 }
               }}
               disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating || isBulkDeleting}
-              className="whitespace-nowrap"
+              className="w-full whitespace-nowrap px-5 sm:w-auto"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
             </Button>
@@ -395,7 +395,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
                 }
               }}
               disabled={isBulkUpdating || isBulkDeleting}
-              className="whitespace-nowrap"
+              className="w-full whitespace-nowrap px-5 sm:w-auto"
             >
               {isBulkDeleting ? 'Перенос...' : 'В корзину'}
             </Button>

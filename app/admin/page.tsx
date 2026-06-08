@@ -5,6 +5,8 @@ import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 
+const PRODUCT_PAGE_SIZES = [40, 100, 500]
+
 export default async function AdminPage({
   searchParams,
 }: {
@@ -12,8 +14,10 @@ export default async function AdminPage({
 }) {
   await connection()
   const params = await searchParams
-  const page = Number(params.page) || 1
-  const perPage = Number(params.perPage) || 40
+  const rawPage = Number(params.page)
+  const rawPerPage = Number(params.perPage)
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
+  const perPage = PRODUCT_PAGE_SIZES.includes(rawPerPage) ? rawPerPage : 40
   const offset = (page - 1) * perPage
   const searchTerm = params.search || ''
   const brandFilter = params.brand || ''
@@ -60,6 +64,8 @@ export default async function AdminPage({
     const products = productPage.products
     const totalItems = productPage.totalItems
     const totalPages = productPage.totalPages
+    const shownFrom = products.length > 0 ? offset + 1 : 0
+    const shownTo = products.length > 0 ? offset + products.length : 0
 
     return (
       <ProductList
@@ -75,7 +81,7 @@ export default async function AdminPage({
             <div className="mt-6 flex flex-col md:flex-row items-center justify-between border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 rounded-xl gap-4">
               <div className="flex items-center gap-4">
                 <p className="text-sm text-slate-400">
-                  Показано <span className="font-medium text-slate-200">{offset + 1}</span> - <span className="font-medium text-slate-200">{Math.min(offset + perPage, totalItems)}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
+                  Показано <span className="font-medium text-slate-200">{shownFrom}</span> - <span className="font-medium text-slate-200">{shownTo}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
                 </p>
                 <PerPageSelector currentPerPage={perPage} />
               </div>

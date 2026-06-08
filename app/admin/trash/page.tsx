@@ -5,6 +5,8 @@ import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 
+const PRODUCT_PAGE_SIZES = [40, 100, 500]
+
 export default async function AdminTrashPage({
   searchParams,
 }: {
@@ -12,8 +14,10 @@ export default async function AdminTrashPage({
 }) {
   await connection()
   const params = await searchParams
-  const page = Number(params.page) || 1
-  const perPage = Number(params.perPage) || 40
+  const rawPage = Number(params.page)
+  const rawPerPage = Number(params.perPage)
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
+  const perPage = PRODUCT_PAGE_SIZES.includes(rawPerPage) ? rawPerPage : 40
   const offset = (page - 1) * perPage
 
   const buildPaginationUrl = (p: number) => {
@@ -36,6 +40,8 @@ export default async function AdminTrashPage({
     const products = productPage.products
     const totalItems = productPage.totalItems
     const totalPages = productPage.totalPages
+    const shownFrom = products.length > 0 ? offset + 1 : 0
+    const shownTo = products.length > 0 ? offset + products.length : 0
 
     return (
       <main className="min-h-screen bg-slate-900 p-6 text-slate-200">
@@ -51,7 +57,7 @@ export default async function AdminTrashPage({
             <div className="mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 md:flex-row">
               <div className="flex items-center gap-4">
                 <p className="text-sm text-slate-400">
-                  Показано <span className="font-medium text-slate-200">{offset + 1}</span> - <span className="font-medium text-slate-200">{Math.min(offset + perPage, totalItems)}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
+                  Показано <span className="font-medium text-slate-200">{shownFrom}</span> - <span className="font-medium text-slate-200">{shownTo}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
                 </p>
                 <PerPageSelector currentPerPage={perPage} />
               </div>

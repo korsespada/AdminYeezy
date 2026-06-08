@@ -1,6 +1,7 @@
 import { type Brand, type Category, type Product, type ProductMedia, type Subcategory } from './types'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
+const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
 
 function railsApiUrl(pathname: string) {
   const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL
@@ -269,16 +270,65 @@ export async function listRailsAdminProducts(options: {
     return listRailsCatalogProductsWithoutGender(options)
   }
 
+  if (options.perPage > ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) {
+    return listRailsAdminProductsInChunks(options)
+  }
+
   const params = buildRailsAdminProductsParams(options)
-  const fetchProducts = options.status ? railsFetch : publicRailsFetch
-  const pathname = options.status ? `/admin/products?${params}` : `/catalog/products?${params}`
-  const payload = await fetchProducts<{ products: any[]; meta: { total: number; pages: number } }>(pathname)
+  const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
   const products = (payload.products || []).map(mapRailsProduct)
 
   return {
     products: options.status ? products : products.filter((product) => product.status !== 'archived'),
     totalItems: Number(payload.meta?.total || 0),
     totalPages: Number(payload.meta?.pages || 0),
+  }
+}
+
+async function listRailsAdminProductsInChunks(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: Product['status']
+}) {
+  const requestedOffset = (options.page - 1) * options.perPage
+  const firstSourcePage = Math.floor(requestedOffset / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) + 1
+  const firstPageSkip = requestedOffset % ADMIN_PRODUCTS_PAGE_CHUNK_SIZE
+  const products: Product[] = []
+  let sourcePage = firstSourcePage
+  let sourcePages = firstSourcePage
+  let totalItems = 0
+
+  while (sourcePage <= sourcePages && products.length < options.perPage) {
+    const params = buildRailsAdminProductsParams({
+      ...options,
+      page: sourcePage,
+      perPage: ADMIN_PRODUCTS_PAGE_CHUNK_SIZE,
+    })
+    const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
+
+    if (sourcePage === firstSourcePage) {
+      totalItems = Number(payload.meta?.total || 0)
+      sourcePages = Number(payload.meta?.pages || Math.ceil(totalItems / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) || firstSourcePage)
+    }
+
+    const pageProducts = (payload.products || []).map(mapRailsProduct)
+    products.push(...(sourcePage === firstSourcePage ? pageProducts.slice(firstPageSkip) : pageProducts))
+    sourcePage += 1
+  }
+
+  const visibleProducts = products
+    .slice(0, options.perPage)
+    .filter((product) => options.status ? true : product.status !== 'archived')
+
+  return {
+    products: visibleProducts,
+    totalItems,
+    totalPages: Math.ceil(totalItems / options.perPage),
   }
 }
 
@@ -368,7 +418,8 @@ export function buildRailsAdminProductsParams(options: {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
   params.set('per_page', String(options.perPage))
-  if (options.search) params.set('q', options.search)
+  const search = options.search?.trim()
+  if (search) params.set('q', search)
   if (options.brand) params.set('brand', options.brand)
   if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
   if (options.gender) params.set('gender', options.gender)

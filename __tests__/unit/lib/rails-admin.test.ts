@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildRailsAdminProductsParams,
+  listRailsAdminProducts,
   mapRailsProduct,
   productFormDataToRailsPayload,
   restoreRailsAdminProductFromTrash,
@@ -32,6 +33,92 @@ describe('rails admin product adapter', () => {
     expect(params.get('category')).toBe('subcategory-id')
     expect(params.get('gender')).toBe('Унисекс')
     expect(params.get('status')).toBe('archived')
+  })
+
+  it('trims product search before sending it to Rails', () => {
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      search: '  ext-1  ',
+    })
+
+    expect(params.get('q')).toBe('ext-1')
+  })
+
+  it('loads searched products from the admin endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [
+          {
+            id: 'product-id',
+            external_id: 'ext-1',
+            name: 'Admin Product',
+            status: 'hidden',
+            price_cents: 0,
+            media: [],
+          },
+        ],
+        meta: { total: 1, pages: 1 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      search: 'ext-1',
+    })
+
+    expect(result.products).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=ext-1')
+    expect(init.headers.Authorization).toBe('Bearer test-token')
+  })
+
+  it('loads 500-product admin pages in chunks', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const requestUrl = new URL(url)
+      const page = Number(requestUrl.searchParams.get('page') || 1)
+      const perPage = Number(requestUrl.searchParams.get('per_page') || 100)
+      const start = (page - 1) * perPage + 1
+
+      return {
+        ok: true,
+        json: async () => ({
+          products: Array.from({ length: perPage }, (_, index) => ({
+            id: `product-${start + index}`,
+            external_id: `ext-${start + index}`,
+            name: `Product ${start + index}`,
+            status: 'active',
+            price_cents: 0,
+            media: [],
+          })),
+          meta: { total: 1200, pages: Math.ceil(1200 / perPage) },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 500,
+      search: 'sneaker',
+    })
+
+    expect(result.products).toHaveLength(500)
+    expect(result.products[0].id).toBe('product-1')
+    expect(result.products[499].id).toBe('product-500')
+    expect(result.totalItems).toBe(1200)
+    expect(result.totalPages).toBe(3)
+    expect(fetchMock).toHaveBeenCalledTimes(13)
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(
+      Array.from({ length: 13 }, () => '40')
+    )
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('page'))).toEqual(
+      Array.from({ length: 13 }, (_, index) => String(index + 1))
+    )
   })
 
   it('builds update payload without defaulting Rails fields and preserves metadata', () => {
@@ -85,7 +172,7 @@ describe('rails admin product adapter', () => {
       seo_title: 'SEO',
       metadata: {
         source: 'admin',
-        gender: 'Для женщин',
+        gender: 'female',
         price_on_request: true,
       },
     })
