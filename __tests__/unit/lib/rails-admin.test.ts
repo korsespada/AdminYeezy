@@ -77,6 +77,41 @@ describe('rails admin product adapter', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
+  it('loads gender-filtered products from the catalog endpoint because Rails admin ignores gender', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [
+          {
+            id: 'product-id',
+            external_id: 'ext-1',
+            name: 'Gender Product',
+            gender: 'unisex',
+            status: 'active',
+            price_cents: 0,
+            media: [],
+          },
+        ],
+        meta: { total: 1, pages: 1 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      brand: 'hermes',
+      gender: 'female',
+    })
+
+    expect(result.products).toHaveLength(1)
+    expect(result.products[0].gender).toBe('Унисекс')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&brand=hermes&gender=female')
+    expect(init).toMatchObject({ cache: 'no-store' })
+  })
+
   it('loads 500-product admin pages in chunks', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)

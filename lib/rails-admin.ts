@@ -270,6 +270,10 @@ export async function listRailsAdminProducts(options: {
     return listRailsCatalogProductsWithoutGender(options)
   }
 
+  if (options.gender && !options.status) {
+    return listRailsCatalogProducts(options)
+  }
+
   if (options.perPage > ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) {
     return listRailsAdminProductsInChunks(options)
   }
@@ -280,6 +284,26 @@ export async function listRailsAdminProducts(options: {
 
   return {
     products: options.status ? products : products.filter((product) => product.status !== 'archived'),
+    totalItems: Number(payload.meta?.total || 0),
+    totalPages: Number(payload.meta?.pages || 0),
+  }
+}
+
+async function listRailsCatalogProducts(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+}) {
+  const params = buildRailsAdminProductsParams(options)
+  const payload = await publicRailsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/catalog/products?${params}`)
+  const products = (payload.products || []).map(mapRailsProduct)
+
+  return {
+    products: products.filter((product) => product.status !== 'archived'),
     totalItems: Number(payload.meta?.total || 0),
     totalPages: Number(payload.meta?.pages || 0),
   }
