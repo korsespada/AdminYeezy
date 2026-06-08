@@ -10,6 +10,7 @@
     "db:migrate:scraping": "node scripts/migrate-scraping-schema.js",
     "db:backfill:batch-products": "node scripts/backfill-batch-products.js",
     "db:backfill:scraping-files": "node scripts/backfill-scraping-files.js",
+    "db:repair:gender": "node scripts/repair-canonical-gender.js",
     "db:normalize-result-paths": "node scripts/normalize-result-paths.js",
     "lint": "eslint .",
     "test": "vitest",

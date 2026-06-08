@@ -59,6 +59,13 @@ function mapRailsGenderToUi(gender: string) {
   return gender
 }
 
+function mapUiGenderToRails(gender: string) {
+  if (gender === 'Для мужчин' || gender === 'male') return 'male'
+  if (gender === 'Для женщин' || gender === 'female') return 'female'
+  if (gender === 'Унисекс' || gender === 'unisex') return 'unisex'
+  return ''
+}
+
 async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<T> {
   const token = await railsAdminToken()
   const response = await fetch(railsApiUrl(pathname), {
@@ -468,8 +475,14 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
     const metadata = parseJsonObject(formData.get('productMetadata'))
     if (formData.has('gender')) {
       const gender = String(formData.get('gender') || '')
-      if (gender) metadata.gender = gender
-      else delete metadata.gender
+      const railsGender = mapUiGenderToRails(gender)
+      if (railsGender) {
+        product.gender = railsGender
+        metadata.gender = railsGender
+      } else {
+        product.gender = null
+        delete metadata.gender
+      }
     }
     if (formData.has('price_on_request')) metadata.price_on_request = formBoolean(formData.get('price_on_request'))
     product.metadata = metadata
@@ -527,11 +540,20 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
   }
   if (data.gender !== undefined) {
     const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
-    const metadata = current.product?.metadata && typeof current.product.metadata === 'object'
-      ? { ...current.product.metadata }
+    const currentMetadata = current.product?.metadata && typeof current.product.metadata === 'object'
+      ? current.product.metadata
       : {}
-    if (data.gender === '__none__' || data.gender === '') delete metadata.gender
-    else metadata.gender = String(data.gender || '')
+    const metadata = product.metadata && typeof product.metadata === 'object'
+      ? { ...currentMetadata, ...product.metadata }
+      : { ...currentMetadata }
+    const railsGender = mapUiGenderToRails(String(data.gender || ''))
+    if (data.gender === '__none__' || data.gender === '' || !railsGender) {
+      product.gender = null
+      delete metadata.gender
+    } else {
+      product.gender = railsGender
+      metadata.gender = railsGender
+    }
     product.metadata = metadata
   }
 
