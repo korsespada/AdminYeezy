@@ -3,6 +3,8 @@ import { type Brand, type Category, type Product, type ProductMedia, type Subcat
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
 const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
+const NO_GENDER_PRODUCTS_PAGE_SIZE = 60
+const NO_GENDER_PRODUCTS_FETCH_CONCURRENCY = 8
 
 function railsApiUrl(pathname: string) {
   const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL
@@ -439,33 +441,42 @@ async function listRailsCatalogProductsWithoutGender(options: {
   category?: string
   subcategory?: string
 }) {
-  const pageSize = 60
   const offset = (options.page - 1) * options.perPage
   const needed = offset + options.perPage
   const collected: Product[] = []
-  let sourcePage = 1
-  let sourcePages = 1
   let totalItems = 0
 
-  while (sourcePage <= sourcePages && collected.length < needed) {
+  const fetchSourcePage = async (sourcePage: number) => {
     const params = buildRailsAdminProductsParams({
       ...options,
       page: sourcePage,
-      perPage: pageSize,
+      perPage: NO_GENDER_PRODUCTS_PAGE_SIZE,
     })
-    const payload = await publicRailsFetch<{
+    return publicRailsFetch<{
       products: any[]
       facets?: { genders?: { count?: number }[] }
       meta: { total: number; pages: number }
     }>(`/catalog/products?${params}`)
+  }
 
-    if (sourcePage === 1) {
-      sourcePages = Number(payload.meta?.pages || 1)
-      totalItems = countProductsWithoutGender(payload)
+  const firstPayload = await fetchSourcePage(1)
+  const sourcePages = Number(firstPayload.meta?.pages || 1)
+  totalItems = countProductsWithoutGender(firstPayload)
+  collected.push(...(firstPayload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
+
+  let nextSourcePage = 2
+  while (nextSourcePage <= sourcePages && collected.length < needed) {
+    const batchPages = Array.from(
+      { length: Math.min(NO_GENDER_PRODUCTS_FETCH_CONCURRENCY, sourcePages - nextSourcePage + 1) },
+      (_, index) => nextSourcePage + index
+    )
+    const payloads = await Promise.all(batchPages.map(fetchSourcePage))
+
+    for (const payload of payloads) {
+      collected.push(...(payload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
     }
 
-    collected.push(...(payload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
-    sourcePage += 1
+    nextSourcePage += batchPages.length
   }
 
   return {

@@ -112,6 +112,58 @@ describe('rails admin product adapter', () => {
     expect(init).toMatchObject({ cache: 'no-store' })
   })
 
+  it('loads products without gender by scanning catalog pages', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const requestUrl = new URL(url)
+      const page = Number(requestUrl.searchParams.get('page') || 1)
+
+      return {
+        ok: true,
+        json: async () => ({
+          products: page === 1
+            ? [
+              {
+                id: 'gender-product',
+                external_id: 'ext-with-gender',
+                name: 'Gender Product',
+                status: 'active',
+                gender: 'female',
+                price_cents: 0,
+                media: [],
+              },
+            ]
+            : [
+              {
+                id: 'no-gender-product',
+                external_id: 'ext-no-gender',
+                name: 'No Gender Product',
+                status: 'active',
+                price_cents: 0,
+                media: [],
+              },
+            ],
+          facets: { genders: [{ count: 1 }] },
+          meta: { total: 2, pages: 2 },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      brand: 'hermes',
+      noGender: true,
+    })
+
+    expect(result.products).toHaveLength(1)
+    expect(result.products[0].gender).toBe('')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender_missing'))).toEqual([null, null])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(['60', '60'])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(['hermes', 'hermes'])
+  })
+
   it('loads 500-product admin pages in chunks', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)
