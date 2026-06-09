@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
@@ -28,6 +28,7 @@ interface ProductListProps {
 export default function ProductList({ initialData, brands, allBrands = [], categories, subcategories, activeSubcategoryIds = [], totalItems, pagination }: ProductListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const routeKey = searchParams.toString()
 
   const [products, setProducts] = useState<Product[]>(initialData)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -45,11 +46,26 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
   const [selectedGender, setSelectedGender] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const lastRouteKeyRef = useRef(routeKey)
 
   // Update local state when initialData changes (e.g. after search/filter)
   useEffect(() => {
-    setProducts(initialData)
-  }, [initialData])
+    const routeChanged = routeKey !== lastRouteKeyRef.current
+    lastRouteKeyRef.current = routeKey
+
+    setProducts(prev => {
+      if (routeChanged || prev.length !== initialData.length) {
+        return initialData
+      }
+
+      const nextById = new Map(initialData.map(product => [product.id, product]))
+      if (prev.some(product => !nextById.has(product.id))) {
+        return initialData
+      }
+
+      return prev.map(product => nextById.get(product.id) || product)
+    })
+  }, [initialData, routeKey])
 
   // Auto-select category if all selected products share the same one
   const autoCategory = useMemo(() => {
