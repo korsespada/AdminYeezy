@@ -53,9 +53,7 @@ import {
 import { processAiAction, targetedAiEditAction } from "@/actions/ai-process";
 import Image from "next/image";
 import Link from "next/link";
-
-const IMG_SUFFIX =
-  "?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg";
+import { imagePresets, resizeImageUrl } from "@/lib/image";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -2124,7 +2122,7 @@ function CsvProductCard({
       >
         {product.photos?.[0] ? (
           <Image
-            src={product.photos[0] + IMG_SUFFIX}
+            src={resizeImageUrl(product.photos[0], imagePresets.productGrid)}
             alt={product.name || ""}
             fill
             sizes="(max-width:768px) 100vw,25vw"
@@ -2377,7 +2375,7 @@ function CsvProductDrawer({
                       className={`relative aspect-square rounded-xl overflow-hidden border-2 group cursor-move transition-all ${dragIdx === i ? "border-indigo-500 opacity-50" : "border-slate-800 hover:border-slate-600"}`}
                     >
                       <Image
-                        src={url + IMG_SUFFIX}
+                        src={resizeImageUrl(url, imagePresets.productForm)}
                         alt=""
                         fill
                         className="object-cover"

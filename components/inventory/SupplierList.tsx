@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { Plus, Edit2, Trash2, Play, ExternalLink, Calendar, Search, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
 import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
 import { useRouter } from 'next/navigation'
+import { imagePresets, resizeImageUrl } from '@/lib/image'
 
 interface Supplier {
   id: number
@@ -243,14 +244,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
     alert('Обновление завершено!')
   }
 
-  const getOptimizedAvatarUrl = (url: string | null | undefined) => {
-    if (!url) return ''
-    if (url.includes('szwego.com') && !url.includes('imageMogr2')) {
-      const separator = url.includes('?') ? '&' : '?'
-      return `${url}${separator}imageMogr2/auto-orient/thumbnail/!200x200r/quality/100/format/jpg`
-    }
-    return url
-  }
+  const getOptimizedAvatarUrl = (url: string | null | undefined) => resizeImageUrl(url, imagePresets.avatar)
 
   return (
     <div className="space-y-6">

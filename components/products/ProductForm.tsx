@@ -20,16 +20,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
-
-const getOptimizedPhotoUrl = (url: string) => {
-  if (typeof url === 'string' && url.includes('szwego.com')) {
-    const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg';
-    if (!url.includes('?imageMogr2')) {
-      return url + IMG_SUFFIX;
-    }
-  }
-  return url;
-}
+import { imagePresets, resizeImageUrl } from '@/lib/image'
 
 interface ProductFormProps {
   product?: Product | null
@@ -470,7 +461,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                           }`}
                       >
                         <Image
-                          src={getOptimizedPhotoUrl(url)}
+                          src={resizeImageUrl(url, imagePresets.productForm)}
                           alt={`Photo ${index + 1}`}
                           fill
                           sizes="(max-width: 768px) 33vw, 200px"

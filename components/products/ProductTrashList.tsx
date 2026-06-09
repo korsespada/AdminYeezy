@@ -9,23 +9,12 @@ import ProductDescription from '@/components/products/ProductDescription'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { imagePresets, productImageUrl } from '@/lib/image'
 
 interface ProductTrashListProps {
   initialData: Product[]
   categories: Category[]
   subcategories: Subcategory[]
-}
-
-function getProductImage(product: Product) {
-  if (product.thumb) {
-    if (product.thumb.startsWith('http')) return product.thumb
-    return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
-  }
-  const photo = product.photos?.[0] || ''
-  if (photo && !photo.startsWith('http') && !photo.includes('/')) {
-    return `https://cdn.yeezyunique.ru/products/${product.id}/${photo}`
-  }
-  return photo
 }
 
 export default function ProductTrashList({ initialData, categories, subcategories }: ProductTrashListProps) {
@@ -75,7 +64,7 @@ export default function ProductTrashList({ initialData, categories, subcategorie
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {products.map((product) => {
-        const image = getProductImage(product)
+        const image = productImageUrl(product, imagePresets.productGrid)
         const categoryName = product.expand?.category?.name || categoryNames.categories.get(product.category) || 'Без категории'
         const subcategoryName = product.expand?.subcategory?.name || categoryNames.subcategories.get(product.subcategory) || ''
         const busy = busyId === product.id

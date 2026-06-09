@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
+import { imagePresets, productImageUrl } from '@/lib/image'
 
 interface ProductTableViewProps {
     products: Product[]
@@ -24,40 +25,7 @@ interface ProductTableViewProps {
     onUpdateProduct: (product: Product) => void
 }
 
-const getPhotoUrl = (product: Product) => {
-    if (!product) return null
-
-    if (product.thumb && typeof product.thumb === 'string') {
-        if (product.thumb.startsWith('http')) {
-            return product.thumb;
-        }
-        return `https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/${product.id}/${product.thumb}`
-    }
-
-    if (!product.photos || product.photos.length === 0) return null
-    let photoUrl = product.photos[0]
-    if (typeof photoUrl === 'string' && photoUrl.startsWith('[')) {
-        try {
-            const photosArray = JSON.parse(photoUrl)
-            photoUrl = photosArray[0]
-        } catch (e) {
-            // ignore
-        }
-    }
-
-    if (typeof photoUrl === 'string') {
-        if (photoUrl.includes('szwego.com')) {
-            const IMG_SUFFIX = '?imageMogr2/auto-orient/thumbnail/!320x320r/quality/100/format/jpg'
-            if (!photoUrl.includes('?imageMogr2')) {
-                photoUrl += IMG_SUFFIX
-            }
-        } else if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
-            photoUrl = `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`;
-        }
-    }
-
-    return photoUrl
-}
+const getPhotoUrl = (product: Product) => productImageUrl(product, imagePresets.productTable)
 
 type FieldName = 'productId' | 'name' | 'description' | 'price'
 
