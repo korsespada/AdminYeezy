@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, productImageUrl } from '@/lib/image'
+import ProductGenderBadge from '@/components/products/ProductGenderBadge'
 
 interface ProductTableViewProps {
     products: Product[]
@@ -287,6 +288,9 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                 <div className="min-w-[200px] max-w-md resize-x overflow-hidden pr-2">Название</div>
                             </TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
+                                <div className="min-w-[90px] max-w-[120px] resize-x overflow-hidden pr-2">Пол</div>
+                            </TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[250px] max-w-xl resize-x overflow-hidden pr-2">Описание</div>
                             </TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
@@ -343,6 +347,9 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                             className="min-h-0 min-w-[180px] resize-y border-transparent bg-transparent px-2 py-1.5 text-sm font-medium text-slate-200 placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800"
                                             placeholder="Название"
                                         />
+                                    </TableCell>
+                                    <TableCell className="p-3 align-top">
+                                        <ProductGenderBadge gender={product.gender} />
                                     </TableCell>
                                     <TableCell className="p-2 align-top">
                                         <Textarea

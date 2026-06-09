@@ -116,6 +116,17 @@ describe('rails admin product adapter', () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)
       const page = Number(requestUrl.searchParams.get('page') || 1)
+      const gender = requestUrl.searchParams.get('gender')
+
+      if (gender === 'unisex') {
+        return {
+          ok: true,
+          json: async () => ({
+            products: [],
+            meta: { total: 1, pages: 1 },
+          }),
+        }
+      }
 
       return {
         ok: true,
@@ -142,8 +153,8 @@ describe('rails admin product adapter', () => {
                 media: [],
               },
             ],
-          facets: { genders: [{ count: 1 }] },
-          meta: { total: 2, pages: 2 },
+          facets: { genders: [{ value: 'female', count: 1 }] },
+          meta: { total: 3, pages: 2 },
         }),
       }
     })
@@ -158,10 +169,13 @@ describe('rails admin product adapter', () => {
 
     expect(result.products).toHaveLength(1)
     expect(result.products[0].gender).toBe('')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender_missing'))).toEqual([null, null])
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(['60', '60'])
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(['hermes', 'hermes'])
+    expect(result.totalItems).toBe(1)
+    expect(result.totalPages).toBe(1)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender_missing'))).toEqual([null, null, null])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(['60', '1', '60'])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender'))).toEqual([null, 'unisex', null])
+    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(['hermes', 'hermes', 'hermes'])
   })
 
   it('loads 500-product admin pages in chunks', async () => {

@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import ProductDescription, { normalizeDescription } from '@/components/products/ProductDescription';
 import { imagePresets, productImageUrl } from '@/lib/image';
+import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 
 interface ProductCardProps {
     product: Product;
@@ -260,16 +261,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     <div className="text-xs text-slate-500">
                         {categoryLabel.category}
                         {categoryLabel.subcategory && ` • ${categoryLabel.subcategory}`}
-                        {product.gender && (
-                            <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${product.gender === 'Для мужчин'
-                                ? 'bg-blue-900/30 text-blue-400'
-                                : product.gender === 'Для женщин'
-                                    ? 'bg-pink-900/30 text-pink-400'
-                                    : 'bg-violet-900/30 text-violet-300'
-                                }`}>
-                                {product.gender.replace('Для ', '')}
-                            </span>
-                        )}
+                        <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
                 </div>
 

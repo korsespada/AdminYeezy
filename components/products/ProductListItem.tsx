@@ -8,6 +8,7 @@ import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
 import { normalizeDescription } from '@/components/products/ProductDescription';
 import { imagePresets, productImageUrl } from '@/lib/image';
+import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 
 interface ProductListItemProps {
     product: Product;
@@ -238,6 +239,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                 <span className="text-[10px] text-slate-500">
                     {product.expand?.subcategory?.name || 'Без подкатегории'}
                 </span>
+                <ProductGenderBadge gender={product.gender} className="mt-1 w-fit" />
             </div>
 
             {/* Price & Actions */}

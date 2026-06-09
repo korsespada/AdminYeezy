@@ -427,10 +427,16 @@ export async function getRailsAdminProduct(id: string) {
   return mapRailsProduct(result.product)
 }
 
-function countProductsWithoutGender(payload: { meta?: { total?: number }; facets?: { genders?: { count?: number }[] } }) {
+function countProductsWithoutGender(
+  payload: { meta?: { total?: number }; facets?: { genders?: { value?: string; count?: number }[] } },
+  unisexCount: number
+) {
   const total = Number(payload.meta?.total || 0)
-  const withGender = (payload.facets?.genders || []).reduce((sum, item) => sum + Number(item.count || 0), 0)
-  return Math.max(0, total - withGender)
+  const genderFacets = payload.facets?.genders || []
+  const withGender = genderFacets.reduce((sum, item) => sum + Number(item.count || 0), 0)
+  const hasUnisexFacet = genderFacets.some((item) => item.value === 'unisex')
+  const missingUnisexCount = hasUnisexFacet ? 0 : unisexCount
+  return Math.max(0, total - withGender - missingUnisexCount)
 }
 
 async function listRailsCatalogProductsWithoutGender(options: {
@@ -454,14 +460,25 @@ async function listRailsCatalogProductsWithoutGender(options: {
     })
     return publicRailsFetch<{
       products: any[]
-      facets?: { genders?: { count?: number }[] }
+      facets?: { genders?: { value?: string; count?: number }[] }
       meta: { total: number; pages: number }
     }>(`/catalog/products?${params}`)
   }
 
-  const firstPayload = await fetchSourcePage(1)
+  const fetchUnisexCount = async () => {
+    const params = buildRailsAdminProductsParams({
+      ...options,
+      page: 1,
+      perPage: 1,
+      gender: 'unisex',
+    })
+    const payload = await publicRailsFetch<{ meta: { total: number } }>(`/catalog/products?${params}`)
+    return Number(payload.meta?.total || 0)
+  }
+
+  const [firstPayload, unisexCount] = await Promise.all([fetchSourcePage(1), fetchUnisexCount()])
   const sourcePages = Number(firstPayload.meta?.pages || 1)
-  totalItems = countProductsWithoutGender(firstPayload)
+  totalItems = countProductsWithoutGender(firstPayload, unisexCount)
   collected.push(...(firstPayload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
 
   let nextSourcePage = 2
