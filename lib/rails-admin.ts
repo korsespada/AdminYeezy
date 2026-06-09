@@ -1,4 +1,13 @@
-import { type Brand, type Category, type Product, type ProductMedia, type Subcategory } from './types'
+import {
+  type Brand,
+  type CatalogSlugFacet,
+  type CatalogValueFacet,
+  type Category,
+  type Product,
+  type ProductFilterFacets,
+  type ProductMedia,
+  type Subcategory,
+} from './types'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
@@ -300,6 +309,7 @@ async function listRailsCatalogProducts(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderMissing?: boolean
 }) {
   if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
     return listRailsCatalogProductsInChunks(options)
@@ -324,6 +334,7 @@ async function listRailsCatalogProductsInChunks(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderMissing?: boolean
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
   const firstSourcePage = Math.floor(requestedOffset / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) + 1
@@ -427,16 +438,112 @@ export async function getRailsAdminProduct(id: string) {
   return mapRailsProduct(result.product)
 }
 
+export function buildRailsAdminProductsParams(options: {
+  page: number
+  perPage: number
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: Product['status']
+  noGender?: boolean
+  genderMissing?: boolean
+}) {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page))
+  params.set('per_page', String(options.perPage))
+  const search = options.search?.trim()
+  if (search) params.set('q', search)
+  if (options.brand) params.set('brand', options.brand)
+  if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
+  if (options.genderMissing || options.noGender) {
+    params.set('gender_missing', 'true')
+  } else if (options.gender) {
+    params.set('gender', options.gender)
+  }
+  if (options.status) params.set('status', options.status)
+  return params
+}
+
+type ProductFacetFilters = {
+  search?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  noGender?: boolean
+}
+
+type RailsProductFacetPayload = {
+  facets?: {
+    brands?: CatalogSlugFacet[]
+    categories?: CatalogSlugFacet[]
+    genders?: CatalogValueFacet[]
+  }
+}
+
+async function fetchRailsProductFacets(options: ProductFacetFilters) {
+  const params = buildRailsAdminProductsParams({
+    ...options,
+    page: 1,
+    perPage: 1,
+    genderMissing: options.noGender,
+    gender: options.noGender ? '' : options.gender,
+  })
+  return publicRailsFetch<RailsProductFacetPayload>(`/catalog/products?${params}`)
+}
+
+export async function getRailsProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
+  if (filters.noGender) {
+    return getRailsNoGenderProductFilterFacets(filters)
+  }
+
+  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload] = await Promise.all([
+    fetchRailsProductFacets({
+      search: filters.search,
+      category: filters.category,
+      subcategory: filters.subcategory,
+      gender: filters.gender,
+      noGender: filters.noGender,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      gender: filters.gender,
+      noGender: filters.noGender,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+      gender: filters.gender,
+      noGender: filters.noGender,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+      subcategory: filters.subcategory,
+    }),
+  ])
+
+  return {
+    brandFacets: brandPayload.facets?.brands || [],
+    categoryFacets: categoryPayload.facets?.categories || [],
+    subcategoryFacets: subcategoryPayload.facets?.categories || [],
+    genderFacets: genderPayload.facets?.genders || [],
+  }
+}
+
 function countProductsWithoutGender(
   payload: { meta?: { total?: number }; facets?: { genders?: { value?: string; count?: number }[] } },
   unisexCount: number
 ) {
   const total = Number(payload.meta?.total || 0)
   const genderFacets = payload.facets?.genders || []
-  const withGender = genderFacets.reduce((sum, item) => sum + Number(item.count || 0), 0)
-  const hasUnisexFacet = genderFacets.some((item) => item.value === 'unisex')
-  const missingUnisexCount = hasUnisexFacet ? 0 : unisexCount
-  return Math.max(0, total - withGender - missingUnisexCount)
+  const withStrictGender = genderFacets.reduce((sum, item) => sum + Number(item.count || 0), 0)
+  return Math.max(0, total - withStrictGender - unisexCount)
 }
 
 async function listRailsCatalogProductsWithoutGender(options: {
@@ -455,6 +562,7 @@ async function listRailsCatalogProductsWithoutGender(options: {
   const fetchSourcePage = async (sourcePage: number) => {
     const params = buildRailsAdminProductsParams({
       ...options,
+      noGender: false,
       page: sourcePage,
       perPage: NO_GENDER_PRODUCTS_PAGE_SIZE,
     })
@@ -468,6 +576,7 @@ async function listRailsCatalogProductsWithoutGender(options: {
   const fetchUnisexCount = async () => {
     const params = buildRailsAdminProductsParams({
       ...options,
+      noGender: false,
       page: 1,
       perPage: 1,
       gender: 'unisex',
@@ -503,27 +612,95 @@ async function listRailsCatalogProductsWithoutGender(options: {
   }
 }
 
-export function buildRailsAdminProductsParams(options: {
-  page: number
-  perPage: number
-  search?: string
-  brand?: string
-  category?: string
-  subcategory?: string
-  gender?: string
-  status?: Product['status']
-  noGender?: boolean
-}) {
-  const params = new URLSearchParams()
-  params.set('page', String(options.page))
-  params.set('per_page', String(options.perPage))
-  const search = options.search?.trim()
-  if (search) params.set('q', search)
-  if (options.brand) params.set('brand', options.brand)
-  if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
-  if (options.gender) params.set('gender', options.gender)
-  if (options.status) params.set('status', options.status)
-  return params
+async function collectRailsCatalogProductsWithoutGender(options: ProductFacetFilters) {
+  const products: Product[] = []
+
+  const fetchSourcePage = async (sourcePage: number) => {
+    const params = buildRailsAdminProductsParams({
+      ...options,
+      noGender: false,
+      page: sourcePage,
+      perPage: NO_GENDER_PRODUCTS_PAGE_SIZE,
+    })
+    return publicRailsFetch<{ products: any[]; meta: { pages: number } }>(`/catalog/products?${params}`)
+  }
+
+  const firstPayload = await fetchSourcePage(1)
+  const sourcePages = Number(firstPayload.meta?.pages || 1)
+  products.push(...(firstPayload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
+
+  let nextSourcePage = 2
+  while (nextSourcePage <= sourcePages) {
+    const batchPages = Array.from(
+      { length: Math.min(NO_GENDER_PRODUCTS_FETCH_CONCURRENCY, sourcePages - nextSourcePage + 1) },
+      (_, index) => nextSourcePage + index
+    )
+    const payloads = await Promise.all(batchPages.map(fetchSourcePage))
+
+    for (const payload of payloads) {
+      products.push(...(payload.products || []).map(mapRailsProduct).filter((product) => !product.gender))
+    }
+
+    nextSourcePage += batchPages.length
+  }
+
+  return products
+}
+
+function slugFacetsFromProducts(products: Product[], getValues: (product: Product) => string[]) {
+  const counts = new Map<string, number>()
+  products.forEach(product => {
+    getValues(product).filter(Boolean).forEach(value => {
+      counts.set(value, (counts.get(value) || 0) + 1)
+    })
+  })
+  return Array.from(counts.entries()).map(([slug, count]) => ({ slug, count }))
+}
+
+async function getRailsNoGenderProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
+  const cache = new Map<string, Promise<Product[]>>()
+  const collect = (options: ProductFacetFilters) => {
+    const key = JSON.stringify({
+      search: options.search || '',
+      brand: options.brand || '',
+      category: options.category || '',
+      subcategory: options.subcategory || '',
+    })
+    if (!cache.has(key)) {
+      cache.set(key, collectRailsCatalogProductsWithoutGender(options))
+    }
+    return cache.get(key)!
+  }
+
+  const [brandProducts, categoryProducts, subcategoryProducts, genderPayload] = await Promise.all([
+    collect({
+      search: filters.search,
+      category: filters.category,
+      subcategory: filters.subcategory,
+    }),
+    collect({
+      search: filters.search,
+      brand: filters.brand,
+    }),
+    collect({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+      subcategory: filters.subcategory,
+    }),
+  ])
+
+  return {
+    brandFacets: slugFacetsFromProducts(brandProducts, product => Array.isArray(product.brand) ? product.brand : [product.brand]),
+    categoryFacets: slugFacetsFromProducts(categoryProducts, product => [product.category]),
+    subcategoryFacets: slugFacetsFromProducts(subcategoryProducts, product => [product.subcategory]),
+    genderFacets: genderPayload.facets?.genders || [],
+  }
 }
 
 function parseJsonArray(value: FormDataEntryValue | null): any[] {

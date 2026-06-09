@@ -41,6 +41,24 @@ export interface Subcategory {
   collectionName: string
 }
 
+export interface CatalogSlugFacet {
+  slug: string
+  name?: string
+  count: number
+}
+
+export interface CatalogValueFacet {
+  value: string | null
+  count: number
+}
+
+export interface ProductFilterFacets {
+  brandFacets: CatalogSlugFacet[]
+  categoryFacets: CatalogSlugFacet[]
+  subcategoryFacets: CatalogSlugFacet[]
+  genderFacets: CatalogValueFacet[]
+}
+
 export interface ProductMedia {
   original_url: string
   thumb_url?: string

@@ -1,6 +1,6 @@
 import ProductList from '@/components/products/ProductList'
 import PerPageSelector from '@/components/ui/PerPageSelector'
-import { getRailsCatalogLookups, listRailsAdminProducts } from '@/lib/rails-admin'
+import { getRailsCatalogLookups, getRailsProductFilterFacets, listRailsAdminProducts } from '@/lib/rails-admin'
 import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -50,7 +50,7 @@ export default async function AdminPage({
           ? 'unisex'
           : genderFilter
 
-    const productPage = await listRailsAdminProducts({
+    const productFilters = {
       page,
       perPage,
       search: searchTerm,
@@ -59,7 +59,19 @@ export default async function AdminPage({
       subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
       gender: genderFilter === '__none__' ? '' : genderParam,
       noGender: genderFilter === '__none__',
-    })
+    }
+
+    const [productPage, filterFacets] = await Promise.all([
+      listRailsAdminProducts(productFilters),
+      getRailsProductFilterFacets({
+        search: searchTerm,
+        brand: brandSlug,
+        category: categorySlug,
+        subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
+        gender: genderFilter === '__none__' ? '' : genderParam,
+        noGender: genderFilter === '__none__',
+      }),
+    ])
 
     const products = productPage.products
     const totalItems = productPage.totalItems
@@ -75,6 +87,7 @@ export default async function AdminPage({
         categories={categories}
         subcategories={subcategories}
         activeSubcategoryIds={[]}
+        filterFacets={filterFacets}
         totalItems={totalItems}
         pagination={
           totalItems > 0 && (

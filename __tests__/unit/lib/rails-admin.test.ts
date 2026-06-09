@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildRailsAdminProductsParams,
+  getRailsProductFilterFacets,
   listRailsAdminProducts,
   mapRailsProduct,
   productFormDataToRailsPayload,
@@ -176,6 +177,57 @@ describe('rails admin product adapter', () => {
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(['60', '1', '60'])
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender'))).toEqual([null, 'unisex', null])
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(['hermes', 'hermes', 'hermes'])
+  })
+
+  it('loads filter facets while excluding the current facet dimension', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const requestUrl = new URL(url)
+      const hasBrand = requestUrl.searchParams.has('brand')
+      const hasCategory = requestUrl.searchParams.has('category')
+      const hasGenderMissing = requestUrl.searchParams.get('gender_missing') === 'true'
+
+      return {
+        ok: true,
+        json: async () => ({
+          facets: {
+            brands: [{ slug: hasBrand ? 'unexpected' : 'gucci', name: 'Gucci', count: 2 }],
+            categories: [{ slug: hasCategory ? 'bags-child' : 'bags-parent', name: 'Сумки', count: 3 }],
+            genders: [{ value: hasGenderMissing ? null : 'female', count: 4 }],
+          },
+          meta: { total: 4, pages: 1 },
+          products: [],
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getRailsProductFilterFacets({
+      search: ' bag ',
+      brand: 'gucci',
+      category: 'bags-parent',
+      subcategory: 'bags-child',
+      gender: 'female',
+    })
+
+    expect(result.brandFacets).toEqual([{ slug: 'gucci', name: 'Gucci', count: 2 }])
+    expect(result.categoryFacets).toEqual([{ slug: 'bags-parent', name: 'Сумки', count: 3 }])
+    expect(result.subcategoryFacets).toEqual([{ slug: 'bags-child', name: 'Сумки', count: 3 }])
+    expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }])
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+
+    const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
+    expect(calls[0].get('brand')).toBeNull()
+    expect(calls[0].get('category')).toBe('bags-child')
+    expect(calls[0].get('gender')).toBe('female')
+    expect(calls[1].get('brand')).toBe('gucci')
+    expect(calls[1].get('category')).toBeNull()
+    expect(calls[1].get('gender')).toBe('female')
+    expect(calls[2].get('brand')).toBe('gucci')
+    expect(calls[2].get('category')).toBe('bags-parent')
+    expect(calls[2].get('gender')).toBe('female')
+    expect(calls[3].get('brand')).toBe('gucci')
+    expect(calls[3].get('category')).toBe('bags-child')
+    expect(calls[3].get('gender')).toBeNull()
   })
 
   it('loads 500-product admin pages in chunks', async () => {

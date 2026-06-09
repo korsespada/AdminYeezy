@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { type Product, type Brand, type Category, type Subcategory } from '@/lib/types'
+import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
@@ -21,11 +21,12 @@ interface ProductListProps {
   categories: Category[]
   subcategories: Subcategory[]
   activeSubcategoryIds?: string[]
+  filterFacets?: ProductFilterFacets
   totalItems: number
   pagination?: React.ReactNode
 }
 
-export default function ProductList({ initialData, brands, allBrands = [], categories, subcategories, activeSubcategoryIds = [], totalItems, pagination }: ProductListProps) {
+export default function ProductList({ initialData, brands, allBrands = [], categories, subcategories, activeSubcategoryIds = [], filterFacets, totalItems, pagination }: ProductListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const routeKey = searchParams.toString()
@@ -133,6 +134,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
         categories={categories}
         subcategories={subcategories}
         activeSubcategoryIds={activeSubcategoryIds}
+        filterFacets={filterFacets}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         count={totalItems}

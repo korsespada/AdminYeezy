@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
-import { X, Filter, Search } from 'lucide-react'
-import { type Brand, type Category, type Subcategory } from '@/lib/types'
+import React, { useCallback, useState, useEffect, useMemo } from 'react'
+import { X, Filter, Search, RotateCcw } from 'lucide-react'
+import { type Brand, type Category, type ProductFilterFacets, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -17,12 +17,13 @@ interface SidebarProps {
     categories: Category[]
     subcategories: Subcategory[]
     activeSubcategoryIds: string[]
+    filterFacets?: ProductFilterFacets
     isOpen: boolean
     onClose: () => void
     count: number
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, isOpen, onClose, count }) => {
+const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, filterFacets, isOpen, onClose, count }) => {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
@@ -32,23 +33,10 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
     const currentGender = searchParams.get('gender') || ''
+    const currentSearch = searchParams.get('search') || ''
+    const hasActiveFilters = Boolean(currentBrand || currentCategory || currentSubcategory || currentGender || currentSearch)
 
-    // Debounce search
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (searchValue !== (searchParams.get('search') || '')) {
-                applyFilter('search', searchValue || null)
-            }
-        }, 500)
-        return () => clearTimeout(timer)
-    }, [searchValue])
-
-    // Update local search value when URL changes (e.g. on reset)
-    useEffect(() => {
-        setSearchValue(searchParams.get('search') || '')
-    }, [searchParams])
-
-    const applyFilter = (key: string, value: string | null) => {
+    const applyFilter = useCallback((key: string, value: string | null) => {
         const params = new URLSearchParams(searchParams.toString())
         if (value) {
             params.set(key, value)
@@ -65,21 +53,115 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
         }
 
         router.push(`/admin?${params.toString()}`)
-    }
+    }, [router, searchParams])
+
+    // Debounce search
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (searchValue !== currentSearch) {
+                applyFilter('search', searchValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentSearch, searchValue])
+
+    // Update local search value when URL changes (e.g. on reset)
+    useEffect(() => {
+        setSearchValue(currentSearch)
+    }, [currentSearch])
 
     const handleReset = () => {
         setSearchValue('')
-        router.push('/admin')
+        const params = new URLSearchParams()
+        const perPage = searchParams.get('perPage')
+        if (perPage) params.set('perPage', perPage)
+        router.push(params.size > 0 ? `/admin?${params.toString()}` : '/admin')
     }
 
+    const facetState = useMemo(() => {
+        const mapSlugFacetCounts = <T extends { id: string; slug?: string }>(items: T[], facets = [] as { slug: string; count: number }[]) => {
+            const bySlugOrId = new Map<string, string>()
+            items.forEach(item => {
+                bySlugOrId.set(item.id, item.id)
+                if (item.slug) bySlugOrId.set(item.slug, item.id)
+            })
+            const counts = new Map<string, number>()
+
+            facets.forEach(facet => {
+                const id = bySlugOrId.get(facet.slug)
+                if (id) counts.set(id, Number(facet.count || 0))
+            })
+
+            return counts
+        }
+
+        const brandCounts = mapSlugFacetCounts(brands, filterFacets?.brandFacets)
+        const categoryCounts = mapSlugFacetCounts(categories, filterFacets?.categoryFacets)
+        const subcategoryCounts = mapSlugFacetCounts(subcategories, filterFacets?.subcategoryFacets)
+        const categoryOptionCounts = new Map(categoryCounts)
+
+        subcategories.forEach(subcategory => {
+            const count = subcategoryCounts.get(subcategory.id) || 0
+            if (count > 0) {
+                categoryOptionCounts.set(subcategory.category, (categoryOptionCounts.get(subcategory.category) || 0) + count)
+            }
+        })
+
+        return {
+            brandCounts,
+            categoryCounts: categoryOptionCounts,
+            subcategoryCounts,
+        }
+    }, [brands, categories, subcategories, filterFacets])
+
+    const isFacetAvailable = (counts: Map<string, number>, id: string, selectedId = '') => {
+        if (!filterFacets) return true
+        return selectedId === id || (counts.get(id) || 0) > 0
+    }
+
+    const availableCategories = categories.filter(category =>
+        isFacetAvailable(facetState.categoryCounts, category.id, currentCategory)
+    )
+
     const availableSubcategories = currentCategory
-        ? subcategories.filter(sub => sub.category === currentCategory)
+        ? subcategories
+            .filter(sub => sub.category === currentCategory)
+            .filter(sub => isFacetAvailable(facetState.subcategoryCounts, sub.id, currentSubcategory))
         : []
+
+    const genderFacetValue = (value: string) => {
+        if (value === 'Для мужчин') return 'male'
+        if (value === 'Для женщин') return 'female'
+        if (value === 'Унисекс') return 'unisex'
+        return value
+    }
+
+    const genderCount = (value: string) => {
+        if (!filterFacets) return undefined
+        const item = filterFacets.genderFacets.find(facet => facet.value === genderFacetValue(value))
+        return item ? Number(item.count || 0) : 0
+    }
+
+    const noGenderCount = useMemo(() => {
+        if (!filterFacets) return undefined
+        const missingFacet = filterFacets.genderFacets.find(facet => {
+            const value = String(facet.value ?? '').toLowerCase()
+            return value === '' || value === '__none__' || value === 'missing' || value === 'none' || value === 'null'
+        })
+        return missingFacet ? Number(missingFacet.count || 0) : undefined
+    }, [filterFacets])
+
+    const genderAvailable = (value: string) => {
+        const count = value === '__none__' ? noGenderCount : genderCount(value)
+        return currentGender === value || count === undefined || count > 0
+    }
 
     // Filter brands by search
     const filteredBrands = brandSearch
-        ? brands.filter(b => b.name.toLowerCase().includes(brandSearch.toLowerCase()))
-        : brands
+        ? brands
+            .filter(brand => isFacetAvailable(facetState.brandCounts, brand.id, currentBrand))
+            .filter(b => b.name.toLowerCase().includes(brandSearch.toLowerCase()))
+        : brands.filter(brand => isFacetAvailable(facetState.brandCounts, brand.id, currentBrand))
 
     return (
         <>
@@ -105,6 +187,18 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                                 <span className="font-semibold text-slate-200">{count}</span> товаров
                             </div>
                         </div>
+                        {hasActiveFilters && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleReset}
+                                className="shrink-0 border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white"
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                                <span>Сбросить фильтры</span>
+                            </Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={onClose} className="lg:hidden text-slate-400 hover:text-slate-200">
                             <X className="w-6 h-6" />
                         </Button>
@@ -139,7 +233,7 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                                 </SelectTrigger>
                                 <SelectContent>
                                 <SelectItem value="__all__">Все категории</SelectItem>
-                                {categories.map(cat => (
+                                {availableCategories.map(cat => (
                                     <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                                 ))}
                                 </SelectContent>
@@ -182,42 +276,24 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, is
                                 >
                                     Все
                                 </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={currentGender === 'Для мужчин' ? 'default' : 'outline'}
-                                    onClick={() => applyFilter('gender', 'Для мужчин')}
-                                    className={currentGender === 'Для мужчин' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
-                                >
-                                    Мужчинам
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={currentGender === 'Для женщин' ? 'default' : 'outline'}
-                                    onClick={() => applyFilter('gender', 'Для женщин')}
-                                    className={currentGender === 'Для женщин' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
-                                >
-                                    Женщинам
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={currentGender === 'Унисекс' ? 'default' : 'outline'}
-                                    onClick={() => applyFilter('gender', 'Унисекс')}
-                                    className={currentGender === 'Унисекс' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
-                                >
-                                    Унисекс
-                                </Button>
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant={currentGender === '__none__' ? 'default' : 'outline'}
-                                    onClick={() => applyFilter('gender', '__none__')}
-                                    className={currentGender === '__none__' ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'}
-                                >
-                                    Без гендера
-                                </Button>
+                                {[
+                                    { value: 'Для мужчин', label: 'Мужчинам' },
+                                    { value: 'Для женщин', label: 'Женщинам' },
+                                    { value: 'Унисекс', label: 'Унисекс' },
+                                    { value: '__none__', label: 'Без гендера' },
+                                ].map(option => (
+                                    <Button
+                                        key={option.value}
+                                        type="button"
+                                        size="sm"
+                                        variant={currentGender === option.value ? 'default' : 'outline'}
+                                        onClick={() => applyFilter('gender', option.value)}
+                                        disabled={!genderAvailable(option.value)}
+                                        className={currentGender === option.value ? '' : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white disabled:cursor-not-allowed disabled:opacity-40'}
+                                    >
+                                        {option.label}
+                                    </Button>
+                                ))}
                             </div>
                         </div>
 
