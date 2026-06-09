@@ -78,7 +78,7 @@ describe('rails admin product adapter', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('loads gender-filtered products from the catalog endpoint because Rails admin ignores gender', async () => {
+  it('loads gender-filtered products from the catalog endpoint for public filter semantics', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -145,51 +145,22 @@ describe('rails admin product adapter', () => {
     expect(init).toMatchObject({ cache: 'no-store' })
   })
 
-  it('loads products without gender by scanning catalog pages', async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      const requestUrl = new URL(url)
-      const page = Number(requestUrl.searchParams.get('page') || 1)
-      const gender = requestUrl.searchParams.get('gender')
-
-      if (gender === 'unisex') {
-        return {
-          ok: true,
-          json: async () => ({
-            products: [],
-            meta: { total: 1, pages: 1 },
-          }),
-        }
-      }
-
-      return {
-        ok: true,
-        json: async () => ({
-          products: page === 1
-            ? [
-              {
-                id: 'gender-product',
-                external_id: 'ext-with-gender',
-                name: 'Gender Product',
-                status: 'active',
-                gender: 'female',
-                price_cents: 0,
-                media: [],
-              },
-            ]
-            : [
-              {
-                id: 'no-gender-product',
-                external_id: 'ext-no-gender',
-                name: 'No Gender Product',
-                status: 'active',
-                price_cents: 0,
-                media: [],
-              },
-            ],
-          facets: { genders: [{ value: 'female', count: 1 }] },
-          meta: { total: 3, pages: 2 },
-        }),
-      }
+  it('loads products without gender through the Rails gender_missing filter', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [
+          {
+            id: 'no-gender-product',
+            external_id: 'ext-no-gender',
+            name: 'No Gender Product',
+            status: 'active',
+            price_cents: 0,
+            media: [],
+          },
+        ],
+        meta: { total: 1, pages: 1 },
+      }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -204,11 +175,14 @@ describe('rails admin product adapter', () => {
     expect(result.products[0].gender).toBe('')
     expect(result.totalItems).toBe(1)
     expect(result.totalPages).toBe(1)
-    expect(fetchMock).toHaveBeenCalledTimes(3)
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender_missing'))).toEqual([null, null, null])
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(['60', '1', '60'])
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender'))).toEqual([null, 'unisex', null])
-    expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(['hermes', 'hermes', 'hermes'])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    const params = new URL(String(url)).searchParams
+    expect(String(url)).toContain('/catalog/products?')
+    expect(params.get('gender_missing')).toBe('true')
+    expect(params.get('gender')).toBeNull()
+    expect(params.get('brand')).toBe('hermes')
+    expect(init).toMatchObject({ cache: 'no-store' })
   })
 
   it('loads filter facets while excluding the current facet dimension', async () => {
