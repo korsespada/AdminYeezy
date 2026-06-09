@@ -282,7 +282,7 @@ export async function listRailsAdminProducts(options: {
     return listRailsCatalogProductsWithoutGender(options)
   }
 
-  if (options.gender && !options.status) {
+  if ((options.brand || options.category || options.subcategory || options.gender) && !options.status) {
     return listRailsCatalogProducts(options)
   }
 
@@ -481,6 +481,9 @@ type RailsProductFacetPayload = {
     categories?: CatalogSlugFacet[]
     genders?: CatalogValueFacet[]
   }
+  meta?: {
+    total?: number
+  }
 }
 
 async function fetchRailsProductFacets(options: ProductFacetFilters) {
@@ -499,7 +502,7 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     return getRailsNoGenderProductFilterFacets(filters)
   }
 
-  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload] = await Promise.all([
+  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload] = await Promise.all([
     fetchRailsProductFacets({
       search: filters.search,
       category: filters.category,
@@ -525,14 +528,27 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       brand: filters.brand,
       category: filters.category,
       subcategory: filters.subcategory,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+      subcategory: filters.subcategory,
+      gender: 'unisex',
     }),
   ])
+
+  const genderFacets = [...(genderPayload.facets?.genders || [])]
+  const unisexCount = Number(unisexPayload.meta?.total || 0)
+  if (unisexCount > 0 && !genderFacets.some(facet => facet.value === 'unisex')) {
+    genderFacets.push({ value: 'unisex', count: unisexCount })
+  }
 
   return {
     brandFacets: brandPayload.facets?.brands || [],
     categoryFacets: categoryPayload.facets?.categories || [],
     subcategoryFacets: subcategoryPayload.facets?.categories || [],
-    genderFacets: genderPayload.facets?.genders || [],
+    genderFacets,
   }
 }
 
@@ -672,7 +688,7 @@ async function getRailsNoGenderProductFilterFacets(filters: ProductFacetFilters)
     return cache.get(key)!
   }
 
-  const [brandProducts, categoryProducts, subcategoryProducts, genderPayload] = await Promise.all([
+  const [brandProducts, categoryProducts, subcategoryProducts, genderPayload, unisexPayload] = await Promise.all([
     collect({
       search: filters.search,
       category: filters.category,
@@ -693,13 +709,26 @@ async function getRailsNoGenderProductFilterFacets(filters: ProductFacetFilters)
       category: filters.category,
       subcategory: filters.subcategory,
     }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+      subcategory: filters.subcategory,
+      gender: 'unisex',
+    }),
   ])
+
+  const genderFacets = [...(genderPayload.facets?.genders || [])]
+  const unisexCount = Number(unisexPayload.meta?.total || 0)
+  if (unisexCount > 0 && !genderFacets.some(facet => facet.value === 'unisex')) {
+    genderFacets.push({ value: 'unisex', count: unisexCount })
+  }
 
   return {
     brandFacets: slugFacetsFromProducts(brandProducts, product => Array.isArray(product.brand) ? product.brand : [product.brand]),
     categoryFacets: slugFacetsFromProducts(categoryProducts, product => [product.category]),
     subcategoryFacets: slugFacetsFromProducts(subcategoryProducts, product => [product.subcategory]),
-    genderFacets: genderPayload.facets?.genders || [],
+    genderFacets,
   }
 }
 

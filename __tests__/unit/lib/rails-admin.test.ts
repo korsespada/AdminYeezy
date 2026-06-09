@@ -113,6 +113,38 @@ describe('rails admin product adapter', () => {
     expect(init).toMatchObject({ cache: 'no-store' })
   })
 
+  it('loads category-filtered products from the catalog endpoint so parent categories include children', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [
+          {
+            id: 'product-id',
+            external_id: 'ext-1',
+            name: 'Bag Product',
+            status: 'active',
+            price_cents: 0,
+            media: [],
+          },
+        ],
+        meta: { total: 1, pages: 1 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      category: 'bags-parent',
+    })
+
+    expect(result.products).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&category=bags-parent')
+    expect(init).toMatchObject({ cache: 'no-store' })
+  })
+
   it('loads products without gender by scanning catalog pages', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)
@@ -184,7 +216,7 @@ describe('rails admin product adapter', () => {
       const requestUrl = new URL(url)
       const hasBrand = requestUrl.searchParams.has('brand')
       const hasCategory = requestUrl.searchParams.has('category')
-      const hasGenderMissing = requestUrl.searchParams.get('gender_missing') === 'true'
+      const gender = requestUrl.searchParams.get('gender')
 
       return {
         ok: true,
@@ -192,9 +224,9 @@ describe('rails admin product adapter', () => {
           facets: {
             brands: [{ slug: hasBrand ? 'unexpected' : 'gucci', name: 'Gucci', count: 2 }],
             categories: [{ slug: hasCategory ? 'bags-child' : 'bags-parent', name: 'Сумки', count: 3 }],
-            genders: [{ value: hasGenderMissing ? null : 'female', count: 4 }],
+            genders: gender === 'unisex' ? [] : [{ value: 'female', count: 4 }],
           },
-          meta: { total: 4, pages: 1 },
+          meta: { total: gender === 'unisex' ? 2 : 4, pages: 1 },
           products: [],
         }),
       }
@@ -212,8 +244,8 @@ describe('rails admin product adapter', () => {
     expect(result.brandFacets).toEqual([{ slug: 'gucci', name: 'Gucci', count: 2 }])
     expect(result.categoryFacets).toEqual([{ slug: 'bags-parent', name: 'Сумки', count: 3 }])
     expect(result.subcategoryFacets).toEqual([{ slug: 'bags-child', name: 'Сумки', count: 3 }])
-    expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }])
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }, { value: 'unisex', count: 2 }])
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
     expect(calls[0].get('brand')).toBeNull()
@@ -228,6 +260,9 @@ describe('rails admin product adapter', () => {
     expect(calls[3].get('brand')).toBe('gucci')
     expect(calls[3].get('category')).toBe('bags-child')
     expect(calls[3].get('gender')).toBeNull()
+    expect(calls[4].get('brand')).toBe('gucci')
+    expect(calls[4].get('category')).toBe('bags-child')
+    expect(calls[4].get('gender')).toBe('unisex')
   })
 
   it('loads 500-product admin pages in chunks', async () => {
