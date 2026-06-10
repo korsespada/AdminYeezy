@@ -106,7 +106,7 @@ function getWritableTmpDir() {
     return os.tmpdir()
   }
 
-  return path.join(process.cwd(), 'tmp')
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp')
 }
 
 function parseServerCsv(text: string): CsvProduct[] {
@@ -299,7 +299,7 @@ export async function readLocalCsvAction(filePath: string) {
       return { success: true, content: dbFile.content, source: 'db' };
     }
 
-    const buffer = await fs.readFile(cleanPath);
+    const buffer = await fs.readFile(/*turbopackIgnore: true*/ cleanPath);
     
     // Пробуем разные кодировки
     const encodings = ['utf-8', 'gbk', 'windows-1251'];
@@ -366,7 +366,7 @@ export async function saveLocalCsvAction(filePath: string, products: any[], colu
     let attempts = 3;
     while (attempts > 0) {
       try {
-        await fs.writeFile(filePath.replace(/"/g, ''), csvContent, 'utf-8');
+        await fs.writeFile(/*turbopackIgnore: true*/ filePath.replace(/"/g, ''), csvContent, 'utf-8');
         return { success: true };
       } catch (writeErr: any) {
         attempts--;
@@ -623,12 +623,12 @@ export async function recordAiTaskAction({
     const path = require('path');
     const tmpDir = getWritableTmpDir();
     const outputFileName = `task_ai_${taskId}.csv`;
-    const outputPath = path.join(tmpDir, outputFileName);
+    const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, outputFileName);
     const csvContent = serializeProductsToCsv(products, columns, delimiter);
 
     // 2. Сохраняем файл во временную writable-директорию.
     await fs.mkdir(tmpDir, { recursive: true });
-    await fs.writeFile(outputPath, csvContent, 'utf-8');
+    await fs.writeFile(/*turbopackIgnore: true*/ outputPath, csvContent, 'utf-8');
 
     // 3. Создаем запись в технической БД (scraping_tasks)
     const taskRes = await scrapingQuery(`
@@ -688,19 +688,21 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     const fs = require('fs');
     
     const tmpDir = getWritableTmpDir();
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    if (!fs.existsSync(/*turbopackIgnore: true*/ tmpDir)) {
+        fs.mkdirSync(/*turbopackIgnore: true*/ tmpDir, { recursive: true });
+    }
     const taskId = Math.floor(Math.random() * 1000000);
     let effectiveInputPath = inputPath;
-    const outputPath = path.join(tmpDir, `task_custom_${taskId}.csv`);
+    const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
 
     if (batchId) {
         const batchRes = await getBatchProductsAction(batchId);
         if (!batchRes.success || !batchRes.data) {
             throw new Error(batchRes.error || "Не удалось загрузить товары партии");
         }
-        effectiveInputPath = path.join(tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
+        effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
         fs.writeFileSync(
-            effectiveInputPath,
+            /*turbopackIgnore: true*/ effectiveInputPath,
             serializeProductsToCsv(batchRes.data.products, BATCH_PRODUCT_COLUMNS, ';'),
             'utf-8'
         );
@@ -708,7 +710,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
 
     if (!effectiveInputPath) throw new Error("Не указан CSV-файл или batchId");
 
-    const pythonScript = path.join(process.cwd(), 'scripts', 'parser', supplierData.post_process_script);
+    const pythonScript = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplierData.post_process_script);
     
     return new Promise((resolve) => {
         const pythonProcess = spawn('python', [pythonScript, effectiveInputPath!, outputPath]);
@@ -725,8 +727,8 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
                 // Подсчитываем товары в новом файле
                 let itemsCount = 0;
                 try {
-                    if (fs.existsSync(outputPath)) {
-                        const content = fs.readFileSync(outputPath, 'utf-8');
+                    if (fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
+                        const content = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
                         const lines = content.split('\n').filter((l: string) => l.trim());
                         if (lines.length > 1) itemsCount = lines.length - 1;
                     }
@@ -750,8 +752,8 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
                         filePath: outputPath,
                     });
 
-                    if (batchId && fs.existsSync(outputPath)) {
-                        const processedText = fs.readFileSync(outputPath, 'utf-8');
+                    if (batchId && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
+                        const processedText = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
                         const processedProducts = parseServerCsv(processedText);
                         const saveRes = await saveBatchProductsAction(batchId, processedProducts);
                         if (!saveRes.success) throw new Error(saveRes.error);

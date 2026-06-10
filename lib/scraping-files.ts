@@ -37,7 +37,7 @@ export async function saveScrapingFileArtifact({
 }: SaveScrapingFileParams) {
   const normalizedPath = cleanFilePath(filePath)
   const fileName = path.basename(normalizedPath)
-  const csvContent = content ?? decodeCsvBuffer(await fs.readFile(normalizedPath))
+  const csvContent = content ?? decodeCsvBuffer(await fs.readFile(/*turbopackIgnore: true*/ normalizedPath))
   const sizeBytes = Buffer.byteLength(csvContent, 'utf8')
 
   await scrapingQuery(`

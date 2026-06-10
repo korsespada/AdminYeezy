@@ -40,7 +40,9 @@ const RAILS_IMPORT_COLUMNS = [
 ];
 
 function ensureDir(dir) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(/*turbopackIgnore: true*/ dir)) {
+    fs.mkdirSync(/*turbopackIgnore: true*/ dir, { recursive: true });
+  }
 }
 
 function cleanPath(value) {
@@ -465,7 +467,7 @@ async function saveBatchProducts(batchId, products) {
 }
 
 async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount }) {
-  const fileContent = fs.readFileSync(outputPath, 'utf-8');
+  const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
   const lines = fileContent.split('\n').filter((line) => line.trim());
   if (lines.length <= 1) return null;
 
@@ -520,10 +522,10 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
   );
   const taskId = taskRes.rows[0].id;
 
-  const tmpDir = path.join(process.cwd(), 'tmp');
+  const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
   ensureDir(tmpDir);
-  const outputPath = path.join(tmpDir, `task_${taskId}.csv`);
-  const scriptPath = path.join(process.cwd(), 'scripts', 'parser', 'SzwegoParser.py');
+  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_${taskId}.csv`);
+  const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py');
   const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || '';
   const args = [
     scriptPath,
@@ -546,7 +548,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
   if (supplier.default_price) args.push('--default_price', String(supplier.default_price));
   if (supplier.parse_tags_enabled) args.push('--parse_tags');
 
-  const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', args);
+  const pythonProcess = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', args);
   let stderr = '';
 
   pythonProcess.stderr.on('data', (data) => {
@@ -568,8 +570,8 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
     let batchId = null;
 
     try {
-      if (code === 0 && fs.existsSync(outputPath)) {
-        const fileContent = fs.readFileSync(outputPath, 'utf-8');
+      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
+        const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
         const lines = fileContent.split('\n').filter((line) => line.trim());
         itemsCount = Math.max(0, lines.length - 1);
       }
@@ -579,7 +581,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
         [status, code === 0 ? outputPath : null, errorMsg, itemsCount, taskId],
       );
 
-      if (code === 0 && fs.existsSync(outputPath)) {
+      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         batchId = await importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount });
       }
     } catch (error) {
@@ -611,16 +613,16 @@ async function processBatchWithAi(batchId) {
     return { processed: 0, total: products.length, path: null };
   }
 
-  const scratchDir = path.join(process.cwd(), 'scratch');
+  const scratchDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scratch');
   ensureDir(scratchDir);
-  const tempIn = path.join(scratchDir, `ai_in_${Date.now()}.json`);
-  fs.writeFileSync(tempIn, JSON.stringify(unprocessed), 'utf-8');
+  const tempIn = path.join(/*turbopackIgnore: true*/ scratchDir, `ai_in_${Date.now()}.json`);
+  fs.writeFileSync(/*turbopackIgnore: true*/ tempIn, JSON.stringify(unprocessed), 'utf-8');
 
-  const scriptPath = path.join(process.cwd(), 'universal_ai_process.py');
+  const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'universal_ai_process.py');
   const pythonCmd = process.env.PYTHON_PATH || 'python';
 
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(pythonCmd, [scriptPath, String(batch.supplier_id), tempIn], {
+    const child = spawn(/*turbopackIgnore: true*/ pythonCmd, [scriptPath, String(batch.supplier_id), tempIn], {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
     let stdout = '';
@@ -638,7 +640,7 @@ async function processBatchWithAi(batchId) {
     });
   }).finally(() => {
     try {
-      fs.unlinkSync(tempIn);
+      fs.unlinkSync(/*turbopackIgnore: true*/ tempIn);
     } catch {}
   });
 
@@ -652,10 +654,10 @@ async function processBatchWithAi(batchId) {
 
   await saveBatchProducts(batchId, products);
 
-  const tmpDir = path.join(process.cwd(), 'tmp');
+  const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
   ensureDir(tmpDir);
-  const outputPath = path.join(tmpDir, `task_ai_${Math.floor(Math.random() * 1000000)}.csv`);
-  fs.writeFileSync(outputPath, serializeProductsToCsv(products), 'utf-8');
+  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_ai_${Math.floor(Math.random() * 1000000)}.csv`);
+  fs.writeFileSync(/*turbopackIgnore: true*/ outputPath, serializeProductsToCsv(products), 'utf-8');
 
   await scrapingPool.query(`
     INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
@@ -675,16 +677,16 @@ async function runBatchPostProcessScript(batchId) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров');
 
-  const tmpDir = path.join(process.cwd(), 'tmp');
+  const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
   ensureDir(tmpDir);
   const taskId = Math.floor(Math.random() * 1000000);
-  const inputPath = path.join(tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
-  const outputPath = path.join(tmpDir, `task_custom_${taskId}.csv`);
-  fs.writeFileSync(inputPath, serializeProductsToCsv(products), 'utf-8');
+  const inputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
+  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
+  fs.writeFileSync(/*turbopackIgnore: true*/ inputPath, serializeProductsToCsv(products), 'utf-8');
 
-  const scriptPath = path.join(process.cwd(), 'scripts', 'parser', supplier.post_process_script);
+  const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplier.post_process_script);
   await new Promise((resolve, reject) => {
-    const child = spawn(process.env.PYTHON_PATH || 'python', [scriptPath, inputPath, outputPath]);
+    const child = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', [scriptPath, inputPath, outputPath]);
     let stderr = '';
     child.stderr.on('data', (data) => { stderr += data.toString(); });
     child.on('error', reject);
@@ -694,8 +696,8 @@ async function runBatchPostProcessScript(batchId) {
     });
   });
 
-  const processedProducts = fs.existsSync(outputPath)
-    ? parseCsvText(fs.readFileSync(outputPath, 'utf-8'))
+  const processedProducts = fs.existsSync(/*turbopackIgnore: true*/ outputPath)
+    ? parseCsvText(fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8'))
     : [];
   if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой файл');
 

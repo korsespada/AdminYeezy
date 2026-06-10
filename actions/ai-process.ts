@@ -1,6 +1,6 @@
 'use server'
 
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import path from 'path'
 import fs from 'fs'
@@ -8,7 +8,7 @@ import os from 'os'
 import { scrapingQuery } from '@/lib/db'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 
 type TargetedAiEditItem = {
   index: number
@@ -41,7 +41,7 @@ function getWritableTmpDir() {
     return os.tmpdir()
   }
 
-  return path.join(process.cwd(), 'scratch')
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), 'scratch')
 }
 
 async function getAiModelForTargetedEdit(supplierId?: number | null) {
@@ -192,7 +192,7 @@ async function resolveSourcePath({
 }): Promise<ResolvedSourcePath | undefined> {
   async function isReadableSource(filePath?: string | null, taskId?: number | null) {
     if (!filePath) return false
-    if (fs.existsSync(filePath)) return true
+    if (fs.existsSync(/*turbopackIgnore: true*/ filePath)) return true
 
     try {
       const artifact = await getScrapingFileArtifact(filePath, taskId)
@@ -260,7 +260,7 @@ async function loadSourceCsvContext(params: {
     if (artifact?.content) {
       text = artifact.content
     } else {
-      text = fs.readFileSync(resolved.filePath, 'utf-8')
+      text = fs.readFileSync(/*turbopackIgnore: true*/ resolved.filePath, 'utf-8')
     }
 
     const rows = parseCsvText(text)
@@ -515,11 +515,14 @@ export async function processAiAction(supplierId: number, products: any[], fileP
     // 1. Создаем бэкап, если передан путь к файлу
     if (filePath) {
       const cleanPath = filePath.replace(/"/g, '');
-      if (fs.existsSync(cleanPath)) {
+      if (fs.existsSync(/*turbopackIgnore: true*/ cleanPath)) {
         const backupPath = cleanPath.replace('.csv', '_original.csv');
         // Создаем бэкап только если его еще нет (чтобы не перезатереть самый первый оригинал)
-        if (!fs.existsSync(backupPath)) {
-          fs.copyFileSync(cleanPath, backupPath);
+        if (!fs.existsSync(/*turbopackIgnore: true*/ backupPath)) {
+          fs.copyFileSync(
+            /*turbopackIgnore: true*/ cleanPath,
+            /*turbopackIgnore: true*/ backupPath,
+          );
           console.log(`[AI Process] Created backup: ${backupPath}`);
         }
       }
@@ -528,14 +531,14 @@ export async function processAiAction(supplierId: number, products: any[], fileP
     const productsJson = JSON.stringify(products)
     
     // Ensure temp dir exists
-    if (!fs.existsSync(tmpDir)) {
-        fs.mkdirSync(tmpDir, { recursive: true })
+    if (!fs.existsSync(/*turbopackIgnore: true*/ tmpDir)) {
+        fs.mkdirSync(/*turbopackIgnore: true*/ tmpDir, { recursive: true })
     }
     
     // Пишем в UTF-8
-    fs.writeFileSync(tempIn, productsJson, 'utf-8')
+    fs.writeFileSync(/*turbopackIgnore: true*/ tempIn, productsJson, 'utf-8')
     
-    const scriptPath = path.join(process.cwd(), 'universal_ai_process.py')
+    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'universal_ai_process.py')
     const pythonCmd = process.env.PYTHON_PATH || 'python'
     
     // Устанавливаем PYTHONIOENCODING=utf-8 для корректного вывода stdout
@@ -543,10 +546,18 @@ export async function processAiAction(supplierId: number, products: any[], fileP
     
     // Execute Python script passing the file path
     // Increase maxBuffer to 100MB (100 * 1024 * 1024) to handle large product sets
-    const { stdout, stderr } = await execAsync(`"${pythonCmd}" "${scriptPath}" ${supplierId} "${tempIn}"`, { 
-      env,
-      maxBuffer: 100 * 1024 * 1024 
-    })
+    const { stdout, stderr } = await execFileAsync(
+      /*turbopackIgnore: true*/ pythonCmd,
+      [
+        /*turbopackIgnore: true*/ scriptPath,
+        String(supplierId),
+        /*turbopackIgnore: true*/ tempIn,
+      ],
+      {
+        env,
+        maxBuffer: 100 * 1024 * 1024,
+      },
+    )
 
     if (stderr && !stdout) {
       console.error('Python Error:', stderr)
@@ -565,8 +576,8 @@ export async function processAiAction(supplierId: number, products: any[], fileP
     return { success: false, error: error.message }
   } finally {
     // Clean up temp file
-    if (fs.existsSync(tempIn)) {
-        try { fs.unlinkSync(tempIn) } catch(e) {}
+    if (fs.existsSync(/*turbopackIgnore: true*/ tempIn)) {
+        try { fs.unlinkSync(/*turbopackIgnore: true*/ tempIn) } catch(e) {}
     }
   }
 }

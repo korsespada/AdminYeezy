@@ -129,12 +129,12 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
     const supplier = res.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
 
-    const scriptPath = path.join(process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
+    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
     const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || ''
     
     return new Promise((resolve) => {
       const pythonProcess = spawn('python', [
-        scriptPath,
+        /*turbopackIgnore: true*/ scriptPath,
         '--album_id', supplier.album_id,
         '--cookie', cookie,
         '--get_avatar'
@@ -510,10 +510,10 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     const taskId = taskRes.rows[0].id
 
     // 3. Подготавливаем пути
-    const tmpDir = path.join(process.cwd(), 'tmp')
+    const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp')
     const outputFileName = `task_${taskId}.csv`
-    const outputPath = path.join(tmpDir, outputFileName)
-    const scriptPath = path.join(process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
+    const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, outputFileName)
+    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
     
     // 4. Запускаем Python процесс
     const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || ''
@@ -550,7 +550,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     // Capture errors
     let stderr = ''
     
-    const pythonProcess = spawn('python', args)
+    const pythonProcess = spawn(/*turbopackIgnore: true*/ 'python', args)
 
     pythonProcess.on('error', (err) => {
       console.error(`[Scraper ${taskId}] Failed to start python:`, err)
@@ -575,9 +575,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
       let batchId: string | null = null
       
       let itemsCount = 0
-      if (code === 0 && fs.existsSync(outputPath)) {
+      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         try {
-          const fileContent = fs.readFileSync(outputPath, 'utf-8')
+          const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
           const lines = fileContent.split('\n').filter(l => l.trim())
           if (lines.length > 1) {
             itemsCount = lines.length - 1
@@ -592,11 +592,11 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
         [status, code === 0 ? outputPath : null, errorMsg, itemsCount, taskId]
       )
 
-      if (code === 0 && fs.existsSync(outputPath)) {
+      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         try {
           console.log(`[Scraper ${taskId}] Starting data import to batch...`)
           // 1. Читаем CSV
-          const fileContent = fs.readFileSync(outputPath, 'utf-8')
+          const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
           const lines = fileContent.split('\n').filter(l => l.trim())
           
           if (lines.length > 1) { // Если есть больше чем заголовок
@@ -712,9 +712,9 @@ export async function deleteTaskAction(taskId: number): Promise<ActionResponse> 
     const filePath = res.rows[0]?.result_path
     await deleteScrapingFileArtifactForTask(taskId)
     
-    if (filePath && fs.existsSync(filePath)) {
+    if (filePath && fs.existsSync(/*turbopackIgnore: true*/ filePath)) {
       try {
-        fs.unlinkSync(filePath)
+        fs.unlinkSync(/*turbopackIgnore: true*/ filePath)
       } catch (e) {
         console.error('Failed to delete file:', filePath, e)
       }
@@ -741,9 +741,9 @@ export async function deleteExportBatchFromAdminAction(batchId: string): Promise
         )
 
         for (const task of tasksRes.rows) {
-            if (task.result_path && fs.existsSync(task.result_path)) {
+            if (task.result_path && fs.existsSync(/*turbopackIgnore: true*/ task.result_path)) {
                 try {
-                    fs.unlinkSync(task.result_path)
+                    fs.unlinkSync(/*turbopackIgnore: true*/ task.result_path)
                 } catch (e) {
                     console.error('Failed to delete file:', task.result_path, e)
                 }
