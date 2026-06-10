@@ -273,6 +273,7 @@ export async function listRailsAdminProducts(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderExact?: boolean
   status?: Product['status']
   noGender?: boolean
 }) {
@@ -303,6 +304,7 @@ async function listRailsCatalogProducts(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderExact?: boolean
   genderMissing?: boolean
 }) {
   if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
@@ -328,6 +330,7 @@ async function listRailsCatalogProductsInChunks(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderExact?: boolean
   genderMissing?: boolean
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
@@ -371,6 +374,7 @@ async function listRailsAdminProductsInChunks(options: {
   category?: string
   subcategory?: string
   gender?: string
+  genderExact?: boolean
   status?: Product['status']
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
@@ -443,11 +447,12 @@ export function buildRailsAdminProductsParams(options: {
   status?: Product['status']
   noGender?: boolean
   genderMissing?: boolean
+  genderExact?: boolean
 }) {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
   params.set('per_page', String(options.perPage))
-  const search = options.search?.trim()
+  const search = normalizeProductSearchInput(options.search)
   if (search) params.set('q', search)
   if (options.brand) params.set('brand', options.brand)
   if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
@@ -455,9 +460,43 @@ export function buildRailsAdminProductsParams(options: {
     params.set('gender_missing', 'true')
   } else if (options.gender) {
     params.set('gender', options.gender)
+    if (options.genderExact) params.set('gender_exact', 'true')
   }
   if (options.status) params.set('status', options.status)
   return params
+}
+
+export function normalizeProductSearchInput(value?: string) {
+  const search = value?.trim() || ''
+  if (!search) return ''
+
+  const directPath = extractProductSlugFromPath(search)
+  if (directPath) return directPath
+
+  try {
+    const url = new URL(search)
+    return extractProductSlugFromPath(url.pathname) || search
+  } catch {
+    return search
+  }
+}
+
+function extractProductSlugFromPath(value: string) {
+  const path = value.split(/[?#]/, 1)[0]
+  const segments = path
+    .split('/')
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+
+  const productIndex = segments.findIndex((segment) => segment === 'product' || segment === 'products')
+  const slug = productIndex >= 0 ? segments[productIndex + 1] : ''
+  if (!slug) return ''
+
+  try {
+    return decodeURIComponent(slug)
+  } catch {
+    return slug
+  }
 }
 
 type ProductFacetFilters = {
@@ -466,6 +505,7 @@ type ProductFacetFilters = {
   category?: string
   subcategory?: string
   gender?: string
+  genderExact?: boolean
   noGender?: boolean
 }
 
@@ -487,6 +527,7 @@ async function fetchRailsProductFacets(options: ProductFacetFilters) {
     perPage: 1,
     genderMissing: options.noGender,
     gender: options.noGender ? '' : options.gender,
+    genderExact: options.genderExact,
   })
   return publicRailsFetch<RailsProductFacetPayload>(`/catalog/products?${params}`)
 }
@@ -498,12 +539,14 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       category: filters.category,
       subcategory: filters.subcategory,
       gender: filters.gender,
+      genderExact: filters.genderExact,
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({
       search: filters.search,
       brand: filters.brand,
       gender: filters.gender,
+      genderExact: filters.genderExact,
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({
@@ -511,6 +554,7 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       brand: filters.brand,
       category: filters.category,
       gender: filters.gender,
+      genderExact: filters.genderExact,
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({

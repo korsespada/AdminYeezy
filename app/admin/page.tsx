@@ -58,6 +58,7 @@ export default async function AdminPage({
       category: categorySlug,
       subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
       gender: genderFilter === '__none__' ? '' : genderParam,
+      genderExact: Boolean(genderParam && genderFilter !== '__none__'),
       noGender: genderFilter === '__none__',
     }
 
@@ -69,6 +70,7 @@ export default async function AdminPage({
         category: categorySlug,
         subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
         gender: genderFilter === '__none__' ? '' : genderParam,
+        genderExact: Boolean(genderParam && genderFilter !== '__none__'),
         noGender: genderFilter === '__none__',
       }),
     ])

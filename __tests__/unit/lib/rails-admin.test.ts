@@ -4,6 +4,7 @@ import {
   getRailsProductFilterFacets,
   listRailsAdminProducts,
   mapRailsProduct,
+  normalizeProductSearchInput,
   productFormDataToRailsPayload,
   restoreRailsAdminProductFromTrash,
 } from '@/lib/rails-admin'
@@ -24,6 +25,7 @@ describe('rails admin product adapter', () => {
       category: 'category-id',
       subcategory: 'subcategory-id',
       gender: 'Унисекс',
+      genderExact: true,
       status: 'archived',
     })
 
@@ -33,6 +35,7 @@ describe('rails admin product adapter', () => {
     expect(params.get('brand')).toBe('brand-id')
     expect(params.get('category')).toBe('subcategory-id')
     expect(params.get('gender')).toBe('Унисекс')
+    expect(params.get('gender_exact')).toBe('true')
     expect(params.get('status')).toBe('archived')
   })
 
@@ -44,6 +47,19 @@ describe('rails admin product adapter', () => {
     })
 
     expect(params.get('q')).toBe('ext-1')
+  })
+
+  it('normalizes pasted product URLs to product slugs for search', () => {
+    expect(normalizeProductSearchInput('https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share')).toBe('gucci-kurtka-abc123')
+    expect(normalizeProductSearchInput('/product/dior-sneakers-42')).toBe('dior-sneakers-42')
+
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      search: 'https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share',
+    })
+
+    expect(params.get('q')).toBe('gucci-kurtka-abc123')
   })
 
   it('loads searched products from the admin endpoint', async () => {
@@ -78,7 +94,7 @@ describe('rails admin product adapter', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('loads gender-filtered products from the catalog endpoint for public filter semantics', async () => {
+  it('loads gender-filtered products from the catalog endpoint with exact admin semantics', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -87,7 +103,7 @@ describe('rails admin product adapter', () => {
             id: 'product-id',
             external_id: 'ext-1',
             name: 'Gender Product',
-            gender: 'unisex',
+            gender: 'female',
             status: 'active',
             price_cents: 0,
             media: [],
@@ -103,13 +119,14 @@ describe('rails admin product adapter', () => {
       perPage: 40,
       brand: 'hermes',
       gender: 'female',
+      genderExact: true,
     })
 
     expect(result.products).toHaveLength(1)
-    expect(result.products[0].gender).toBe('Унисекс')
+    expect(result.products[0].gender).toBe('Для женщин')
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&brand=hermes&gender=female')
+    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&brand=hermes&gender=female&gender_exact=true')
     expect(init).toMatchObject({ cache: 'no-store' })
   })
 
