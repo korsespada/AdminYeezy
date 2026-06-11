@@ -3,10 +3,18 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN if [ "$(nproc)" -gt 1 ]; then \
+      taskset -c 0,1 nice -n 10 npm ci; \
+    else \
+      nice -n 10 npm ci; \
+    fi
 
 COPY . .
-RUN npm run build
+RUN if [ "$(nproc)" -gt 1 ]; then \
+      taskset -c 0,1 nice -n 10 npm run build; \
+    else \
+      nice -n 10 npm run build; \
+    fi
 RUN npm prune --omit=dev
 
 FROM node:20-bookworm-slim AS runner
