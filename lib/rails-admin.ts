@@ -98,6 +98,11 @@ async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<
   return payload as T
 }
 
+function openRouterRuntimeKeyPayload() {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim()
+  return apiKey ? { openrouter_api_key: apiKey } : {}
+}
+
 async function publicRailsFetch<T>(pathname: string): Promise<T> {
   const response = await fetch(railsApiUrl(pathname), { cache: 'no-store' })
   const payload = await response.json().catch(() => ({}))
@@ -472,6 +477,7 @@ export async function runRailsSeoAiGeneration(input: {
   const result = await railsFetch<{ generation: SeoAiGeneration }>('/admin/seo_ai/generations', {
     method: 'POST',
     body: JSON.stringify({
+      ...openRouterRuntimeKeyPayload(),
       generation: {
         target_type: input.targetType,
         target_id: input.targetId,
@@ -497,6 +503,7 @@ export async function createRailsSeoAiBatch(input: {
   const result = await railsFetch<{ batch: SeoAiBatch; generations: SeoAiGeneration[] }>('/admin/seo_ai/batches', {
     method: 'POST',
     body: JSON.stringify({
+      ...openRouterRuntimeKeyPayload(),
       batch: {
         ids: input.ids || [],
         brand: input.brand || '',
@@ -527,10 +534,16 @@ export async function rejectRailsSeoAiDraft(id: string) {
   return result.generation
 }
 
+export async function deleteRailsSeoAiDraft(id: string) {
+  await railsFetch(`/admin/seo_ai/generations/${id}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function createRailsSeoAiLandingIdeas(filters: Record<string, any>) {
   const result = await railsFetch<{ generation: SeoAiGeneration }>('/admin/seo_ai/landing_ideas', {
     method: 'POST',
-    body: JSON.stringify({ filters }),
+    body: JSON.stringify({ ...openRouterRuntimeKeyPayload(), filters }),
   })
   return result.generation
 }

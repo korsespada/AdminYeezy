@@ -5,6 +5,7 @@ import {
   applyRailsSeoAiDraft,
   createRailsSeoAiBatch,
   createRailsSeoAiLandingIdeas,
+  deleteRailsSeoAiDraft,
   getRailsAdminProduct,
   getRailsSeoAiSettings,
   listRailsAdminProducts,
@@ -120,6 +121,16 @@ export async function rejectSeoAiDraftAction(id: string): Promise<ActionResponse
     return { success: true, data: generation }
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to reject SEO AI draft' }
+  }
+}
+
+export async function deleteSeoAiDraftAction(id: string): Promise<ActionResponse> {
+  try {
+    await deleteRailsSeoAiDraft(id)
+    revalidatePath(SEO_AI_PATH)
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to delete SEO AI draft' }
   }
 }
 

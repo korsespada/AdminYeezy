@@ -1,11 +1,12 @@
 'use client'
 
 import { useMemo, useState, useTransition, type ReactNode } from 'react'
-import { Bot, Check, Layers, Lightbulb, Loader2, RefreshCw, Save, Search, Sparkles, X } from 'lucide-react'
+import { Bot, Check, Layers, Lightbulb, Loader2, RefreshCw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
 import {
   applySeoAiDraftAction,
   createSeoAiBatchAction,
   createSeoAiLandingIdeasAction,
+  deleteSeoAiDraftAction,
   listSeoAiDraftsAction,
   rejectSeoAiDraftAction,
   runSeoAiGenerationAction,
@@ -359,7 +360,12 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, brands, ca
             </div>
             <div className="grid gap-4">
               {drafts.length === 0 ? <p className="text-sm text-slate-400">Черновиков пока нет.</p> : drafts.map((draft) => (
-                <DraftCard key={draft.id} draft={draft} onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))} />
+                <DraftCard
+                  key={draft.id}
+                  draft={draft}
+                  onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))}
+                  onDelete={(id) => setDrafts((prev) => prev.filter((item) => item.id !== id))}
+                />
               ))}
             </div>
           </div>
@@ -426,7 +432,7 @@ function productBrandLabel(product: Product) {
   return brand?.name || ''
 }
 
-function DraftCard({ draft, onChange }: { draft: SeoAiGeneration; onChange: (draft: SeoAiGeneration) => void }) {
+function DraftCard({ draft, onChange, onDelete }: { draft: SeoAiGeneration; onChange: (draft: SeoAiGeneration) => void; onDelete: (id: string) => void }) {
   const [fields, setFields] = useState(PRODUCT_FIELDS.filter((field) => field.key !== 'suggested_name').map((field) => field.key))
   const [isPending, startTransition] = useTransition()
   const outputText = JSON.stringify(draft.output, null, 2)
@@ -448,6 +454,16 @@ function DraftCard({ draft, onChange }: { draft: SeoAiGeneration; onChange: (dra
       const result = await rejectSeoAiDraftAction(draft.id)
       if (result.success) onChange(result.data)
       else alert(result.error || 'Не удалось отклонить draft')
+    })
+  }
+
+  function deleteDraft() {
+    if (!confirm('Удалить этот AI-черновик?')) return
+
+    startTransition(async () => {
+      const result = await deleteSeoAiDraftAction(draft.id)
+      if (result.success) onDelete(draft.id)
+      else alert(result.error || 'Не удалось удалить draft')
     })
   }
 
@@ -481,6 +497,10 @@ function DraftCard({ draft, onChange }: { draft: SeoAiGeneration; onChange: (dra
             <Button type="button" variant="outline" onClick={rejectDraft} disabled={isPending}><X className="h-4 w-4" /> Отклонить</Button>
           </div>
         )}
+        <Button type="button" variant="outline" onClick={deleteDraft} disabled={isPending} className="border-red-500/30 text-red-300 hover:bg-red-500/10 hover:text-red-200">
+          <Trash2 className="h-4 w-4" />
+          Удалить
+        </Button>
       </CardContent>
     </Card>
   )
