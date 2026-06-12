@@ -6,6 +6,9 @@ import {
   type Product,
   type ProductFilterFacets,
   type ProductMedia,
+  type SeoAiBatch,
+  type SeoAiGeneration,
+  type SeoAiSetting,
   type Subcategory,
 } from './types'
 
@@ -434,6 +437,102 @@ export async function searchRailsAdminProductsExact(search: string, statuses: Pr
 export async function getRailsAdminProduct(id: string) {
   const result = await railsFetch<{ product: any }>(`/admin/products/${id}`)
   return mapRailsProduct(result.product)
+}
+
+export async function getRailsSeoAiSettings() {
+  const result = await railsFetch<{ settings: SeoAiSetting[] }>('/admin/seo_ai/settings')
+  return result.settings
+}
+
+export async function updateRailsSeoAiSettings(settings: SeoAiSetting[]) {
+  const result = await railsFetch<{ settings: SeoAiSetting[] }>('/admin/seo_ai/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({ settings }),
+  })
+  return result.settings
+}
+
+export async function listRailsSeoAiDrafts(options: { status?: string; draftType?: string; targetType?: string; limit?: number } = {}) {
+  const params = new URLSearchParams()
+  if (options.status) params.set('status', options.status)
+  if (options.draftType) params.set('draft_type', options.draftType)
+  if (options.targetType) params.set('target_type', options.targetType)
+  if (options.limit) params.set('limit', String(options.limit))
+  const result = await railsFetch<{ generations: SeoAiGeneration[] }>(`/admin/seo_ai/generations?${params}`)
+  return result.generations
+}
+
+export async function runRailsSeoAiGeneration(input: {
+  targetType: string
+  targetId?: string | null
+  draftType?: string
+  includeImages?: boolean
+  imageLimit?: number
+}) {
+  const result = await railsFetch<{ generation: SeoAiGeneration }>('/admin/seo_ai/generations', {
+    method: 'POST',
+    body: JSON.stringify({
+      generation: {
+        target_type: input.targetType,
+        target_id: input.targetId,
+        draft_type: input.draftType,
+        include_images: Boolean(input.includeImages),
+        image_limit: input.imageLimit,
+      },
+    }),
+  })
+  return result.generation
+}
+
+export async function createRailsSeoAiBatch(input: {
+  ids?: string[]
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: string
+  missingSeoOnly?: boolean
+  includeImages?: boolean
+}) {
+  const result = await railsFetch<{ batch: SeoAiBatch; generations: SeoAiGeneration[] }>('/admin/seo_ai/batches', {
+    method: 'POST',
+    body: JSON.stringify({
+      batch: {
+        ids: input.ids || [],
+        brand: input.brand || '',
+        category: input.category || '',
+        subcategory: input.subcategory || '',
+        gender: input.gender || '',
+        status: input.status || '',
+        missing_seo_only: Boolean(input.missingSeoOnly),
+        include_images: Boolean(input.includeImages),
+      },
+    }),
+  })
+  return result
+}
+
+export async function applyRailsSeoAiDraft(id: string, fields?: string[]) {
+  const result = await railsFetch<{ generation: SeoAiGeneration; result: any }>(`/admin/seo_ai/generations/${id}/apply`, {
+    method: 'POST',
+    body: JSON.stringify({ fields }),
+  })
+  return result
+}
+
+export async function rejectRailsSeoAiDraft(id: string) {
+  const result = await railsFetch<{ generation: SeoAiGeneration }>(`/admin/seo_ai/generations/${id}/reject`, {
+    method: 'POST',
+  })
+  return result.generation
+}
+
+export async function createRailsSeoAiLandingIdeas(filters: Record<string, any>) {
+  const result = await railsFetch<{ generation: SeoAiGeneration }>('/admin/seo_ai/landing_ideas', {
+    method: 'POST',
+    body: JSON.stringify({ filters }),
+  })
+  return result.generation
 }
 
 export function buildRailsAdminProductsParams(options: {

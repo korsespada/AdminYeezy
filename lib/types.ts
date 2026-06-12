@@ -143,6 +143,57 @@ export interface ActionResponse {
   data?: any
 }
 
+export interface SeoAiSetting {
+  id?: string
+  task_key: string
+  model: string
+  temperature: number
+  max_tokens: number
+  system_prompt: string
+  user_prompt_template: string
+  enabled: boolean
+}
+
+export interface SeoAiGeneration {
+  id: string
+  target_type: 'Product' | 'Brand' | 'Category' | 'SeoLanding' | 'LandingIdea'
+  target_id?: string | null
+  target_label?: string | null
+  draft_type: 'product' | 'brand' | 'category' | 'landing_ideas'
+  status: 'draft' | 'applied' | 'rejected' | 'failed'
+  input_snapshot: Record<string, any>
+  text_result: Record<string, any>
+  vision_result: Record<string, any>
+  output: Record<string, any>
+  prompt_snapshot: Record<string, any>
+  model_snapshot: Record<string, any>
+  error_message?: string | null
+  batch_id?: string | null
+  created_at: string
+  updated_at: string
+  applied_at?: string | null
+}
+
+export interface SeoAiBatch {
+  id: string
+  target_type: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  ids: string[]
+  brand?: string | null
+  category?: string | null
+  subcategory?: string | null
+  gender?: string | null
+  target_status?: string | null
+  missing_seo_only: boolean
+  include_images: boolean
+  total_count: number
+  success_count: number
+  failure_count: number
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
 /**
  * PocketBase collection names
  */

@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -55,6 +55,13 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           <Link href="/admin/gender-backfill">
             <Tags size={20} className="text-emerald-400" />
             <span className="hidden md:inline">Гендер</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="AI SEO Studio">
+          <Link href="/admin/seo-ai">
+            <Sparkles size={20} className="text-fuchsia-400" />
+            <span className="hidden md:inline">AI SEO</span>
           </Link>
         </Button>
 
