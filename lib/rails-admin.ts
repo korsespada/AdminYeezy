@@ -11,10 +11,215 @@ import {
   type SeoAiSetting,
   type Subcategory,
 } from './types'
+import { cookies } from 'next/headers'
+import { ADMIN_TOKEN_COOKIE } from './admin-session'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
 const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
+
+export interface RailsCrmCustomer {
+  id?: number | string
+  display_name?: string | null
+  email?: string | null
+  phone?: string | null
+  telegram_username?: string | null
+  preferred_contact_channel?: string | null
+}
+
+export interface RailsCrmOrder {
+  id: number | string
+  public_number: string
+  status: string
+  currency?: string
+  total_cents?: number
+  paid_at?: string | null
+  created_at?: string
+  customer?: RailsCrmCustomer | null
+  item_counts?: Record<string, number>
+}
+
+export interface RailsCrmRefund {
+  id: number | string
+  order_id?: number | string
+  order_public_number?: string
+  order_item_id?: number | string | null
+  order_item_public_number?: string | null
+  status: string
+  target?: string
+  reason?: string
+  amount_cents?: number
+  currency?: string
+  created_at?: string
+}
+
+export interface RailsCrmWalletWithdrawal {
+  id: number | string
+  customer_name?: string
+  amount_cents?: number
+  currency?: string
+  status: string
+  created_at?: string
+}
+
+export interface RailsCrmListResult<T> {
+  items: T[]
+  totalItems: number
+  totalPages: number
+}
+
+export interface RailsCrmCustomerSummary {
+  id: number | string
+  display_name?: string | null
+  email?: string | null
+  phone?: string | null
+  telegram_id?: string | null
+  telegram_username?: string | null
+  country?: string
+  preferred_contact_channel?: string
+  referral_code?: string
+  created_at?: string
+  order_count: number
+  last_order_at?: string | null
+  wallet_cash_cents: number
+  wallet_bonus_cents: number
+  wallet_total_cents: number
+}
+
+export interface RailsCrmSupplierRequest {
+  id: number | string
+  supplier_id?: number | string
+  supplier_name?: string
+  request_type?: string
+  status: string
+  message_text?: string | null
+  sent_at?: string | null
+  answered_at?: string | null
+  sla_deadline_at?: string | null
+  overdue?: boolean
+  responses?: RailsCrmSupplierResponse[]
+}
+
+export interface RailsCrmSupplierResponse {
+  id: number | string
+  response_type: string
+  message_text?: string | null
+  price_cents?: number | null
+  created_at?: string
+}
+
+export interface RailsCrmReplacementOffer {
+  id: number | string
+  order_item_id?: number | string
+  status: string
+  message?: string | null
+  price_difference_cents?: number | null
+  expires_at?: string | null
+  replacement_product?: {
+    id: number | string
+    name?: string
+    slug?: string
+    price_cents?: number
+    image_url?: string | null
+  }
+  replacement_variant?: {
+    id: number | string
+    size?: string
+    sku?: string
+    price_cents?: number
+  } | null
+}
+
+export interface RailsCrmOrderItem {
+  id: number | string
+  public_number: string
+  title: string
+  image_url?: string | null
+  size?: string | null
+  sku?: string | null
+  fulfillment_mode: string
+  status: string
+  public_status?: string
+  public_message?: string
+  quantity: number
+  unit_price_cents: number
+  total_price_cents: number
+  production_min_days?: number | null
+  production_max_days?: number | null
+  supplier?: {
+    id: number | string
+    name?: string
+    wechat_name?: string | null
+  } | null
+  metadata?: Record<string, any>
+  replacement_offers?: RailsCrmReplacementOffer[]
+  supplier_requests?: RailsCrmSupplierRequest[]
+}
+
+export interface RailsCrmPayment {
+  id: number | string
+  provider?: string
+  status: string
+  public_status?: string
+  amount_cents?: number
+  currency?: string
+  payment_method?: string | null
+  created_at?: string
+}
+
+export interface RailsCrmOrderEvent {
+  id: number | string
+  event_type: string
+  from_status?: string | null
+  to_status?: string | null
+  message?: string | null
+  actor_type?: string | null
+  actor_id?: number | string | null
+  order_item_id?: number | string | null
+  created_at?: string
+}
+
+export interface RailsCrmOrderDetail extends RailsCrmOrder {
+  public_status?: string
+  public_message?: string
+  next_step?: string
+  subtotal_cents?: number
+  delivery_cents?: number
+  discount_cents?: number
+  wallet_spent_cents?: number
+  admin_comment?: string | null
+  customer_comment?: string | null
+  cancelled_at?: string | null
+  delivered_at?: string | null
+  items: RailsCrmOrderItem[]
+  payments: RailsCrmPayment[]
+  refunds: RailsCrmRefund[]
+  timeline: RailsCrmOrderEvent[]
+}
+
+export interface RailsCrmReplacementProductOption {
+  id: number | string
+  name: string
+  slug?: string
+  sku?: string | null
+  status?: string
+  price_cents?: number
+  currency?: string
+  image_url?: string | null
+  brand?: {
+    id?: number | string
+    name?: string
+    slug?: string
+  } | null
+  variants?: Array<{
+    id: number | string
+    sku?: string | null
+    size?: string | null
+    color?: string | null
+    price_cents?: number | null
+    status?: string
+  }>
+}
 
 function railsApiUrl(pathname: string) {
   const rawBase = process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL
@@ -35,6 +240,14 @@ function jwtExpiresAt(token: string) {
 }
 
 async function railsAdminToken() {
+  try {
+    const cookieToken = (await cookies()).get(ADMIN_TOKEN_COOKIE)?.value
+    if (cookieToken) return cookieToken
+  } catch {
+    // Server actions and server components have request cookies; tests and
+    // background scripts fall back to env credentials below.
+  }
+
   const staticToken = process.env.RAILS_ADMIN_TOKEN || process.env.ADMIN_RAILS_TOKEN
   if (staticToken) return staticToken
 
@@ -442,6 +655,244 @@ export async function searchRailsAdminProductsExact(search: string, statuses: Pr
 export async function getRailsAdminProduct(id: string) {
   const result = await railsFetch<{ product: any }>(`/admin/products/${id}`)
   return mapRailsProduct(result.product)
+}
+
+export async function listRailsCrmOrders(options: {
+  page?: number
+  perPage?: number
+  search?: string
+  status?: string
+  queue?: 'paid' | 'problem' | 'refund' | 'production' | string
+} = {}): Promise<RailsCrmListResult<RailsCrmOrder>> {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page || 1))
+  params.set('per_page', String(options.perPage || 20))
+  if (options.search?.trim()) params.set('q', options.search.trim())
+  if (options.status) params.set('status', options.status)
+  if (options.queue) params.set('queue', options.queue)
+
+  const result = await railsFetch<{ orders: RailsCrmOrder[]; meta?: { total?: number; pages?: number } }>(`/admin/orders?${params}`)
+
+  return {
+    items: result.orders || [],
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+  }
+}
+
+export async function getRailsCrmOrder(id: string): Promise<RailsCrmOrderDetail> {
+  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}`)
+  return result.order
+}
+
+export async function transitionRailsCrmOrder(id: string, input: {
+  toStatus: string
+  message?: string
+}) {
+  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}/transitions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      to_status: input.toStatus,
+      message: input.message || '',
+    }),
+  })
+  return result.order
+}
+
+export async function transitionRailsCrmOrderItem(id: string, input: {
+  toStatus: string
+  message?: string
+}) {
+  const result = await railsFetch<{ item: RailsCrmOrderItem }>(`/admin/order_items/${encodeURIComponent(id)}/transitions`, {
+    method: 'POST',
+    body: JSON.stringify({
+      to_status: input.toStatus,
+      message: input.message || '',
+    }),
+  })
+  return result.item
+}
+
+export async function createRailsCrmSupplierRequest(itemId: string, input: {
+  supplierId?: string
+  requestType?: string
+  messageText?: string
+  slaHours?: number
+}) {
+  const result = await railsFetch<{ supplier_request: RailsCrmSupplierRequest }>(
+    `/admin/order_items/${encodeURIComponent(itemId)}/supplier_requests`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        supplier_id: input.supplierId || '',
+        request_type: input.requestType || 'availability',
+        message_text: input.messageText || '',
+        sla_hours: input.slaHours || 6,
+      }),
+    }
+  )
+  return result.supplier_request
+}
+
+export async function recordRailsCrmSupplierResponse(requestId: string, input: {
+  responseType: string
+  messageText?: string
+  priceCents?: number | null
+}) {
+  const result = await railsFetch<{ supplier_response: RailsCrmSupplierResponse }>(
+    `/admin/supplier_requests/${encodeURIComponent(requestId)}/responses`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        response_type: input.responseType,
+        message_text: input.messageText || '',
+        price_cents: input.priceCents ?? null,
+      }),
+    }
+  )
+  return result.supplier_response
+}
+
+export async function createRailsCrmReplacementOffer(itemId: string, input: {
+  replacementProductId: string
+  replacementVariantId?: string
+  message?: string
+  expiresAt?: string
+}) {
+  const result = await railsFetch<{ replacement_offers: RailsCrmReplacementOffer[] }>(
+    `/admin/order_items/${encodeURIComponent(itemId)}/replacement_offers`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        offers: [{
+          replacement_product_id: input.replacementProductId,
+          replacement_variant_id: input.replacementVariantId || '',
+          message: input.message || '',
+          expires_at: input.expiresAt || '',
+        }],
+      }),
+    }
+  )
+  return result.replacement_offers
+}
+
+export async function searchRailsCrmReplacementProducts(options: {
+  search: string
+  limit?: number
+}): Promise<RailsCrmReplacementProductOption[]> {
+  const search = options.search.trim()
+  if (!search) return []
+
+  const params = new URLSearchParams()
+  params.set('page', '1')
+  params.set('per_page', String(options.limit || 8))
+  params.set('q', search)
+  params.set('status', 'active')
+
+  const result = await railsFetch<{ products: RailsCrmReplacementProductOption[] }>(`/admin/products?${params}`)
+  return result.products || []
+}
+
+export async function listRailsCrmRefunds(options: {
+  page?: number
+  perPage?: number
+  status?: string
+  target?: string
+} = {}): Promise<RailsCrmListResult<RailsCrmRefund>> {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page || 1))
+  params.set('per_page', String(options.perPage || 20))
+  if (options.status) params.set('status', options.status)
+  if (options.target) params.set('target', options.target)
+
+  const result = await railsFetch<{ refunds: RailsCrmRefund[]; meta?: { total?: number; pages?: number } }>(`/admin/refunds?${params}`)
+
+  return {
+    items: result.refunds || [],
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+  }
+}
+
+export async function listRailsCrmWalletWithdrawals(options: {
+  status?: string
+} = {}): Promise<RailsCrmListResult<RailsCrmWalletWithdrawal>> {
+  const params = new URLSearchParams()
+  if (options.status) params.set('status', options.status)
+
+  const suffix = params.toString() ? `?${params}` : ''
+  const result = await railsFetch<{ wallet_withdrawal_requests: RailsCrmWalletWithdrawal[] }>(`/admin/wallet_withdrawal_requests${suffix}`)
+  const items = result.wallet_withdrawal_requests || []
+
+  return {
+    items,
+    totalItems: items.length,
+    totalPages: 1,
+  }
+}
+
+export async function listRailsCrmCustomers(options: {
+  page?: number
+  perPage?: number
+  search?: string
+} = {}): Promise<RailsCrmListResult<RailsCrmCustomerSummary>> {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page || 1))
+  params.set('per_page', String(options.perPage || 30))
+  if (options.search?.trim()) params.set('q', options.search.trim())
+
+  const result = await railsFetch<{
+    customers: RailsCrmCustomerSummary[]
+    meta?: { total?: number; pages?: number }
+  }>(`/admin/customers?${params}`)
+
+  return {
+    items: result.customers || [],
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+  }
+}
+
+export async function approveRailsCrmRefund(id: string) {
+  const result = await railsFetch<{ refund: RailsCrmRefund }>(`/admin/refunds/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+  })
+  return result.refund
+}
+
+export async function rejectRailsCrmRefund(id: string, message?: string) {
+  const result = await railsFetch<{ refund: RailsCrmRefund }>(`/admin/refunds/${encodeURIComponent(id)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ message: message || '' }),
+  })
+  return result.refund
+}
+
+export async function approveRailsCrmWalletWithdrawal(id: string) {
+  const result = await railsFetch<{ wallet_withdrawal_request: RailsCrmWalletWithdrawal }>(
+    `/admin/wallet_withdrawal_requests/${encodeURIComponent(id)}/approve`,
+    { method: 'POST' }
+  )
+  return result.wallet_withdrawal_request
+}
+
+export async function rejectRailsCrmWalletWithdrawal(id: string, message?: string) {
+  const result = await railsFetch<{ wallet_withdrawal_request: RailsCrmWalletWithdrawal }>(
+    `/admin/wallet_withdrawal_requests/${encodeURIComponent(id)}/reject`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ message: message || '' }),
+    }
+  )
+  return result.wallet_withdrawal_request
+}
+
+export async function markRailsCrmWalletWithdrawalPaid(id: string) {
+  const result = await railsFetch<{ wallet_withdrawal_request: RailsCrmWalletWithdrawal }>(
+    `/admin/wallet_withdrawal_requests/${encodeURIComponent(id)}/mark_paid`,
+    { method: 'POST' }
+  )
+  return result.wallet_withdrawal_request
 }
 
 export async function getRailsSeoAiSettings() {

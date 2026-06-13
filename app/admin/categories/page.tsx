@@ -1,37 +1,57 @@
-import { query } from '@/lib/db'
 import CategoryList from '@/components/inventory/CategoryList'
+import { getRailsCatalogLookups } from '@/lib/rails-admin'
+import { type Category, type Subcategory } from '@/lib/types'
+import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
+
+type CategoryLookupRow = (Category | Subcategory) & {
+  kind: 'category' | 'subcategory'
+  parentName?: string
+}
 
 export default async function CategoriesPage({
   searchParams,
 }: {
-  searchParams: { page?: string; search?: string }
+  searchParams: Promise<{ page?: string; search?: string }>
 }) {
-  const page = Number(searchParams.page) || 1
+  await connection()
+  const params = await searchParams
+  const page = Number(params.page) || 1
   const perPage = 40
   const offset = (page - 1) * perPage
-  const searchTerm = searchParams.search || ''
+  const searchTerm = params.search?.trim().toLowerCase() || ''
   
   try {
-    const whereClause = searchTerm ? 'WHERE name ILIKE $1 OR description ILIKE $1' : ''
-    const params = searchTerm ? [`%${searchTerm}%`] : []
-
-    const [categoriesRes, countRes] = await Promise.all([
-      query(`SELECT * FROM categories ${whereClause} ORDER BY name ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params, perPage, offset]),
-      query(`SELECT COUNT(*) FROM categories ${whereClause}`, params)
-    ])
-
-    const categories = categoriesRes.rows
-    const totalItems = parseInt(countRes.rows[0].count)
+    const { categories, subcategories } = await getRailsCatalogLookups()
+    const parentById = new Map(categories.map((category) => [category.id, category.name]))
+    const allItems: CategoryLookupRow[] = [
+      ...categories.map((category) => ({ ...category, kind: 'category' as const })),
+      ...subcategories.map((subcategory) => ({
+        ...subcategory,
+        kind: 'subcategory' as const,
+        parentName: parentById.get(subcategory.category) || 'Без родительской категории',
+      })),
+    ].sort((a, b) => a.name.localeCompare(b.name, 'ru', { sensitivity: 'base' }))
+    const filteredItems = searchTerm
+      ? allItems.filter((category) =>
+          [category.name, category.slug, category.description, category.parentName].some((value) =>
+            String(value || '').toLowerCase().includes(searchTerm)
+          )
+        )
+      : allItems
+    const pageItems = filteredItems.slice(offset, offset + perPage)
+    const totalItems = filteredItems.length
     const totalPages = Math.ceil(totalItems / perPage)
 
     return (
       <>
-        <CategoryList initialData={categories} />
+        <div className="p-8">
+          <CategoryList initialData={pageItems} totalItems={totalItems} />
+        </div>
         
         {totalPages > 1 && (
-          <div className="mt-6 flex items-center justify-between border-t border-slate-700 bg-slate-800 px-4 py-3 rounded-lg">
+          <div className="mx-8 mt-6 flex items-center justify-between rounded-lg border-t border-slate-700 bg-slate-800 px-4 py-3">
              <div className="text-sm text-slate-400">
                 Показано <span className="text-slate-200">{offset + 1}</span> - <span className="text-slate-200">{Math.min(offset + perPage, totalItems)}</span> из <span className="text-slate-200">{totalItems}</span>
              </div>
@@ -48,6 +68,6 @@ export default async function CategoriesPage({
       </>
     )
   } catch (err: any) {
-    return <div className="p-4 bg-red-900/20 text-red-400 rounded-lg">Ошибка загрузки категорий: {err.message}</div>
+    return <div className="m-8 rounded-lg bg-red-900/20 p-4 text-red-400">Ошибка загрузки категорий из Rails API: {err.message}</div>
   }
 }

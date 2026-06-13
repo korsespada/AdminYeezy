@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as fc from 'fast-check'
+import { ADMIN_TOKEN_COOKIE } from '@/lib/admin-session'
 
 /**
  * Feature: yeezyunique-admin
@@ -100,7 +101,7 @@ describe('Authentication Properties', () => {
    * The auth cookie name should be consistent across login and logout.
    */
   it('Property 23: Auth cookie name is consistent', () => {
-    const COOKIE_NAME = 'pb_auth'
+    const COOKIE_NAME = ADMIN_TOKEN_COOKIE
     
     // Verify cookie name is a non-empty string
     expect(COOKIE_NAME).toBeTruthy()

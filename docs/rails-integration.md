@@ -58,13 +58,36 @@ CSV adapter должен:
 - публиковать чанками;
 - показывать ошибки партии в UI.
 
-## Этап 4. CRM позже
+## Этап 4. CRM
 
-Добавить в `AdminYeezy` страницы заказов, карточку заказа, возвраты и supplier workflow через готовые Rails admin endpoints. Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
+CRM-экраны живут в `AdminYeezy` и работают через Rails admin endpoints:
+
+```text
+GET  /api/v1/admin/orders
+GET  /api/v1/admin/orders/:id
+POST /api/v1/admin/orders/:id/transitions
+POST /api/v1/admin/order_items/:id/transitions
+POST /api/v1/admin/order_items/:id/supplier_requests
+POST /api/v1/admin/supplier_requests/:id/responses
+POST /api/v1/admin/order_items/:id/replacement_offers
+GET  /api/v1/admin/refunds
+POST /api/v1/admin/refunds/:id/approve
+POST /api/v1/admin/refunds/:id/reject
+GET  /api/v1/admin/wallet_withdrawal_requests
+POST /api/v1/admin/wallet_withdrawal_requests/:id/approve
+POST /api/v1/admin/wallet_withdrawal_requests/:id/reject
+POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
+GET  /api/v1/admin/customers
+```
+
+Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
 
 ## Проверка
 
 1. Вход выполняется Rails-учетной записью.
 2. Изменение опубликованного товара появляется на сайте.
 3. Тестовая партия публикуется без дублей при повторном запуске.
-4. Legacy-БД `shop` не меняется в результате новой публикации.
+4. CRM customers, orders, refunds и wallet withdrawals открываются через Rails JWT.
+5. Legacy-БД `shop` не меняется в результате новой публикации.
+
+Полная карта разделов: [admin-sections.md](./admin-sections.md).

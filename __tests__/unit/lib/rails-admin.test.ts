@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  approveRailsCrmRefund,
+  approveRailsCrmWalletWithdrawal,
   buildRailsAdminProductsParams,
   getRailsProductFilterFacets,
+  listRailsCrmCustomers,
   listRailsAdminProducts,
   mapRailsProduct,
+  markRailsCrmWalletWithdrawalPaid,
   normalizeProductSearchInput,
   productFormDataToRailsPayload,
+  rejectRailsCrmRefund,
+  rejectRailsCrmWalletWithdrawal,
   restoreRailsAdminProductFromTrash,
 } from '@/lib/rails-admin'
 
@@ -92,6 +98,59 @@ describe('rails admin product adapter', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=ext-1')
     expect(init.headers.Authorization).toBe('Bearer test-token')
+  })
+
+  it('loads CRM customers from the admin endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        customers: [
+          {
+            id: 'customer-1',
+            display_name: 'VIP Customer',
+            order_count: 2,
+            wallet_total_cents: 15000,
+          },
+        ],
+        meta: { total: 1, pages: 1 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await listRailsCrmCustomers({ page: 2, perPage: 30, search: 'vip' })
+
+    expect(result.items).toHaveLength(1)
+    expect(result.totalItems).toBe(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://rails.example.test/api/v1/admin/customers?page=2&per_page=30&q=vip')
+    expect(init.headers.Authorization).toBe('Bearer test-token')
+  })
+
+  it('calls CRM refund and wallet mutation endpoints', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        refund: { id: 'refund-1', status: 'approved' },
+        wallet_withdrawal_request: { id: 'withdrawal-1', status: 'approved' },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await approveRailsCrmRefund('refund-1')
+    await rejectRailsCrmRefund('refund-2', 'bad request')
+    await approveRailsCrmWalletWithdrawal('withdrawal-1')
+    await rejectRailsCrmWalletWithdrawal('withdrawal-2', 'bad payout')
+    await markRailsCrmWalletWithdrawalPaid('withdrawal-3')
+
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://rails.example.test/api/v1/admin/refunds/refund-1/approve')
+    expect(String(fetchMock.mock.calls[1][0])).toBe('https://rails.example.test/api/v1/admin/refunds/refund-2/reject')
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ message: 'bad request' })
+    expect(String(fetchMock.mock.calls[2][0])).toBe('https://rails.example.test/api/v1/admin/wallet_withdrawal_requests/withdrawal-1/approve')
+    expect(String(fetchMock.mock.calls[3][0])).toBe('https://rails.example.test/api/v1/admin/wallet_withdrawal_requests/withdrawal-2/reject')
+    expect(JSON.parse(fetchMock.mock.calls[3][1].body)).toEqual({ message: 'bad payout' })
+    expect(String(fetchMock.mock.calls[4][0])).toBe('https://rails.example.test/api/v1/admin/wallet_withdrawal_requests/withdrawal-3/mark_paid')
+    expect(fetchMock.mock.calls.every(([, init]) => init.method === 'POST')).toBe(true)
   })
 
   it('loads gender-filtered products from the catalog endpoint with exact admin semantics', async () => {

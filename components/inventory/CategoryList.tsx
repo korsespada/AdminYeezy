@@ -3,16 +3,17 @@
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Category } from '@/lib/types'
-import { Plus, Search, Edit, Trash2 } from 'lucide-react'
+import { Search } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 
 interface CategoryListProps {
-  initialData: Category[]
+  initialData: Array<Category & { kind?: 'category' | 'subcategory'; parentName?: string }>
+  totalItems: number
 }
 
-export default function CategoryList({ initialData }: CategoryListProps) {
+export default function CategoryList({ initialData, totalItems }: CategoryListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [categories, setCategories] = useState<Category[]>(initialData)
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '')
 
   const handleSearch = (value: string) => {
@@ -45,18 +46,14 @@ export default function CategoryList({ initialData }: CategoryListProps) {
           />
         </div>
 
-        {/* Create Button */}
-        <button
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
-        >
-          <Plus size={18} />
-          New Category
-        </button>
+        <Badge className="bg-slate-700 text-slate-200 hover:bg-slate-700">
+          Rails read-only
+        </Badge>
       </div>
 
       {/* Results Count */}
       <div className="text-sm text-gray-600 dark:text-gray-400">
-        Showing {categories.length} categories
+        Showing {initialData.length} of {totalItems} categories
         {searchTerm && ` matching "${searchTerm}"`}
       </div>
 
@@ -70,34 +67,37 @@ export default function CategoryList({ initialData }: CategoryListProps) {
                   Name
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Description
+                  Type
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                  Actions
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Slug
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Parent / Description
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {categories.map((category) => (
+              {initialData.map((category) => (
                 <tr key={category.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">
                       {category.name}
                     </div>
                   </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <Badge variant="outline" className="border-gray-300 text-gray-700 dark:border-gray-600 dark:text-gray-300">
+                      {category.kind === 'subcategory' ? 'Subcategory' : 'Category'}
+                    </Badge>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <code className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-gray-900 dark:text-gray-300">
+                      {category.slug || '-'}
+                    </code>
+                  </td>
                   <td className="px-6 py-4">
                     <div className="text-sm text-gray-600 dark:text-gray-400">
-                      {category.description || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end gap-2">
-                      <button className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300">
-                        <Edit size={18} />
-                      </button>
-                      <button className="text-gray-400 hover:text-red-600 dark:hover:text-red-400">
-                        <Trash2 size={18} />
-                      </button>
+                      {category.parentName || category.description || '-'}
                     </div>
                   </td>
                 </tr>
@@ -108,7 +108,7 @@ export default function CategoryList({ initialData }: CategoryListProps) {
       </div>
 
       {/* Empty State */}
-      {categories.length === 0 && (
+      {initialData.length === 0 && (
         <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg">
           <p className="text-gray-500 dark:text-gray-400">
             {searchTerm ? `No categories found matching "${searchTerm}"` : 'No categories found'}

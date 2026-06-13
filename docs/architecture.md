@@ -39,4 +39,7 @@ Rails CRM Postgres является единственным source of truth д�
 1. Сохранить работающие scraping, AI и analytics экраны.
 2. Перевести вход и опубликованный каталог на Rails API.
 3. Публиковать партии через Rails import API.
-4. Позже добавить CRM-экраны заказов, возвратов и supplier workflow поверх Rails API.
+4. Развивать CRM-экраны заказов, клиентов, возвратов, wallet и supplier workflow поверх Rails API.
+
+Актуальная карта разделов: [admin-sections.md](./admin-sections.md).
+Порядок деплоя и smoke-checks: [deployment-runbook.md](./deployment-runbook.md).

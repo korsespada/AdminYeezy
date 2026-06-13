@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { ADMIN_SESSION_COOKIE, ADMIN_TOKEN_COOKIE, LEGACY_PB_AUTH_COOKIE } from '@/lib/admin-session'
 
-const ADMIN_ENTRY_PATH = '/admin/batches'
+const ADMIN_ENTRY_PATH = '/admin/home'
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  const authCookie = request.cookies.get('admin_auth') || request.cookies.get('pb_auth')
-  const isAuthenticated = !!authCookie?.value
+  const tokenCookie = request.cookies.get(ADMIN_TOKEN_COOKIE)
+  const fallbackCookie = request.cookies.get(ADMIN_SESSION_COOKIE) || request.cookies.get(LEGACY_PB_AUTH_COOKIE)
+  const isAuthenticated = process.env.NODE_ENV === 'production'
+    ? !!tokenCookie?.value
+    : Boolean(tokenCookie?.value || fallbackCookie?.value)
 
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {

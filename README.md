@@ -33,8 +33,10 @@ npm run dev
 ## Документация
 
 - [Архитектура](./docs/architecture.md)
+- [Разделы админки](./docs/admin-sections.md)
 - [Интеграция с Rails API](./docs/rails-integration.md)
 - [Деплой в Coolify](./docs/coolify-deployment.md)
+- [Runbook деплоя и проверок](./docs/deployment-runbook.md)
 - [NocoDB](./docs/nocodb.md)
 - [Post-process скрипты](./docs/postprocess-scripts.md)
 

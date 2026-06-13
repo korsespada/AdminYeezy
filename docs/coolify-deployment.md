@@ -61,4 +61,6 @@ https://admin.yeezyunique.ru/login
 https://api.yeezyunique.ru/api/v1/health
 ```
 
-После подключения Rails API проверить вход, список товаров, scraping-партии, публикацию тестовой партии и отображение товара на storefront.
+После подключения Rails API проверить вход, список товаров, scraping-партии, публикацию тестовой партии, CRM-разделы и отображение товара на storefront.
+
+Подробный порядок деплоя Rails API -> AdminYeezy -> storefront описан в [deployment-runbook.md](./deployment-runbook.md).

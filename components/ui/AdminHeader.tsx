@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles, ClipboardList } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -26,7 +26,7 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           </Button>
         )}
         <div className="hidden sm:block">
-          <Link href="/admin" className="hover:opacity-80 transition-opacity">
+          <Link href="/admin/home" className="hover:opacity-80 transition-opacity">
             <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
               <span className="text-indigo-500">Yeezy</span>
               <span>Unique</span>
@@ -37,6 +37,13 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="CRM">
+          <Link href="/admin/crm">
+            <ClipboardList size={20} className="text-sky-400" />
+            <span className="hidden md:inline">CRM</span>
+          </Link>
+        </Button>
+
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Выгрузка и парсинг">
           <Link href="/admin/batches">
             <RefreshCw size={20} className="text-orange-400" />
