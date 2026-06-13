@@ -7,6 +7,8 @@ import fs from 'fs'
 import os from 'os'
 import { scrapingQuery } from '@/lib/db'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
+import { requireAdmin } from '@/lib/admin-session'
+import { isSafeRuntimePath, resolveSafeRuntimePath } from '@/lib/runtime-paths'
 
 const execFileAsync = promisify(execFile)
 
@@ -192,14 +194,16 @@ async function resolveSourcePath({
 }): Promise<ResolvedSourcePath | undefined> {
   async function isReadableSource(filePath?: string | null, taskId?: number | null) {
     if (!filePath) return false
-    if (fs.existsSync(/*turbopackIgnore: true*/ filePath)) return true
 
     try {
       const artifact = await getScrapingFileArtifact(filePath, taskId)
-      return Boolean(artifact?.content)
+      if (artifact?.content) return true
     } catch {
-      return false
+      // Fall through to a constrained filesystem read.
     }
+
+    if (!isSafeRuntimePath(filePath)) return false
+    return fs.existsSync(/*turbopackIgnore: true*/ resolveSafeRuntimePath(filePath))
   }
 
   const cleanSourcePath = sourcePath?.replace(/"/g, '')
@@ -260,7 +264,7 @@ async function loadSourceCsvContext(params: {
     if (artifact?.content) {
       text = artifact.content
     } else {
-      text = fs.readFileSync(/*turbopackIgnore: true*/ resolved.filePath, 'utf-8')
+      text = fs.readFileSync(/*turbopackIgnore: true*/ resolveSafeRuntimePath(resolved.filePath), 'utf-8')
     }
 
     const rows = parseCsvText(text)
@@ -357,6 +361,8 @@ export async function targetedAiEditAction({
   sourcePath?: string | null
 }) {
   try {
+    await requireAdmin()
+
     const cleanInstruction = instruction.trim()
     console.log('[targetedAiEdit] start', {
       items: items.length,
@@ -508,13 +514,15 @@ ${JSON.stringify(subcategories)}
 }
 
 export async function processAiAction(supplierId: number, products: any[], filePath?: string) {
+  await requireAdmin()
+
   const tmpDir = getWritableTmpDir()
   const tempIn = path.join(tmpDir, `ai_in_${Date.now()}.json`)
   
   try {
     // 1. Создаем бэкап, если передан путь к файлу
     if (filePath) {
-      const cleanPath = filePath.replace(/"/g, '');
+      const cleanPath = resolveSafeRuntimePath(filePath);
       if (fs.existsSync(/*turbopackIgnore: true*/ cleanPath)) {
         const backupPath = cleanPath.replace('.csv', '_original.csv');
         // Создаем бэкап только если его еще нет (чтобы не перезатереть самый первый оригинал)

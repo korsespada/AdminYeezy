@@ -4,6 +4,8 @@ import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/d
 import { revalidatePath } from 'next/cache'
 import { uploadToS3 } from '@/lib/s3'
 import { getScrapingFileArtifact, saveScrapingFileArtifact } from '@/lib/scraping-files'
+import { requireAdmin } from '@/lib/admin-session'
+import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
 
 export interface CsvProduct {
     id?: string | number
@@ -168,6 +170,8 @@ function parseServerCsv(text: string): CsvProduct[] {
  * Загрузка справочников для импорта
  */
 export async function fetchLookupsAction() {
+    await requireAdmin()
+
     const [brands, categories, subcategories] = await Promise.all([
         query('SELECT * FROM brands ORDER BY name ASC'),
         query('SELECT * FROM categories ORDER BY name ASC'),
@@ -185,6 +189,8 @@ export async function fetchLookupsAction() {
  */
 export async function pushCsvProductsAction(products: CsvProduct[]) {
     try {
+        await requireAdmin()
+
         const results = { success: 0, failed: 0, errors: [] as string[] }
 
         const processPromises = products.map(async (p) => {
@@ -291,6 +297,8 @@ export async function pushCsvProductsAction(products: CsvProduct[]) {
 
 // Функции для работы с локальными файлами
 export async function readLocalCsvAction(filePath: string) {
+  await requireAdmin()
+
   const fs = require('fs/promises');
   try {
     const cleanPath = filePath.replace(/"/g, '');
@@ -299,7 +307,7 @@ export async function readLocalCsvAction(filePath: string) {
       return { success: true, content: dbFile.content, source: 'db' };
     }
 
-    const buffer = await fs.readFile(/*turbopackIgnore: true*/ cleanPath);
+    const buffer = await fs.readFile(/*turbopackIgnore: true*/ resolveSafeRuntimePath(cleanPath));
     
     // Пробуем разные кодировки
     const encodings = ['utf-8', 'gbk', 'windows-1251'];
@@ -330,8 +338,12 @@ export async function readLocalCsvAction(filePath: string) {
 }
 
 export async function saveLocalCsvAction(filePath: string, products: any[], columns: { name: string, key: string }[], delimiter: string = ',') {
+  await requireAdmin()
+
   const fs = require('fs/promises');
   try {
+    const safePath = resolveSafeRuntimePath(filePath);
+
     // Формируем CSV строку
     // 1. Заголовки (используем оригинальные имена из файла)
     const header = columns.map(c => c.name).join(delimiter);
@@ -366,7 +378,7 @@ export async function saveLocalCsvAction(filePath: string, products: any[], colu
     let attempts = 3;
     while (attempts > 0) {
       try {
-        await fs.writeFile(/*turbopackIgnore: true*/ filePath.replace(/"/g, ''), csvContent, 'utf-8');
+        await fs.writeFile(/*turbopackIgnore: true*/ safePath, csvContent, 'utf-8');
         return { success: true };
       } catch (writeErr: any) {
         attempts--;
@@ -393,6 +405,8 @@ export async function saveLocalCsvAction(filePath: string, products: any[], colu
 
 export async function getBatchProductsAction(batchId: string) {
   try {
+    await requireAdmin()
+
     const res = await scrapingQuery(`
       SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, ai_processed, created_at, updated_at
       FROM products
@@ -479,6 +493,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
 }
 
 export async function saveBatchProductsAction(batchId: string, products: any[]) {
+  await requireAdmin()
+
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
@@ -510,6 +526,8 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
 
 export async function updateBatchProductAction(identifier: string | number, patch: Partial<CsvProduct>, batchId?: string | null) {
   try {
+    await requireAdmin()
+
     const keys = Object.keys(patch).filter((key) => [
       'external_id',
       'name',
@@ -562,6 +580,8 @@ export async function updateBatchProductAction(identifier: string | number, patc
 
 export async function deleteBatchProductAction(identifier: string | number, batchId?: string | null) {
   try {
+    await requireAdmin()
+
     const isNumericId = String(identifier).match(/^\d+$/)
     const values: any[] = [identifier]
     let where = isNumericId ? 'id=$1' : 'external_id=$1'
@@ -584,6 +604,8 @@ export async function deleteBatchProductAction(identifier: string | number, batc
 
 export async function exportBatchProductsCsvAction(batchId: string): Promise<any> {
   try {
+    await requireAdmin()
+
     const res = await getBatchProductsAction(batchId)
     if (!res.success || !res.data) return res
     return {
@@ -615,6 +637,8 @@ export async function recordAiTaskAction({
   delimiter: string
 }) {
   try {
+    await requireAdmin()
+
     if (!supplierId) throw new Error("Missing supplierId");
 
     // 1. Генерируем путь для нового AI-файла
@@ -664,6 +688,8 @@ export async function recordAiTaskAction({
 }
 
 export async function getSupplierDataAction(supplierId: number) {
+    await requireAdmin()
+
     try {
         const res = await scrapingQuery('SELECT album_id, post_process_script, ai_parallel_enabled, ai_parallel_count FROM suppliers WHERE id=$1', [supplierId]);
         if (res.rows.length > 0) return res.rows[0];
@@ -675,6 +701,8 @@ export async function getSupplierDataAction(supplierId: number) {
 
 export async function runCustomSupplierScriptAction(inputPath: string | null, supplierId: number, batchId?: string | null): Promise<any> {
   try {
+    await requireAdmin()
+
     const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
     if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
     const supplierData = supplierRes.rows[0];
@@ -692,7 +720,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         fs.mkdirSync(/*turbopackIgnore: true*/ tmpDir, { recursive: true });
     }
     const taskId = Math.floor(Math.random() * 1000000);
-    let effectiveInputPath = inputPath;
+    let effectiveInputPath = inputPath ? resolveSafeRuntimePath(inputPath) : inputPath;
     const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
 
     if (batchId) {
@@ -710,7 +738,11 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
 
     if (!effectiveInputPath) throw new Error("Не указан CSV-файл или batchId");
 
-    const pythonScript = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplierData.post_process_script);
+    const parserDir = path.resolve(process.cwd(), 'scripts', 'parser');
+    const pythonScript = path.resolve(parserDir, supplierData.post_process_script);
+    if (!pythonScript.startsWith(`${parserDir}${path.sep}`)) {
+      throw new Error("Недопустимый post-process скрипт");
+    }
     
     return new Promise((resolve) => {
         const pythonProcess = spawn('python', [pythonScript, effectiveInputPath!, outputPath]);

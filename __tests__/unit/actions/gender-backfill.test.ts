@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getRailsAdminProduct: vi.fn(),
   patchRailsAdminProduct: vi.fn(),
   revalidatePath: vi.fn(),
+  requireAdmin: vi.fn(),
 }))
 
 vi.mock('next/cache', () => ({
@@ -16,6 +17,10 @@ vi.mock('@/lib/rails-admin', () => ({
   listRailsAdminProducts: mocks.listRailsAdminProducts,
   getRailsAdminProduct: mocks.getRailsAdminProduct,
   patchRailsAdminProduct: mocks.patchRailsAdminProduct,
+}))
+
+vi.mock('@/lib/admin-session', () => ({
+  requireAdmin: mocks.requireAdmin,
 }))
 
 function product(overrides: Partial<Product> = {}): Product {
@@ -46,6 +51,7 @@ function product(overrides: Partial<Product> = {}): Product {
 describe('gender backfill actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.requireAdmin.mockResolvedValue({ id: 1, email: 'admin@example.com', source: 'rails' })
   })
 
   it('parses CSV rows', async () => {

@@ -8,10 +8,12 @@ import {
   restoreRailsAdminProductFromTrash,
   updateRailsAdminProduct,
 } from '@/lib/rails-admin'
+import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse } from '@/lib/types'
 
 export async function createProductAction(formData: FormData): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const product = await createRailsAdminProduct(formData)
     revalidatePath('/admin')
     return { success: true, data: product }
@@ -23,6 +25,7 @@ export async function createProductAction(formData: FormData): Promise<ActionRes
 
 export async function updateProductAction(id: string, formData: FormData): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const product = await updateRailsAdminProduct(id, formData)
     revalidatePath('/admin')
     return { success: true, data: product }
@@ -38,6 +41,7 @@ export async function deleteProductAction(id: string): Promise<ActionResponse> {
 
 export async function moveProductToTrashAction(id: string): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     await moveRailsAdminProductToTrash(id)
     revalidatePath('/admin')
     revalidatePath('/admin/trash')
@@ -50,6 +54,7 @@ export async function moveProductToTrashAction(id: string): Promise<ActionRespon
 
 export async function restoreProductFromTrashAction(id: string): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const product = await restoreRailsAdminProductFromTrash(id)
     revalidatePath('/admin')
     revalidatePath('/admin/trash')
@@ -62,6 +67,7 @@ export async function restoreProductFromTrashAction(id: string): Promise<ActionR
 
 export async function deleteProductPermanentlyAction(id: string): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     await deleteRailsAdminProduct(id)
     revalidatePath('/admin')
     revalidatePath('/admin/trash')

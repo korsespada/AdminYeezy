@@ -6,11 +6,16 @@ const ALLOWED_HOSTS = new Set([
   'cdn.yeezyunique.ru',
   'yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru',
   'xcimg.szwego.com',
-  'localhost',
-  '127.0.0.1',
 ])
 
 export const runtime = 'nodejs'
+
+const MAX_SOURCE_IMAGE_BYTES = 12 * 1024 * 1024
+
+function isAllowedHost(hostname: string) {
+  if (ALLOWED_HOSTS.has(hostname)) return true
+  return process.env.NODE_ENV !== 'production' && (hostname === 'localhost' || hostname === '127.0.0.1')
+}
 
 export async function GET(request: NextRequest) {
   const sourceUrl = request.nextUrl.searchParams.get('url')
@@ -25,7 +30,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid url' }, { status: 400 })
   }
 
-  if (!['http:', 'https:'].includes(parsedUrl.protocol) || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+  if (!['http:', 'https:'].includes(parsedUrl.protocol) || !isAllowedHost(parsedUrl.hostname)) {
     return NextResponse.json({ error: 'Unsupported image host' }, { status: 400 })
   }
 
@@ -44,7 +49,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch source image' }, { status: 502 })
     }
 
+    const contentType = response.headers.get('content-type') || ''
+    const contentLength = Number(response.headers.get('content-length') || 0)
+    if (!contentType.startsWith('image/') || contentLength > MAX_SOURCE_IMAGE_BYTES) {
+      return NextResponse.json({ error: 'Unsupported image' }, { status: 400 })
+    }
+
     const input = Buffer.from(await response.arrayBuffer())
+    if (input.byteLength > MAX_SOURCE_IMAGE_BYTES) {
+      return NextResponse.json({ error: 'Image too large' }, { status: 413 })
+    }
+
     const output = await sharp(input, { failOn: 'none' })
       .rotate()
       .resize(width, height, {

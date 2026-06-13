@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
     client,
     getScrapingClient: vi.fn(async () => client),
     revalidatePath: vi.fn(),
+    requireAdmin: vi.fn(),
   }
 })
 
@@ -35,9 +36,14 @@ vi.mock('@/lib/db', () => ({
   elastic: {},
 }))
 
+vi.mock('@/lib/admin-session', () => ({
+  requireAdmin: mocks.requireAdmin,
+}))
+
 describe('batch product server actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.requireAdmin.mockResolvedValue({ id: 1, email: 'admin@example.com', source: 'rails' })
   })
 
   it('loads and normalizes products for a batch', async () => {

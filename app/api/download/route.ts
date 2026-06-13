@@ -1,5 +1,14 @@
 import { NextResponse } from 'next/server'
 
+const ALLOWED_DOWNLOAD_HOSTS = new Set([
+  'static.yeezyunique.ru',
+  'cdn.yeezyunique.ru',
+  'yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru',
+  'xcimg.szwego.com',
+])
+
+const MAX_DOWNLOAD_BYTES = 12 * 1024 * 1024
+
 export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const url = searchParams.get('url')
@@ -9,15 +18,31 @@ export async function GET(request: Request) {
     }
 
     try {
-        const response = await fetch(url)
+        const parsedUrl = new URL(url)
+        if (!['https:'].includes(parsedUrl.protocol) || !ALLOWED_DOWNLOAD_HOSTS.has(parsedUrl.hostname)) {
+            return new NextResponse('Unsupported URL', { status: 400 })
+        }
+
+        const response = await fetch(parsedUrl, {
+            headers: { Accept: 'image/*' },
+            signal: AbortSignal.timeout(10_000),
+        })
         if (!response.ok) {
             throw new Error(`Failed to fetch image: ${response.statusText}`)
         }
 
         const contentType = response.headers.get('content-type') || 'application/octet-stream'
-        const blob = await response.blob()
+        const contentLength = Number(response.headers.get('content-length') || 0)
+        if (!contentType.startsWith('image/') || contentLength > MAX_DOWNLOAD_BYTES) {
+            return new NextResponse('Unsupported file', { status: 400 })
+        }
 
-        return new NextResponse(blob, {
+        const arrayBuffer = await response.arrayBuffer()
+        if (arrayBuffer.byteLength > MAX_DOWNLOAD_BYTES) {
+            return new NextResponse('File too large', { status: 413 })
+        }
+
+        return new NextResponse(arrayBuffer, {
             headers: {
                 'Content-Type': contentType,
                 'Cache-Control': 'public, max-age=31536000, immutable',

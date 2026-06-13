@@ -13,6 +13,7 @@ import {
   transitionRailsCrmOrder,
   transitionRailsCrmOrderItem,
 } from '@/lib/rails-admin'
+import { requireAdmin } from '@/lib/admin-session'
 
 function revalidateCrm(orderId?: string) {
   revalidatePath('/admin/crm')
@@ -37,6 +38,7 @@ function requiredString(formData: FormData, key: string) {
 }
 
 export async function transitionOrderAction(formData: FormData) {
+  await requireAdmin()
   const orderId = requiredString(formData, 'orderId')
   const toStatus = requiredString(formData, 'toStatus')
   const message = String(formData.get('message') || '').trim()
@@ -45,6 +47,7 @@ export async function transitionOrderAction(formData: FormData) {
 }
 
 export async function transitionOrderItemAction(formData: FormData) {
+  await requireAdmin()
   const orderId = requiredString(formData, 'orderId')
   const itemId = requiredString(formData, 'itemId')
   const toStatus = requiredString(formData, 'toStatus')
@@ -54,6 +57,7 @@ export async function transitionOrderItemAction(formData: FormData) {
 }
 
 export async function createSupplierRequestAction(formData: FormData) {
+  await requireAdmin()
   const orderId = requiredString(formData, 'orderId')
   const itemId = requiredString(formData, 'itemId')
   const supplierId = String(formData.get('supplierId') || '').trim()
@@ -70,6 +74,7 @@ export async function createSupplierRequestAction(formData: FormData) {
 }
 
 export async function recordSupplierResponseAction(formData: FormData) {
+  await requireAdmin()
   const orderId = requiredString(formData, 'orderId')
   const requestId = requiredString(formData, 'requestId')
   const responseType = requiredString(formData, 'responseType')
@@ -84,6 +89,7 @@ export async function recordSupplierResponseAction(formData: FormData) {
 }
 
 export async function createReplacementOfferAction(formData: FormData) {
+  await requireAdmin()
   const orderId = requiredString(formData, 'orderId')
   const itemId = requiredString(formData, 'itemId')
   const replacementProductId = requiredString(formData, 'replacementProductId')
@@ -100,6 +106,7 @@ export async function createReplacementOfferAction(formData: FormData) {
 }
 
 export async function approveRefundAction(formData: FormData) {
+  await requireAdmin()
   const refundId = requiredString(formData, 'refundId')
   const orderId = String(formData.get('orderId') || '').trim()
   await approveRailsCrmRefund(refundId)
@@ -107,6 +114,7 @@ export async function approveRefundAction(formData: FormData) {
 }
 
 export async function rejectRefundAction(formData: FormData) {
+  await requireAdmin()
   const refundId = requiredString(formData, 'refundId')
   const orderId = String(formData.get('orderId') || '').trim()
   const message = String(formData.get('message') || '').trim()
@@ -115,12 +123,14 @@ export async function rejectRefundAction(formData: FormData) {
 }
 
 export async function approveWalletWithdrawalAction(formData: FormData) {
+  await requireAdmin()
   const withdrawalId = requiredString(formData, 'withdrawalId')
   await approveRailsCrmWalletWithdrawal(withdrawalId)
   revalidateWalletWithdrawals()
 }
 
 export async function rejectWalletWithdrawalAction(formData: FormData) {
+  await requireAdmin()
   const withdrawalId = requiredString(formData, 'withdrawalId')
   const message = String(formData.get('message') || '').trim()
   await rejectRailsCrmWalletWithdrawal(withdrawalId, message)
@@ -128,6 +138,7 @@ export async function rejectWalletWithdrawalAction(formData: FormData) {
 }
 
 export async function markWalletWithdrawalPaidAction(formData: FormData) {
+  await requireAdmin()
   const withdrawalId = requiredString(formData, 'withdrawalId')
   await markRailsCrmWalletWithdrawalPaid(withdrawalId)
   revalidateWalletWithdrawals()

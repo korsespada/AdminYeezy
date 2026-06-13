@@ -2,9 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { deleteRailsAdminProduct, moveRailsAdminProductToTrash, patchRailsAdminProduct } from '@/lib/rails-admin'
+import { requireAdmin } from '@/lib/admin-session'
 
 export async function bulkUpdateProductsAction(ids: string[], updates: { category?: string, subcategory?: string, gender?: string }) {
   try {
+    await requireAdmin()
     for (const id of ids) {
       await patchRailsAdminProduct(id, updates)
     }
@@ -22,6 +24,7 @@ export async function bulkDeleteProductsAction(ids: string[]) {
 
 export async function bulkMoveProductsToTrashAction(ids: string[]) {
   try {
+    await requireAdmin()
     for (const id of ids) {
       await moveRailsAdminProductToTrash(id)
     }
@@ -36,6 +39,7 @@ export async function bulkMoveProductsToTrashAction(ids: string[]) {
 
 export async function bulkDeleteProductsPermanentlyAction(ids: string[]) {
   try {
+    await requireAdmin()
     for (const id of ids) {
       await deleteRailsAdminProduct(id)
     }
@@ -49,6 +53,7 @@ export async function bulkDeleteProductsPermanentlyAction(ids: string[]) {
 
 export async function bulkPatchObjectsAction(updates: { id: string, data: any }[]) {
   try {
+    await requireAdmin()
     for (const update of updates) {
       await patchRailsAdminProduct(update.id, update.data)
     }

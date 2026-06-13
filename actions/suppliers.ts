@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { query, scrapingQuery, redis, describeScrapingDatabaseConnection } from '@/lib/db'
 import { deleteS3Folder } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
+import { requireAdmin } from '@/lib/admin-session'
+import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -18,8 +20,25 @@ import {
 
 // --- Suppliers CRUD ---
 
+async function requireAdminOrWorker(workerSecret?: string) {
+  if (process.env.NODE_ENV !== 'production' && workerSecret === 'dev-api-route') {
+    return
+  }
+
+  if (
+    workerSecret &&
+    process.env.SCRAPER_WORKER_SECRET &&
+    workerSecret === process.env.SCRAPER_WORKER_SECRET
+  ) {
+    return
+  }
+
+  await requireAdmin()
+}
+
 export async function getSuppliersAction(): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery('SELECT * FROM suppliers ORDER BY name ASC')
     return { success: true, data: res.rows }
   } catch (err: any) {
@@ -29,6 +48,7 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
 
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
@@ -75,6 +95,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
 
 export async function updateSupplierAction(id: number, formData: FormData): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
@@ -125,6 +146,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
 
 export async function fetchSupplierAvatarAction(supplierId: number): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery('SELECT album_id, cookie FROM suppliers WHERE id=$1', [supplierId])
     const supplier = res.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
@@ -174,6 +196,7 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
 
 export async function deleteSupplierAction(id: number): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     await scrapingQuery('DELETE FROM suppliers WHERE id=$1', [id])
     revalidatePath('/admin/suppliers')
     return { success: true }
@@ -186,6 +209,7 @@ export async function deleteSupplierAction(id: number): Promise<ActionResponse> 
 
 export async function getTasksAction(): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery(`
       SELECT t.*, s.name as supplier_name, s.avatar_url as supplier_avatar, b.stage as batch_stage
       FROM scraping_tasks t
@@ -322,6 +346,7 @@ function formatScrapingConnectionError(err: any) {
 
 export async function getExportHistoryAction(): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery(`
       SELECT
         t.id,
@@ -474,6 +499,7 @@ async function forwardScrapingToWorker(supplierId: number, endDate?: string, ove
 
 export async function toggleSupplierFavoriteAction(id: number): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery(
       `UPDATE suppliers
        SET is_favorite = NOT COALESCE(is_favorite, FALSE), updated_at = NOW()
@@ -489,13 +515,16 @@ export async function toggleSupplierFavoriteAction(id: number): Promise<ActionRe
 }
 
 export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
+  await requireAdmin()
   const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
   if (workerResult) return workerResult
   return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup)
 }
 
-export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
+export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string, workerSecret?: string): Promise<ActionResponse> {
   try {
+    await requireAdminOrWorker(workerSecret)
+
     // 1. Получаем данные поставщика
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
     const supplier = supplierRes.rows[0]
@@ -708,13 +737,17 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
 export async function deleteTaskAction(taskId: number): Promise<ActionResponse> {
   try {
+    await requireAdmin()
     const res = await scrapingQuery('SELECT result_path FROM scraping_tasks WHERE id=$1', [taskId])
     const filePath = res.rows[0]?.result_path
     await deleteScrapingFileArtifactForTask(taskId)
     
-    if (filePath && fs.existsSync(/*turbopackIgnore: true*/ filePath)) {
+    if (filePath) {
       try {
-        fs.unlinkSync(/*turbopackIgnore: true*/ filePath)
+        const safePath = resolveSafeRuntimePath(filePath)
+        if (fs.existsSync(/*turbopackIgnore: true*/ safePath)) {
+          fs.unlinkSync(/*turbopackIgnore: true*/ safePath)
+        }
       } catch (e) {
         console.error('Failed to delete file:', filePath, e)
       }
@@ -735,15 +768,20 @@ export async function deleteExportFileFromAdminAction(taskId: number): Promise<A
 
 export async function deleteExportBatchFromAdminAction(batchId: string): Promise<ActionResponse> {
     try {
+        await requireAdmin()
+
         const tasksRes = await scrapingQuery(
             'SELECT id, result_path FROM scraping_tasks WHERE batch_id = $1',
             [batchId]
         )
 
         for (const task of tasksRes.rows) {
-            if (task.result_path && fs.existsSync(/*turbopackIgnore: true*/ task.result_path)) {
+            if (task.result_path) {
                 try {
-                    fs.unlinkSync(/*turbopackIgnore: true*/ task.result_path)
+                    const safePath = resolveSafeRuntimePath(task.result_path)
+                    if (fs.existsSync(/*turbopackIgnore: true*/ safePath)) {
+                        fs.unlinkSync(/*turbopackIgnore: true*/ safePath)
+                    }
                 } catch (e) {
                     console.error('Failed to delete file:', task.result_path, e)
                 }
@@ -804,6 +842,7 @@ async function notifyTelegram(supplierName: string, status: string, taskId: numb
  */
 export async function linkBatchToTaskAction(batchId: string, taskId: number) {
     try {
+        await requireAdmin()
         await scrapingQuery('UPDATE scraping_tasks SET batch_id = $1 WHERE id = $2', [batchId, taskId])
         return { success: true }
     } catch (err: any) {
@@ -816,6 +855,7 @@ export async function linkBatchToTaskAction(batchId: string, taskId: number) {
  */
 export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' | 'AI_PROCESSED' | 'PUSHED') {
     try {
+        await requireAdmin()
         await scrapingQuery('UPDATE scraping_batches SET stage = $1 WHERE id = $2', [stage, batchId])
         revalidatePath('/admin/batches')
         return { success: true }
@@ -826,6 +866,7 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
 
 export async function pushBatchToCatalogAction(batchId: string): Promise<ActionResponse> {
     try {
+        await requireAdmin()
         const workflow = require('../scripts/batch-workflow')
         const result = await workflow.pushBatchToCatalog(batchId)
         try {
@@ -847,6 +888,7 @@ export async function pushBatchToCatalogAction(batchId: string): Promise<ActionR
  */
 export async function createBatchAction(name: string, supplierId?: number, itemsCount: number = 0) {
     try {
+        await requireAdmin()
         const id = crypto.randomUUID()
         await scrapingQuery(
             'INSERT INTO scraping_batches (id, name, supplier_id, items_count, stage) VALUES ($1, $2, $3, $4, $5)',
@@ -863,6 +905,7 @@ export async function createBatchAction(name: string, supplierId?: number, items
  */
 export async function getBatchesAction() {
     try {
+        await requireAdmin()
         const res = await scrapingQuery(`
             SELECT b.id, b.name, b.supplier_id, b.items_count, b.stage, b.created_at, s.name as supplier_name, s.avatar_url as supplier_avatar,
                    (SELECT result_path FROM scraping_tasks WHERE batch_id = b.id AND status = 'Сырой CSV' ORDER BY created_at ASC LIMIT 1) as raw_path,
@@ -882,6 +925,7 @@ export async function getBatchesAction() {
  */
 export async function deleteBatchAction(batchId: string) {
     try {
+        await requireAdmin()
         // 0. Удаляем фотографии из S3 бакета Beget
         try {
             await deleteS3Folder(`batches/${batchId}/`);

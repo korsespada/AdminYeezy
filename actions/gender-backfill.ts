@@ -20,6 +20,7 @@ import {
   type GenderCsvRow,
   type GenderValue,
 } from '@/lib/gender-backfill'
+import { requireAdmin } from '@/lib/admin-session'
 import type { Product } from '@/lib/types'
 
 const CATALOG_CACHE_TTL_MS = 10 * 60 * 1000
@@ -70,6 +71,7 @@ async function loadGenderBackfillCatalog() {
 
 export async function parseGenderCsvAction(csvText: string) {
   try {
+    await requireAdmin()
     const rows = parseGenderCsv(csvText)
     return {
       success: true,
@@ -89,6 +91,7 @@ export async function previewGenderMatchesAction(
   chunkSize = 50
 ) {
   try {
+    await requireAdmin()
     const slice = rows.slice(cursor, cursor + chunkSize)
     const cache = new Map<string, Awaited<ReturnType<typeof searchRailsAdminProductsExact>>>()
 
@@ -133,6 +136,7 @@ export async function previewGenderMatchesAction(
 
 export async function lookupGenderBackfillProductsAction(productIds: string[]) {
   try {
+    await requireAdmin()
     const uniqueIds = Array.from(new Set(productIds.map(normalizeLookupKey).filter(Boolean)))
     const catalogByKey = await loadGenderBackfillCatalog()
     const matches: Record<string, GenderBackfillProductSummary> = {}
@@ -157,6 +161,7 @@ export async function lookupGenderBackfillProductsAction(productIds: string[]) {
 
 export async function applyGenderUpdatesAction(updates: { productId: string; gender: GenderValue }[]) {
   try {
+    await requireAdmin()
     const results = {
       updated: 0,
       skipped: 0,
@@ -209,6 +214,7 @@ export async function applyGenderUpdatesAction(updates: { productId: string; gen
 
 export async function exportGenderBackfillReportAction(rows: GenderBackfillPreviewRow[]) {
   try {
+    await requireAdmin()
     return {
       success: true,
       data: {

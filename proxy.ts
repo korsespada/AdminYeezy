@@ -4,14 +4,31 @@ import { ADMIN_SESSION_COOKIE, ADMIN_TOKEN_COOKIE, LEGACY_PB_AUTH_COOKIE } from 
 
 const ADMIN_ENTRY_PATH = '/admin/home'
 
+function isExpiredJwt(token?: string) {
+  if (!token) return true
+
+  try {
+    const encodedPayload = token.split('.')[1]
+    if (!encodedPayload) return true
+
+    const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+    const payload = JSON.parse(atob(padded))
+    const exp = Number(payload?.exp)
+    return !Number.isFinite(exp) || exp * 1000 <= Date.now()
+  } catch {
+    return true
+  }
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const tokenCookie = request.cookies.get(ADMIN_TOKEN_COOKIE)
   const fallbackCookie = request.cookies.get(ADMIN_SESSION_COOKIE) || request.cookies.get(LEGACY_PB_AUTH_COOKIE)
   const isAuthenticated = process.env.NODE_ENV === 'production'
-    ? !!tokenCookie?.value
-    : Boolean(tokenCookie?.value || fallbackCookie?.value)
+    ? Boolean(tokenCookie?.value && !isExpiredJwt(tokenCookie.value))
+    : Boolean((tokenCookie?.value && !isExpiredJwt(tokenCookie.value)) || fallbackCookie?.value)
 
   if (pathname.startsWith('/admin')) {
     if (!isAuthenticated) {

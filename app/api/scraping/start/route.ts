@@ -6,6 +6,13 @@ export const dynamic = 'force-dynamic'
 export async function POST(request: Request) {
   try {
     const expectedSecret = process.env.SCRAPER_WORKER_SECRET
+    if (process.env.NODE_ENV === 'production' && !expectedSecret) {
+      return NextResponse.json(
+        { success: false, error: 'SCRAPER_WORKER_SECRET is required in production' },
+        { status: 500 },
+      )
+    }
+
     if (expectedSecret) {
       const auth = request.headers.get('authorization') || ''
       if (auth !== `Bearer ${expectedSecret}`) {
@@ -24,6 +31,7 @@ export async function POST(request: Request) {
       body?.endDate || undefined,
       body?.overrideTag || undefined,
       body?.overrideGroup || undefined,
+      expectedSecret || (process.env.NODE_ENV !== 'production' ? 'dev-api-route' : undefined),
     )
 
     return NextResponse.json(result, { status: result.success ? 200 : 400 })

@@ -1,9 +1,22 @@
 import { NextResponse } from "next/server";
 import { analyticsQuery } from "@/lib/db";
+import { isAdminAuthError, requireAdmin } from "@/lib/admin-session";
 
 export const dynamic = "force-dynamic";
 
 type AnalyticsChannel = "all" | "site" | "telegram";
+
+const MAX_ANALYTICS_BODY_BYTES = 16 * 1024;
+const MAX_TEXT_FIELD_LENGTH = 500;
+const ALLOWED_ANALYTICS_EVENTS = new Set([
+  "page_view",
+  "product_view",
+  "add_to_cart",
+  "add_to_favorites",
+  "order_success",
+  "order_submit",
+  "ask_manager",
+]);
 
 const emptyOverviewRow = {
   unique_visitors: "0",
@@ -116,6 +129,8 @@ function getPeriodSql(period: string) {
 
 export async function GET(request: Request) {
   try {
+    await requireAdmin();
+
     const configError = getAnalyticsDatabaseConfigError();
     if (configError) {
       return NextResponse.json({ error: configError }, { status: 500 });
@@ -281,6 +296,10 @@ export async function GET(request: Request) {
       updatedAt: new Date().toISOString(),
     });
   } catch (error: any) {
+    if (isAdminAuthError(error)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     console.error("Analytics error:", error);
     const message = isDatabaseConnectionError(error)
       ? "Не удалось подключиться к базе аналитики. Проверь DATABASE_URL/ANALYTICS_DATABASE_URL и доступность Postgres из окружения админки."
@@ -300,7 +319,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = await request.json();
+    const rawBody = await request.text();
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_ANALYTICS_BODY_BYTES) {
+      return NextResponse.json(
+        { error: "Request body too large" },
+        { status: 413, headers: corsHeaders() },
+      );
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody || "{}");
+    } catch {
+      return NextResponse.json(
+        { error: "Invalid JSON" },
+        { status: 400, headers: corsHeaders() },
+      );
+    }
     const {
       event,
       productId,
@@ -318,6 +353,27 @@ export async function POST(request: Request) {
       );
     }
 
+    const normalizedEvent = String(event).trim();
+    const normalizedSessionId = String(session_id).trim();
+    if (!ALLOWED_ANALYTICS_EVENTS.has(normalizedEvent)) {
+      return NextResponse.json(
+        { error: "Unsupported event" },
+        { status: 400, headers: corsHeaders() },
+      );
+    }
+
+    if (!normalizedSessionId || normalizedSessionId.length > 128) {
+      return NextResponse.json(
+        { error: "Invalid session_id" },
+        { status: 400, headers: corsHeaders() },
+      );
+    }
+
+    const safeProductId = productId ? String(productId).slice(0, 128) : null;
+    const safeName = name ? String(name).slice(0, MAX_TEXT_FIELD_LENGTH) : "";
+    const safeUserAgent = user_agent ? String(user_agent).slice(0, MAX_TEXT_FIELD_LENGTH) : "";
+    const safeMeta = meta && typeof meta === "object" && !Array.isArray(meta) ? meta : {};
+
     await analyticsQuery(
       `
         INSERT INTO analytics_events (
@@ -325,13 +381,13 @@ export async function POST(request: Request) {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
       `,
       [
-        event,
-        productId || null,
-        name || "",
-        price || 0,
-        session_id,
-        user_agent || "",
-        JSON.stringify(meta),
+        normalizedEvent,
+        safeProductId,
+        safeName,
+        Number.isFinite(Number(price)) ? Number(price) : 0,
+        normalizedSessionId,
+        safeUserAgent,
+        JSON.stringify(safeMeta),
       ],
     );
 
@@ -362,6 +418,8 @@ function corsHeaders() {
 
 export async function DELETE(request: Request) {
   try {
+    await requireAdmin();
+
     const configError = getAnalyticsDatabaseConfigError();
     if (configError) {
       return NextResponse.json({ error: configError }, { status: 500 });
@@ -385,6 +443,10 @@ export async function DELETE(request: Request) {
       message: `Статистика очищена (${type === "all" ? "все время" : period})`,
     });
   } catch (error: any) {
+    if (isAdminAuthError(error)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     console.error("Analytics DELETE error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
