@@ -28,6 +28,10 @@ describe('rails admin product adapter', () => {
       page: 2,
       perPage: 100,
       search: 'mules',
+      name: 'Gucci mule',
+      description: 'leather',
+      priceMin: '0',
+      priceMax: '1250.99',
       brand: 'brand-id',
       category: 'category-id',
       subcategory: 'subcategory-id',
@@ -39,6 +43,10 @@ describe('rails admin product adapter', () => {
     expect(params.toString()).toContain('page=2')
     expect(params.toString()).toContain('per_page=100')
     expect(params.get('q')).toBe('mules')
+    expect(params.get('name')).toBe('Gucci mule')
+    expect(params.get('description')).toBe('leather')
+    expect(params.get('price_min')).toBe('0')
+    expect(params.get('price_max')).toBe('125099')
     expect(params.get('brand')).toBe('brand-id')
     expect(params.get('category')).toBe('subcategory-id')
     expect(params.get('gender')).toBe('Унисекс')
@@ -99,6 +107,31 @@ describe('rails admin product adapter', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=ext-1')
     expect(init.headers.Authorization).toBe('Bearer test-token')
+  })
+
+  it('loads separately filtered products from the admin endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [],
+        meta: { total: 0, pages: 0 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      name: 'bag',
+      description: 'leather',
+      priceMin: '0',
+      priceMax: '50000',
+    })
+
+    const [url] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe(
+      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&name=bag&description=leather&price_min=0&price_max=5000000'
+    )
   })
 
   it('loads CRM customers from the admin endpoint', async () => {

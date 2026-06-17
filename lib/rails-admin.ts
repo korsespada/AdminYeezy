@@ -496,6 +496,10 @@ export async function listRailsAdminProducts(options: {
   page: number
   perPage: number
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -527,6 +531,10 @@ async function listRailsCatalogProducts(options: {
   page: number
   perPage: number
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -553,6 +561,10 @@ async function listRailsCatalogProductsInChunks(options: {
   page: number
   perPage: number
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -597,6 +609,10 @@ async function listRailsAdminProductsInChunks(options: {
   page: number
   perPage: number
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -1009,6 +1025,10 @@ export function buildRailsAdminProductsParams(options: {
   page: number
   perPage: number
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -1023,6 +1043,14 @@ export function buildRailsAdminProductsParams(options: {
   params.set('per_page', String(options.perPage))
   const search = normalizeProductSearchInput(options.search)
   if (search) params.set('q', search)
+  const name = options.name?.trim() || ''
+  if (name) params.set('name', name)
+  const description = options.description?.trim() || ''
+  if (description) params.set('description', description)
+  const priceMin = normalizePriceRublesFilter(options.priceMin)
+  const priceMax = normalizePriceRublesFilter(options.priceMax)
+  if (priceMin) params.set('price_min', priceMin)
+  if (priceMax) params.set('price_max', priceMax)
   if (options.brand) params.set('brand', options.brand)
   if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
   if (options.genderMissing || options.noGender) {
@@ -1033,6 +1061,14 @@ export function buildRailsAdminProductsParams(options: {
   }
   if (options.status) params.set('status', options.status)
   return params
+}
+
+function normalizePriceRublesFilter(value?: string | number) {
+  const raw = String(value ?? '').trim().replace(',', '.')
+  if (!raw) return ''
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) return ''
+  return String(Math.round(parsed * 100))
 }
 
 export function normalizeProductSearchInput(value?: string) {
@@ -1070,6 +1106,10 @@ function extractProductSlugFromPath(value: string) {
 
 type ProductFacetFilters = {
   search?: string
+  name?: string
+  description?: string
+  priceMin?: string | number
+  priceMax?: string | number
   brand?: string
   category?: string
   subcategory?: string
@@ -1102,9 +1142,17 @@ async function fetchRailsProductFacets(options: ProductFacetFilters) {
 }
 
 export async function getRailsProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
+  const sharedFilters = {
+    search: filters.search,
+    name: filters.name,
+    description: filters.description,
+    priceMin: filters.priceMin,
+    priceMax: filters.priceMax,
+  }
+
   const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload] = await Promise.all([
     fetchRailsProductFacets({
-      search: filters.search,
+      ...sharedFilters,
       category: filters.category,
       subcategory: filters.subcategory,
       gender: filters.gender,
@@ -1112,14 +1160,14 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({
-      search: filters.search,
+      ...sharedFilters,
       brand: filters.brand,
       gender: filters.gender,
       genderExact: filters.genderExact,
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({
-      search: filters.search,
+      ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
       gender: filters.gender,
@@ -1127,13 +1175,13 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       noGender: filters.noGender,
     }),
     fetchRailsProductFacets({
-      search: filters.search,
+      ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
       subcategory: filters.subcategory,
     }),
     fetchRailsProductFacets({
-      search: filters.search,
+      ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
       subcategory: filters.subcategory,

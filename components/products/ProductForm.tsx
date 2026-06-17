@@ -330,58 +330,67 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('gender', gender)
 
     // Always send media, including an empty array when all photos were removed.
-    formData.append('media', JSON.stringify(buildMediaPayload()))
+    const mediaPayload = buildMediaPayload()
+    formData.append('media', JSON.stringify(mediaPayload))
+
+    if (product) {
+      if (onSave) {
+        // Optimistically update the list and release the editor immediately.
+        onSave({
+          ...product,
+          productId: productId.trim(),
+          external_id: productId.trim(),
+          sku: sku.trim(),
+          name: name.trim(),
+          description: description.trim(),
+          price: parseFloat(price),
+          status,
+          fulfillment_mode: fulfillmentMode,
+          availability_confidence: availabilityConfidence,
+          indexing_status: indexingStatus,
+          production_min_days: productionMinDays ? Number(productionMinDays) : null,
+          production_max_days: productionMaxDays ? Number(productionMaxDays) : null,
+          office_delivery_min_days: officeDeliveryMinDays ? Number(officeDeliveryMinDays) : null,
+          office_delivery_max_days: officeDeliveryMaxDays ? Number(officeDeliveryMaxDays) : null,
+          seo_title: seoTitle.trim(),
+          seo_description: seoDescription.trim(),
+          h1: h1.trim(),
+          canonical_url: canonicalUrl.trim(),
+          price_on_request: priceOnRequest,
+          metadata: {
+            ...(product.metadata || {}),
+            gender,
+            price_on_request: priceOnRequest,
+          },
+          gender,
+          category,
+          subcategory,
+          photos: existingPhotos,
+          media: mediaPayload,
+        })
+      }
+      onClose()
+
+      updateProductAction(product.id, formData)
+        .then((result) => {
+          if (!result.success) {
+            window.alert(result.error || 'Не удалось сохранить товар')
+          }
+        })
+        .catch(() => {
+          window.alert('Не удалось сохранить товар')
+        })
+      return
+    }
 
     startTransition(async () => {
       try {
-        let result
-        if (product) {
-          result = await updateProductAction(product.id, formData)
-        } else {
-          result = await createProductAction(formData)
-        }
+        const result = await createProductAction(formData)
 
         if (result.success) {
-          if (product && onSave) {
-            // Сразу обновляем данные в локальном стейте — без рефреша
-            onSave({
-              ...product,
-              productId: productId.trim(),
-              external_id: productId.trim(),
-              sku: sku.trim(),
-              name: name.trim(),
-              description: description.trim(),
-              price: parseFloat(price),
-              status,
-              fulfillment_mode: fulfillmentMode,
-              availability_confidence: availabilityConfidence,
-              indexing_status: indexingStatus,
-              production_min_days: productionMinDays ? Number(productionMinDays) : null,
-              production_max_days: productionMaxDays ? Number(productionMaxDays) : null,
-              office_delivery_min_days: officeDeliveryMinDays ? Number(officeDeliveryMinDays) : null,
-              office_delivery_max_days: officeDeliveryMaxDays ? Number(officeDeliveryMaxDays) : null,
-              seo_title: seoTitle.trim(),
-              seo_description: seoDescription.trim(),
-              h1: h1.trim(),
-              canonical_url: canonicalUrl.trim(),
-              price_on_request: priceOnRequest,
-              metadata: {
-                ...(product.metadata || {}),
-                gender,
-                price_on_request: priceOnRequest,
-              },
-              gender,
-              category,
-              subcategory,
-              photos: existingPhotos,
-              media: buildMediaPayload(),
-            })
-          }
           onClose()
           // Только при создании нового товара нужен рефреш (чтобы новый появился в списке)
-          if (!product) {
-            router.refresh()
-          }
+          router.refresh()
         } else {
           setError(result.error || 'Failed to save product')
         }

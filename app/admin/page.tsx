@@ -6,11 +6,24 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 
 const PRODUCT_PAGE_SIZES = [40, 100, 500]
+type AdminSearchParams = {
+  page?: string
+  search?: string
+  name?: string
+  description?: string
+  priceMin?: string
+  priceMax?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  perPage?: string
+}
 
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; search?: string; brand?: string; category?: string; subcategory?: string; gender?: string; perPage?: string }>
+  searchParams: Promise<AdminSearchParams>
 }) {
   await connection()
   const params = await searchParams
@@ -19,7 +32,10 @@ export default async function AdminPage({
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   const perPage = PRODUCT_PAGE_SIZES.includes(rawPerPage) ? rawPerPage : 40
   const offset = (page - 1) * perPage
-  const searchTerm = params.search || ''
+  const nameSearch = params.name || params.search || ''
+  const descriptionSearch = params.description || ''
+  const priceMin = params.priceMin || ''
+  const priceMax = params.priceMax || ''
   const brandFilter = params.brand || ''
   const categoryFilter = params.category || ''
   const subcategoryFilter = params.subcategory || ''
@@ -28,7 +44,10 @@ export default async function AdminPage({
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
     if (p !== 1) params.set('page', p.toString())
-    if (searchTerm) params.set('search', searchTerm)
+    if (nameSearch) params.set('name', nameSearch)
+    if (descriptionSearch) params.set('description', descriptionSearch)
+    if (priceMin) params.set('priceMin', priceMin)
+    if (priceMax) params.set('priceMax', priceMax)
     if (brandFilter) params.set('brand', brandFilter)
     if (categoryFilter) params.set('category', categoryFilter)
     if (subcategoryFilter) params.set('subcategory', subcategoryFilter)
@@ -53,7 +72,10 @@ export default async function AdminPage({
     const productFilters = {
       page,
       perPage,
-      search: searchTerm,
+      name: nameSearch,
+      description: descriptionSearch,
+      priceMin,
+      priceMax,
       brand: brandSlug,
       category: categorySlug,
       subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
@@ -65,7 +87,10 @@ export default async function AdminPage({
     const [productPage, filterFacets] = await Promise.all([
       listRailsAdminProducts(productFilters),
       getRailsProductFilterFacets({
-        search: searchTerm,
+        name: nameSearch,
+        description: descriptionSearch,
+        priceMin,
+        priceMax,
         brand: brandSlug,
         category: categorySlug,
         subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,

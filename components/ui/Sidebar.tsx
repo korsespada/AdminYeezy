@@ -27,22 +27,32 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
-    const [searchValue, setSearchValue] = useState(searchParams.get('search') || '')
+    const [nameValue, setNameValue] = useState(searchParams.get('name') || searchParams.get('search') || '')
+    const [descriptionValue, setDescriptionValue] = useState(searchParams.get('description') || '')
+    const [priceMinValue, setPriceMinValue] = useState(searchParams.get('priceMin') || '')
+    const [priceMaxValue, setPriceMaxValue] = useState(searchParams.get('priceMax') || '')
 
     const currentBrand = searchParams.get('brand') || ''
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
     const currentGender = searchParams.get('gender') || ''
-    const currentSearch = searchParams.get('search') || ''
-    const hasActiveFilters = Boolean(currentBrand || currentCategory || currentSubcategory || currentGender || currentSearch)
+    const currentName = searchParams.get('name') || searchParams.get('search') || ''
+    const currentDescription = searchParams.get('description') || ''
+    const currentPriceMin = searchParams.get('priceMin') || ''
+    const currentPriceMax = searchParams.get('priceMax') || ''
+    const hasActiveFilters = Boolean(
+        currentBrand || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax
+    )
 
     const applyFilter = useCallback((key: string, value: string | null) => {
         const params = new URLSearchParams(searchParams.toString())
-        if (value) {
-            params.set(key, value)
+        const cleanValue = value?.trim() || ''
+        if (cleanValue) {
+            params.set(key, cleanValue)
         } else {
             params.delete(key)
         }
+        if (key === 'name') params.delete('search')
 
         // Reset page when filters change
         params.delete('page')
@@ -55,23 +65,65 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
         router.push(`/admin?${params.toString()}`)
     }, [router, searchParams])
 
-    // Debounce search
+    // Debounce text/price filters
     useEffect(() => {
         const timer = setTimeout(() => {
-            if (searchValue !== currentSearch) {
-                applyFilter('search', searchValue || null)
+            if (nameValue !== currentName) {
+                applyFilter('name', nameValue || null)
             }
         }, 500)
         return () => clearTimeout(timer)
-    }, [applyFilter, currentSearch, searchValue])
+    }, [applyFilter, currentName, nameValue])
 
-    // Update local search value when URL changes (e.g. on reset)
     useEffect(() => {
-        setSearchValue(currentSearch)
-    }, [currentSearch])
+        const timer = setTimeout(() => {
+            if (descriptionValue !== currentDescription) {
+                applyFilter('description', descriptionValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentDescription, descriptionValue])
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (priceMinValue !== currentPriceMin) {
+                applyFilter('priceMin', priceMinValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentPriceMin, priceMinValue])
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (priceMaxValue !== currentPriceMax) {
+                applyFilter('priceMax', priceMaxValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentPriceMax, priceMaxValue])
+
+    // Update local filter values when URL changes (e.g. on reset)
+    useEffect(() => {
+        setNameValue(currentName)
+    }, [currentName])
+
+    useEffect(() => {
+        setDescriptionValue(currentDescription)
+    }, [currentDescription])
+
+    useEffect(() => {
+        setPriceMinValue(currentPriceMin)
+    }, [currentPriceMin])
+
+    useEffect(() => {
+        setPriceMaxValue(currentPriceMax)
+    }, [currentPriceMax])
 
     const handleReset = () => {
-        setSearchValue('')
+        setNameValue('')
+        setDescriptionValue('')
+        setPriceMinValue('')
+        setPriceMaxValue('')
         const params = new URLSearchParams()
         const perPage = searchParams.get('perPage')
         if (perPage) params.set('perPage', perPage)
@@ -206,18 +258,66 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
 
                     <div className="space-y-6">
 
-                        {/* Search (Modern) */}
+                        {/* Search */}
                         <div>
-                            <Label className="mb-2 block text-slate-300">Поиск</Label>
-                            <div className="relative">
+                            <Label htmlFor="product-name-search" className="mb-2 block text-slate-300">Название</Label>
+                            <div className="relative mb-3">
                                 <Input
+                                    id="product-name-search"
                                     type="text"
-                                    placeholder="Поиск..."
-                                    value={searchValue}
-                                    onChange={(e) => setSearchValue(e.target.value)}
+                                    placeholder="Поиск по названию..."
+                                    value={nameValue}
+                                    onChange={(e) => setNameValue(e.target.value)}
                                     className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500"
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                            </div>
+                            <Label htmlFor="product-description-search" className="mb-2 block text-slate-300">Описание</Label>
+                            <div className="relative">
+                                <Input
+                                    id="product-description-search"
+                                    type="text"
+                                    placeholder="Поиск по описанию..."
+                                    value={descriptionValue}
+                                    onChange={(e) => setDescriptionValue(e.target.value)}
+                                    className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500"
+                                />
+                                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                            </div>
+                        </div>
+
+                        {/* Price Filter */}
+                        <div>
+                            <Label className="mb-2 block text-slate-300">Цена</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                    <Label htmlFor="product-price-min" className="sr-only">Цена от</Label>
+                                    <Input
+                                        id="product-price-min"
+                                        type="number"
+                                        inputMode="decimal"
+                                        min="0"
+                                        step="1"
+                                        placeholder="От"
+                                        value={priceMinValue}
+                                        onChange={(e) => setPriceMinValue(e.target.value)}
+                                        className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
+                                    />
+                                </div>
+                                <div>
+                                    <Label htmlFor="product-price-max" className="sr-only">Цена до</Label>
+                                    <Input
+                                        id="product-price-max"
+                                        type="number"
+                                        inputMode="decimal"
+                                        min="0"
+                                        step="1"
+                                        placeholder="До"
+                                        value={priceMaxValue}
+                                        onChange={(e) => setPriceMaxValue(e.target.value)}
+                                        className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
+                                    />
+                                </div>
                             </div>
                         </div>
 

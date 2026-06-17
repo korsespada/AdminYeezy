@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Sidebar from '@/components/ui/Sidebar'
 import type { Brand, Category, ProductFilterFacets, Subcategory } from '@/lib/types'
@@ -87,6 +87,7 @@ function renderSidebar() {
 
 describe('Sidebar faceted filters', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     navigationMock.push.mockReset()
     navigationMock.searchParams = new URLSearchParams()
   })
@@ -110,12 +111,24 @@ describe('Sidebar faceted filters', () => {
   })
 
   it('resets filters while preserving perPage', () => {
-    navigationMock.searchParams = new URLSearchParams('gender=__none__&brand=acne-id&search=bag&page=2&perPage=500')
+    navigationMock.searchParams = new URLSearchParams('gender=__none__&brand=acne-id&name=bag&description=leather&priceMin=0&page=2&perPage=500')
 
     renderSidebar()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Сбросить фильтры' })[0])
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?perPage=500')
+  })
+
+  it('keeps zero as an active price filter', () => {
+    vi.useFakeTimers()
+    renderSidebar()
+
+    fireEvent.change(screen.getByLabelText('Цена от'), { target: { value: '0' } })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(navigationMock.push).toHaveBeenCalledWith('/admin?priceMin=0')
   })
 })
