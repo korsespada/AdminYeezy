@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import ProductDescription, { normalizeDescription } from '@/components/products/ProductDescription';
 import { imagePresets, productImageUrl } from '@/lib/image';
+import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 
 interface ProductCardProps {
@@ -61,16 +62,18 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
         const categoryId = product.category || product.expand?.category?.id || '';
         const subcategoryId = product.subcategory || product.expand?.subcategory?.id || '';
+        const nextPrice = editingField === 'price' ? parseFloat(editValue) || 0 : product.price;
+        const priceOnRequest = isPriceOnRequest(nextPrice);
 
         const formData = new FormData();
         formData.append('productId', product.productId);
         formData.append('name', editingField === 'name' ? editValue.trim() : product.name);
         formData.append('description', normalizeDescription(product.description));
-        formData.append('price', editingField === 'price' ? editValue : product.price.toString());
+        formData.append('price', nextPrice.toString());
         formData.append('status', product.status);
         formData.append('gender', product.gender || '');
         formData.append('productMetadata', JSON.stringify(product.metadata || {}));
-        formData.append('price_on_request', product.price_on_request ? 'true' : 'false');
+        formData.append('price_on_request', priceOnRequest ? 'true' : 'false');
 
         // Handle multiple brands
         const b = product.brand || product.expand?.brand;
@@ -101,7 +104,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             if (result.success) {
                 const updatedProduct = {
                     ...product,
-                    [editingField!]: editingField === 'price' ? parseFloat(editValue) : editValue.trim()
+                    [editingField!]: editingField === 'price' ? nextPrice : editValue.trim(),
+                    price_on_request: priceOnRequest,
+                    metadata: {
+                        ...(product.metadata || {}),
+                        price_on_request: priceOnRequest,
+                    },
                 };
                 onUpdate(updatedProduct);
             }
@@ -127,7 +135,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
-            formData.append('price_on_request', product.price_on_request ? 'true' : 'false');
+            formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
             if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
@@ -312,7 +320,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                             className="font-bold text-lg text-slate-200 cursor-text hover:bg-slate-700/50 rounded px-1 -mx-1"
                             onClick={(e) => startEdit('price', e)}
                         >
-                            {new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(product.price)}
+                            {isPriceOnRequest(product.price)
+                                ? 'Цена по запросу'
+                                : new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(product.price)}
                         </div>
                     )}
                 </div>

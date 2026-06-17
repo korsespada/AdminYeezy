@@ -21,6 +21,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
+import { isPriceOnRequest } from '@/lib/product-pricing'
 
 interface ProductFormProps {
   product?: Product | null
@@ -46,7 +47,6 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [fulfillmentMode, setFulfillmentMode] = useState<Product['fulfillment_mode']>('requires_confirmation')
   const [availabilityConfidence, setAvailabilityConfidence] = useState<Product['availability_confidence']>('unknown')
   const [indexingStatus, setIndexingStatus] = useState<Product['indexing_status']>('indexable')
-  const [priceOnRequest, setPriceOnRequest] = useState(false)
   const [productionMinDays, setProductionMinDays] = useState('')
   const [productionMaxDays, setProductionMaxDays] = useState('')
   const [officeDeliveryMinDays, setOfficeDeliveryMinDays] = useState('')
@@ -116,7 +116,6 @@ export default function ProductForm({ product, brands, categories, subcategories
         setFulfillmentMode(product.fulfillment_mode || 'requires_confirmation')
         setAvailabilityConfidence(product.availability_confidence || 'unknown')
         setIndexingStatus(product.indexing_status || 'indexable')
-        setPriceOnRequest(Boolean(product.price_on_request || product.metadata?.price_on_request))
         setProductionMinDays(product.production_min_days == null ? '' : String(product.production_min_days))
         setProductionMaxDays(product.production_max_days == null ? '' : String(product.production_max_days))
         setOfficeDeliveryMinDays(product.office_delivery_min_days == null ? '' : String(product.office_delivery_min_days))
@@ -191,7 +190,6 @@ export default function ProductForm({ product, brands, categories, subcategories
         setFulfillmentMode('requires_confirmation')
         setAvailabilityConfidence('unknown')
         setIndexingStatus('indexable')
-        setPriceOnRequest(false)
         setProductionMinDays('')
         setProductionMaxDays('')
         setOfficeDeliveryMinDays('')
@@ -318,6 +316,7 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
     formData.append('canonical_url', canonicalUrl.trim())
+    const priceOnRequest = isPriceOnRequest(priceNum)
     formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
     formData.append('productMetadata', JSON.stringify(product?.metadata || {}))
 
@@ -689,16 +688,6 @@ export default function ProductForm({ product, brands, categories, subcategories
                   required
                   disabled={isPending}
                 />
-                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                  <input
-                    type="checkbox"
-                    checked={priceOnRequest}
-                    onChange={(e) => setPriceOnRequest(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    disabled={isPending}
-                  />
-                  Цена по запросу
-                </label>
               </div>
             </div>
 

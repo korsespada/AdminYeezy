@@ -13,6 +13,7 @@ import {
 } from './types'
 import { cookies } from 'next/headers'
 import { ADMIN_TOKEN_COOKIE } from './admin-session'
+import { isPriceCentsOnRequest, isPriceOnRequest } from './product-pricing'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
@@ -406,7 +407,12 @@ export function mapRailsProduct(product: any): Product {
   const subcategoryId = category.parent_id ? String(category.id || '') : ''
   const media = normalizeRailsMedia(product)
   const photos = media.map((item) => item.preview_url || item.original_url).filter(Boolean)
-  const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {}
+  const priceCents = Number(product.price_cents || 0)
+  const priceOnRequest = isPriceCentsOnRequest(priceCents)
+  const metadata = {
+    ...(product.metadata && typeof product.metadata === 'object' ? product.metadata : {}),
+    price_on_request: priceOnRequest,
+  }
 
   return {
     id: String(product.id),
@@ -416,9 +422,9 @@ export function mapRailsProduct(product: any): Product {
     slug: product.slug || '',
     name: product.name || '',
     description: product.description || '',
-    price: Number(product.price_cents || 0) / 100,
-    price_cents: Number(product.price_cents || 0),
-    price_on_request: Boolean(product.price_on_request || metadata.price_on_request),
+    price: priceCents / 100,
+    price_cents: priceCents,
+    price_on_request: priceOnRequest,
     status: ['draft', 'active', 'hidden', 'archived'].includes(String(product.status)) ? product.status : 'hidden',
     brand: product.brand?.id ? String(product.brand.id) : '',
     category: categoryId,
@@ -1210,6 +1216,7 @@ function normalizeMediaForPayload(formData: FormData) {
 export function productFormDataToRailsPayload(formData: FormData, options: { applyDefaults?: boolean } = {}) {
   const applyDefaults = options.applyDefaults !== false
   const product: Record<string, any> = {}
+  let priceOnRequest: boolean | undefined
 
   if (formData.has('productId') || formData.has('external_id')) {
     product.external_id = String(formData.get('external_id') || formData.get('productId') || '')
@@ -1222,6 +1229,8 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('price')) {
     const price = parseFloat(String(formData.get('price') || '0')) || 0
     product.price_cents = Math.round(price * 100)
+    priceOnRequest = isPriceOnRequest(price)
+    product.price_on_request = priceOnRequest
   }
   if (formData.has('status')) product.status = String(formData.get('status') || 'hidden')
 
@@ -1244,7 +1253,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('h1')) product.h1 = String(formData.get('h1') || '')
   if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
 
-  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request')) {
+  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined) {
     const metadata = parseJsonObject(formData.get('productMetadata'))
     if (formData.has('gender')) {
       const gender = String(formData.get('gender') || '')
@@ -1257,7 +1266,11 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
         delete metadata.gender
       }
     }
-    if (formData.has('price_on_request')) metadata.price_on_request = formBoolean(formData.get('price_on_request'))
+    if (priceOnRequest !== undefined) {
+      metadata.price_on_request = priceOnRequest
+    } else if (formData.has('price_on_request')) {
+      metadata.price_on_request = formBoolean(formData.get('price_on_request'))
+    }
     product.metadata = metadata
   }
 
@@ -1293,6 +1306,17 @@ export async function updateRailsAdminProduct(id: string, formData: FormData) {
 
 export async function patchRailsAdminProduct(id: string, data: Record<string, any>) {
   const product: Record<string, any> = {}
+  let currentProduct: any | null = null
+  const getCurrentProduct = async () => {
+    if (currentProduct) return currentProduct
+    const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
+    currentProduct = current.product || {}
+    return currentProduct
+  }
+  const getCurrentMetadata = async () => {
+    const current = await getCurrentProduct()
+    return current.metadata && typeof current.metadata === 'object' ? current.metadata : {}
+  }
 
   if (data.productId !== undefined) {
     product.external_id = String(data.productId)
@@ -1300,7 +1324,11 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
   }
   if (data.name !== undefined) product.name = String(data.name)
   if (data.description !== undefined) product.description = String(data.description)
-  if (data.price !== undefined) product.price_cents = Math.round((Number(data.price) || 0) * 100)
+  if (data.price !== undefined) {
+    const price = Number(data.price) || 0
+    product.price_cents = Math.round(price * 100)
+    product.price_on_request = isPriceOnRequest(price)
+  }
   if (data.status !== undefined) {
     const status = String(data.status || 'hidden')
     product.status = ['draft', 'active', 'hidden', 'archived'].includes(status) ? status : 'hidden'
@@ -1311,11 +1339,15 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
   if (data.metadata !== undefined) {
     product.metadata = data.metadata && typeof data.metadata === 'object' ? data.metadata : {}
   }
+  if (data.price !== undefined) {
+    const metadata = product.metadata && typeof product.metadata === 'object'
+      ? { ...product.metadata }
+      : { ...(await getCurrentMetadata()) }
+    metadata.price_on_request = isPriceOnRequest(data.price)
+    product.metadata = metadata
+  }
   if (data.gender !== undefined) {
-    const current = await railsFetch<{ product: any }>(`/admin/products/${id}`)
-    const currentMetadata = current.product?.metadata && typeof current.product.metadata === 'object'
-      ? current.product.metadata
-      : {}
+    const currentMetadata = await getCurrentMetadata()
     const metadata = product.metadata && typeof product.metadata === 'object'
       ? { ...currentMetadata, ...product.metadata }
       : { ...currentMetadata }

@@ -9,6 +9,7 @@ import {
   mapRailsProduct,
   markRailsCrmWalletWithdrawalPaid,
   normalizeProductSearchInput,
+  patchRailsAdminProduct,
   productFormDataToRailsPayload,
   rejectRailsCrmRefund,
   rejectRailsCrmWalletWithdrawal,
@@ -409,7 +410,7 @@ describe('rails admin product adapter', () => {
     )
   })
 
-  it('builds update payload without defaulting Rails fields and preserves metadata', () => {
+  it('builds update payload without defaulting Rails fields and derives price-on-request from price', () => {
     const formData = new FormData()
     formData.append('productId', 'ext-1')
     formData.append('sku', 'sku-1')
@@ -458,10 +459,11 @@ describe('rails admin product adapter', () => {
       production_min_days: 3,
       production_max_days: null,
       seo_title: 'SEO',
+      price_on_request: false,
       metadata: {
         source: 'admin',
         gender: 'female',
-        price_on_request: true,
+        price_on_request: false,
       },
     })
     expect(payload.product.currency).toBeUndefined()
@@ -487,6 +489,62 @@ describe('rails admin product adapter', () => {
     ])
   })
 
+  it('marks zero-price products as price-on-request in payload metadata', () => {
+    const formData = new FormData()
+    formData.append('price', '0')
+    formData.append('productMetadata', JSON.stringify({ source: 'admin', price_on_request: false }))
+
+    const payload = productFormDataToRailsPayload(formData, { applyDefaults: false })
+
+    expect(payload.product).toMatchObject({
+      price_cents: 0,
+      price_on_request: true,
+      metadata: {
+        source: 'admin',
+        price_on_request: true,
+      },
+    })
+  })
+
+  it('patches price and syncs price-on-request metadata from price', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          product: {
+            id: 'product-id',
+            metadata: { source: 'admin', price_on_request: true },
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          product: {
+            id: 'product-id',
+            external_id: 'ext-1',
+            name: 'Product',
+            price_cents: 123400,
+            metadata: { source: 'admin', price_on_request: false },
+          },
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await patchRailsAdminProduct('product-id', { price: 1234 })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const patchBody = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(patchBody.product).toMatchObject({
+      price_cents: 123400,
+      price_on_request: false,
+      metadata: {
+        source: 'admin',
+        price_on_request: false,
+      },
+    })
+  })
+
   it('keeps archived status and uses subcategory as Rails category id', () => {
     const formData = new FormData()
     formData.append('status', 'archived')
@@ -509,7 +567,7 @@ describe('rails admin product adapter', () => {
       description: 'Desc',
       status: 'draft',
       price_cents: 10000,
-      price_on_request: false,
+      price_on_request: true,
       currency: 'RUB',
       fulfillment_mode: 'ready_to_ship',
       availability_confidence: 'high',
@@ -522,7 +580,7 @@ describe('rails admin product adapter', () => {
       seo_description: 'SEO description',
       h1: 'H1',
       canonical_url: 'https://example.com/product',
-      metadata: { gender: 'Для мужчин', source: 'rails' },
+      metadata: { gender: 'Для мужчин', source: 'rails', price_on_request: true },
       brand: { id: 'brand-id', name: 'Brand' },
       category: { id: 'subcategory-id', name: 'Subcategory', parent_id: 'category-id' },
       media: [
@@ -541,6 +599,7 @@ describe('rails admin product adapter', () => {
       slug: 'slug-1',
       price: 100,
       price_cents: 10000,
+      price_on_request: false,
       status: 'draft',
       brand: 'brand-id',
       category: 'category-id',

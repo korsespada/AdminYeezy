@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, productImageUrl } from '@/lib/image'
+import { isPriceOnRequest } from '@/lib/product-pricing'
 import ProductGenderBadge from '@/components/products/ProductGenderBadge'
 
 interface ProductTableViewProps {
@@ -106,7 +107,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
-            formData.append('price_on_request', product.price_on_request ? 'true' : 'false');
+            formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
             if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
