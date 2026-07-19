@@ -107,6 +107,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
             formData.append('status', product.status);
             formData.append('gender', product.gender || '');
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
+            formData.append('catalog_attributes', JSON.stringify(product.catalog_attributes || product.attributes || {}));
             formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
             if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);

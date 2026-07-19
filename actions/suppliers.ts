@@ -6,6 +6,10 @@ import { deleteS3Folder } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
 import { requireAdmin } from '@/lib/admin-session'
 import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
+import { extractProductAttributes } from '@/lib/product-attributes'
+import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
+import { runCustomSupplierScriptAction } from '@/actions/csv-import'
+import { deleteRailsAdminProductsByExternalIds } from '@/lib/rails-admin'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -39,11 +43,109 @@ async function requireAdminOrWorker(workerSecret?: string) {
 export async function getSuppliersAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const res = await scrapingQuery('SELECT * FROM suppliers ORDER BY name ASC')
+    const res = await scrapingQuery(`
+      SELECT
+        s.*,
+        brand_mapping.name AS default_brand_name,
+        category_mapping.name AS default_category_name,
+        subcategory_mapping.name AS default_subcategory_name
+      FROM suppliers s
+      LEFT JOIN catalog_id_mappings brand_mapping
+        ON brand_mapping.entity_type = 'brand'
+        AND (brand_mapping.canonical_id = s.default_brand OR brand_mapping.legacy_id = s.default_brand)
+      LEFT JOIN catalog_id_mappings category_mapping
+        ON category_mapping.entity_type = 'category'
+        AND (category_mapping.canonical_id = s.default_category OR category_mapping.legacy_id = s.default_category)
+      LEFT JOIN catalog_id_mappings subcategory_mapping
+        ON subcategory_mapping.entity_type = 'subcategory'
+        AND (subcategory_mapping.canonical_id = s.default_subcategory OR subcategory_mapping.legacy_id = s.default_subcategory)
+      ORDER BY s.name ASC
+    `)
+    const unresolved = res.rows.some((row) =>
+      (row.default_brand && !row.default_brand_name) ||
+      (row.default_category && !row.default_category_name) ||
+      (row.default_subcategory && !row.default_subcategory_name),
+    )
+    if (unresolved) {
+      const [brands, categories, subcategories] = await Promise.all([
+        query('SELECT id::text, name FROM brands'),
+        query('SELECT id::text, name FROM categories'),
+        query('SELECT id::text, name FROM subcategories'),
+      ])
+      const brandNames = new Map(brands.rows.map((row) => [String(row.id), row.name]))
+      const categoryNames = new Map(categories.rows.map((row) => [String(row.id), row.name]))
+      const subcategoryNames = new Map(subcategories.rows.map((row) => [String(row.id), row.name]))
+      for (const row of res.rows) {
+        row.default_brand_name ||= brandNames.get(String(row.default_brand || '')) || null
+        row.default_category_name ||= categoryNames.get(String(row.default_category || '')) || null
+        row.default_subcategory_name ||= subcategoryNames.get(String(row.default_subcategory || '')) || null
+      }
+    }
     return { success: true, data: res.rows }
   } catch (err: any) {
     return { success: false, error: err.message }
   }
+}
+
+export async function getSupplierCatalogLookupsAction(): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const result = await scrapingQuery(`
+      SELECT entity_type, canonical_id AS id, name, canonical_parent_id AS parent_id
+      FROM catalog_id_mappings
+      ORDER BY entity_type, name
+    `)
+    return {
+      success: true,
+      data: {
+        brands: result.rows.filter((row) => row.entity_type === 'brand'),
+        categories: result.rows.filter((row) => row.entity_type === 'category'),
+        subcategories: result.rows.filter((row) => row.entity_type === 'subcategory'),
+      },
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+async function resolveLegacySupplierDefaults(supplier: any) {
+  const values = [
+    supplier.default_brand,
+    supplier.default_category,
+    supplier.default_subcategory,
+  ].filter(Boolean).map(String)
+  if (values.length === 0) {
+    return {
+      brand: supplier.default_brand,
+      category: supplier.default_category,
+      subcategory: supplier.default_subcategory,
+    }
+  }
+
+  const result = await scrapingQuery(
+    `SELECT entity_type, legacy_id, canonical_id
+     FROM catalog_id_mappings
+     WHERE canonical_id = ANY($1::text[]) OR legacy_id = ANY($1::text[])`,
+    [values],
+  )
+  const byValue = new Map<string, string>()
+  for (const row of result.rows) {
+    byValue.set(String(row.canonical_id), String(row.legacy_id))
+    byValue.set(String(row.legacy_id), String(row.legacy_id))
+  }
+  return {
+    brand: byValue.get(String(supplier.default_brand || '')) || supplier.default_brand,
+    category: byValue.get(String(supplier.default_category || '')) || supplier.default_category,
+    subcategory: byValue.get(String(supplier.default_subcategory || '')) || supplier.default_subcategory,
+  }
+}
+
+function normalizeSupplierGender(value: FormDataEntryValue | null) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['male', 'мужской', 'для мужчин'].includes(normalized)) return 'male'
+  if (['female', 'женский', 'для женщин'].includes(normalized)) return 'female'
+  if (['unisex', 'унисекс'].includes(normalized)) return 'unisex'
+  return null
 }
 
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
@@ -64,7 +166,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const brand_tags = formData.get('brand_tags') as string || ''
 
     const default_price = formData.get('default_price') ? parseFloat(formData.get('default_price') as string) : null
-    const default_gender = formData.get('default_gender') as string || null
+    const default_gender = normalizeSupplierGender(formData.get('default_gender'))
     const ai_deep_search_enabled = formData.get('ai_deep_search_enabled') === 'on'
     const ai_resize_enabled = formData.get('ai_resize_enabled') === 'on'
     const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
@@ -74,16 +176,18 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const avatar_url = formData.get('avatar_url') as string || null
     const cookie = formData.get('cookie') as string || null
     const post_process_script = formData.get('post_process_script') as string || null
+    const post_process_enabled = formData.get('post_process_enabled') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = formData.get('ai_photo_instructions') as string || ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
+    const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
 
     const res = await scrapingQuery(
-      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25) RETURNING id`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled]
+      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27::jsonb) RETURNING id`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes)]
     )
 
     revalidatePath('/admin/suppliers')
@@ -111,7 +215,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const brand_tags = formData.get('brand_tags') as string || ''
 
     const default_price = formData.get('default_price') ? parseFloat(formData.get('default_price') as string) : null
-    const default_gender = formData.get('default_gender') as string || null
+    const default_gender = normalizeSupplierGender(formData.get('default_gender'))
     const ai_deep_search_enabled = formData.get('ai_deep_search_enabled') === 'on'
     const ai_resize_enabled = formData.get('ai_resize_enabled') === 'on'
     const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
@@ -121,20 +225,22 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const avatar_url = formData.get('avatar_url') as string || null
     const cookie = formData.get('cookie') as string || null
     const post_process_script = formData.get('post_process_script') as string || null
+    const post_process_enabled = formData.get('post_process_enabled') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = formData.get('ai_photo_instructions') as string || ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
+    const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
 
     await scrapingQuery(
       `UPDATE suppliers SET name=$1, album_id=$2, group_id=$3, tag_id=$4, 
        default_category=$5, default_subcategory=$6, default_brand=$7, 
        min_photos=$8, min_desc_len=$9, brand_tags=$10, 
        default_price=$11, default_gender=$12, 
-       ai_photo_enabled=$13, ai_cache_enabled=$14, ai_deep_search_enabled=$15, ai_resize_enabled=$16, ai_instructions=$17, avatar_url=$18, cookie=$19, post_process_script=$20, ai_photo_models=$21, ai_photo_instructions=$22, ai_parallel_enabled=$23, ai_parallel_count=$24, parse_tags_enabled=$25, updated_at=NOW()
-       WHERE id=$26`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, id]
+       ai_photo_enabled=$13, ai_cache_enabled=$14, ai_deep_search_enabled=$15, ai_resize_enabled=$16, ai_instructions=$17, avatar_url=$18, cookie=$19, post_process_script=$20, post_process_enabled=$21, ai_photo_models=$22, ai_photo_instructions=$23, ai_parallel_enabled=$24, ai_parallel_count=$25, parse_tags_enabled=$26, default_attributes=$27::jsonb, updated_at=NOW()
+       WHERE id=$28`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), id]
     )
 
     revalidatePath('/admin/suppliers')
@@ -268,9 +374,9 @@ function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[]) 
   if (stage === 'PUSHED') return 'Запушено'
   if (stage === 'AI_PROCESSED') return 'Обработано ИИ'
   if (files.some((file) => file.status === 'Запущено')) return 'Запущено'
+  if (files[0]?.status === 'failed') return 'failed'
   if (files.some((file) => file.status === 'Обработано ИИ')) return 'Обработано ИИ'
   if (files.some((file) => file.status === 'Обработано скриптом')) return 'Обработано скриптом'
-  if (files.some((file) => file.status === 'failed')) return 'failed'
   return 'Сырой CSV'
 }
 
@@ -421,9 +527,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
 
     const data: ExportHistoryBatch[] = Array.from(grouped.values()).map(({ batch, files }) => {
       const sortedFiles = files.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      const rawFile = [...sortedFiles]
-        .reverse()
-        .find((file) => file.status === 'Сырой CSV')
+      const rawFile = sortedFiles.find((file) => file.status === 'Сырой CSV')
       const aiFile = sortedFiles.find((file) => file.status === 'Обработано ИИ')
       const latestFile = sortedFiles[0]
       const latestEndDate = sortedFiles.find((file) => file.end_date)?.end_date || null
@@ -529,6 +633,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
     const supplier = supplierRes.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
+    const parserDefaults = await resolveLegacySupplierDefaults(supplier)
 
     // 2. Создаем задачу в БД
     const taskRes = await scrapingQuery(
@@ -567,9 +672,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     
     if (supplier.min_photos) args.push('--min_photos', supplier.min_photos.toString())
     if (supplier.min_desc_len) args.push('--min_desc', supplier.min_desc_len.toString())
-    if (supplier.default_category) args.push('--category', supplier.default_category)
-    if (supplier.default_subcategory) args.push('--subcategory', supplier.default_subcategory)
-    if (supplier.default_brand) args.push('--brand', supplier.default_brand)
+    if (parserDefaults.category) args.push('--category', parserDefaults.category)
+    if (parserDefaults.subcategory) args.push('--subcategory', parserDefaults.subcategory)
+    if (parserDefaults.brand) args.push('--brand', parserDefaults.brand)
     if (supplier.default_gender) args.push('--gender', supplier.default_gender)
     if (supplier.default_price) args.push('--default_price', supplier.default_price.toString())
     if (supplier.parse_tags_enabled) args.push('--parse_tags')
@@ -658,8 +763,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
                // Мапим поля в БД
                const sql = `
-                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, created_at, updated_at)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NOW(), NOW())
+                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, created_at, updated_at)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, NOW(), NOW())
                   ON CONFLICT (external_id) DO UPDATE SET
                       name = EXCLUDED.name,
                       description = EXCLUDED.description,
@@ -670,6 +775,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                       subcategory = EXCLUDED.subcategory,
                       gender = EXCLUDED.gender,
                       photos = EXCLUDED.photos,
+                      attributes = EXCLUDED.attributes,
                       batch_id = EXCLUDED.batch_id,
                       created_at = COALESCE(products.created_at, NOW()),
                       updated_at = NOW()
@@ -677,9 +783,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                
                const price = parseFloat(item.price) || supplier.default_price || 0
                const gender = item.gender || supplier.default_gender || ''
-               const cat = item.category || supplier.default_category || ''
-               const sub = item.subcategory || supplier.default_subcategory || ''
-               const brandStr = item.brand || supplier.default_brand || ''
+               const cat = item.category || parserDefaults.category || ''
+               const sub = item.subcategory || parserDefaults.subcategory || ''
+               const brandStr = item.brand || parserDefaults.brand || ''
                let photos: string[] = []
                try {
                  photos = item.photos ? JSON.parse(item.photos) : []
@@ -698,10 +804,19 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                   sub || null,
                   gender,
                   JSON.stringify(photos),
+                  JSON.stringify(extractProductAttributes(item)),
                   batchId
                ])
             }
             console.log(`[Scraper ${taskId}] Imported ${itemsCount} items to batch ${batchId}`)
+
+            if (supplier.post_process_enabled && supplier.post_process_script && batchId) {
+              console.log(`[Scraper ${taskId}] Auto post-process enabled: ${supplier.post_process_script}`)
+              const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
+              if (!postProcessResult?.success) {
+                console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error || 'unknown error'}`)
+              }
+            }
           }
         } catch (importErr) {
           console.error(`[Scraper ${taskId}] Import failed:`, importErr)
@@ -933,16 +1048,33 @@ export async function deleteBatchAction(batchId: string) {
             console.warn('Could not delete images from S3:', s3Err.message);
         }
 
-        // 1. Удаляем товары, привязанные к этой партии в технической базе
+        // Сначала фиксируем external_id, потому что Rails-каталог не хранит batch_id.
+        const batchProducts = await scrapingQuery(
+          'SELECT external_id FROM products WHERE batch_id = $1',
+          [batchId]
+        )
+        const externalIds = batchProducts.rows
+          .map((row) => String(row.external_id || '').trim())
+          .filter(Boolean)
+
+        // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
+        let catalogDeletedCount = 0
+        if (externalIds.length > 0 && process.env.RAILS_API_URL) {
+          const result = await deleteRailsAdminProductsByExternalIds(externalIds)
+          catalogDeletedCount = result.deleted
+        } else if (externalIds.length > 0) {
+          // Совместимость со старой схемой, где у основной таблицы был batch_id.
+          try {
+            const legacyResult = await query('DELETE FROM products WHERE external_id = ANY($1::text[])', [externalIds])
+            catalogDeletedCount = legacyResult.rowCount || 0
+          } catch (legacyError: any) {
+            console.warn('Could not delete legacy catalog products:', legacyError.message)
+          }
+        }
+
+        // После успешного удаления публикации удаляем товары партии из технической БД.
         const deleteProductsRes = await scrapingQuery('DELETE FROM products WHERE batch_id = $1', [batchId])
         const deletedCount = deleteProductsRes.rowCount
-
-        // 2. Удаляем товары из основной базы (если они были туда запушены)
-        try {
-            await query('DELETE FROM products WHERE batch_id = $1', [batchId])
-        } catch (vibeErr: any) {
-             console.warn('Could not delete from vibe DB:', vibeErr.message)
-        }
 
         // 3. Оставляем партию в истории, но фиксируем, что товары из БД удалены
         await scrapingQuery("UPDATE scraping_batches SET stage = 'DELETED_FROM_DB' WHERE id = $1", [batchId])
@@ -957,7 +1089,7 @@ export async function deleteBatchAction(batchId: string) {
         revalidatePath('/admin/batches')
         revalidatePath('/admin/scraping')
 
-        return { success: true, deletedCount }
+        return { success: true, deletedCount, catalogDeletedCount }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

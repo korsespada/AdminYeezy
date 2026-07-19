@@ -169,6 +169,7 @@ export default function CrmOrderDetail({
 
           <aside className="space-y-4">
             <CustomerCard order={order} />
+            <CheckoutCard order={order} />
             <MoneyCard order={order} />
             <TimelineCard order={order} />
           </aside>
@@ -496,6 +497,32 @@ function CustomerCard({ order }: { order: RailsCrmOrderDetail }) {
   )
 }
 
+function CheckoutCard({ order }: { order: RailsCrmOrderDetail }) {
+  const checkout = order.checkout
+  if (!checkout) return null
+
+  return (
+    <Card className="border-slate-800 bg-slate-900 text-slate-100">
+      <CardHeader>
+        <CardTitle className="text-base">Доставка</CardTitle>
+        <CardDescription className="text-slate-500">
+          Стоимость доставки рассчитывается после прибытия в офис ТК.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm text-slate-400">
+        <Info label="Способ" value={deliveryLabel(checkout.delivery_method)} />
+        <Info label="Получатель" value={checkout.full_name} />
+        <Info label="Телефон" value={checkout.phone} />
+        <Info label="Email" value={checkout.email} />
+        <Info label="Город" value={checkout.city} />
+        <Info label="Адрес" value={checkout.address_line} />
+        <Info label="Индекс" value={checkout.postal_code} />
+        <Info label="Комментарий" value={checkout.delivery_comment} />
+      </CardContent>
+    </Card>
+  )
+}
+
 function MoneyCard({ order }: { order: RailsCrmOrderDetail }) {
   return (
     <Card className="border-slate-800 bg-slate-900 text-slate-100">
@@ -608,6 +635,12 @@ function label(status?: string) {
 function formatMoney(value?: number | null, currency = 'RUB') {
   if (typeof value !== 'number') return '-'
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value / 100)
+}
+
+function deliveryLabel(value?: string) {
+  if (value === 'cdek_to_door') return 'СДЭК до двери'
+  if (value === 'express_moscow') return 'Экспресс по Москве'
+  return value || 'Не указан'
 }
 
 function formatDate(value?: string | null) {

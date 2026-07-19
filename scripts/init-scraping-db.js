@@ -30,6 +30,7 @@ async function init() {
         default_category TEXT,
         default_subcategory TEXT,
         default_brand TEXT,
+        default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         min_photos INTEGER,
         min_desc TEXT,
         min_desc_len INTEGER,
@@ -40,9 +41,44 @@ async function init() {
         default_gender TEXT,
         merge_enabled BOOLEAN,
         ai_photo_enabled BOOLEAN,
+        post_process_script TEXT,
+        post_process_enabled BOOLEAN DEFAULT FALSE,
         avatar_url TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog_id_mappings (
+        entity_type TEXT NOT NULL,
+        legacy_id TEXT NOT NULL,
+        canonical_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        legacy_parent_id TEXT,
+        canonical_parent_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (entity_type, legacy_id),
+        UNIQUE (entity_type, canonical_id)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog_attribute_definitions (
+        code TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        category_scope TEXT NOT NULL DEFAULT 'Все категории',
+        value_type TEXT NOT NULL DEFAULT 'text',
+        show_as_characteristic BOOLEAN NOT NULL DEFAULT TRUE,
+        use_as_filter BOOLEAN NOT NULL DEFAULT FALSE,
+        use_as_variant_dimension BOOLEAN NOT NULL DEFAULT FALSE,
+        parser_rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+        aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
 
@@ -87,6 +123,7 @@ async function init() {
         subcategory TEXT,
         gender TEXT,
         photos JSONB,
+        attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()

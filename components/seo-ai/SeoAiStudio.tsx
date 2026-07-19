@@ -31,6 +31,7 @@ const TASK_LABELS: Record<string, string> = {
   brand_writer: 'Бренды',
   category_writer: 'Категории',
   landing_ideas: 'Идеи лендингов',
+  catalog_attribute_refiner: 'Товары: нормализация атрибутов',
 }
 
 const PRODUCT_FIELDS = [

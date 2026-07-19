@@ -106,6 +106,9 @@ export interface Product {
   h1?: string
   canonical_url?: string
   metadata?: Record<string, any>
+  /** Structured catalog attributes from Rails; `attributes` is a compatibility alias. */
+  catalog_attributes?: Record<string, any>
+  attributes?: Record<string, any>
   created: string
   updated: string
   collectionId: string

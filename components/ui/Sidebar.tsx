@@ -31,6 +31,8 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
     const [descriptionValue, setDescriptionValue] = useState(searchParams.get('description') || '')
     const [priceMinValue, setPriceMinValue] = useState(searchParams.get('priceMin') || '')
     const [priceMaxValue, setPriceMaxValue] = useState(searchParams.get('priceMax') || '')
+    const [attributeKeyValue, setAttributeKeyValue] = useState(searchParams.get('attributeKey') || '')
+    const [attributeValueValue, setAttributeValueValue] = useState(searchParams.get('attributeValue') || '')
 
     const currentBrand = searchParams.get('brand') || ''
     const currentCategory = searchParams.get('category') || ''
@@ -40,8 +42,10 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
     const currentDescription = searchParams.get('description') || ''
     const currentPriceMin = searchParams.get('priceMin') || ''
     const currentPriceMax = searchParams.get('priceMax') || ''
+    const currentAttributeKey = searchParams.get('attributeKey') || ''
+    const currentAttributeValue = searchParams.get('attributeValue') || ''
     const hasActiveFilters = Boolean(
-        currentBrand || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax
+        currentBrand || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
     )
 
     const applyFilter = useCallback((key: string, value: string | null) => {
@@ -102,6 +106,24 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
         return () => clearTimeout(timer)
     }, [applyFilter, currentPriceMax, priceMaxValue])
 
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (attributeKeyValue !== currentAttributeKey) {
+                applyFilter('attributeKey', attributeKeyValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentAttributeKey, attributeKeyValue])
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (attributeValueValue !== currentAttributeValue) {
+                applyFilter('attributeValue', attributeValueValue || null)
+            }
+        }, 500)
+        return () => clearTimeout(timer)
+    }, [applyFilter, currentAttributeValue, attributeValueValue])
+
     // Update local filter values when URL changes (e.g. on reset)
     useEffect(() => {
         setNameValue(currentName)
@@ -119,11 +141,21 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
         setPriceMaxValue(currentPriceMax)
     }, [currentPriceMax])
 
+    useEffect(() => {
+        setAttributeKeyValue(currentAttributeKey)
+    }, [currentAttributeKey])
+
+    useEffect(() => {
+        setAttributeValueValue(currentAttributeValue)
+    }, [currentAttributeValue])
+
     const handleReset = () => {
         setNameValue('')
         setDescriptionValue('')
         setPriceMinValue('')
         setPriceMaxValue('')
+        setAttributeKeyValue('')
+        setAttributeValueValue('')
         const params = new URLSearchParams()
         const perPage = searchParams.get('perPage')
         if (perPage) params.set('perPage', perPage)
@@ -319,6 +351,28 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
                                     />
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Catalog attribute filter */}
+                        <div>
+                            <Label className="mb-2 block text-slate-300">Атрибуты</Label>
+                            <div className="space-y-2">
+                                <Input
+                                    value={attributeKeyValue}
+                                    onChange={(event) => setAttributeKeyValue(event.target.value)}
+                                    placeholder="Ключ, например material"
+                                    className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
+                                />
+                                <Input
+                                    value={attributeValueValue}
+                                    onChange={(event) => setAttributeValueValue(event.target.value)}
+                                    placeholder="Значение, например leather"
+                                    className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
+                                />
+                            </div>
+                            <p className="mt-1 text-[11px] text-slate-500">
+                                Можно указать только ключ, чтобы найти все товары с этим атрибутом.
+                            </p>
                         </div>
 
                         {/* Category Filter */}

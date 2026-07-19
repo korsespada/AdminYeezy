@@ -6,6 +6,12 @@ import { uploadToS3 } from '@/lib/s3'
 import { getScrapingFileArtifact, saveScrapingFileArtifact } from '@/lib/scraping-files'
 import { requireAdmin } from '@/lib/admin-session'
 import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
+import {
+  extractProductAttributes,
+  hasProductAttributes,
+  normalizeProductAttributes,
+  type ProductAttributes,
+} from '@/lib/product-attributes'
 
 export interface CsvProduct {
     id?: string | number
@@ -19,6 +25,7 @@ export interface CsvProduct {
     subcategory: string
     photos: string[]
     gender?: string
+    attributes?: ProductAttributes
     batchId?: string
     ai_processed?: boolean | string
 }
@@ -82,16 +89,21 @@ function normalizeBatchProduct(row: any): CsvProduct {
     gender: row.gender || '',
     photos: normalizePhotos(row.photos),
     batchId: row.batch_id || row.batchId,
+    attributes: extractProductAttributes(row),
     ai_processed: row.ai_processed === true || row.ai_processed === 'true',
   }
 }
 
 function serializeProductsToCsv(products: any[], columns = BATCH_PRODUCT_COLUMNS, delimiter = ';') {
-  const header = columns.map((c) => c.name).join(delimiter)
-  const rows = products.map((p) => columns.map((col) => {
+  const effectiveColumns = columns.some((column) => column.key === 'attributes') || !products.some((product) => hasProductAttributes(product.attributes))
+    ? columns
+    : [...columns, { name: 'attributes', key: 'attributes' }]
+  const header = effectiveColumns.map((c) => c.name).join(delimiter)
+  const rows = products.map((p) => effectiveColumns.map((col) => {
     let val = p[col.key]
     if (val === undefined || val === null) val = ''
     if (Array.isArray(val)) val = JSON.stringify(val)
+    if (col.key === 'attributes' && typeof val === 'object' && val !== null) val = JSON.stringify(normalizeProductAttributes(val))
     if (typeof val === 'boolean') val = val ? 'true' : 'false'
     if (typeof val === 'string') val = val.replace(/\r\n/g, '\\n').replace(/\n/g, '\\n').replace(/\r/g, '\\n')
     const str = String(val).replace(/"/g, '""')
@@ -346,16 +358,26 @@ export async function saveLocalCsvAction(filePath: string, products: any[], colu
 
     // Формируем CSV строку
     // 1. Заголовки (используем оригинальные имена из файла)
-    const header = columns.map(c => c.name).join(delimiter);
+    const effectiveColumns = columns.some((column) => column.key === 'attributes') || !products.some((product) => {
+      const attributes = normalizeProductAttributes(product.attributes)
+      return Object.keys(attributes).some((key) => !columns.some((column) => column.key === key))
+    })
+      ? columns
+      : [...columns, { name: 'attributes', key: 'attributes' }]
+
+    const header = effectiveColumns.map(c => c.name).join(delimiter);
     
     // 2. Строки данных
     const rows = products.map(p => {
-      return columns.map(col => {
+      return effectiveColumns.map(col => {
         let val = p[col.key]; // Используем внутренний ключ для получения значения
         if (val === undefined || val === null) val = '';
         
         // Если это массив (например, фото), превращаем в JSON-строку
         if (Array.isArray(val)) val = JSON.stringify(val);
+        if (col.key === 'attributes' && typeof val === 'object' && val !== null) {
+          val = JSON.stringify(normalizeProductAttributes(val))
+        }
         
         // Специфичное правило пользователя: заменять реальные переносы строк на текст \n
         if (typeof val === 'string') {
@@ -408,7 +430,7 @@ export async function getBatchProductsAction(batchId: string) {
     await requireAdmin()
 
     const res = await scrapingQuery(`
-      SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, ai_processed, created_at, updated_at
+      SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, created_at, updated_at
       FROM products
       WHERE batch_id = $1
       ORDER BY id ASC
@@ -436,8 +458,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
   if (numericId) {
     const updateRes = await client.query(`
       UPDATE products
-      SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, ai_processed=$11, batch_id=$12, updated_at=NOW()
-      WHERE id=$13
+      SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, attributes=$11::jsonb, ai_processed=$12, batch_id=$13, updated_at=NOW()
+      WHERE id=$14
       RETURNING id
     `, [
       normalized.external_id,
@@ -450,6 +472,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       normalized.subcategory || null,
       normalized.gender,
       JSON.stringify(normalized.photos || []),
+      JSON.stringify(normalized.attributes || {}),
       normalized.ai_processed === true || normalized.ai_processed === 'true',
       batchId,
       numericId,
@@ -458,8 +481,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, ai_processed, batch_id, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, NOW(), NOW())
+    INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
     ON CONFLICT (external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -470,6 +493,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       subcategory = EXCLUDED.subcategory,
       gender = EXCLUDED.gender,
       photos = EXCLUDED.photos,
+      attributes = EXCLUDED.attributes,
       ai_processed = EXCLUDED.ai_processed,
       batch_id = EXCLUDED.batch_id,
       updated_at = NOW()
@@ -485,6 +509,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
     normalized.subcategory || null,
     normalized.gender,
     JSON.stringify(normalized.photos || []),
+    JSON.stringify(normalized.attributes || {}),
     normalized.ai_processed === true || normalized.ai_processed === 'true',
     batchId,
   ])
@@ -539,6 +564,7 @@ export async function updateBatchProductAction(identifier: string | number, patc
       'subcategory',
       'gender',
       'photos',
+      'attributes',
       'ai_processed',
     ].includes(key))
 
@@ -548,10 +574,11 @@ export async function updateBatchProductAction(identifier: string | number, patc
     const setClauses = keys.map((key, index) => {
       let value = (patch as any)[key]
       if (key === 'photos') value = JSON.stringify(normalizePhotos(value))
+      if (key === 'attributes') value = JSON.stringify(normalizeProductAttributes(value))
       if (key === 'brand') value = normalizeBrand(value)
       if (key === 'ai_processed') value = value === true || value === 'true'
       values.push(value)
-      return key === 'photos'
+      return key === 'photos' || key === 'attributes'
         ? `${key}=$${index + 1}::jsonb`
         : `${key}=$${index + 1}`
     })
@@ -691,7 +718,7 @@ export async function getSupplierDataAction(supplierId: number) {
     await requireAdmin()
 
     try {
-        const res = await scrapingQuery('SELECT album_id, post_process_script, ai_parallel_enabled, ai_parallel_count FROM suppliers WHERE id=$1', [supplierId]);
+        const res = await scrapingQuery('SELECT album_id, post_process_script, post_process_enabled, ai_parallel_enabled, ai_parallel_count FROM suppliers WHERE id=$1', [supplierId]);
         if (res.rows.length > 0) return res.rows[0];
         return null;
     } catch (err) {
@@ -721,6 +748,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     }
     const taskId = Math.floor(Math.random() * 1000000);
     let effectiveInputPath = inputPath ? resolveSafeRuntimePath(inputPath) : inputPath;
+    let originalProducts: any[] = [];
     const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
 
     if (batchId) {
@@ -728,6 +756,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         if (!batchRes.success || !batchRes.data) {
             throw new Error(batchRes.error || "Не удалось загрузить товары партии");
         }
+        originalProducts = batchRes.data.products || [];
         effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
         fs.writeFileSync(
             /*turbopackIgnore: true*/ effectiveInputPath,
@@ -787,6 +816,13 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
                     if (batchId && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
                         const processedText = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
                         const processedProducts = parseServerCsv(processedText);
+                        const originalByExternalId = new Map(originalProducts.map((product: any) => [String(product.external_id), product]));
+                        for (const processedProduct of processedProducts) {
+                          if (Object.keys(processedProduct.attributes || {}).length === 0) {
+                            const original = originalByExternalId.get(String(processedProduct.external_id));
+                            if (original?.attributes) processedProduct.attributes = original.attributes;
+                          }
+                        }
                         const saveRes = await saveBatchProductsAction(batchId, processedProducts);
                         if (!saveRes.success) throw new Error(saveRes.error);
                         itemsCount = processedProducts.length;

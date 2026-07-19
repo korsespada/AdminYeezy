@@ -43,6 +43,17 @@ yeezy_scraping batch
   -> storefront
 ```
 
+Подробная инструкция по работе с партиями, CSV-совместимости и атрибутам: [exports.md](./exports.md).
+
+## Фильтры и характеристики
+
+| URL | Назначение | Источник |
+|---|---|---|
+| `/admin/filter-characteristics` | Реестр атрибутов каталога и их режимов | `yeezy_scraping.catalog_attribute_definitions` |
+| `/admin/catalog-attributes` | Проверка и подтверждение предложений AI | Rails catalog attribute suggestions |
+
+В реестре можно отдельно включить показ атрибута в карточке, фильтрацию на сайте и использование как варианта товара. Изменение флага не меняет старые товары и не запускает массовый пересчёт.
+
 ## CRM
 
 | URL | Назначение | Rails API |

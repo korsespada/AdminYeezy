@@ -19,6 +19,30 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SCRAPING_DATABASE_URL = os.getenv("SCRAPING_DATABASE_URL") or os.getenv("DATABASE_URL")
 MODEL_NAME = "google/gemini-2.0-flash-lite:free" # Универсальная и быстрая модель
 
+ATTRIBUTE_HINT_LABELS = {
+    "sizes": "Размеры",
+    "colors": "Цвета",
+    "materials": "Материалы",
+    "model_name": "Модель",
+    "season": "Сезон",
+    "fit": "Посадка",
+    "clothing_measurements": "Замеры одежды",
+    "sole_material": "Материал подошвы",
+    "upper_material": "Материал верха",
+    "lining_material": "Материал подкладки",
+    "heel_height": "Высота каблука",
+    "shoe_size_system": "Система размеров",
+    "bag_dimensions": "Размеры сумки",
+    "bag_capacity": "Вместимость",
+    "strap_length": "Длина ремня",
+    "watch_movement": "Механизм часов",
+    "water_resistance": "Водозащита",
+    "case_material": "Материал корпуса",
+    "strap_material": "Материал ремешка",
+    "dial_color": "Цвет циферблата",
+    "country_of_origin": "Страна производства",
+}
+
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
@@ -64,7 +88,7 @@ def get_ai_settings(supplier_id):
         model_name = model_name['value'] if model_name else "google/gemini-2.0-flash-lite:free"
 
         # Get Supplier Settings
-        cur.execute("SELECT ai_instructions, ai_photo_enabled, ai_photo_instructions, ai_photo_models, ai_parallel_enabled, ai_parallel_count, ai_cache_enabled FROM suppliers WHERE id = %s", (supplier_id,))
+        cur.execute("SELECT ai_instructions, ai_photo_enabled, ai_photo_instructions, ai_photo_models, ai_parallel_enabled, ai_parallel_count, ai_cache_enabled, default_attributes FROM suppliers WHERE id = %s", (supplier_id,))
         supplier_settings = cur.fetchone()
 
         mapping = get_mapping_data()
@@ -78,6 +102,7 @@ def get_ai_settings(supplier_id):
             "ai_parallel_enabled": supplier_settings['ai_parallel_enabled'] if supplier_settings else False,
             "ai_parallel_count": supplier_settings['ai_parallel_count'] if supplier_settings else 5,
             "ai_cache_enabled": supplier_settings['ai_cache_enabled'] if supplier_settings else False,
+            "default_attributes": supplier_settings.get('default_attributes') if supplier_settings else [],
             "model_name": model_name,
             "mapping": mapping
         }
@@ -131,10 +156,13 @@ def process_product_ai(product, settings):
     ai_photo = settings["ai_photo_enabled"]
     use_cache = settings["ai_cache_enabled"]
     model_name = settings["model_name"]
+    supplier_attributes = settings.get("default_attributes") or []
+    if not isinstance(supplier_attributes, list):
+        supplier_attributes = []
 
     # Calculate Cache Hash
     photo_url = product.get('photos', [''])[0] if product.get('photos') else ''
-    cache_input = f"{product.get('description', '')}|{photo_url}|{global_rules}|{supplier_instr}|{model_name}"
+    cache_input = f"{product.get('description', '')}|{photo_url}|{global_rules}|{supplier_instr}|{model_name}|{json.dumps(supplier_attributes, ensure_ascii=False, sort_keys=True)}"
     cache_hash = hashlib.md5(cache_input.encode('utf-8')).hexdigest()
 
     if use_cache:
@@ -144,6 +172,7 @@ def process_product_ai(product, settings):
             return cached
 
     mapping = settings["mapping"]
+    existing_attributes = product.get("attributes") if isinstance(product.get("attributes"), dict) else {}
     
     # Format mapping for prompt
     brands_list = ", ".join([f"{name} (ID: {mid})" for name, mid in mapping['brands'].items()])
@@ -180,6 +209,21 @@ def process_product_ai(product, settings):
     combined_instruction = f"{global_rules}\n\nДОПОЛНИТЕЛЬНЫЕ ИНСТРУКЦИИ ПОСТАВЩИКА:\n{supplier_instr}"
     if photo_analysis:
         combined_instruction += f"\n\nРЕЗУЛЬТАТ АНАЛИЗА ФОТО (ИСПОЛЬЗУЙ ЭТО):\n{photo_analysis}"
+
+    prioritized_attributes = [
+        f"{code} ({ATTRIBUTE_HINT_LABELS.get(code, code)})"
+        for code in supplier_attributes
+        if code in ATTRIBUTE_HINT_LABELS
+    ]
+    attribute_instruction = (
+        "Нет специальных атрибутов поставщика."
+        if not prioritized_attributes
+        else (
+            "В первую очередь извлеки следующие атрибуты поставщика: "
+            + ", ".join(prioritized_attributes)
+            + ". Используй указанные коды как ключи JSON. Не выдумывай значение: если данных нет, не добавляй ключ."
+        )
+    )
     
     prompt_text = (
         f"Проанализируй товар и верни JSON. Используй ID из списков ниже, если находишь соответствие.\n\n"
@@ -195,6 +239,9 @@ def process_product_ai(product, settings):
         f"Category (default): {product.get('category', '')}\n"
         f"Subcategory (default): {product.get('subcategory', '')}\n"
         f"Gender (default): {product.get('gender', '')}\n\n"
+        f"УЖЕ СОХРАНЁННЫЕ АТРИБУТЫ (не удаляй их, дополни или уточни при необходимости):\n"
+        f"{json.dumps(existing_attributes, ensure_ascii=False)}\n\n"
+        f"ПРИОРИТЕТНЫЕ АТРИБУТЫ ПОСТАВЩИКА:\n{attribute_instruction}\n\n"
         f"ВЕРНИ JSON В ФОРМАТЕ:\n"
         "{\n"
         "  \"name\": \"...\",\n"
@@ -203,7 +250,8 @@ def process_product_ai(product, settings):
         "  \"brand\": \"ID или название\",\n"
         "  \"category\": \"ID или название\",\n"
         "  \"subcategory\": \"ID или название\",\n"
-        "  \"gender\": \"...\"\n"
+        "  \"gender\": \"...\",\n"
+        "  \"attributes\": {\"model_name\": \"...\", \"colors\": [\"...\"], \"materials\": [\"...\"], \"sizes\": [\"...\"], \"shoe_size_system\": \"EU\", \"upper_material\": \"...\", \"lining_material\": \"...\", \"sole_material\": \"...\", \"heel_height\": \"...\", \"season\": \"...\"}\n"
         "}"
     )
 
@@ -230,6 +278,11 @@ def process_product_ai(product, settings):
         for field in ['description', 'name']:
             if field in ai_res and isinstance(ai_res[field], str):
                 ai_res[field] = ai_res[field].replace('\r\n', '\\n').replace('\n', '\\n').replace('\r', '\\n')
+
+        if not isinstance(ai_res.get('attributes'), dict):
+            ai_res['attributes'] = existing_attributes
+        else:
+            ai_res['attributes'] = {**existing_attributes, **ai_res['attributes']}
 
         # Save to cache if enabled
         if use_cache:

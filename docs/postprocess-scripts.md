@@ -221,7 +221,7 @@ Then inspect:
 3. Commit and push.
 4. Redeploy Coolify.
 5. In supplier settings, set `post_process_script` to `my_script.py`.
-6. Open a batch and click `Пост-обработка скриптом`.
+6. Open a batch and click `Пост-обработка скриптом`, либо включите для поставщика флажок `Автоматически`, чтобы запускать этот же шаг сразу после сырого парсинга.
 
 The admin will use the script through the DB-backed batch flow: `scraping.products -> temporary CSV -> script -> output CSV -> scraping.products`.
 

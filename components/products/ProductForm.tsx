@@ -55,6 +55,7 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [seoDescription, setSeoDescription] = useState('')
   const [h1, setH1] = useState('')
   const [canonicalUrl, setCanonicalUrl] = useState('')
+  const [catalogAttributes, setCatalogAttributes] = useState<Record<string, any>>({})
   const [brandIds, setBrandIds] = useState<string[]>([])
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
@@ -124,6 +125,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         setSeoDescription(product.seo_description || '')
         setH1(product.h1 || '')
         setCanonicalUrl(product.canonical_url || '')
+        setCatalogAttributes(product.catalog_attributes || product.attributes || {})
         // Handle brand as array or single value
         const b = product.brand || product.expand?.brand
         if (Array.isArray(b)) {
@@ -198,6 +200,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         setSeoDescription('')
         setH1('')
         setCanonicalUrl('')
+        setCatalogAttributes({})
         setBrandIds([])
         setCategory(categories[0]?.id || '')
         setSubcategory('')
@@ -247,6 +250,31 @@ export default function ProductForm({ product, brands, categories, subcategories
 
   const handleDragEnd = () => {
     setDraggedIndex(null)
+  }
+
+  const updateCatalogAttribute = (oldKey: string, nextKey: string, rawValue: string) => {
+    setCatalogAttributes((current) => {
+      const next = { ...current }
+      if (oldKey !== nextKey) delete next[oldKey]
+      const key = nextKey.trim()
+      if (!key) return next
+      let value: unknown = rawValue
+      try {
+        value = JSON.parse(rawValue)
+      } catch {
+        value = rawValue
+      }
+      next[key] = value
+      return next
+    })
+  }
+
+  const removeCatalogAttribute = (key: string) => {
+    setCatalogAttributes((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
   }
 
   const buildMediaPayload = () => {
@@ -316,6 +344,7 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
     formData.append('canonical_url', canonicalUrl.trim())
+    formData.append('catalog_attributes', JSON.stringify(catalogAttributes))
     const priceOnRequest = isPriceOnRequest(priceNum)
     formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
     formData.append('productMetadata', JSON.stringify(product?.metadata || {}))
@@ -356,6 +385,8 @@ export default function ProductForm({ product, brands, categories, subcategories
           seo_description: seoDescription.trim(),
           h1: h1.trim(),
           canonical_url: canonicalUrl.trim(),
+          catalog_attributes: catalogAttributes,
+          attributes: catalogAttributes,
           price_on_request: priceOnRequest,
           metadata: {
             ...(product.metadata || {}),
@@ -698,6 +729,65 @@ export default function ProductForm({ product, brands, categories, subcategories
                   disabled={isPending}
                 />
               </div>
+            </div>
+
+            <div className="space-y-3 border-t border-gray-700 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300">
+                    Атрибуты каталога
+                  </label>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Структурированные характеристики товара; ключи используются в фильтрах.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCatalogAttributes((current) => ({ ...current, '': '' }))}
+                  disabled={isPending}
+                >
+                  Добавить
+                </Button>
+              </div>
+              {Object.entries(catalogAttributes).length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-700 p-3 text-xs text-gray-500">
+                  Атрибутов пока нет
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {Object.entries(catalogAttributes).map(([key, value]) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <input
+                        value={key}
+                        onChange={(event) => updateCatalogAttribute(key, event.target.value, String(value ?? ''))}
+                        placeholder="Ключ, например material"
+                        className="w-2/5 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                        disabled={isPending}
+                      />
+                      <input
+                        value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? '')}
+                        onChange={(event) => updateCatalogAttribute(key, key, event.target.value)}
+                        placeholder="Значение"
+                        className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                        disabled={isPending}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeCatalogAttribute(key)}
+                        disabled={isPending}
+                        className="text-gray-400 hover:text-red-400"
+                        title="Удалить атрибут"
+                      >
+                        <Trash2 size={16} />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

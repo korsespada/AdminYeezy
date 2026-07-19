@@ -25,6 +25,7 @@ async function migrate() {
         default_category TEXT,
         default_subcategory TEXT,
         default_brand TEXT,
+        default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         min_photos INTEGER DEFAULT 0,
         min_desc TEXT,
         min_desc_len INTEGER DEFAULT 0,
@@ -41,6 +42,7 @@ async function migrate() {
         ai_instructions TEXT DEFAULT '',
         avatar_url TEXT,
         post_process_script TEXT,
+        post_process_enabled BOOLEAN DEFAULT FALSE,
         ai_photo_models TEXT DEFAULT '',
         ai_photo_instructions TEXT DEFAULT '',
         ai_parallel_enabled BOOLEAN DEFAULT FALSE,
@@ -60,6 +62,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS default_category TEXT,
         ADD COLUMN IF NOT EXISTS default_subcategory TEXT,
         ADD COLUMN IF NOT EXISTS default_brand TEXT,
+        ADD COLUMN IF NOT EXISTS default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS min_photos INTEGER DEFAULT 0,
         ADD COLUMN IF NOT EXISTS min_desc TEXT,
         ADD COLUMN IF NOT EXISTS min_desc_len INTEGER DEFAULT 0,
@@ -76,6 +79,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS ai_instructions TEXT DEFAULT '',
         ADD COLUMN IF NOT EXISTS avatar_url TEXT,
         ADD COLUMN IF NOT EXISTS post_process_script TEXT,
+        ADD COLUMN IF NOT EXISTS post_process_enabled BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS ai_photo_models TEXT DEFAULT '',
         ADD COLUMN IF NOT EXISTS ai_photo_instructions TEXT DEFAULT '',
         ADD COLUMN IF NOT EXISTS ai_parallel_enabled BOOLEAN DEFAULT FALSE,
@@ -84,6 +88,50 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog_id_mappings (
+        entity_type TEXT NOT NULL,
+        legacy_id TEXT NOT NULL,
+        canonical_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        legacy_parent_id TEXT,
+        canonical_parent_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (entity_type, legacy_id),
+        UNIQUE (entity_type, canonical_id)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog_attribute_definitions (
+        code TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        category_scope TEXT NOT NULL DEFAULT 'Все категории',
+        value_type TEXT NOT NULL DEFAULT 'text',
+        show_as_characteristic BOOLEAN NOT NULL DEFAULT TRUE,
+        use_as_filter BOOLEAN NOT NULL DEFAULT FALSE,
+        use_as_variant_dimension BOOLEAN NOT NULL DEFAULT FALSE,
+        parser_rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+        aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      UPDATE suppliers
+      SET default_gender = CASE
+        WHEN lower(trim(default_gender)) IN ('для мужчин', 'мужской', 'male') THEN 'male'
+        WHEN lower(trim(default_gender)) IN ('для женщин', 'женский', 'female') THEN 'female'
+        WHEN lower(trim(default_gender)) IN ('унисекс', 'unisex') THEN 'unisex'
+        ELSE NULL
+      END
+      WHERE default_gender IS NOT NULL;
     `);
 
     await pool.query(`
@@ -204,6 +252,7 @@ async function migrate() {
         subcategory TEXT,
         gender TEXT,
         photos JSONB,
+        attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
         ai_processed BOOLEAN DEFAULT FALSE,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -223,6 +272,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS subcategory TEXT,
         ADD COLUMN IF NOT EXISTS gender TEXT,
         ADD COLUMN IF NOT EXISTS photos JSONB,
+        ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
         ADD COLUMN IF NOT EXISTS ai_processed BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -236,8 +286,11 @@ async function migrate() {
     `);
 
     await pool.query(`
-      CREATE INDEX IF NOT EXISTS products_batch_id_idx
+    CREATE INDEX IF NOT EXISTS products_batch_id_idx
       ON products (batch_id);
+
+    CREATE INDEX IF NOT EXISTS products_attributes_gin_idx
+      ON products USING GIN (attributes);
     `);
 
     await pool.query(`

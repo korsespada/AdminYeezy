@@ -57,6 +57,12 @@
   }
 }
 
+html:has(.admin-shell),
+body:has(.admin-shell) {
+  height: 100%;
+  overflow: hidden;
+}
+
 /* Custom scrollbar for better aesthetics */
 ::-webkit-scrollbar {
   width: 6px;

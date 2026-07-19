@@ -62,6 +62,7 @@ describe('batch product server actions', () => {
           subcategory: null,
           gender: 'women',
           photos: ['https://example.com/a.jpg'],
+          attributes: { color: 'black', sizes: ['M', 'L'] },
           batch_id: 'batch-1',
           ai_processed: true,
         },
@@ -80,6 +81,7 @@ describe('batch product server actions', () => {
       subcategory: '',
       batchId: 'batch-1',
       ai_processed: true,
+      attributes: { color: 'black', sizes: ['M', 'L'] },
     })
     expect(mocks.scrapingQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE batch_id = $1'), ['batch-1'])
   })
@@ -105,6 +107,7 @@ describe('batch product server actions', () => {
         category: 'cat-id',
         photos: ['a.jpg'],
         ai_processed: true,
+        attributes: { color: 'black', sizes: ['M', 'L'] },
       },
     ])
 
@@ -116,6 +119,10 @@ describe('batch product server actions', () => {
     )
     expect(mocks.client.query).toHaveBeenLastCalledWith('COMMIT')
     expect(mocks.client.release).toHaveBeenCalled()
+    expect(mocks.client.query).toHaveBeenCalledWith(
+      expect.stringContaining('attributes=$11::jsonb'),
+      expect.arrayContaining([JSON.stringify({ color: 'black', sizes: ['M', 'L'] })]),
+    )
   })
 
   it('patches one batch product by id', async () => {
@@ -168,6 +175,7 @@ describe('batch product server actions', () => {
           photos: ['a.jpg', 'b.jpg'],
           batch_id: 'batch-1',
           ai_processed: false,
+          attributes: { color: 'black', model: 'M60895' },
         },
       ],
     })
@@ -179,5 +187,7 @@ describe('batch product server actions', () => {
     expect(res.data?.content).toContain('external_id;name;description')
     expect(res.data?.content).toContain('ext-1;Product;Text')
     expect(res.data?.content).toContain('[""a.jpg"",""b.jpg""]')
+    expect(res.data?.content).toContain('attributes')
+    expect(res.data?.content).toContain('color')
   })
 })

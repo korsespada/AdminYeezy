@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import {
   createRailsAdminProduct,
   deleteRailsAdminProduct,
+  getRailsAdminProduct,
   moveRailsAdminProductToTrash,
   restoreRailsAdminProductFromTrash,
   updateRailsAdminProduct,
@@ -32,6 +33,15 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   } catch (error: any) {
     console.error('Update product error:', error)
     return { success: false, error: error.message || 'Failed to update product' }
+  }
+}
+
+export async function getProductAction(id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    return { success: true, data: await getRailsAdminProduct(id) }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось загрузить товар' }
   }
 }
 

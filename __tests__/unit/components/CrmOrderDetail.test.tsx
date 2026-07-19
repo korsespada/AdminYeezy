@@ -70,7 +70,7 @@ describe('CrmOrderDetail', () => {
               ],
             },
           ],
-          payments: [{ id: 80, provider: 'yookassa', status: 'succeeded', amount_cents: 300000, currency: 'RUB' }],
+          payments: [{ id: 80, provider: 'platega', status: 'succeeded', amount_cents: 300000, currency: 'RUB' }],
           refunds: [],
           timeline: [{ id: 90, event_type: 'payment_succeeded', from_status: 'payment_pending', to_status: 'paid', created_at: '2026-06-13T10:05:00Z' }],
         }}

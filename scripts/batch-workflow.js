@@ -37,7 +37,14 @@ const RAILS_IMPORT_COLUMNS = [
   { name: 'subcategory', key: 'subcategory' },
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
+  { name: 'attributes', key: 'attributes' },
 ];
+
+const CORE_PRODUCT_FIELDS = new Set([
+  'id', 'external_id', 'name', 'description', 'price', 'status', 'brand',
+  'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
+  'ai_processed', 'attributes', 'created_at', 'updated_at',
+]);
 
 function ensureDir(dir) {
   if (!fs.existsSync(/*turbopackIgnore: true*/ dir)) {
@@ -73,6 +80,36 @@ function normalizeBrand(value) {
   return String(value);
 }
 
+function normalizeAttributes(value) {
+  if (!value) return {};
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value.trim());
+    } catch {
+      return {};
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return Object.fromEntries(Object.entries(parsed).filter(([key, item]) => {
+    if (!key.trim() || CORE_PRODUCT_FIELDS.has(key.toLowerCase())) return false;
+    return item === null || typeof item === 'string' || typeof item === 'number' ||
+      typeof item === 'boolean' || (Array.isArray(item) && item.every((entry) =>
+        entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean'
+      ));
+  }));
+}
+
+function extractAttributes(row) {
+  const attributes = normalizeAttributes(row.attributes);
+  for (const [key, value] of Object.entries(row)) {
+    if (!CORE_PRODUCT_FIELDS.has(key.trim().toLowerCase()) && value !== undefined && value !== null && value !== '') {
+      attributes[key.trim()] = typeof value === 'string' ? value : value;
+    }
+  }
+  return normalizeAttributes(attributes);
+}
+
 function normalizeProduct(row) {
   return {
     id: row.id,
@@ -86,17 +123,22 @@ function normalizeProduct(row) {
     subcategory: row.subcategory || '',
     gender: row.gender || '',
     photos: normalizePhotos(row.photos),
+    attributes: extractAttributes(row),
     batchId: row.batch_id || row.batchId,
     ai_processed: row.ai_processed === true || row.ai_processed === 'true' || row.ai_processed === 'True',
   };
 }
 
 function serializeProductsToCsv(products, columns = PRODUCT_COLUMNS, delimiter = ';') {
-  const header = columns.map((column) => column.name).join(delimiter);
-  const rows = products.map((product) => columns.map((column) => {
+  const effectiveColumns = columns.some((column) => column.key === 'attributes') || !products.some((product) => Object.keys(normalizeAttributes(product.attributes)).length > 0)
+    ? columns
+    : [...columns, { name: 'attributes', key: 'attributes' }];
+  const header = effectiveColumns.map((column) => column.name).join(delimiter);
+  const rows = products.map((product) => effectiveColumns.map((column) => {
     let value = product[column.key];
     if (value === undefined || value === null) value = '';
     if (Array.isArray(value)) value = JSON.stringify(value);
+    if (column.key === 'attributes' && typeof value === 'object' && value !== null) value = JSON.stringify(normalizeAttributes(value));
     if (typeof value === 'boolean') value = value ? 'true' : 'false';
     if (typeof value === 'string') {
       value = value.replace(/\r\n/g, '\\n').replace(/\n/g, '\\n').replace(/\r/g, '\\n');
@@ -201,6 +243,7 @@ function productToRailsCsvRow(product, lookups) {
     subcategory: lookupName(lookups.subcategories, product.subcategory),
     gender: product.gender || '',
     photos: normalizePhotos(product.photos).join('|'),
+    attributes: normalizeAttributes(product.attributes),
   };
 }
 
@@ -318,6 +361,38 @@ async function getSupplier(supplierId) {
   return res.rows[0] || null;
 }
 
+async function resolveLegacySupplierDefaults(supplier) {
+  const values = [
+    supplier.default_brand,
+    supplier.default_category,
+    supplier.default_subcategory,
+  ].filter(Boolean).map(String);
+  if (values.length === 0) return supplier;
+
+  try {
+    const result = await scrapingPool.query(
+      `SELECT entity_type, legacy_id, canonical_id
+       FROM catalog_id_mappings
+       WHERE canonical_id = ANY($1::text[]) OR legacy_id = ANY($1::text[])`,
+      [values],
+    );
+    const legacyByValue = new Map();
+    for (const row of result.rows) {
+      legacyByValue.set(String(row.canonical_id), String(row.legacy_id));
+      legacyByValue.set(String(row.legacy_id), String(row.legacy_id));
+    }
+    return {
+      ...supplier,
+      default_brand: legacyByValue.get(String(supplier.default_brand || '')) || supplier.default_brand,
+      default_category: legacyByValue.get(String(supplier.default_category || '')) || supplier.default_category,
+      default_subcategory: legacyByValue.get(String(supplier.default_subcategory || '')) || supplier.default_subcategory,
+    };
+  } catch (error) {
+    console.warn('Catalog ID compatibility mapping unavailable:', error.message);
+    return supplier;
+  }
+}
+
 async function listFavoriteSuppliers() {
   try {
     const res = await scrapingPool.query(
@@ -366,7 +441,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, batch_id, ai_processed, created_at, updated_at
+    SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY id ASC
@@ -391,8 +466,8 @@ async function saveBatchProducts(batchId, products) {
       if (numericId) {
         const updateRes = await client.query(`
           UPDATE products
-          SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, ai_processed=$11, batch_id=$12, updated_at=NOW()
-          WHERE id=$13
+          SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, attributes=$11::jsonb, ai_processed=$12, batch_id=$13, updated_at=NOW()
+          WHERE id=$14
           RETURNING id
         `, [
           normalized.external_id,
@@ -405,6 +480,7 @@ async function saveBatchProducts(batchId, products) {
           normalized.subcategory || null,
           normalized.gender,
           JSON.stringify(normalized.photos || []),
+          JSON.stringify(normalized.attributes || {}),
           normalized.ai_processed,
           batchId,
           numericId,
@@ -416,8 +492,8 @@ async function saveBatchProducts(batchId, products) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, ai_processed, batch_id, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, NOW(), NOW())
+        INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
         ON CONFLICT (external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -428,6 +504,7 @@ async function saveBatchProducts(batchId, products) {
           subcategory = EXCLUDED.subcategory,
           gender = EXCLUDED.gender,
           photos = EXCLUDED.photos,
+          attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
           batch_id = EXCLUDED.batch_id,
           updated_at = NOW()
@@ -443,6 +520,7 @@ async function saveBatchProducts(batchId, products) {
         normalized.subcategory || null,
         normalized.gender,
         JSON.stringify(normalized.photos || []),
+        JSON.stringify(normalized.attributes || {}),
         normalized.ai_processed,
         batchId,
       ]);
@@ -514,6 +592,7 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
 async function startScraping(supplierId, endDate, overrideTag, overrideGroup, onComplete) {
   const supplier = await getSupplier(supplierId);
   if (!supplier) throw new Error('Поставщик не найден');
+  const parserSupplier = await resolveLegacySupplierDefaults(supplier);
 
   const taskRes = await scrapingPool.query(
     `INSERT INTO scraping_tasks (supplier_id, status, end_date)
@@ -539,14 +618,14 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
   const finalTag = overrideTag || supplier.tag_id;
   if (finalGroup) args.push('--group_id', finalGroup);
   if (finalTag) args.push('--tag_id', finalTag);
-  if (supplier.min_photos) args.push('--min_photos', String(supplier.min_photos));
-  if (supplier.min_desc_len) args.push('--min_desc', String(supplier.min_desc_len));
-  if (supplier.default_category) args.push('--category', supplier.default_category);
-  if (supplier.default_subcategory) args.push('--subcategory', supplier.default_subcategory);
-  if (supplier.default_brand) args.push('--brand', supplier.default_brand);
-  if (supplier.default_gender) args.push('--gender', supplier.default_gender);
-  if (supplier.default_price) args.push('--default_price', String(supplier.default_price));
-  if (supplier.parse_tags_enabled) args.push('--parse_tags');
+  if (parserSupplier.min_photos) args.push('--min_photos', String(parserSupplier.min_photos));
+  if (parserSupplier.min_desc_len) args.push('--min_desc', String(parserSupplier.min_desc_len));
+  if (parserSupplier.default_category) args.push('--category', parserSupplier.default_category);
+  if (parserSupplier.default_subcategory) args.push('--subcategory', parserSupplier.default_subcategory);
+  if (parserSupplier.default_brand) args.push('--brand', parserSupplier.default_brand);
+  if (parserSupplier.default_gender) args.push('--gender', parserSupplier.default_gender);
+  if (parserSupplier.default_price) args.push('--default_price', String(parserSupplier.default_price));
+  if (parserSupplier.parse_tags_enabled) args.push('--parse_tags');
 
   const pythonProcess = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', args);
   let stderr = '';
@@ -582,7 +661,14 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
       );
 
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
-        batchId = await importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount });
+        batchId = await importScrapedFileToBatch({ supplier: parserSupplier, taskId, outputPath, itemsCount });
+        if (batchId && supplier.post_process_enabled && supplier.post_process_script) {
+          try {
+            await runBatchPostProcessScript(batchId);
+          } catch (postProcessError) {
+            console.error(`[Scraper ${taskId}] Auto post-process failed:`, postProcessError);
+          }
+        }
       }
     } catch (error) {
       console.error(`[Scraper ${taskId}] import failed:`, error);
@@ -701,6 +787,14 @@ async function runBatchPostProcessScript(batchId) {
     : [];
   if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой файл');
 
+  const originalByExternalId = new Map(products.map((product) => [String(product.external_id), product]));
+  for (const processedProduct of processedProducts) {
+    if (Object.keys(processedProduct.attributes || {}).length === 0) {
+      const original = originalByExternalId.get(String(processedProduct.external_id));
+      if (original?.attributes) processedProduct.attributes = original.attributes;
+    }
+  }
+
   await saveBatchProducts(batchId, processedProducts);
   await scrapingPool.query(`
     INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
@@ -759,6 +853,24 @@ async function uploadPhotoIfNeeded(url, key) {
 async function pushBatchToCatalog(batchId, onProgress) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
+
+  const seenExternalIds = new Set();
+  const validationErrors = [];
+  products.forEach((product, index) => {
+    const externalId = String(product.external_id || '').trim();
+    if (externalId && seenExternalIds.has(externalId)) {
+      validationErrors.push(`Строка ${index + 1}: дубликат external_id ${externalId}`);
+    }
+    if (externalId) seenExternalIds.add(externalId);
+    for (const key of Object.keys(product.attributes || {})) {
+      if (!/^[a-zA-Zа-яА-Я0-9][a-zA-Zа-яА-Я0-9_.-]{0,63}$/.test(key)) {
+        validationErrors.push(`Строка ${index + 1}: некорректный ключ атрибута ${key}`);
+      }
+    }
+  });
+  if (validationErrors.length > 0) {
+    throw new Error(`Партия не прошла проверку:\n${validationErrors.slice(0, 20).join('\n')}`);
+  }
 
   const batch = await getBatch(batchId);
   const lookups = await loadLegacyLookupMaps();

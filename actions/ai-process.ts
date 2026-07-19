@@ -9,6 +9,11 @@ import { scrapingQuery } from '@/lib/db'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
 import { requireAdmin } from '@/lib/admin-session'
 import { isSafeRuntimePath, resolveSafeRuntimePath } from '@/lib/runtime-paths'
+import {
+  getSupplierAttributeDefinition,
+  normalizeSupplierAttributeCodes,
+} from '@/lib/supplier-attributes'
+import { normalizeProductAttributes } from '@/lib/product-attributes'
 
 const execFileAsync = promisify(execFile)
 
@@ -66,6 +71,26 @@ async function getAiModelForTargetedEdit(supplierId?: number | null) {
   }
 }
 
+async function getSupplierAttributeHints(supplierId?: number | null) {
+  if (!supplierId) return []
+  try {
+    const result = await scrapingQuery(
+      'SELECT default_attributes FROM suppliers WHERE id=$1',
+      [supplierId],
+    )
+    return normalizeSupplierAttributeCodes(result.rows[0]?.default_attributes).map((code) => {
+      const definition = getSupplierAttributeDefinition(code)
+      return {
+        code,
+        label: definition?.label || code,
+        description: definition?.description || '',
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
 function compactLookup(items: any[] | undefined, extraFields: string[] = []) {
   return (items || []).map((item) => {
     const result: Record<string, any> = {
@@ -113,6 +138,10 @@ function normalizePatch(rawPatch: any, lookups: TargetedAiEditLookups) {
 
   if (rawPatch?.subcategory !== undefined) {
     patch.subcategory = normalizeLookupValue(rawPatch.subcategory, lookups.subcategories)
+  }
+
+  if (rawPatch?.attributes && typeof rawPatch.attributes === 'object' && !Array.isArray(rawPatch.attributes)) {
+    patch.attributes = normalizeProductAttributes(rawPatch.attributes)
   }
 
   return patch
@@ -385,6 +414,7 @@ export async function targetedAiEditAction({
     }
 
     const model = await getAiModelForTargetedEdit(supplierId)
+    const supplierAttributeHints = await getSupplierAttributeHints(supplierId)
     const categories = compactLookup(lookups.categories)
     const subcategories = compactLookup(lookups.subcategories, ['category'])
     const brands = compactLookup(lookups.brands)
@@ -397,6 +427,7 @@ export async function targetedAiEditAction({
       categories: categories.length,
       subcategories: subcategories.length,
       brands: brands.length,
+      supplierAttributes: supplierAttributeHints.length,
     })
 
     const patches: { index: number; external_id?: string; patch: Record<string, any> }[] = []
@@ -419,6 +450,8 @@ ${cleanInstruction}
 - Не меняй external_id и photos.
 - Если меняешь category/subcategory, используй только id из справочника ниже.
 - Если значение не нужно менять, можешь не включать поле в patch.
+- Если запрос затрагивает атрибуты, верни их внутри patch.attributes.
+- Приоритетные атрибуты поставщика используй с указанными кодами; не выдумывай значение, если данных нет.
 - name должен быть коротким: "Бренд + тип товара".
 - description пиши на русском, без китайского текста и эмодзи.
 - description должен быть содержательным: 2-3 предложения, примерно 160-320 символов.
@@ -428,6 +461,9 @@ ${cleanInstruction}
 
 Текущий товар:
 ${JSON.stringify(product, null, 2)}
+
+Приоритетные атрибуты поставщика:
+${JSON.stringify(supplierAttributeHints)}
 
 Исходный товар из файла после скрипта${sourceContext.sourcePath ? ` (${path.basename(sourceContext.sourcePath)})` : ''}:
 ${JSON.stringify(source.sourceProduct || null, null, 2)}

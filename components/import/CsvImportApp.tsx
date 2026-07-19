@@ -49,11 +49,14 @@ import {
   createBatchAction,
   updateBatchStageAction,
   linkBatchToTaskAction,
+  pushBatchToCatalogAction,
 } from "@/actions/suppliers";
 import { processAiAction, targetedAiEditAction } from "@/actions/ai-process";
 import Image from "next/image";
 import Link from "next/link";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
+import { extractProductAttributes } from "@/lib/product-attributes";
+import { validateProducts } from "@/lib/product-validation";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -68,6 +71,8 @@ const DEFAULT_PRODUCT_COLUMNS = [
   { name: "photos", key: "photos" },
   { name: "ai_processed", key: "ai_processed" },
 ];
+
+const CSV_CORE_KEYS = new Set(DEFAULT_PRODUCT_COLUMNS.map((column) => column.key));
 
 // ─── CSV Parsing ───────────────────────────────────────────────────────
 
@@ -177,6 +182,7 @@ function parseCsv(text: string): {
       if (values.length === 0 || values.every((v) => !v.trim())) return null;
 
       const product: any = {};
+      const rawAttributes: Record<string, unknown> = {};
       columns.forEach((col, i) => {
         let val = (values[i] || "").trim();
 
@@ -235,7 +241,13 @@ function parseCsv(text: string): {
         } else {
           // Убираем двойные кавычки, если они пролезли в обычные поля
           product[col.key] = val.replace(/""/g, '"');
+          if (!CSV_CORE_KEYS.has(col.key)) rawAttributes[col.key] = product[col.key];
         }
+      });
+
+      product.attributes = extractProductAttributes({
+        ...rawAttributes,
+        attributes: product.attributes,
       });
 
       // Ensure baseline fields are never undefined to prevent corruption on save
@@ -458,7 +470,7 @@ export default function CsvImportApp({
   const [isProcessing, setIsProcessing] = useState(false)
   const isAiStoppedRef = useRef(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
-  const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
+  const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
   const [targetedAiInstruction, setTargetedAiInstruction] = useState("");
   const [isTargetedAiEditing, setIsTargetedAiEditing] = useState(false);
@@ -467,6 +479,7 @@ export default function CsvImportApp({
   const [targetedAiProgress, setTargetedAiProgress] = useState<{ current: number; total: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const batchUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     fetchLookupsAction().then(setLookups).catch(console.error);
@@ -490,6 +503,14 @@ export default function CsvImportApp({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialLocalPath, initialSupplierId, initialBatchId]);
+
+  useEffect(() => {
+    const timers = batchUpdateTimers.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
 
 
   // Unique values for filters (derived from all products)
@@ -738,6 +759,35 @@ export default function CsvImportApp({
   // ─── Data Handlers ────────────────────────────────────────────────
   const handlePush = async () => {
     if (products.length === 0) return;
+    const validationIssues = validateProducts(products);
+    const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
+    if (validationErrors.length > 0) {
+      alert(`Публикация остановлена. Исправьте ошибки:\n${validationErrors.slice(0, 10).map((issue) => `Строка ${issue.row}: ${issue.message}`).join("\n")}`);
+      return;
+    }
+    const validationWarnings = validationIssues.filter((issue) => issue.severity === "warning");
+    if (validationWarnings.length > 0) {
+      setSaveMsg(`⚠ Предупреждений: ${validationWarnings.length}`);
+    }
+
+    if (batchId && products.some((product) => Object.keys(product.attributes || {}).length > 0)) {
+      setIsPushing(true);
+      await persistBatchProducts(products);
+      const pushResult = await pushBatchToCatalogAction(batchId);
+      if (pushResult.success) {
+        setResult({
+          success: Number(pushResult.data?.success || 0),
+          failed: Number(pushResult.data?.failed || 0),
+          errors: pushResult.data?.errors || [],
+        });
+        setSaveMsg("✓ Партия опубликована через batch API");
+      } else {
+        setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
+      }
+      setIsPushing(false);
+      return;
+    }
+
     setIsPushing(true);
     setResult(null);
     setPushProgress({ current: 0, total: products.length });
@@ -1006,17 +1056,24 @@ export default function CsvImportApp({
       if (batchId && currentProduct) {
         const identifier = currentProduct.id || currentProduct.external_id;
         if (identifier) {
-          updateBatchProductAction(identifier, { [field]: value } as Partial<CsvProduct>, batchId)
-            .then((res) => {
-              if (res.success) {
-                setIsDirty(false);
-                setSaveMsg("✓ Сохранено в БД");
-                setTimeout(() => setSaveMsg(null), 2500);
-              } else {
-                setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
-              }
-            })
-            .catch((error) => setSaveMsg("✗ Ошибка БД: " + error.message));
+          const timerKey = `${batchId}:${identifier}:${field}`;
+          const previousTimer = batchUpdateTimers.current.get(timerKey);
+          if (previousTimer) clearTimeout(previousTimer);
+          const timer = setTimeout(() => {
+            updateBatchProductAction(identifier, { [field]: value } as Partial<CsvProduct>, batchId)
+                .then((res) => {
+                  if (res.success) {
+                  if (batchUpdateTimers.current.size <= 1) setIsDirty(false);
+                  setSaveMsg("✓ Сохранено в БД");
+                  setTimeout(() => setSaveMsg(null), 2500);
+                } else {
+                  setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
+                }
+              })
+              .catch((error) => setSaveMsg("✗ Ошибка БД: " + error.message))
+              .finally(() => batchUpdateTimers.current.delete(timerKey));
+          }, 500);
+          batchUpdateTimers.current.set(timerKey, timer);
         }
       }
     },
@@ -1429,7 +1486,7 @@ export default function CsvImportApp({
                     onClick={handleCustomScriptProcess}
                     disabled={isRunningCustomScript}
                     className="px-4 py-2.5 text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2 disabled:opacity-50"
-                    title={`Скрипт: ${supplierData.post_process_script}`}
+                    title={`Скрипт: ${supplierData.post_process_script}${supplierData.post_process_enabled ? ' (автоматически после парсинга)' : ''}`}
                 >
                     {isRunningCustomScript ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -2305,6 +2362,28 @@ function CsvProductDrawer({
     onUpdate(index, field, value);
   };
 
+  const attributes = local.attributes || {};
+  const updateAttribute = (oldKey: string, nextKey: string, nextValue: string) => {
+    const next = { ...attributes };
+    if (oldKey !== nextKey) delete next[oldKey];
+    if (nextKey.trim()) {
+      let parsed: unknown = nextValue;
+      try {
+        parsed = JSON.parse(nextValue);
+      } catch {
+        parsed = nextValue;
+      }
+      next[nextKey.trim()] = parsed as any;
+    }
+    change("attributes", next);
+  };
+
+  const removeAttribute = (key: string) => {
+    const next = { ...attributes };
+    delete next[key];
+    change("attributes", next);
+  };
+
   const removePhoto = (i: number) =>
     change(
       "photos",
@@ -2481,6 +2560,53 @@ function CsvProductDrawer({
                     placeholder="Найти подкатегорию..."
                   />
                 </div>
+              </div>
+              <div className="space-y-3 border-t border-slate-800 pt-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs text-slate-500">Дополнительные атрибуты</label>
+                    <p className="mt-1 text-[11px] text-slate-600">Ключи сохраняются в JSON и не меняют старый CSV-контракт.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => change("attributes", { ...attributes, "": "" })}
+                    className="rounded-lg border border-indigo-500/30 px-3 py-1.5 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10"
+                  >
+                    Добавить
+                  </button>
+                </div>
+                {Object.entries(attributes).length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-700 p-3 text-xs text-slate-600">
+                    Атрибутов пока нет
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(attributes).map(([key, value]) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <input
+                          value={key}
+                          onChange={(event) => updateAttribute(key, event.target.value, String(value ?? ""))}
+                          placeholder="Ключ"
+                          className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
+                        />
+                        <input
+                          value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? "")}
+                          onChange={(event) => updateAttribute(key, key, event.target.value)}
+                          placeholder="Значение"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeAttribute(key)}
+                          className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"
+                          title="Удалить атрибут"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           </div>

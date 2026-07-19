@@ -5,6 +5,11 @@ import { Plus, Edit2, Trash2, Play, ExternalLink, Calendar, Search, X, PlusCircl
 import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
 import { useRouter } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
+import {
+  SUPPLIER_ATTRIBUTE_DEFINITIONS,
+  getSupplierAttributeLabel,
+  normalizeSupplierAttributeCodes,
+} from '@/lib/supplier-attributes'
 
 interface Supplier {
   id: number
@@ -15,6 +20,10 @@ interface Supplier {
   default_category: string
   default_subcategory: string
   default_brand: string
+  default_category_name?: string | null
+  default_subcategory_name?: string | null
+  default_brand_name?: string | null
+  default_attributes: string[]
   min_photos: number
   min_desc_len: number
   brand_tags: string
@@ -28,6 +37,7 @@ interface Supplier {
   avatar_url?: string | null
   cookie?: string | null
   post_process_script?: string | null
+  post_process_enabled: boolean
   ai_photo_models?: string | null
   ai_photo_instructions?: string | null
   ai_parallel_enabled: boolean
@@ -42,14 +52,39 @@ interface TagRow {
   value: string
 }
 
-export default function SupplierList({ initialData }: { initialData: Supplier[] }) {
+type CatalogLookup = {
+  id: string
+  name: string
+  parent_id?: string | null
+}
+
+type SupplierCatalogLookups = {
+  brands: CatalogLookup[]
+  categories: CatalogLookup[]
+  subcategories: CatalogLookup[]
+}
+
+export default function SupplierList({
+  initialData,
+  catalogLookups,
+}: {
+  initialData: Supplier[]
+  catalogLookups: SupplierCatalogLookups
+}) {
   const router = useRouter()
-  const [suppliers, setSuppliers] = useState<Supplier[]>(initialData)
+  const normalizedInitialData = React.useMemo(
+    () => initialData.map((supplier) => ({
+      ...supplier,
+      default_attributes: normalizeSupplierAttributeCodes(supplier.default_attributes),
+    })),
+    [initialData],
+  )
+  const [suppliers, setSuppliers] = useState<Supplier[]>(normalizedInitialData)
 
   // Обновляем локальный список, когда приходят свежие данные с сервера
   React.useEffect(() => {
-    setSuppliers(initialData)
-  }, [initialData])
+    setSuppliers(normalizedInitialData)
+  }, [normalizedInitialData])
 
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
@@ -104,6 +139,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
         default_category: '',
         default_subcategory: '',
         default_brand: '',
+        default_attributes: [],
         min_photos: 0,
         min_desc_len: 0,
         brand_tags: '',
@@ -119,6 +155,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
         ai_parallel_enabled: false,
         ai_parallel_count: 5,
         parse_tags_enabled: false,
+        post_process_enabled: false,
         is_favorite: false
       })
       setModalTags([])
@@ -159,12 +196,15 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
     const aiDeepSearchValue = editingSupplier?.ai_deep_search_enabled ? 'on' : 'off'
     const aiResizeValue = editingSupplier?.ai_resize_enabled ? 'on' : 'off'
     const parseTagsValue = editingSupplier?.parse_tags_enabled ? 'on' : 'off'
+    const postProcessValue = editingSupplier?.post_process_enabled ? 'on' : 'off'
     
     formData.set('ai_photo_enabled', aiPhotoValue)
     formData.set('ai_cache_enabled', aiCacheValue)
     formData.set('ai_deep_search_enabled', aiDeepSearchValue)
     formData.set('ai_resize_enabled', aiResizeValue)
     formData.set('parse_tags_enabled', parseTagsValue)
+    formData.set('post_process_enabled', postProcessValue)
+    formData.set('default_attributes', JSON.stringify(editingSupplier?.default_attributes || []))
 
     let res
     if (editingSupplier && editingSupplier.id !== 0) {
@@ -286,7 +326,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
           const brandTags = parseBrandTags(s.brand_tags)
           const isFav = Boolean(s.is_favorite)
           return (
-            <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg group flex flex-col h-full">
+            <div key={s.id} className="bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-lg group flex flex-col h-full">
               <div className="flex-1">
                 <div className="flex justify-between items-start mb-4 gap-3">
                   <div className="flex gap-4 flex-1 overflow-hidden">
@@ -312,7 +352,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                     </div>
                     <div className="min-w-0 flex-1">
                       <h3 className="text-lg font-bold text-white group-hover:text-indigo-400 transition-colors truncate">{s.name}</h3>
-                      <p className="text-xs text-slate-400 font-mono mt-1 truncate">{s.album_id}</p>
+                      <p className="text-[11px] text-slate-500 font-mono mt-1 truncate" title={`Album ID: ${s.album_id}`}>Album ID: {s.album_id}</p>
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -338,7 +378,7 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                   </div>
                 </div>
 
-                <div className="space-y-4 mb-6">
+                <div className="space-y-3 mb-4">
                   {(s.min_photos > 0 || s.min_desc_len > 0) && (
                     <div className="flex gap-2 items-center">
                       {s.min_photos > 0 && (
@@ -373,9 +413,22 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                     </div>
                   )}
 
-                  {(s.default_category || s.default_brand) && (
-                    <div className="text-[10px] text-indigo-400 font-medium">
-                      {s.default_brand} / {s.default_category}
+                  {(s.default_category || s.default_subcategory || s.default_brand) && (
+                    <div className="rounded-lg border border-indigo-500/15 bg-indigo-500/5 px-2.5 py-2 text-[10px] text-indigo-300">
+                      <div className="mb-1 uppercase tracking-wider text-slate-500">Значения по умолчанию</div>
+                      <div className="truncate" title={`${s.default_brand_name || 'Бренд не выбран'} / ${s.default_category_name || 'Категория не выбрана'} / ${s.default_subcategory_name || 'Подкатегория не выбрана'}`}>
+                        {s.default_brand_name || 'Бренд не выбран'} · {s.default_category_name || 'Категория не выбрана'}
+                        {s.default_subcategory_name ? ` · ${s.default_subcategory_name}` : ''}
+                      </div>
+                    </div>
+                  )}
+                  {s.default_attributes?.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {s.default_attributes.map((code) => (
+                        <span key={code} className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] text-emerald-200">
+                          {getSupplierAttributeLabel(code)}
+                        </span>
+                      ))}
                     </div>
                   )}
 
@@ -474,7 +527,17 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Пол (gender)</label>
-                        <input name="default_gender" defaultValue={editingSupplier?.default_gender || ''} placeholder="unisex" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-indigo-500" />
+                        <select
+                          name="default_gender"
+                          value={editingSupplier?.default_gender || ''}
+                          onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, default_gender: event.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Не задан</option>
+                          <option value="female">Для женщин</option>
+                          <option value="male">Для мужчин</option>
+                          <option value="unisex">Унисекс</option>
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Цена по умолч.</label>
@@ -484,15 +547,137 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Категория</label>
-                        <input name="default_category" defaultValue={editingSupplier?.default_category || ''} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500" />
+                        <select
+                          name="default_category"
+                          value={editingSupplier?.default_category || ''}
+                          onChange={(event) => {
+                            if (!editingSupplier) return
+                            const selected = catalogLookups.categories.find((item) => item.id === event.target.value)
+                            setEditingSupplier({
+                              ...editingSupplier,
+                              default_category: event.target.value,
+                              default_category_name: selected?.name || null,
+                              default_subcategory: '',
+                              default_subcategory_name: null,
+                            })
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Не выбрана</option>
+                          {editingSupplier?.default_category && !catalogLookups.categories.some((item) => item.id === editingSupplier.default_category) && (
+                            <option value={editingSupplier.default_category}>
+                              {editingSupplier.default_category_name || 'Категория не сопоставлена'}
+                            </option>
+                          )}
+                          {catalogLookups.categories.map((item) => (
+                            <option key={item.id} value={item.id}>{item.name}</option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Подкатегория</label>
-                        <input name="default_subcategory" defaultValue={editingSupplier?.default_subcategory || ''} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500" />
+                        <select
+                          name="default_subcategory"
+                          value={editingSupplier?.default_subcategory || ''}
+                          onChange={(event) => {
+                            if (!editingSupplier) return
+                            const selected = catalogLookups.subcategories.find((item) => item.id === event.target.value)
+                            setEditingSupplier({
+                              ...editingSupplier,
+                              default_subcategory: event.target.value,
+                              default_subcategory_name: selected?.name || null,
+                            })
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Не выбрана</option>
+                          {editingSupplier?.default_subcategory && !catalogLookups.subcategories.some((item) => item.id === editingSupplier.default_subcategory) && (
+                            <option value={editingSupplier.default_subcategory}>
+                              {editingSupplier.default_subcategory_name || 'Подкатегория не сопоставлена'}
+                            </option>
+                          )}
+                          {catalogLookups.subcategories
+                            .filter((item) => !editingSupplier?.default_category || item.parent_id === editingSupplier.default_category)
+                            .map((item) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Бренд</label>
-                        <input name="default_brand" defaultValue={editingSupplier?.default_brand || ''} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500" />
+                        <select
+                          name="default_brand"
+                          value={editingSupplier?.default_brand || ''}
+                          onChange={(event) => {
+                            if (!editingSupplier) return
+                            const selected = catalogLookups.brands.find((item) => item.id === event.target.value)
+                            setEditingSupplier({
+                              ...editingSupplier,
+                              default_brand: event.target.value,
+                              default_brand_name: selected?.name || null,
+                            })
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs outline-none focus:border-indigo-500"
+                        >
+                          <option value="">Не выбран</option>
+                          {editingSupplier?.default_brand && !catalogLookups.brands.some((item) => item.id === editingSupplier.default_brand) && (
+                            <option value={editingSupplier.default_brand}>
+                              {editingSupplier.default_brand_name || 'Бренд не сопоставлен'}
+                            </option>
+                          )}
+                          {catalogLookups.brands.map((item) => (
+                            <option key={item.id} value={item.id}>{item.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-3">
+                      <div className="mb-1 text-xs font-semibold text-slate-200">Атрибуты поставщика</div>
+                      <p className="mb-3 text-[11px] leading-4 text-slate-500">
+                        ИИ будет целенаправленно искать выбранные характеристики. Пустые значения автоматически не создаются.
+                      </p>
+                      <div className="max-h-48 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
+                        {Object.entries(
+                          SUPPLIER_ATTRIBUTE_DEFINITIONS.reduce<Record<string, typeof SUPPLIER_ATTRIBUTE_DEFINITIONS>>((groups, item) => {
+                            groups[item.group] ||= []
+                            groups[item.group].push(item)
+                            return groups
+                          }, {}),
+                        ).map(([group, items]) => (
+                          <div key={group}>
+                            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">{group}</div>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {items.map((attribute) => {
+                                const checked = editingSupplier?.default_attributes?.includes(attribute.code) || false
+                                return (
+                                  <label
+                                    key={attribute.code}
+                                    title={attribute.description}
+                                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
+                                      checked
+                                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                                        : 'border-slate-700 bg-slate-950/60 text-slate-400 hover:border-slate-600'
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        if (!editingSupplier) return
+                                        const selected = new Set(editingSupplier.default_attributes || [])
+                                        if (event.target.checked) selected.add(attribute.code)
+                                        else selected.delete(attribute.code)
+                                        setEditingSupplier({ ...editingSupplier, default_attributes: [...selected] })
+                                      }}
+                                      className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                                    />
+                                    {attribute.label}
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2">
@@ -578,13 +763,26 @@ export default function SupplierList({ initialData }: { initialData: Supplier[] 
                   
                   <div>
                     <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Пост-обработка скриптом</h4>
-                    <p className="text-xs text-slate-400 mb-2">Укажите название скрипта в папке scripts/parser/ (например: fix_descriptions.py)</p>
-                    <input 
-                      name="post_process_script" 
-                      defaultValue={editingSupplier?.post_process_script || ''} 
-                      placeholder="Например: fix_descriptions.py"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
-                    />
+                    <p className="text-xs text-slate-400 mb-2">Укажите название скрипта в папке scripts/parser/.</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        name="post_process_script"
+                        defaultValue={editingSupplier?.post_process_script || ''}
+                        placeholder="Например: fix_descriptions.py"
+                        className="min-w-0 flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
+                      />
+                      <label className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200" title="После успешного парсинга автоматически запустить этот скрипт для новой партии">
+                        <input
+                          type="checkbox"
+                          name="post_process_enabled"
+                          checked={editingSupplier?.post_process_enabled || false}
+                          onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, post_process_enabled: event.target.checked })}
+                          className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-amber-500"
+                        />
+                        Автоматически
+                      </label>
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-500">Выкл. по умолчанию: можно продолжать запускать скрипт вручную.</p>
                   </div>
 
                   {/* Parallel Processing Block */}

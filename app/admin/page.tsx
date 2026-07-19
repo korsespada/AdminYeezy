@@ -17,6 +17,8 @@ type AdminSearchParams = {
   category?: string
   subcategory?: string
   gender?: string
+  attributeKey?: string
+  attributeValue?: string
   perPage?: string
 }
 
@@ -40,6 +42,8 @@ export default async function AdminPage({
   const categoryFilter = params.category || ''
   const subcategoryFilter = params.subcategory || ''
   const genderFilter = params.gender || ''
+  const attributeKeyFilter = params.attributeKey || ''
+  const attributeValueFilter = params.attributeValue || ''
 
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
@@ -52,6 +56,8 @@ export default async function AdminPage({
     if (categoryFilter) params.set('category', categoryFilter)
     if (subcategoryFilter) params.set('subcategory', subcategoryFilter)
     if (genderFilter) params.set('gender', genderFilter)
+    if (attributeKeyFilter) params.set('attributeKey', attributeKeyFilter)
+    if (attributeValueFilter) params.set('attributeValue', attributeValueFilter)
     if (perPage !== 40) params.set('perPage', perPage.toString())
     return `/admin?${params.toString()}`
   }
@@ -82,6 +88,8 @@ export default async function AdminPage({
       gender: genderFilter === '__none__' ? '' : genderParam,
       genderExact: Boolean(genderParam && genderFilter !== '__none__'),
       noGender: genderFilter === '__none__',
+      attributeKey: attributeKeyFilter,
+      attributeValue: attributeValueFilter,
     }
 
     const [productPage, filterFacets] = await Promise.all([
@@ -97,6 +105,8 @@ export default async function AdminPage({
         gender: genderFilter === '__none__' ? '' : genderParam,
         genderExact: Boolean(genderParam && genderFilter !== '__none__'),
         noGender: genderFilter === '__none__',
+        attributeKey: attributeKeyFilter,
+        attributeValue: attributeValueFilter,
       }),
     ])
 

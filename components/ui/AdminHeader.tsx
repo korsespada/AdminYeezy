@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles, ClipboardList } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles, ClipboardList, ListChecks, SlidersHorizontal } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -69,6 +69,20 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           <Link href="/admin/seo-ai">
             <Sparkles size={20} className="text-fuchsia-400" />
             <span className="hidden md:inline">AI SEO</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Атрибуты товаров">
+          <Link href="/admin/catalog-attributes">
+            <ListChecks size={20} className="text-emerald-400" />
+            <span className="hidden xl:inline">Атрибуты</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Фильтры и характеристики">
+          <Link href="/admin/filter-characteristics">
+            <SlidersHorizontal size={20} className="text-cyan-400" />
+            <span className="hidden xl:inline">Фильтры</span>
           </Link>
         </Button>
 

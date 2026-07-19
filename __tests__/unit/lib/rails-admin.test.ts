@@ -38,6 +38,8 @@ describe('rails admin product adapter', () => {
       gender: 'Унисекс',
       genderExact: true,
       status: 'archived',
+      attributeKey: 'material',
+      attributeValue: 'leather',
     })
 
     expect(params.toString()).toContain('page=2')
@@ -52,6 +54,8 @@ describe('rails admin product adapter', () => {
     expect(params.get('gender')).toBe('Унисекс')
     expect(params.get('gender_exact')).toBe('true')
     expect(params.get('status')).toBe('archived')
+    expect(params.get('attribute_key')).toBe('material')
+    expect(params.get('attribute_value')).toBe('leather')
   })
 
   it('trims product search before sending it to Rails', () => {
@@ -107,6 +111,41 @@ describe('rails admin product adapter', () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=ext-1')
     expect(init.headers.Authorization).toBe('Bearer test-token')
+  })
+
+  it('uses local admin credentials for Rails authentication in development', async () => {
+    vi.stubEnv('NODE_ENV', 'development')
+    vi.stubEnv('RAILS_ADMIN_TOKEN', '')
+    vi.stubEnv('RAILS_ADMIN_EMAIL', '')
+    vi.stubEnv('RAILS_ADMIN_PASSWORD', '')
+    vi.stubEnv('LOCAL_ADMIN_EMAIL', 'local@example.com')
+    vi.stubEnv('LOCAL_ADMIN_PASSWORD', 'local-password')
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ token: 'local-rails-token' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          products: [],
+          meta: { total: 0, pages: 0 },
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listRailsAdminProducts({ page: 1, perPage: 40, search: 'local' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://rails.example.test/api/v1/admin/auth/login')
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      email: 'local@example.com',
+      password: 'local-password',
+    })
+    expect(fetchMock.mock.calls[1][1].headers.Authorization).toBe('Bearer local-rails-token')
+
+    vi.unstubAllEnvs()
   })
 
   it('loads separately filtered products from the admin endpoint', async () => {
@@ -462,6 +501,7 @@ describe('rails admin product adapter', () => {
     formData.append('gender', 'Для женщин')
     formData.append('price_on_request', 'true')
     formData.append('productMetadata', JSON.stringify({ source: 'admin', gender: 'old' }))
+    formData.append('catalog_attributes', JSON.stringify({ material: ['leather'], colors: ['black'] }))
     formData.append('media', JSON.stringify([
       {
         original_url: 'https://example.com/original-a.jpg',
@@ -497,6 +537,10 @@ describe('rails admin product adapter', () => {
         source: 'admin',
         gender: 'female',
         price_on_request: false,
+      },
+      catalog_attributes: {
+        material: ['leather'],
+        colors: ['black'],
       },
     })
     expect(payload.product.currency).toBeUndefined()
@@ -614,6 +658,7 @@ describe('rails admin product adapter', () => {
       h1: 'H1',
       canonical_url: 'https://example.com/product',
       metadata: { gender: 'Для мужчин', source: 'rails', price_on_request: true },
+      catalog_attributes: { material: ['leather'] },
       brand: { id: 'brand-id', name: 'Brand' },
       category: { id: 'subcategory-id', name: 'Subcategory', parent_id: 'category-id' },
       media: [
@@ -623,6 +668,8 @@ describe('rails admin product adapter', () => {
       created_at: 'created',
       updated_at: 'updated',
     })
+    expect(product.catalog_attributes).toEqual({ material: ['leather'] })
+    expect(product.attributes).toEqual({ material: ['leather'] })
 
     expect(product).toMatchObject({
       id: 'product-id',

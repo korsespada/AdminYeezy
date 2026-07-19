@@ -69,6 +69,41 @@ export interface RailsCrmListResult<T> {
   totalPages: number
 }
 
+export interface RailsCatalogAttributeSuggestion {
+  id: string
+  attribute_code: string
+  raw_value: string
+  normalized_value: Record<string, any>
+  source: string
+  evidence?: string | null
+  confidence: number
+  status: 'suggested' | 'approved' | 'rejected'
+  extractor_version: string
+  public_filter?: boolean
+  current_value?: Record<string, any> | null
+  product: {
+    id: string
+    slug: string
+    name: string
+    image_url?: string | null
+    brand?: { id: string; name: string; slug: string } | null
+    category?: { id: string; name: string; slug: string } | null
+  }
+  reviewed_by_id?: string | null
+  reviewed_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RailsCatalogAttributeSuggestionList {
+  items: RailsCatalogAttributeSuggestion[]
+  page: number
+  perPage: number
+  totalItems: number
+  totalPages: number
+  availableValues?: Array<{ value: string; label: string; count: number }>
+}
+
 export interface RailsCrmCustomerSummary {
   id: number | string
   display_name?: string | null
@@ -190,6 +225,17 @@ export interface RailsCrmOrderDetail extends RailsCrmOrder {
   wallet_spent_cents?: number
   admin_comment?: string | null
   customer_comment?: string | null
+  checkout?: {
+    delivery_method?: string
+    delivery_pricing?: string
+    full_name?: string
+    email?: string
+    phone?: string
+    city?: string
+    address_line?: string
+    postal_code?: string
+    delivery_comment?: string
+  }
   cancelled_at?: string | null
   delivered_at?: string | null
   items: RailsCrmOrderItem[]
@@ -256,10 +302,17 @@ async function railsAdminToken() {
     return cachedRailsAdminToken.token
   }
 
-  const email = process.env.RAILS_ADMIN_EMAIL
-  const password = process.env.RAILS_ADMIN_PASSWORD
+  const localCredentialsAllowed = process.env.NODE_ENV !== 'production'
+  const email = process.env.RAILS_ADMIN_EMAIL?.trim() ||
+    (localCredentialsAllowed ? process.env.LOCAL_ADMIN_EMAIL?.trim() : undefined)
+  const password = process.env.RAILS_ADMIN_PASSWORD?.trim() ||
+    (localCredentialsAllowed ? process.env.LOCAL_ADMIN_PASSWORD?.trim() : undefined)
   if (!email || !password) {
-    throw new Error('RAILS_ADMIN_EMAIL and RAILS_ADMIN_PASSWORD are required')
+    throw new Error(
+      localCredentialsAllowed
+        ? 'RAILS_ADMIN_EMAIL/RAILS_ADMIN_PASSWORD or LOCAL_ADMIN_EMAIL/LOCAL_ADMIN_PASSWORD are required'
+        : 'RAILS_ADMIN_EMAIL and RAILS_ADMIN_PASSWORD are required'
+    )
   }
 
   const response = await fetch(railsApiUrl('/admin/auth/login'), {
@@ -413,6 +466,9 @@ export function mapRailsProduct(product: any): Product {
     ...(product.metadata && typeof product.metadata === 'object' ? product.metadata : {}),
     price_on_request: priceOnRequest,
   }
+  const catalogAttributes = product.catalog_attributes && typeof product.catalog_attributes === 'object'
+    ? product.catalog_attributes
+    : (product.attributes && typeof product.attributes === 'object' ? product.attributes : {})
 
   return {
     id: String(product.id),
@@ -447,6 +503,8 @@ export function mapRailsProduct(product: any): Product {
     h1: product.h1 || '',
     canonical_url: product.canonical_url || '',
     metadata,
+    catalog_attributes: catalogAttributes,
+    attributes: catalogAttributes,
     created: product.created_at || '',
     updated: product.updated_at || '',
     collectionId: '',
@@ -507,6 +565,8 @@ export async function listRailsAdminProducts(options: {
   genderExact?: boolean
   status?: Product['status']
   noGender?: boolean
+  attributeKey?: string
+  attributeValue?: string
 }) {
   if ((options.brand || options.category || options.subcategory || options.gender || options.noGender) && !options.status) {
     return listRailsCatalogProducts(options)
@@ -541,6 +601,8 @@ async function listRailsCatalogProducts(options: {
   gender?: string
   genderExact?: boolean
   genderMissing?: boolean
+  attributeKey?: string
+  attributeValue?: string
 }) {
   if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
     return listRailsCatalogProductsInChunks(options)
@@ -1007,6 +1069,127 @@ export async function rejectRailsSeoAiDraft(id: string) {
   return result.generation
 }
 
+export async function listRailsCatalogAttributeSuggestions(options: {
+  page?: number
+  perPage?: number
+  status?: string
+  attributeCode?: string
+  source?: string
+  query?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  suggestedValue?: string
+} = {}): Promise<RailsCatalogAttributeSuggestionList> {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page || 1))
+  params.set('per_page', String(options.perPage || 30))
+  if (options.status) params.set('status', options.status)
+  if (options.attributeCode) params.set('attribute_code', options.attributeCode)
+  if (options.source) params.set('source', options.source)
+  if (options.query) params.set('query', options.query)
+  if (options.brand) params.set('brand', options.brand)
+  if (options.category) params.set('category', options.category)
+  if (options.subcategory) params.set('subcategory', options.subcategory)
+  if (options.suggestedValue) params.set('suggested_value', options.suggestedValue)
+
+  const result = await railsFetch<{
+    catalog_attribute_suggestions: RailsCatalogAttributeSuggestion[]
+    meta: {
+      page: number
+      per_page: number
+      total: number
+      pages: number
+      available_values?: Array<{ value: string; label: string; count: number }>
+    }
+  }>(`/admin/catalog_attribute_suggestions?${params}`)
+
+  return {
+    items: result.catalog_attribute_suggestions || [],
+    page: Number(result.meta?.page || options.page || 1),
+    perPage: Number(result.meta?.per_page || options.perPage || 30),
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+    availableValues: result.meta?.available_values || [],
+  }
+}
+
+export async function approveRailsCatalogAttributeSuggestion(id: string) {
+  const result = await railsFetch<{ catalog_attribute_suggestion: RailsCatalogAttributeSuggestion }>(
+    `/admin/catalog_attribute_suggestions/${encodeURIComponent(id)}/approve`,
+    { method: 'POST' }
+  )
+  return result.catalog_attribute_suggestion
+}
+
+export async function rejectRailsCatalogAttributeSuggestion(id: string) {
+  const result = await railsFetch<{ catalog_attribute_suggestion: RailsCatalogAttributeSuggestion }>(
+    `/admin/catalog_attribute_suggestions/${encodeURIComponent(id)}/reject`,
+    { method: 'POST' }
+  )
+  return result.catalog_attribute_suggestion
+}
+
+export async function updateRailsCatalogAttributeSuggestionValue(id: string, value: string) {
+  const result = await railsFetch<{ catalog_attribute_suggestion: RailsCatalogAttributeSuggestion }>(
+    `/admin/catalog_attribute_suggestions/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ catalog_attribute_suggestion: { value } }),
+    }
+  )
+  return result.catalog_attribute_suggestion
+}
+
+export async function bulkApproveRailsCatalogAttributeSuggestions(ids: string[]) {
+  return railsFetch<{ reviewed_ids: string[]; status: 'approved' }>(
+    '/admin/catalog_attribute_suggestions/bulk_approve',
+    { method: 'POST', body: JSON.stringify({ ids }) }
+  )
+}
+
+export async function bulkApproveFilteredRailsCatalogAttributeSuggestions(options: {
+  query?: string
+  attributeCode?: string
+  source?: string
+  brand?: string
+  category?: string
+  subcategory?: string
+  suggestedValue?: string
+}) {
+  const params = new URLSearchParams()
+  if (options.query) params.set('query', options.query)
+  if (options.attributeCode) params.set('attribute_code', options.attributeCode)
+  if (options.source) params.set('source', options.source)
+  if (options.brand) params.set('brand', options.brand)
+  if (options.category) params.set('category', options.category)
+  if (options.subcategory) params.set('subcategory', options.subcategory)
+  if (options.suggestedValue) params.set('suggested_value', options.suggestedValue)
+  const suffix = params.size > 0 ? `?${params}` : ''
+
+  return railsFetch<{ approved_count: number; status: 'approved' }>(
+    `/admin/catalog_attribute_suggestions/bulk_approve_filtered${suffix}`,
+    { method: 'POST' }
+  )
+}
+
+export async function bulkRejectRailsCatalogAttributeSuggestions(ids: string[]) {
+  return railsFetch<{ reviewed_ids: string[]; status: 'rejected' }>(
+    '/admin/catalog_attribute_suggestions/bulk_reject',
+    { method: 'POST', body: JSON.stringify({ ids }) }
+  )
+}
+
+export async function aiRefineRailsCatalogAttributeSuggestions(ids: string[]) {
+  return railsFetch<{
+    catalog_attribute_suggestions: RailsCatalogAttributeSuggestion[]
+    processed_products: number
+  }>('/admin/catalog_attribute_suggestions/ai_refine', {
+    method: 'POST',
+    body: JSON.stringify({ ids, ...openRouterRuntimeKeyPayload() }),
+  })
+}
+
 export async function deleteRailsSeoAiDraft(id: string) {
   await railsFetch(`/admin/seo_ai/generations/${id}`, {
     method: 'DELETE',
@@ -1037,6 +1220,8 @@ export function buildRailsAdminProductsParams(options: {
   noGender?: boolean
   genderMissing?: boolean
   genderExact?: boolean
+  attributeKey?: string
+  attributeValue?: string
 }) {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
@@ -1060,6 +1245,8 @@ export function buildRailsAdminProductsParams(options: {
     if (options.genderExact) params.set('gender_exact', 'true')
   }
   if (options.status) params.set('status', options.status)
+  if (options.attributeKey?.trim()) params.set('attribute_key', options.attributeKey.trim())
+  if (options.attributeValue?.trim()) params.set('attribute_value', options.attributeValue.trim())
   return params
 }
 
@@ -1116,6 +1303,8 @@ type ProductFacetFilters = {
   gender?: string
   genderExact?: boolean
   noGender?: boolean
+  attributeKey?: string
+  attributeValue?: string
 }
 
 type RailsProductFacetPayload = {
@@ -1137,6 +1326,8 @@ async function fetchRailsProductFacets(options: ProductFacetFilters) {
     genderMissing: options.noGender,
     gender: options.noGender ? '' : options.gender,
     genderExact: options.genderExact,
+    attributeKey: options.attributeKey,
+    attributeValue: options.attributeValue,
   })
   return publicRailsFetch<RailsProductFacetPayload>(`/catalog/products?${params}`)
 }
@@ -1148,6 +1339,8 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     description: filters.description,
     priceMin: filters.priceMin,
     priceMax: filters.priceMax,
+    attributeKey: filters.attributeKey,
+    attributeValue: filters.attributeValue,
   }
 
   const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload] = await Promise.all([
@@ -1300,6 +1493,9 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('seo_description')) product.seo_description = String(formData.get('seo_description') || '')
   if (formData.has('h1')) product.h1 = String(formData.get('h1') || '')
   if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
+  if (formData.has('catalog_attributes')) {
+    product.catalog_attributes = parseJsonObject(formData.get('catalog_attributes'))
+  }
 
   if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined) {
     const metadata = parseJsonObject(formData.get('productMetadata'))
@@ -1387,6 +1583,10 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
   if (data.metadata !== undefined) {
     product.metadata = data.metadata && typeof data.metadata === 'object' ? data.metadata : {}
   }
+  if (data.catalog_attributes !== undefined || data.attributes !== undefined) {
+    const attributes = data.catalog_attributes ?? data.attributes
+    product.catalog_attributes = attributes && typeof attributes === 'object' ? attributes : {}
+  }
   if (data.price !== undefined) {
     const metadata = product.metadata && typeof product.metadata === 'object'
       ? { ...product.metadata }
@@ -1456,4 +1656,25 @@ export async function restoreRailsAdminProductFromTrash(id: string) {
 
 export async function deleteRailsAdminProduct(id: string) {
   await railsFetch(`/admin/products/${id}`, { method: 'DELETE' })
+}
+
+export async function deleteRailsAdminProductsByExternalIds(externalIds: string[]) {
+  const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))]
+  let deleted = 0
+
+  for (const externalId of ids) {
+    const params = new URLSearchParams({
+      page: '1',
+      per_page: '10',
+      external_id: externalId,
+    })
+    const result = await railsFetch<{ products: any[] }>(`/admin/products?${params}`)
+    const matches = (result.products || []).filter((product) => String(product.external_id || '').trim() === externalId)
+    for (const product of matches) {
+      await deleteRailsAdminProduct(String(product.id))
+      deleted += 1
+    }
+  }
+
+  return { requested: ids.length, deleted }
 }
