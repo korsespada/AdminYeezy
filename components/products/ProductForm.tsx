@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition } from 'react'
+import { useState, useEffect, useMemo, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
@@ -22,6 +22,33 @@ import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { isPriceOnRequest } from '@/lib/product-pricing'
+
+type CatalogAttributeDefinition = {
+  code: string
+  label: string
+  values: string[]
+  categories?: string[]
+}
+
+// The API stores attributes as a flat object, while the editor presents a
+// controlled list of category-aware choices. Values are intentionally kept
+// editable through the "Другое" option for attributes not covered here.
+const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
+  { code: 'material', label: 'Материал', values: ['Кожа', 'Замша', 'Текстиль', 'Шёлк', 'Хлопок', 'Полиэстер', 'Металл', 'Пластик'] },
+  { code: 'colors', label: 'Цвет', values: ['Чёрный', 'Белый', 'Бежевый', 'Коричневый', 'Серый', 'Синий', 'Красный', 'Розовый', 'Зелёный', 'Мультиколор'] },
+  { code: 'sizes', label: 'Размеры', values: ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'] },
+  { code: 'season', label: 'Сезон', values: ['Весна', 'Лето', 'Осень', 'Зима', 'Демисезон'] },
+  { code: 'model_name', label: 'Модель', values: [] },
+  { code: 'brand', label: 'Бренд', values: [], categories: ['обув', 'сум', 'одеж', 'аксессуар', 'украш', 'часы'] },
+  { code: 'heel_height', label: 'Высота каблука', values: [], categories: ['обув'] },
+  { code: 'water_resistance', label: 'Водонепроницаемость', values: ['Да', 'Нет'], categories: ['часы', 'сум', 'обув'] },
+  { code: 'watch_movement', label: 'Механизм часов', values: ['Кварцевый', 'Механический', 'Автоматический'], categories: ['часы'] },
+  { code: 'jewelry_metal', label: 'Металл', values: ['Золото', 'Серебро', 'Платина', 'Сталь'], categories: ['украш'] },
+  { code: 'stones', label: 'Камни', values: [], categories: ['украш'] },
+  { code: 'dimensions', label: 'Габариты', values: [], categories: ['сум', 'багаж', 'чемод'] },
+]
+
+const ATTRIBUTE_OTHER_VALUE = '__other__'
 
 interface ProductFormProps {
   product?: Product | null
@@ -66,6 +93,24 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+
+  const selectedCategoryText = useMemo(() => {
+    const categoryItem = categories.find((item) => item.id === category)
+    const subcategoryItem = subcategories.find((item) => item.id === subcategory)
+    return `${categoryItem?.name || ''} ${subcategoryItem?.name || ''}`.toLocaleLowerCase()
+  }, [categories, subcategories, category, subcategory])
+
+  const categoryAttributeDefinitions = useMemo(() => {
+    const filtered = CATALOG_ATTRIBUTE_DEFINITIONS.filter((definition) => {
+      if (!definition.categories?.length) return true
+      return definition.categories.some((term) => selectedCategoryText.includes(term))
+    })
+    const known = new Set(filtered.map((definition) => definition.code))
+    const existing: CatalogAttributeDefinition[] = Object.keys(catalogAttributes)
+      .filter((key) => key && !known.has(key))
+      .map((code) => ({ code, label: code, values: [] }))
+    return [...filtered, ...existing]
+  }, [selectedCategoryText, catalogAttributes])
 
   const handleDownload = async (url: string, index: number) => {
     try {
@@ -121,9 +166,12 @@ export default function ProductForm({ product, brands, categories, subcategories
         setProductionMaxDays(product.production_max_days == null ? '' : String(product.production_max_days))
         setOfficeDeliveryMinDays(product.office_delivery_min_days == null ? '' : String(product.office_delivery_min_days))
         setOfficeDeliveryMaxDays(product.office_delivery_max_days == null ? '' : String(product.office_delivery_max_days))
-        setSeoTitle(product.seo_title || '')
-        setSeoDescription(product.seo_description || '')
-        setH1(product.h1 || '')
+        // Keep existing SEO values visible, and use the product content as a
+        // useful fallback when older records do not have dedicated SEO fields.
+        const productDescription = normalizeDescription(product.description)
+        setSeoTitle(product.seo_title || product.name || '')
+        setSeoDescription(product.seo_description || productDescription)
+        setH1(product.h1 || product.name || '')
         setCanonicalUrl(product.canonical_url || '')
         setCatalogAttributes(product.catalog_attributes || product.attributes || {})
         // Handle brand as array or single value
@@ -269,6 +317,20 @@ export default function ProductForm({ product, brands, categories, subcategories
     })
   }
 
+  const addCatalogAttribute = () => {
+    setCatalogAttributes((current) => ({
+      ...current,
+      [`__new_${Date.now()}`]: '',
+    }))
+  }
+
+  const updateCatalogAttributeValue = (key: string, value: string) => {
+    updateCatalogAttribute(key, key, value)
+  }
+
+  const getAttributeDefinition = (key: string) =>
+    categoryAttributeDefinitions.find((definition) => definition.code === key)
+
   const removeCatalogAttribute = (key: string) => {
     setCatalogAttributes((current) => {
       const next = { ...current }
@@ -344,7 +406,12 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
     formData.append('canonical_url', canonicalUrl.trim())
-    formData.append('catalog_attributes', JSON.stringify(catalogAttributes))
+    const normalizedCatalogAttributes = Object.fromEntries(
+      Object.entries(catalogAttributes)
+        .filter(([key]) => key && !key.startsWith('__new_'))
+        .map(([key, value]) => [key, value === ATTRIBUTE_OTHER_VALUE ? '' : value])
+    )
+    formData.append('catalog_attributes', JSON.stringify(normalizedCatalogAttributes))
     const priceOnRequest = isPriceOnRequest(priceNum)
     formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
     formData.append('productMetadata', JSON.stringify(product?.metadata || {}))
@@ -385,8 +452,8 @@ export default function ProductForm({ product, brands, categories, subcategories
           seo_description: seoDescription.trim(),
           h1: h1.trim(),
           canonical_url: canonicalUrl.trim(),
-          catalog_attributes: catalogAttributes,
-          attributes: catalogAttributes,
+          catalog_attributes: normalizedCatalogAttributes,
+          attributes: normalizedCatalogAttributes,
           price_on_request: priceOnRequest,
           metadata: {
             ...(product.metadata || {}),
@@ -438,14 +505,14 @@ export default function ProductForm({ product, brands, categories, subcategories
       if (!open) onClose()
     }}>
       <SheetContent side="right" className="flex w-full max-w-2xl flex-col overflow-y-auto bg-gray-800 p-0 sm:max-w-2xl">
-          <SheetHeader className="sticky top-0 z-10 border-b border-gray-700 bg-gray-900 px-6 py-4">
+          <SheetHeader className="sticky top-0 z-10 border-b border-gray-700 bg-gray-900 px-5 py-3">
             <SheetTitle>
               {product ? 'Изменить товар' : 'Новый товар'}
             </SheetTitle>
           </SheetHeader>
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="flex-1 p-6 space-y-6">
+          <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4">
             {error && (
               <Alert variant="destructive" className="border-red-800 bg-red-900/20 text-red-400">
                 <AlertDescription>{error}</AlertDescription>
@@ -620,7 +687,7 @@ export default function ProductForm({ product, brands, categories, subcategories
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={6}
+                rows={4}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
                 placeholder="Описание товара..."
                 disabled={isPending}
@@ -738,14 +805,14 @@ export default function ProductForm({ product, brands, categories, subcategories
                     Атрибуты каталога
                   </label>
                   <p className="mt-1 text-xs text-gray-500">
-                    Структурированные характеристики товара; ключи используются в фильтрах.
+                    Выберите характеристики для текущей категории. Можно добавить несколько.
                   </p>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => setCatalogAttributes((current) => ({ ...current, '': '' }))}
+                  onClick={addCatalogAttribute}
                   disabled={isPending}
                 >
                   Добавить
@@ -757,22 +824,47 @@ export default function ProductForm({ product, brands, categories, subcategories
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {Object.entries(catalogAttributes).map(([key, value]) => (
-                    <div key={key} className="flex items-center gap-2">
-                      <input
-                        value={key}
-                        onChange={(event) => updateCatalogAttribute(key, event.target.value, String(value ?? ''))}
-                        placeholder="Ключ, например material"
-                        className="w-2/5 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                  {Object.entries(catalogAttributes).map(([key, value]) => {
+                    const definition = getAttributeDefinition(key)
+                    const stringValue = Array.isArray(value) ? JSON.stringify(value) : String(value ?? '')
+                    const isOtherValue = stringValue === ATTRIBUTE_OTHER_VALUE
+                    const displayValue = isOtherValue ? '' : stringValue
+                    const valueIsPreset = Boolean(definition?.values.includes(displayValue))
+                    return (
+                    <div key={key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
+                      <select
+                        value={definition ? key : ''}
+                        onChange={(event) => {
+                          const nextKey = event.target.value
+                          if (nextKey) updateCatalogAttribute(key, nextKey, '')
+                        }}
+                        className="min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
                         disabled={isPending}
-                      />
-                      <input
-                        value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? '')}
-                        onChange={(event) => updateCatalogAttribute(key, key, event.target.value)}
-                        placeholder="Значение"
-                        className="min-w-0 flex-1 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                        disabled={isPending}
-                      />
+                      >
+                        <option value="">Выберите атрибут...</option>
+                        {categoryAttributeDefinitions.map((option) => (
+                          <option key={option.code} value={option.code}>{option.label}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={valueIsPreset ? displayValue : isOtherValue ? ATTRIBUTE_OTHER_VALUE : displayValue ? ATTRIBUTE_OTHER_VALUE : ''}
+                        onChange={(event) => updateCatalogAttributeValue(key, event.target.value === ATTRIBUTE_OTHER_VALUE ? ATTRIBUTE_OTHER_VALUE : event.target.value)}
+                        className="min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                        disabled={isPending || !definition}
+                      >
+                        <option value="">Выберите значение...</option>
+                        {(definition?.values || []).map((option) => <option key={option} value={option}>{option}</option>)}
+                        {definition && <option value={ATTRIBUTE_OTHER_VALUE}>Другое…</option>}
+                      </select>
+                      {definition && (!valueIsPreset && (isOtherValue || displayValue || !definition.values.length)) && (
+                        <input
+                          value={displayValue}
+                          onChange={(event) => updateCatalogAttributeValue(key, event.target.value)}
+                          placeholder="Своё значение"
+                          className="col-span-2 min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+                          disabled={isPending}
+                        />
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -785,89 +877,10 @@ export default function ProductForm({ product, brands, categories, subcategories
                         <Trash2 size={16} />
                       </Button>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Исполнение
-                </label>
-                <select
-                  value={fulfillmentMode}
-                  onChange={(e) => setFulfillmentMode(e.target.value as Product['fulfillment_mode'])}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                  disabled={isPending}
-                >
-                  <option value="ready_to_ship">В наличии</option>
-                  <option value="requires_confirmation">Подтвердить наличие</option>
-                  <option value="made_to_order">Под заказ</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Доступность
-                </label>
-                <select
-                  value={availabilityConfidence}
-                  onChange={(e) => setAvailabilityConfidence(e.target.value as Product['availability_confidence'])}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                  disabled={isPending}
-                >
-                  <option value="unknown">Неизвестно</option>
-                  <option value="low">Низкая</option>
-                  <option value="medium">Средняя</option>
-                  <option value="high">Высокая</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Индексация
-                </label>
-                <select
-                  value={indexingStatus}
-                  onChange={(e) => setIndexingStatus(e.target.value as Product['indexing_status'])}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                  disabled={isPending}
-                >
-                  <option value="indexable">Indexable</option>
-                  <option value="noindex">Noindex</option>
-                  <option value="needs_review">Needs review</option>
-                  <option value="thin_content">Thin content</option>
-                  <option value="duplicate">Duplicate</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Производство от
-                </label>
-                <input type="number" min="0" value={productionMinDays} onChange={(e) => setProductionMinDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Производство до
-                </label>
-                <input type="number" min="0" value={productionMaxDays} onChange={(e) => setProductionMaxDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Офис от
-                </label>
-                <input type="number" min="0" value={officeDeliveryMinDays} onChange={(e) => setOfficeDeliveryMinDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Офис до
-                </label>
-                <input type="number" min="0" value={officeDeliveryMaxDays} onChange={(e) => setOfficeDeliveryMaxDays(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
-              </div>
             </div>
 
             <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">
@@ -889,7 +902,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   SEO description
                 </label>
-                <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} rows={3} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+                <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} rows={2} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
               </div>
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -901,7 +914,7 @@ export default function ProductForm({ product, brands, categories, subcategories
           </form>
 
           {/* Footer */}
-          <div className="sticky bottom-0 flex justify-end space-x-3 border-t border-gray-700 bg-gray-900 px-6 py-4">
+          <div className="sticky bottom-0 flex justify-end space-x-3 border-t border-gray-700 bg-gray-900 px-5 py-3">
             <Button
               type="button"
               variant="outline"
