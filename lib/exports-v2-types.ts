@@ -1,0 +1,93 @@
+export type V2AlbumRole =
+  | 'UNASSIGNED'
+  | 'PRIMARY_PHOTOS'
+  | 'PRODUCT_MEDIA'
+  | 'EXTRA_MEDIA'
+  | 'TEXT_ONLY'
+  | 'SIZE_CHART'
+  | 'COMPARISON_OR_AD'
+  | 'IGNORE'
+
+export interface V2HistoricalSource {
+  task_id: number
+  batch_id: string | null
+  supplier_id: number
+  supplier_name: string
+  supplier_avatar: string | null
+  items_count: number
+  created_at: string
+  file_name: string
+  script_name: string | null
+  already_imported_run_id: string | null
+}
+
+export interface V2RunSummary {
+  id: string
+  name: string
+  status: string
+  supplier_id: number
+  supplier_name: string
+  supplier_avatar: string | null
+  album_count: number
+  assigned_count: number
+  draft_count: number
+  training_example_count: number
+  source_kind: string
+  source_task_id: number | null
+  production_push_enabled: boolean
+  last_started_at: string | null
+  last_completed_at: string | null
+  last_error: string | null
+  last_received_count: number
+  last_inserted_count: number
+  last_updated_count: number
+  last_unchanged_count: number
+  created_at: string
+}
+
+export interface V2SupplierSource {
+  id: number
+  name: string
+  avatar_url: string | null
+  album_id: string
+  group_id: string | null
+  tag_id: string | null
+}
+
+export interface V2Album {
+  id: string
+  external_id: string
+  source_order: number
+  name: string
+  description: string
+  photos: string[]
+  draft_id: string | null
+  role: V2AlbumRole | null
+  use_text: boolean | null
+  use_photos: boolean | null
+  use_for_ai: boolean | null
+}
+
+export interface V2DraftAlbum extends V2Album {
+  role: V2AlbumRole
+  use_text: boolean
+  use_photos: boolean
+  use_for_ai: boolean
+}
+
+export interface V2Draft {
+  id: string
+  status: string
+  name: string
+  created_at: string
+  albums: V2DraftAlbum[]
+}
+
+export interface V2RunDetails extends V2RunSummary {
+  source_batch_id: string | null
+  total_albums: number
+  page: number
+  per_page: number
+  albums: V2Album[]
+  drafts: V2Draft[]
+}

@@ -2,7 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles, ClipboardList, ListChecks, SlidersHorizontal } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Tags, Sparkles, ClipboardList, ListChecks, SlidersHorizontal, FlaskConical } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -62,6 +62,13 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           <Link href="/admin/gender-backfill">
             <Tags size={20} className="text-emerald-400" />
             <span className="hidden md:inline">Гендер</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Новая DB-native выгрузка">
+          <Link href="/admin/exports-v2">
+            <FlaskConical size={20} className="text-cyan-400" />
+            <span className="hidden 2xl:inline">Выгрузка 2.0</span>
           </Link>
         </Button>
 

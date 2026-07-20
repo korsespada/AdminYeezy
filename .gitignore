@@ -35,3 +35,11 @@ Thumbs.db
 
 # Vite/TS temp
 **/*.timestamp-*.mjs
+
+# Local browser verification artifacts
+.playwright-cli/
+output/playwright/
+
+# Python bytecode
+**/__pycache__/
+**/*.py[cod]

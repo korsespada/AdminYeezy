@@ -11,6 +11,7 @@
     "build": "next build",
     "start": "next start",
     "db:migrate:scraping": "node scripts/migrate-scraping-schema.js",
+    "db:migrate:scraping-v2": "node scripts/migrate-scraping-v2.js",
     "db:migrate:supplier-catalog-ids": "node scripts/migrate-supplier-catalog-ids.js",
     "db:backfill:batch-products": "node scripts/backfill-batch-products.js",
     "db:backfill:scraping-files": "node scripts/backfill-scraping-files.js",
