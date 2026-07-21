@@ -153,8 +153,66 @@ def normalized_photos(item):
             continue
         if url.startswith("//"):
             url = "https:" + url
+        if "/pvod/" in url or re.search(r"\.mp4(?:\?|$)", url, re.IGNORECASE):
+            continue
         result.append(url)
     return result
+
+
+def iter_source_urls(value):
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate.startswith("//"):
+            candidate = "https:" + candidate
+        if candidate.startswith(("http://", "https://")):
+            yield candidate
+        return
+    if isinstance(value, list):
+        for child in value:
+            yield from iter_source_urls(child)
+        return
+    if isinstance(value, dict):
+        for child in value.values():
+            yield from iter_source_urls(child)
+
+
+def normalized_media(item, photos):
+    media = []
+    seen = set()
+
+    def append(media_type, url, preview_url=None):
+        clean_url = str(url or "").strip()
+        if not clean_url:
+            return
+        if clean_url.startswith("//"):
+            clean_url = "https:" + clean_url
+        key = (media_type, clean_url.split("?", 1)[0])
+        if key in seen:
+            return
+        seen.add(key)
+        media.append({
+            "type": media_type,
+            "url": clean_url.split("?", 1)[0] if media_type == "video" else clean_url,
+            "preview_url": preview_url or clean_url,
+        })
+
+    for photo in photos:
+        if "/pvod/" in photo or re.search(r"\.mp4(?:\?|$)", photo, re.IGNORECASE):
+            base_url = photo.split("?", 1)[0]
+            append("video", base_url, photo if "vframe/" in photo else f"{base_url}?vframe/jpg/offset/0")
+        else:
+            append("image", photo, photo)
+
+    # Szwego keeps video links outside imgsSrc for some album types. Walk the
+    # provider payload so those albums remain visible without depending on one
+    # unstable field name. Restrict the scan to Szwego's media CDN paths.
+    for url in iter_source_urls(item):
+        if "xcimg.szwego.com/pvod/" not in url and not re.search(r"\.mp4(?:\?|$)", url, re.IGNORECASE):
+            continue
+        base_url = url.split("?", 1)[0]
+        append("video", base_url, url if "vframe/" in url else f"{base_url}?vframe/jpg/offset/0")
+
+    return media
 
 
 def item_tags(item):
@@ -177,13 +235,13 @@ def item_tags(item):
     return values
 
 
-def stable_external_id(item, description, photos):
+def stable_external_id(item, description, media):
     value = item.get("goods_id", "") or item.get("selfGoodsId", "")
     if value:
         return str(value).strip()
     digest = hashlib.sha256(
         json.dumps(
-            {"description": description, "photos": photos},
+            {"description": description, "media": media},
             ensure_ascii=False,
             sort_keys=True,
         ).encode("utf-8")
@@ -214,6 +272,7 @@ def main():
     page_timestamp = int(time.time() * 1000)
     page_index = 1
     received = 0
+    catalog_position = 0
     seen_in_process = set()
 
     while True:
@@ -272,7 +331,8 @@ def main():
 
         dated_items = 0
         old_items = 0
-        for item in items:
+        for page_position, item in enumerate(items, start=1):
+            catalog_position += 1
             raw_text = (
                 item.get("content", "")
                 or item.get("title", "")
@@ -287,7 +347,8 @@ def main():
                     description = " ".join([description, *tags]).strip()
 
             photos = normalized_photos(item)
-            external_id = stable_external_id(item, description, photos)
+            media = normalized_media(item, photos)
+            external_id = stable_external_id(item, description, media)
             item_date = parse_date_from_item_fields(item)
             if parsed_end_date and not item_date:
                 item_date = parse_date_from_text(description)
@@ -312,7 +373,11 @@ def main():
                     "name": str(item.get("goods_name", "") or "").strip(),
                     "description": description,
                     "photos": photos,
+                    "media": media,
                     "source_published_at": item_date.isoformat() if item_date else None,
+                    "source_position": catalog_position,
+                    "source_page": page_index,
+                    "page_position": page_position,
                     "raw_payload": item,
                 },
             })

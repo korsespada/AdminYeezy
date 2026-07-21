@@ -85,6 +85,31 @@ async function migrate() {
     `)
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS scraping_v2_scrape_passes (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES scraping_v2_runs(id) ON DELETE CASCADE,
+        supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL DEFAULT 'RUNNING',
+        cutoff_date DATE,
+        received_count INTEGER NOT NULL DEFAULT 0,
+        inserted_count INTEGER NOT NULL DEFAULT 0,
+        updated_count INTEGER NOT NULL DEFAULT 0,
+        unchanged_count INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        CONSTRAINT scraping_v2_scrape_passes_status_check CHECK (
+          status IN ('RUNNING', 'COMPLETED', 'FAILED')
+        )
+      )
+    `)
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS scraping_v2_scrape_passes_run_started_idx
+      ON scraping_v2_scrape_passes (run_id, started_at DESC)
+    `)
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS scraping_v2_albums (
         id TEXT PRIMARY KEY,
         run_id TEXT NOT NULL REFERENCES scraping_v2_runs(id) ON DELETE CASCADE,
@@ -95,12 +120,31 @@ async function migrate() {
         name TEXT NOT NULL DEFAULT '',
         description TEXT NOT NULL DEFAULT '',
         photos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        media JSONB NOT NULL DEFAULT '[]'::jsonb,
         raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
         content_hash TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (run_id, external_id)
       )
+    `)
+
+    await client.query(`
+      ALTER TABLE scraping_v2_albums
+      ADD COLUMN IF NOT EXISTS media JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+
+    await client.query(`
+      UPDATE scraping_v2_albums
+      SET media = COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'type', 'image',
+          'url', url,
+          'preview_url', url
+        ))
+        FROM jsonb_array_elements_text(photos) AS photo(url)
+      ), '[]'::jsonb)
+      WHERE media = '[]'::jsonb AND jsonb_array_length(photos) > 0
     `)
 
     await client.query(`
@@ -119,16 +163,53 @@ async function migrate() {
     `)
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS scraping_v2_album_observations (
+        pass_id TEXT NOT NULL REFERENCES scraping_v2_scrape_passes(id) ON DELETE CASCADE,
+        album_id TEXT NOT NULL REFERENCES scraping_v2_albums(id) ON DELETE CASCADE,
+        source_position INTEGER NOT NULL,
+        source_page INTEGER NOT NULL,
+        page_position INTEGER NOT NULL,
+        observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (pass_id, album_id),
+        UNIQUE (pass_id, source_position)
+      )
+    `)
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS scraping_v2_album_observations_album_idx
+      ON scraping_v2_album_observations (album_id, observed_at DESC)
+    `)
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS scraping_v2_album_revisions (
         id TEXT PRIMARY KEY,
         album_id TEXT NOT NULL REFERENCES scraping_v2_albums(id) ON DELETE CASCADE,
         content_hash TEXT NOT NULL,
         description TEXT NOT NULL DEFAULT '',
         photos JSONB NOT NULL DEFAULT '[]'::jsonb,
+        media JSONB NOT NULL DEFAULT '[]'::jsonb,
         raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
         observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE (album_id, content_hash)
       )
+    `)
+
+    await client.query(`
+      ALTER TABLE scraping_v2_album_revisions
+      ADD COLUMN IF NOT EXISTS media JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+
+    await client.query(`
+      UPDATE scraping_v2_album_revisions
+      SET media = COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'type', 'image',
+          'url', url,
+          'preview_url', url
+        ))
+        FROM jsonb_array_elements_text(photos) AS photo(url)
+      ), '[]'::jsonb)
+      WHERE media = '[]'::jsonb AND jsonb_array_length(photos) > 0
     `)
 
     await client.query(`

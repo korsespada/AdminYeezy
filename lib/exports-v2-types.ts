@@ -58,9 +58,16 @@ export interface V2Album {
   id: string
   external_id: string
   source_order: number
+  source_page: number | null
+  page_position: number | null
   name: string
   description: string
   photos: string[]
+  media: Array<{
+    type: 'image' | 'video'
+    url: string
+    preview_url: string
+  }>
   draft_id: string | null
   role: V2AlbumRole | null
   use_text: boolean | null

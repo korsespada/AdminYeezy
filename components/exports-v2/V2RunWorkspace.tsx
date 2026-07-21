@@ -19,6 +19,7 @@ import {
   Sparkles,
   Split,
   Type,
+  Video,
   RefreshCw,
   X,
 } from 'lucide-react'
@@ -404,6 +405,7 @@ function AlbumCard({
   onPreview: () => void
 }) {
   const assigned = Boolean(album.draft_id)
+  const videoCount = (album.media || []).filter((item) => item.type === 'video').length
   return (
     <div
       className={`group relative overflow-hidden rounded-xl border text-left transition ${
@@ -420,6 +422,7 @@ function AlbumCard({
           <div className="absolute left-2 top-2 rounded-md bg-slate-950/85 px-2 py-1 text-[10px] font-bold text-white backdrop-blur">#{album.source_order}</div>
           <div className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-slate-950/85 px-2 py-1 text-[10px] font-semibold text-slate-200 backdrop-blur">
             <ImageIcon className="h-3 w-3" /> {album.photos.length}
+            {videoCount > 0 && <><Video className="ml-1 h-3 w-3" /> {videoCount}</>}
           </div>
           {selected && <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-slate-950"><Check className="h-4 w-4" /></div>}
           {assigned && <div className="absolute inset-x-2 bottom-2 rounded-md bg-indigo-500/90 px-2 py-1 text-center text-[10px] font-bold text-white">Уже в товаре</div>}
@@ -445,8 +448,8 @@ function AlbumCard({
   )
 }
 
-function AlbumThumb({ album, className }: { album: Pick<V2Album, 'photos'>; className: string }) {
-  const photo = album.photos[0]
+function AlbumThumb({ album, className }: { album: Pick<V2Album, 'photos' | 'media'>; className: string }) {
+  const photo = album.photos[0] || album.media?.[0]?.preview_url
   if (!photo) return <div className={`flex items-center justify-center bg-slate-950 text-slate-700 ${className}`}><ImageIcon className="h-6 w-6" /></div>
   return (
     <div
@@ -459,7 +462,7 @@ function AlbumThumb({ album, className }: { album: Pick<V2Album, 'photos'>; clas
 }
 
 function supplierImageUrl(source: string, size: number, quality: number) {
-  if (!source || source.includes('imageMogr2/')) return source
+  if (!source || source.includes('imageMogr2/') || source.includes('vframe/')) return source
   try {
     const url = new URL(source)
     if (!url.hostname.endsWith('szwego.com')) return source
@@ -471,7 +474,11 @@ function supplierImageUrl(source: string, size: number, quality: number) {
 }
 
 function AlbumPreviewModal({ album, onClose }: { album: V2Album; onClose: () => void }) {
-  const [activePhoto, setActivePhoto] = useState(album.photos[0] || '')
+  const media = album.media?.length
+    ? album.media
+    : album.photos.map((photo) => ({ type: 'image' as const, url: photo, preview_url: photo }))
+  const [activeMedia, setActiveMedia] = useState(media[0] || null)
+  const videoCount = media.filter((item) => item.type === 'video').length
 
   return (
     <div role="dialog" aria-modal="true" aria-label={`Альбом #${album.source_order}`} className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
@@ -481,6 +488,7 @@ function AlbumPreviewModal({ album, onClose }: { album: V2Album; onClose: () => 
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-white">Альбом #{album.source_order}</h2>
               <span className="rounded-full bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-300">{album.photos.length} фото</span>
+              {videoCount > 0 && <span className="rounded-full bg-violet-500/15 px-2 py-1 text-xs font-semibold text-violet-300">{videoCount} видео</span>}
             </div>
             <p className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap text-sm leading-5 text-slate-400">{album.description || 'Без текста'}</p>
           </div>
@@ -490,33 +498,44 @@ function AlbumPreviewModal({ album, onClose }: { album: V2Album; onClose: () => 
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          {activePhoto ? (
+          {activeMedia?.type === 'video' ? (
+            <video
+              key={activeMedia.url}
+              controls
+              preload="metadata"
+              poster={supplierImageUrl(activeMedia.preview_url, 1280, 85)}
+              className="h-[min(62vh,720px)] w-full rounded-xl bg-slate-950 object-contain"
+            >
+              <source src={activeMedia.url} type="video/mp4" />
+            </video>
+          ) : activeMedia ? (
             <div
               role="img"
               aria-label={`Выбранное фото альбома #${album.source_order}`}
               className="h-[min(62vh,720px)] w-full rounded-xl bg-slate-950 bg-contain bg-center bg-no-repeat"
-              style={{ backgroundImage: `url(${JSON.stringify(supplierImageUrl(activePhoto, 1280, 85))})` }}
+              style={{ backgroundImage: `url(${JSON.stringify(supplierImageUrl(activeMedia.url, 1280, 85))})` }}
             />
           ) : (
             <div className="flex h-72 items-center justify-center rounded-xl bg-slate-950 text-slate-600">В альбоме нет фотографий</div>
           )}
 
-          {album.photos.length > 1 && (
+          {media.length > 1 && (
             <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
-              {album.photos.map((photo, index) => (
+              {media.map((item, index) => (
                 <button
-                  key={`${photo}-${index}`}
+                  key={`${item.type}-${item.url}-${index}`}
                   type="button"
-                  onClick={() => setActivePhoto(photo)}
-                  aria-label={`Фото ${index + 1}`}
-                  className={`aspect-square overflow-hidden rounded-lg bg-slate-950 ${activePhoto === photo ? 'ring-2 ring-cyan-400' : 'opacity-75 hover:opacity-100'}`}
+                  onClick={() => setActiveMedia(item)}
+                  aria-label={`${item.type === 'video' ? 'Видео' : 'Фото'} ${index + 1}`}
+                  className={`relative aspect-square overflow-hidden rounded-lg bg-slate-950 ${activeMedia?.url === item.url ? 'ring-2 ring-cyan-400' : 'opacity-75 hover:opacity-100'}`}
                 >
                   <span
                     role="img"
                     aria-label="Миниатюра"
                     className="block h-full w-full bg-cover bg-center"
-                    style={{ backgroundImage: `url(${JSON.stringify(supplierImageUrl(photo, 240, 72))})` }}
+                    style={{ backgroundImage: `url(${JSON.stringify(supplierImageUrl(item.preview_url, 240, 72))})` }}
                   />
+                  {item.type === 'video' && <span className="absolute inset-0 flex items-center justify-center bg-slate-950/25"><Video className="h-5 w-5 text-white" /></span>}
                 </button>
               ))}
             </div>

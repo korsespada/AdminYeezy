@@ -12,6 +12,8 @@ import type { V2AlbumRole } from '@/lib/exports-v2-types'
 
 const ALBUMS_PER_PAGE = 80
 const MAX_GROUP_SIZE = 30
+const TRAINING_CONTEXT_RADIUS = 4
+const MAX_CONTIGUOUS_CONTEXT_SPAN = 40
 
 const ROLE_FLAGS: Record<V2AlbumRole, { useText: boolean, usePhotos: boolean, useForAi: boolean }> = {
   UNASSIGNED: { useText: false, usePhotos: false, useForAi: false },
@@ -41,8 +43,18 @@ type NativeAlbum = {
   name: string
   description: string
   photos: string[]
+  media: SourceMedia[]
   source_published_at: string | null
+  source_position: number
+  source_page: number
+  page_position: number
   raw_payload: Record<string, unknown>
+}
+
+type SourceMedia = {
+  type: 'image' | 'video'
+  url: string
+  preview_url: string
 }
 
 type NativeIngestResult = 'inserted' | 'updated' | 'unchanged'
@@ -69,6 +81,33 @@ function normalizePhotos(value: unknown): string[] {
   } catch {
     return text.split(/[|,;]/).map((item) => item.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
   }
+}
+
+function normalizeMedia(value: unknown, photos: string[]): SourceMedia[] {
+  const normalized: SourceMedia[] = []
+  const seen = new Set<string>()
+  const append = (type: 'image' | 'video', urlValue: unknown, previewValue?: unknown) => {
+    const url = String(urlValue || '').trim()
+    if (!url) return
+    const key = `${type}:${url}`
+    if (seen.has(key)) return
+    seen.add(key)
+    normalized.push({
+      type,
+      url,
+      preview_url: String(previewValue || url).trim() || url,
+    })
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => {
+      if (!entry || typeof entry !== 'object') return
+      const raw = entry as Record<string, unknown>
+      append(raw.type === 'video' ? 'video' : 'image', raw.url, raw.preview_url)
+    })
+  }
+  if (normalized.length === 0) photos.forEach((photo) => append('image', photo, photo))
+  return normalized
 }
 
 function parseDelimitedRows(text: string) {
@@ -148,34 +187,63 @@ function parseHistoricalAlbums(text: string, taskId: number): HistoricalAlbum[] 
   })
 }
 
-function contentHash(album: Pick<HistoricalAlbum, 'external_id' | 'name' | 'description' | 'photos'>) {
+function contentHash(album: Pick<HistoricalAlbum, 'external_id' | 'name' | 'description' | 'photos'> & { media?: SourceMedia[] }) {
   return crypto.createHash('sha256').update(JSON.stringify({
     external_id: album.external_id,
     name: album.name,
     description: album.description,
     photos: album.photos,
+    media: album.media || normalizeMedia(null, album.photos),
   })).digest('hex')
 }
 
-function normalizeNativeAlbum(value: unknown): NativeAlbum | null {
+function positiveInteger(value: unknown, fallback: number) {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function normalizeNativeAlbum(value: unknown, fallbackPosition: number): NativeAlbum | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
   const externalId = String(raw.external_id || '').trim()
   if (!externalId) return null
 
+  const photos = normalizePhotos(raw.photos)
   return {
     external_id: externalId,
     name: String(raw.name || '').trim(),
     description: String(raw.description || '').trim(),
-    photos: normalizePhotos(raw.photos),
+    photos,
+    media: normalizeMedia(raw.media, photos),
     source_published_at: raw.source_published_at ? String(raw.source_published_at) : null,
+    source_position: positiveInteger(raw.source_position, fallbackPosition),
+    source_page: positiveInteger(raw.source_page, 1),
+    page_position: positiveInteger(raw.page_position, fallbackPosition),
     raw_payload: raw.raw_payload && typeof raw.raw_payload === 'object'
       ? raw.raw_payload as Record<string, unknown>
       : {},
   }
 }
 
-async function ingestNativeAlbum(runId: string, supplierId: number, album: NativeAlbum): Promise<NativeIngestResult> {
+async function recordNativeObservation(client: any, passId: string, albumId: string, album: NativeAlbum) {
+  await client.query(`
+    INSERT INTO scraping_v2_album_observations (
+      pass_id, album_id, source_position, source_page, page_position
+    ) VALUES ($1,$2,$3,$4,$5)
+    ON CONFLICT (pass_id, album_id) DO UPDATE
+    SET source_position=EXCLUDED.source_position,
+        source_page=EXCLUDED.source_page,
+        page_position=EXCLUDED.page_position,
+        observed_at=NOW()
+  `, [passId, albumId, album.source_position, album.source_page, album.page_position])
+}
+
+async function ingestNativeAlbum(
+  runId: string,
+  passId: string,
+  supplierId: number,
+  album: NativeAlbum,
+): Promise<NativeIngestResult> {
   const client = await getScrapingClient()
   const hash = contentHash(album)
 
@@ -190,6 +258,7 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
     const existing = existingResult.rows[0]
 
     if (existing?.content_hash === hash) {
+      await recordNativeObservation(client, passId, existing.id, album)
       await client.query('COMMIT')
       return 'unchanged'
     }
@@ -197,8 +266,8 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
     if (existing) {
       await client.query(`
         INSERT INTO scraping_v2_album_revisions (
-          id, album_id, content_hash, description, photos, raw_payload
-        ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb)
+          id, album_id, content_hash, description, photos, media, raw_payload
+        ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)
         ON CONFLICT (album_id, content_hash) DO NOTHING
       `, [
         crypto.randomUUID(),
@@ -206,6 +275,7 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
         hash,
         album.description,
         JSON.stringify(album.photos),
+        JSON.stringify(album.media),
         JSON.stringify(album.raw_payload),
       ])
       await client.query(`
@@ -213,20 +283,23 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
         SET name=$1,
             description=$2,
             photos=$3::jsonb,
-            raw_payload=$4::jsonb,
-            content_hash=$5,
-            source_published_at=$6,
+            media=$4::jsonb,
+            raw_payload=$5::jsonb,
+            content_hash=$6,
+            source_published_at=$7,
             updated_at=NOW()
-        WHERE id=$7
+        WHERE id=$8
       `, [
         album.name,
         album.description,
         JSON.stringify(album.photos),
+        JSON.stringify(album.media),
         JSON.stringify(album.raw_payload),
         hash,
         album.source_published_at,
         existing.id,
       ])
+      await recordNativeObservation(client, passId, existing.id, album)
       await client.query('COMMIT')
       return 'updated'
     }
@@ -239,8 +312,8 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
     await client.query(`
       INSERT INTO scraping_v2_albums (
         id, run_id, supplier_id, external_id, source_order, source_published_at,
-        name, description, photos, raw_payload, content_hash
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11)
+        name, description, photos, media, raw_payload, content_hash
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12)
     `, [
       albumId,
       runId,
@@ -251,21 +324,24 @@ async function ingestNativeAlbum(runId: string, supplierId: number, album: Nativ
       album.name,
       album.description,
       JSON.stringify(album.photos),
+      JSON.stringify(album.media),
       JSON.stringify(album.raw_payload),
       hash,
     ])
     await client.query(`
       INSERT INTO scraping_v2_album_revisions (
-        id, album_id, content_hash, description, photos, raw_payload
-      ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb)
+        id, album_id, content_hash, description, photos, media, raw_payload
+      ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb)
     `, [
       crypto.randomUUID(),
       albumId,
       hash,
       album.description,
       JSON.stringify(album.photos),
+      JSON.stringify(album.media),
       JSON.stringify(album.raw_payload),
     ])
+    await recordNativeObservation(client, passId, albumId, album)
     await client.query('COMMIT')
     return 'inserted'
   } catch (error) {
@@ -314,6 +390,7 @@ export async function startExportsV2ScrapingLocalAction(
   workerSecret?: string,
 ): Promise<ActionResponse> {
   let runId = ''
+  let passId = ''
 
   try {
     await requireAdminOrWorker(workerSecret)
@@ -355,6 +432,12 @@ export async function startExportsV2ScrapingLocalAction(
           ) VALUES ($1,$2,$3,'RUNNING','DB_NATIVE',FALSE,NOW())
         `, [runId, supplierId, `V2 · ${supplier.name} · ${date}`])
       }
+      passId = crypto.randomUUID()
+      await client.query(`
+        INSERT INTO scraping_v2_scrape_passes (
+          id, run_id, supplier_id, status, cutoff_date
+        ) VALUES ($1,$2,$3,'RUNNING',$4)
+      `, [passId, runId, supplierId, endDate || null])
       await client.query('COMMIT')
     } catch (error) {
       await client.query('ROLLBACK')
@@ -393,10 +476,10 @@ export async function startExportsV2ScrapingLocalAction(
       processing = processing.then(async () => {
         const event = JSON.parse(line)
         if (event?.type !== 'album') return
-        const album = normalizeNativeAlbum(event.album)
+        const album = normalizeNativeAlbum(event.album, received + 1)
         if (!album) throw new Error('Парсер V2 вернул альбом без external_id')
         received += 1
-        const result = await ingestNativeAlbum(runId, supplierId, album)
+        const result = await ingestNativeAlbum(runId, passId, supplierId, album)
         if (result === 'inserted') inserted += 1
         else if (result === 'updated') updated += 1
         else unchanged += 1
@@ -417,6 +500,13 @@ export async function startExportsV2ScrapingLocalAction(
       const errorMessage = failed
         ? (processError?.message || stderr.trim() || `V2 parser exited with code ${exitCode}`)
         : null
+      await scrapingQuery(`
+        UPDATE scraping_v2_scrape_passes
+        SET status=CASE WHEN $2::boolean THEN 'FAILED' ELSE 'COMPLETED' END,
+            received_count=$3, inserted_count=$4, updated_count=$5,
+            unchanged_count=$6, error_message=$7, completed_at=NOW()
+        WHERE id=$1
+      `, [passId, failed, received, inserted, updated, unchanged, errorMessage])
       await scrapingQuery(`
         UPDATE scraping_v2_runs r
         SET status = CASE
@@ -446,8 +536,15 @@ export async function startExportsV2ScrapingLocalAction(
     })
 
     revalidatePath('/admin/exports-v2')
-    return { success: true, data: { runId, status: 'RUNNING' } }
+    return { success: true, data: { runId, passId, status: 'RUNNING' } }
   } catch (error: any) {
+    if (passId) {
+      await scrapingQuery(`
+        UPDATE scraping_v2_scrape_passes
+        SET status='FAILED', error_message=$2, completed_at=NOW()
+        WHERE id=$1
+      `, [passId, error.message]).catch(() => undefined)
+    }
     if (runId) {
       await scrapingQuery(`
         UPDATE scraping_v2_runs
@@ -469,7 +566,7 @@ async function insertAlbumChunk(client: any, rows: Array<{
 }>) {
   const values: unknown[] = []
   const placeholders = rows.map((row, rowIndex) => {
-    const offset = rowIndex * 10
+    const offset = rowIndex * 11
     values.push(
       row.id,
       row.runId,
@@ -479,16 +576,17 @@ async function insertAlbumChunk(client: any, rows: Array<{
       row.album.name,
       row.album.description,
       JSON.stringify(row.album.photos),
+      JSON.stringify(normalizeMedia(null, row.album.photos)),
       JSON.stringify(row.album),
       row.hash,
     )
-    return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8}::jsonb,$${offset + 9}::jsonb,$${offset + 10})`
+    return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8}::jsonb,$${offset + 9}::jsonb,$${offset + 10}::jsonb,$${offset + 11})`
   })
 
   await client.query(`
     INSERT INTO scraping_v2_albums (
       id, run_id, supplier_id, external_id, source_order,
-      name, description, photos, raw_payload, content_hash
+      name, description, photos, media, raw_payload, content_hash
     ) VALUES ${placeholders.join(',')}
   `, values)
 }
@@ -692,13 +790,23 @@ export async function getExportsV2RunAction(
 
     const albumParams = [...params, ALBUMS_PER_PAGE, offset]
     const albumsResult = await scrapingQuery(`
+      WITH latest_pass AS (
+        SELECT p.id
+        FROM scraping_v2_scrape_passes p
+        WHERE p.run_id=$1 AND p.status='COMPLETED'
+        ORDER BY p.completed_at DESC
+        LIMIT 1
+      )
       SELECT
         a.id,
         a.external_id,
-        a.source_order,
+        COALESCE(o.source_position, a.source_order) AS source_order,
+        o.source_page,
+        o.page_position,
         a.name,
         a.description,
         a.photos,
+        a.media,
         da.draft_id,
         da.role,
         da.use_text,
@@ -706,12 +814,22 @@ export async function getExportsV2RunAction(
         da.use_for_ai
       FROM scraping_v2_albums a
       LEFT JOIN scraping_v2_draft_albums da ON da.album_id = a.id
+      LEFT JOIN scraping_v2_album_observations o
+        ON o.album_id=a.id AND o.pass_id=(SELECT id FROM latest_pass)
       WHERE ${filters.join(' AND ')}
-      ORDER BY a.source_order
+      ORDER BY CASE WHEN o.album_id IS NULL THEN 1 ELSE 0 END,
+               COALESCE(o.source_position, a.source_order)
       LIMIT $${albumParams.length - 1} OFFSET $${albumParams.length}
     `, albumParams)
 
     const draftsResult = await scrapingQuery(`
+      WITH latest_pass AS (
+        SELECT p.id
+        FROM scraping_v2_scrape_passes p
+        WHERE p.run_id=$1 AND p.status='COMPLETED'
+        ORDER BY p.completed_at DESC
+        LIMIT 1
+      )
       SELECT
         d.id,
         d.status,
@@ -722,22 +840,27 @@ export async function getExportsV2RunAction(
             json_build_object(
               'id', a.id,
               'external_id', a.external_id,
-              'source_order', a.source_order,
+              'source_order', COALESCE(o.source_position, a.source_order),
+              'source_page', o.source_page,
+              'page_position', o.page_position,
               'name', a.name,
               'description', a.description,
               'photos', a.photos,
+              'media', a.media,
               'draft_id', da.draft_id,
               'role', da.role,
               'use_text', da.use_text,
               'use_photos', da.use_photos,
               'use_for_ai', da.use_for_ai
-            ) ORDER BY da.sort_order, a.source_order
+            ) ORDER BY COALESCE(o.source_position, a.source_order), da.sort_order
           ) FILTER (WHERE a.id IS NOT NULL),
           '[]'::json
         ) AS albums
       FROM scraping_v2_product_drafts d
       LEFT JOIN scraping_v2_draft_albums da ON da.draft_id = d.id
       LEFT JOIN scraping_v2_albums a ON a.id = da.album_id
+      LEFT JOIN scraping_v2_album_observations o
+        ON o.album_id=a.id AND o.pass_id=(SELECT id FROM latest_pass)
       WHERE d.run_id = $1 AND d.status <> 'ARCHIVED'
       GROUP BY d.id
       ORDER BY d.created_at DESC
@@ -873,8 +996,9 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
   try {
     await requireAdmin()
     const draftResult = await scrapingQuery(`
-      SELECT d.id, d.run_id, d.supplier_id, d.name
+      SELECT d.id, d.run_id, d.supplier_id, d.name, r.source_kind
       FROM scraping_v2_product_drafts d
+      JOIN scraping_v2_runs r ON r.id=d.run_id
       WHERE d.id=$1 AND d.status <> 'ARCHIVED'
     `, [draftId])
     const draft = draftResult.rows[0]
@@ -882,14 +1006,24 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
 
     const albumsResult = await scrapingQuery(`
       SELECT
+        a.id,
         a.external_id,
         a.source_order,
+        a.name,
         a.description,
         jsonb_array_length(a.photos) AS photo_count,
+        a.photos->>0 AS preview_photo,
+        jsonb_array_length(a.media) AS media_count,
+        COALESCE(a.photos->>0, a.media->0->>'preview_url') AS preview_media,
+        EXISTS (
+          SELECT 1 FROM jsonb_array_elements(a.media) item
+          WHERE item->>'type'='video'
+        ) AS has_video,
         da.role,
         da.use_text,
         da.use_photos,
-        da.use_for_ai
+        da.use_for_ai,
+        da.sort_order AS draft_sort_order
       FROM scraping_v2_draft_albums da
       JOIN scraping_v2_albums a ON a.id = da.album_id
       WHERE da.draft_id=$1
@@ -903,13 +1037,159 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
       return { success: false, error: 'Для примера нужен хотя бы один альбом с основными фотографиями' }
     }
 
+    const albumIds = albumsResult.rows.map((album) => String(album.id))
+    const passResult = await scrapingQuery(`
+      SELECT
+        p.id,
+        p.started_at,
+        p.completed_at,
+        COUNT(o.album_id)::int AS selected_coverage
+      FROM scraping_v2_scrape_passes p
+      LEFT JOIN scraping_v2_album_observations o
+        ON o.pass_id=p.id AND o.album_id=ANY($2::text[])
+      WHERE p.run_id=$1 AND p.status='COMPLETED'
+      GROUP BY p.id
+      HAVING COUNT(o.album_id) > 0
+      ORDER BY selected_coverage DESC, p.completed_at DESC
+      LIMIT 1
+    `, [draft.run_id, albumIds])
+    const bestPass = passResult.rows[0] || null
+    const sourcePass = Number(bestPass?.selected_coverage || 0) === albumIds.length ? bestPass : null
+
+    const contextResult = sourcePass
+      ? await scrapingQuery(`
+          WITH selected_positions AS (
+            SELECT o.source_position
+            FROM scraping_v2_album_observations o
+            WHERE o.pass_id=$1 AND o.album_id=ANY($2::text[])
+          ), bounds AS (
+            SELECT MIN(source_position)::int AS min_position, MAX(source_position)::int AS max_position
+            FROM selected_positions
+          )
+          SELECT
+            a.id,
+            a.external_id,
+            a.name,
+            a.description,
+            jsonb_array_length(a.photos)::int AS photo_count,
+            a.photos->>0 AS preview_photo,
+            jsonb_array_length(a.media)::int AS media_count,
+            COALESCE(a.photos->>0, a.media->0->>'preview_url') AS preview_media,
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(a.media) item
+              WHERE item->>'type'='video'
+            ) AS has_video,
+            o.source_position,
+            o.source_page,
+            o.page_position,
+            CASE
+              WHEN a.id=ANY($2::text[]) THEN 'SELECTED'
+              WHEN da.draft_id IS NOT NULL THEN 'OTHER_PRODUCT'
+              ELSE 'UNASSIGNED_CONTEXT'
+            END AS sequence_label,
+            CASE WHEN a.id=ANY($2::text[]) THEN da.role ELSE NULL END AS role
+          FROM scraping_v2_album_observations o
+          JOIN scraping_v2_albums a ON a.id=o.album_id
+          LEFT JOIN scraping_v2_draft_albums da ON da.album_id=a.id
+          CROSS JOIN bounds b
+          WHERE o.pass_id=$1 AND (
+            a.id=ANY($2::text[])
+            OR EXISTS (
+              SELECT 1 FROM selected_positions sp
+              WHERE ABS(o.source_position - sp.source_position) <= $3
+            )
+            OR (
+              b.max_position - b.min_position <= $4
+              AND o.source_position BETWEEN b.min_position AND b.max_position
+            )
+          )
+          ORDER BY o.source_position
+        `, [sourcePass.id, albumIds, TRAINING_CONTEXT_RADIUS, MAX_CONTIGUOUS_CONTEXT_SPAN])
+      : await scrapingQuery(`
+          WITH selected_positions AS (
+            SELECT a.source_order AS source_position
+            FROM scraping_v2_albums a
+            WHERE a.run_id=$1 AND a.id=ANY($2::text[])
+          ), bounds AS (
+            SELECT MIN(source_position)::int AS min_position, MAX(source_position)::int AS max_position
+            FROM selected_positions
+          )
+          SELECT
+            a.id,
+            a.external_id,
+            a.name,
+            a.description,
+            jsonb_array_length(a.photos)::int AS photo_count,
+            a.photos->>0 AS preview_photo,
+            jsonb_array_length(a.media)::int AS media_count,
+            COALESCE(a.photos->>0, a.media->0->>'preview_url') AS preview_media,
+            EXISTS (
+              SELECT 1 FROM jsonb_array_elements(a.media) item
+              WHERE item->>'type'='video'
+            ) AS has_video,
+            a.source_order AS source_position,
+            NULL::int AS source_page,
+            NULL::int AS page_position,
+            CASE
+              WHEN a.id=ANY($2::text[]) THEN 'SELECTED'
+              WHEN da.draft_id IS NOT NULL THEN 'OTHER_PRODUCT'
+              ELSE 'UNASSIGNED_CONTEXT'
+            END AS sequence_label,
+            CASE WHEN a.id=ANY($2::text[]) THEN da.role ELSE NULL END AS role
+          FROM scraping_v2_albums a
+          LEFT JOIN scraping_v2_draft_albums da ON da.album_id=a.id
+          CROSS JOIN bounds b
+          WHERE a.run_id=$1 AND (
+            a.id=ANY($2::text[])
+            OR EXISTS (
+              SELECT 1 FROM selected_positions sp
+              WHERE ABS(a.source_order - sp.source_position) <= $3
+            )
+            OR (
+              b.max_position - b.min_position <= $4
+              AND a.source_order BETWEEN b.min_position AND b.max_position
+            )
+          )
+          ORDER BY a.source_order
+        `, [draft.run_id, albumIds, TRAINING_CONTEXT_RADIUS, MAX_CONTIGUOUS_CONTEXT_SPAN])
+
+    const positionByAlbum = new Map(
+      contextResult.rows.map((album) => [String(album.id), Number(album.source_position)]),
+    )
+    const orderedAlbums = albumsResult.rows
+      .map((album) => ({
+        ...album,
+        source_position: positionByAlbum.get(String(album.id)) ?? Number(album.source_order),
+      }))
+      .sort((left, right) => left.source_position - right.source_position)
+    const gaps = orderedAlbums.slice(1).map((album, index) => {
+      const previous = orderedAlbums[index]
+      return {
+        from_external_id: previous.external_id,
+        to_external_id: album.external_id,
+        distance: album.source_position - previous.source_position,
+        intervening_albums: Math.max(0, album.source_position - previous.source_position - 1),
+      }
+    })
+
     await scrapingQuery(`
       INSERT INTO scraping_v2_training_examples (id, supplier_id, run_id, draft_id, example)
       VALUES ($1,$2,$3,$4,$5::jsonb)
     `, [crypto.randomUUID(), draft.supplier_id, draft.run_id, draft.id, JSON.stringify({
-      version: 1,
+      version: 2,
       draft_name: draft.name,
-      albums: albumsResult.rows,
+      sequence: {
+        direction: 'PROVIDER_FEED_ORDER',
+        source: sourcePass ? 'SCRAPE_PASS' : 'LEGACY_SOURCE_ORDER',
+        pass_id: sourcePass?.id || null,
+        pass_started_at: sourcePass?.started_at || null,
+        pass_completed_at: sourcePass?.completed_at || null,
+        selected_coverage: sourcePass?.selected_coverage || orderedAlbums.length,
+        context_radius: TRAINING_CONTEXT_RADIUS,
+        gaps,
+      },
+      albums: orderedAlbums,
+      context_albums: contextResult.rows,
     })])
     await scrapingQuery("UPDATE scraping_v2_product_drafts SET status='GROUPED', updated_at=NOW() WHERE id=$1", [draftId])
 
