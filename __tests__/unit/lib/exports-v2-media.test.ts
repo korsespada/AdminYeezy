@@ -20,7 +20,7 @@ function album(
     media,
     draft_id: 'draft-1',
     role,
-    use_text: role === 'MEDIA_WITH_TEXT' || role === 'TEXT_ONLY' || role === 'SIZE_CHART',
+    use_text: role === 'PRIMARY_MEDIA' || role === 'MEDIA_WITH_TEXT' || role === 'TEXT_ONLY' || role === 'SIZE_CHART',
     use_media: ['PRIMARY_MEDIA', 'ON_MODEL', 'MEDIA_WITH_TEXT', 'EXTRA_MEDIA'].includes(role),
     use_photos: ['PRIMARY_MEDIA', 'ON_MODEL', 'MEDIA_WITH_TEXT', 'EXTRA_MEDIA'].includes(role),
     use_for_ai: !['UNASSIGNED', 'COMPARISON_OR_AD', 'IGNORE'].includes(role),

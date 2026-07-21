@@ -303,6 +303,11 @@ async function migrate() {
       use_media = use_photos
     `)
     await client.query(`
+      UPDATE scraping_v2_draft_albums
+      SET use_text = TRUE
+      WHERE role = 'PRIMARY_MEDIA'
+    `)
+    await client.query(`
       ALTER TABLE scraping_v2_draft_albums
       ADD CONSTRAINT scraping_v2_draft_albums_role_check CHECK (
         role IN (
@@ -338,6 +343,32 @@ async function migrate() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS scraping_v2_training_examples_supplier_idx
       ON scraping_v2_training_examples (supplier_id, created_at DESC)
+    `)
+
+    await client.query(`
+      UPDATE scraping_v2_training_examples te
+      SET example = jsonb_set(
+        te.example,
+        '{albums}',
+        (
+          SELECT jsonb_agg(
+            CASE
+              WHEN album.value->>'role' IN ('PRIMARY_MEDIA', 'PRIMARY_PHOTOS')
+                THEN jsonb_set(album.value, '{use_text}', 'true'::jsonb)
+              ELSE album.value
+            END
+            ORDER BY album.ordinality
+          )
+          FROM jsonb_array_elements(te.example->'albums') WITH ORDINALITY AS album(value, ordinality)
+        )
+      )
+      WHERE jsonb_typeof(te.example->'albums') = 'array'
+        AND EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(te.example->'albums') AS item
+          WHERE item->>'role' IN ('PRIMARY_MEDIA', 'PRIMARY_PHOTOS')
+            AND COALESCE((item->>'use_text')::boolean, FALSE) = FALSE
+        )
     `)
 
     await client.query('COMMIT')

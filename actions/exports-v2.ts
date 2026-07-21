@@ -18,7 +18,7 @@ const MAX_CONTIGUOUS_CONTEXT_SPAN = 40
 
 const ROLE_FLAGS: Record<V2AlbumRole, { useText: boolean, useMedia: boolean, useForAi: boolean }> = {
   UNASSIGNED: { useText: false, useMedia: false, useForAi: false },
-  PRIMARY_MEDIA: { useText: false, useMedia: true, useForAi: true },
+  PRIMARY_MEDIA: { useText: true, useMedia: true, useForAi: true },
   ON_MODEL: { useText: false, useMedia: true, useForAi: true },
   MEDIA_WITH_TEXT: { useText: true, useMedia: true, useForAi: true },
   EXTRA_MEDIA: { useText: false, useMedia: true, useForAi: true },
