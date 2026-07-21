@@ -32,6 +32,7 @@ async function init() {
         default_brand TEXT,
         default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         min_photos INTEGER,
+        max_on_model_media INTEGER NOT NULL DEFAULT 5,
         min_desc TEXT,
         min_desc_len INTEGER,
         brand_tags TEXT,

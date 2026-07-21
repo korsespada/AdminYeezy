@@ -25,6 +25,7 @@ interface Supplier {
   default_brand_name?: string | null
   default_attributes: string[]
   min_photos: number
+  max_on_model_media: number
   min_desc_len: number
   brand_tags: string
   default_price: number | null
@@ -76,6 +77,9 @@ export default function SupplierList({
     () => initialData.map((supplier) => ({
       ...supplier,
       default_attributes: normalizeSupplierAttributeCodes(supplier.default_attributes),
+      max_on_model_media: Number.isFinite(Number(supplier.max_on_model_media))
+        ? Number(supplier.max_on_model_media)
+        : 5,
     })),
     [initialData],
   )
@@ -141,6 +145,7 @@ export default function SupplierList({
         default_brand: '',
         default_attributes: [],
         min_photos: 0,
+        max_on_model_media: 5,
         min_desc_len: 0,
         brand_tags: '',
         default_price: null,
@@ -518,6 +523,18 @@ export default function SupplierList({
                         <label className="block text-xs text-slate-400 mb-1">Мин. символов опис.</label>
                         <input type="number" name="min_desc_len" defaultValue={editingSupplier?.min_desc_len} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500" />
                       </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Макс. медиа «На модели»</label>
+                      <input
+                        type="number"
+                        name="max_on_model_media"
+                        min={0}
+                        max={20}
+                        defaultValue={editingSupplier?.max_on_model_media ?? 5}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">В исходнике сохраняются все, в карточку попадёт не больше этого числа.</p>
                     </div>
 
                   </div>

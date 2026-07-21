@@ -17,6 +17,20 @@ async function migrate() {
     await client.query('BEGIN')
 
     await client.query(`
+      ALTER TABLE suppliers
+      ADD COLUMN IF NOT EXISTS max_on_model_media INTEGER NOT NULL DEFAULT 5
+    `)
+    await client.query(`
+      ALTER TABLE suppliers
+      DROP CONSTRAINT IF EXISTS suppliers_max_on_model_media_check
+    `)
+    await client.query(`
+      ALTER TABLE suppliers
+      ADD CONSTRAINT suppliers_max_on_model_media_check
+      CHECK (max_on_model_media BETWEEN 0 AND 20)
+    `)
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS scraping_v2_runs (
         id TEXT PRIMARY KEY,
         supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
@@ -246,6 +260,7 @@ async function migrate() {
         album_id TEXT NOT NULL REFERENCES scraping_v2_albums(id) ON DELETE CASCADE,
         role TEXT NOT NULL DEFAULT 'UNASSIGNED',
         use_text BOOLEAN NOT NULL DEFAULT FALSE,
+        use_media BOOLEAN NOT NULL DEFAULT FALSE,
         use_photos BOOLEAN NOT NULL DEFAULT FALSE,
         use_for_ai BOOLEAN NOT NULL DEFAULT FALSE,
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -256,8 +271,9 @@ async function migrate() {
         CONSTRAINT scraping_v2_draft_albums_role_check CHECK (
           role IN (
             'UNASSIGNED',
-            'PRIMARY_PHOTOS',
-            'PRODUCT_MEDIA',
+            'PRIMARY_MEDIA',
+            'ON_MODEL',
+            'MEDIA_WITH_TEXT',
             'EXTRA_MEDIA',
             'TEXT_ONLY',
             'SIZE_CHART',
@@ -275,11 +291,25 @@ async function migrate() {
     `)
     await client.query(`
       ALTER TABLE scraping_v2_draft_albums
+      ADD COLUMN IF NOT EXISTS use_media BOOLEAN NOT NULL DEFAULT FALSE
+    `)
+    await client.query(`
+      UPDATE scraping_v2_draft_albums
+      SET role = CASE role
+        WHEN 'PRIMARY_PHOTOS' THEN 'PRIMARY_MEDIA'
+        WHEN 'PRODUCT_MEDIA' THEN 'MEDIA_WITH_TEXT'
+        ELSE role
+      END,
+      use_media = use_photos
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_draft_albums
       ADD CONSTRAINT scraping_v2_draft_albums_role_check CHECK (
         role IN (
           'UNASSIGNED',
-          'PRIMARY_PHOTOS',
-          'PRODUCT_MEDIA',
+          'PRIMARY_MEDIA',
+          'ON_MODEL',
+          'MEDIA_WITH_TEXT',
           'EXTRA_MEDIA',
           'TEXT_ONLY',
           'SIZE_CHART',

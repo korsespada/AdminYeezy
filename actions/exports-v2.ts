@@ -9,21 +9,23 @@ import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse } from '@/lib/types'
 import type { V2AlbumRole } from '@/lib/exports-v2-types'
+import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
 
 const ALBUMS_PER_PAGE = 80
 const MAX_GROUP_SIZE = 30
 const TRAINING_CONTEXT_RADIUS = 4
 const MAX_CONTIGUOUS_CONTEXT_SPAN = 40
 
-const ROLE_FLAGS: Record<V2AlbumRole, { useText: boolean, usePhotos: boolean, useForAi: boolean }> = {
-  UNASSIGNED: { useText: false, usePhotos: false, useForAi: false },
-  PRIMARY_PHOTOS: { useText: false, usePhotos: true, useForAi: true },
-  PRODUCT_MEDIA: { useText: true, usePhotos: true, useForAi: true },
-  EXTRA_MEDIA: { useText: true, usePhotos: true, useForAi: true },
-  TEXT_ONLY: { useText: true, usePhotos: false, useForAi: true },
-  SIZE_CHART: { useText: true, usePhotos: false, useForAi: true },
-  COMPARISON_OR_AD: { useText: false, usePhotos: false, useForAi: false },
-  IGNORE: { useText: false, usePhotos: false, useForAi: false },
+const ROLE_FLAGS: Record<V2AlbumRole, { useText: boolean, useMedia: boolean, useForAi: boolean }> = {
+  UNASSIGNED: { useText: false, useMedia: false, useForAi: false },
+  PRIMARY_MEDIA: { useText: false, useMedia: true, useForAi: true },
+  ON_MODEL: { useText: false, useMedia: true, useForAi: true },
+  MEDIA_WITH_TEXT: { useText: true, useMedia: true, useForAi: true },
+  EXTRA_MEDIA: { useText: false, useMedia: true, useForAi: true },
+  TEXT_ONLY: { useText: true, useMedia: false, useForAi: true },
+  SIZE_CHART: { useText: true, useMedia: false, useForAi: true },
+  COMPARISON_OR_AD: { useText: false, useMedia: false, useForAi: false },
+  IGNORE: { useText: false, useMedia: false, useForAi: false },
 }
 
 type HistoricalAlbum = {
@@ -759,6 +761,7 @@ export async function getExportsV2RunAction(
         r.*,
         s.name AS supplier_name,
         s.avatar_url AS supplier_avatar,
+        s.max_on_model_media,
         COUNT(DISTINCT da.album_id)::int AS assigned_count,
         COUNT(DISTINCT d.id)::int AS draft_count,
         COUNT(DISTINCT te.id)::int AS training_example_count
@@ -768,7 +771,7 @@ export async function getExportsV2RunAction(
       LEFT JOIN scraping_v2_draft_albums da ON da.draft_id = d.id
       LEFT JOIN scraping_v2_training_examples te ON te.run_id = r.id
       WHERE r.id = $1
-      GROUP BY r.id, s.name, s.avatar_url
+      GROUP BY r.id, s.name, s.avatar_url, s.max_on_model_media
     `, [runId])
     if (!runResult.rows[0]) return { success: false, error: 'Запуск V2 не найден' }
 
@@ -810,6 +813,7 @@ export async function getExportsV2RunAction(
         da.draft_id,
         da.role,
         da.use_text,
+        da.use_media,
         da.use_photos,
         da.use_for_ai
       FROM scraping_v2_albums a
@@ -850,6 +854,7 @@ export async function getExportsV2RunAction(
               'draft_id', da.draft_id,
               'role', da.role,
               'use_text', da.use_text,
+              'use_media', da.use_media,
               'use_photos', da.use_photos,
               'use_for_ai', da.use_for_ai
             ) ORDER BY COALESCE(o.source_position, a.source_order), da.sort_order
@@ -894,11 +899,20 @@ export async function createExportsV2DraftAction(runId: string, albumIds: string
 
     await client.query('BEGIN')
     const albumsResult = await client.query(`
-      SELECT a.id, a.source_order
+      WITH latest_pass AS (
+        SELECT p.id
+        FROM scraping_v2_scrape_passes p
+        WHERE p.run_id=$1 AND p.status='COMPLETED'
+        ORDER BY p.completed_at DESC
+        LIMIT 1
+      )
+      SELECT a.id, COALESCE(o.source_position, a.source_order) AS source_order
       FROM scraping_v2_albums a
       LEFT JOIN scraping_v2_draft_albums da ON da.album_id = a.id
+      LEFT JOIN scraping_v2_album_observations o
+        ON o.album_id=a.id AND o.pass_id=(SELECT id FROM latest_pass)
       WHERE a.run_id = $1 AND a.id = ANY($2::text[]) AND da.album_id IS NULL
-      ORDER BY a.source_order
+      ORDER BY COALESCE(o.source_position, a.source_order)
       FOR UPDATE OF a
     `, [runId, uniqueAlbumIds])
 
@@ -946,10 +960,10 @@ export async function updateExportsV2AlbumRoleAction(
 
     const result = await scrapingQuery(`
       UPDATE scraping_v2_draft_albums
-      SET role=$1, use_text=$2, use_photos=$3, use_for_ai=$4, updated_at=NOW()
+      SET role=$1, use_text=$2, use_media=$3, use_photos=$3, use_for_ai=$4, updated_at=NOW()
       WHERE draft_id=$5 AND album_id=$6
       RETURNING draft_id
-    `, [role, flags.useText, flags.usePhotos, flags.useForAi, draftId, albumId])
+    `, [role, flags.useText, flags.useMedia, flags.useForAi, draftId, albumId])
     if (!result.rows[0]) return { success: false, error: 'Связь альбома с товаром не найдена' }
 
     const runResult = await scrapingQuery(`
@@ -996,9 +1010,10 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
   try {
     await requireAdmin()
     const draftResult = await scrapingQuery(`
-      SELECT d.id, d.run_id, d.supplier_id, d.name, r.source_kind
+      SELECT d.id, d.run_id, d.supplier_id, d.name, r.source_kind, s.max_on_model_media
       FROM scraping_v2_product_drafts d
       JOIN scraping_v2_runs r ON r.id=d.run_id
+      JOIN suppliers s ON s.id=d.supplier_id
       WHERE d.id=$1 AND d.status <> 'ARCHIVED'
     `, [draftId])
     const draft = draftResult.rows[0]
@@ -1011,6 +1026,8 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
         a.source_order,
         a.name,
         a.description,
+        a.photos,
+        a.media,
         jsonb_array_length(a.photos) AS photo_count,
         a.photos->>0 AS preview_photo,
         jsonb_array_length(a.media) AS media_count,
@@ -1021,6 +1038,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
         ) AS has_video,
         da.role,
         da.use_text,
+        da.use_media,
         da.use_photos,
         da.use_for_ai,
         da.sort_order AS draft_sort_order
@@ -1033,8 +1051,8 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
     if (albumsResult.rows.some((album) => album.role === 'UNASSIGNED')) {
       return { success: false, error: 'Сначала назначьте роль каждому альбому' }
     }
-    if (!albumsResult.rows.some((album) => album.role === 'PRODUCT_MEDIA' || album.role === 'PRIMARY_PHOTOS')) {
-      return { success: false, error: 'Для примера нужен хотя бы один альбом с основными фотографиями' }
+    if (!albumsResult.rows.some((album) => album.role === 'PRIMARY_MEDIA' || album.role === 'MEDIA_WITH_TEXT')) {
+      return { success: false, error: 'Для примера нужен хотя бы один альбом с основными медиа' }
     }
 
     const albumIds = albumsResult.rows.map((album) => String(album.id))
@@ -1171,13 +1189,25 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
         intervening_albums: Math.max(0, album.source_position - previous.source_position - 1),
       }
     })
+    const mediaPlan = buildExportsV2MediaPlan(
+      orderedAlbums.map((album) => ({
+        id: String(album.id),
+        source_order: Number(album.source_position),
+        photos: Array.isArray(album.photos) ? album.photos : [],
+        media: Array.isArray(album.media) ? album.media : [],
+        role: album.role,
+        use_media: Boolean(album.use_media),
+      })),
+      Number(draft.max_on_model_media ?? 5),
+    )
 
     await scrapingQuery(`
       INSERT INTO scraping_v2_training_examples (id, supplier_id, run_id, draft_id, example)
       VALUES ($1,$2,$3,$4,$5::jsonb)
     `, [crypto.randomUUID(), draft.supplier_id, draft.run_id, draft.id, JSON.stringify({
-      version: 2,
+      version: 3,
       draft_name: draft.name,
+      max_on_model_media: Number(draft.max_on_model_media ?? 5),
       sequence: {
         direction: 'PROVIDER_FEED_ORDER',
         source: sourcePass ? 'SCRAPE_PASS' : 'LEGACY_SOURCE_ORDER',
@@ -1190,6 +1220,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
       },
       albums: orderedAlbums,
       context_albums: contextResult.rows,
+      media_plan: mediaPlan,
     })])
     await scrapingQuery("UPDATE scraping_v2_product_drafts SET status='GROUPED', updated_at=NOW() WHERE id=$1", [draftId])
 

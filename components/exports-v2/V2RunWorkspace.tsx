@@ -30,6 +30,7 @@ import {
   updateExportsV2AlbumRoleAction,
 } from '@/actions/exports-v2'
 import type { V2Album, V2AlbumRole, V2Draft, V2RunDetails } from '@/lib/exports-v2-types'
+import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
 
 const ROLE_OPTIONS: Array<{
   value: V2AlbumRole
@@ -37,10 +38,11 @@ const ROLE_OPTIONS: Array<{
   hint: string
 }> = [
   { value: 'UNASSIGNED', label: 'Выберите роль', hint: 'Пока ничего не использовать' },
-  { value: 'PRIMARY_PHOTOS', label: 'Основные фото', hint: 'Фото публикуются, подпись этого альбома не используется' },
-  { value: 'PRODUCT_MEDIA', label: 'Основные фото + текст', hint: 'Фото публикуются, текст используется AI' },
-  { value: 'EXTRA_MEDIA', label: 'Дополнительные фото + текст', hint: 'Дополнительные фото публикуются, текст используется AI' },
-  { value: 'TEXT_ONLY', label: 'Только текст', hint: 'Текст используется, фотографии не публикуются' },
+  { value: 'PRIMARY_MEDIA', label: 'Основные медиа', hint: 'Фото и видео публикуются первыми; текст не используется' },
+  { value: 'ON_MODEL', label: 'На модели', hint: 'Медиа публикуются после основных с лимитом поставщика' },
+  { value: 'MEDIA_WITH_TEXT', label: 'Медиа + текст', hint: 'Медиа публикуются, текст используется AI' },
+  { value: 'EXTRA_MEDIA', label: 'Дополнительные медиа', hint: 'Медиа публикуются после основных и кадров на модели' },
+  { value: 'TEXT_ONLY', label: 'Только текст', hint: 'Текст используется, медиа не публикуются' },
   { value: 'SIZE_CHART', label: 'Размеры / OCR', hint: 'Извлечь данные из изображения, само фото не публиковать' },
   { value: 'COMPARISON_OR_AD', label: 'Сравнение / реклама', hint: 'Китайские сравнения и маркетинг не использовать' },
   { value: 'IGNORE', label: 'Игнорировать', hint: 'Сохранить в источнике, исключить из товара' },
@@ -365,7 +367,7 @@ export default function V2RunWorkspace({
                   )
                 })}
 
-                <RoleSummary draft={draft} />
+                <RoleSummary draft={draft} maxOnModelMedia={initialData.max_on_model_media} />
 
                 <button
                   type="button"
@@ -546,21 +548,27 @@ function AlbumPreviewModal({ album, onClose }: { album: V2Album; onClose: () => 
   )
 }
 
-function RoleSummary({ draft }: { draft: V2Draft }) {
-  const publicPhotos = draft.albums.filter((album) => album.use_photos).reduce((sum, album) => sum + album.photos.length, 0)
+function RoleSummary({ draft, maxOnModelMedia }: { draft: V2Draft; maxOnModelMedia: number }) {
+  const mediaPlan = buildExportsV2MediaPlan(draft.albums, maxOnModelMedia)
   const textSources = draft.albums.filter((album) => album.use_text).length
   const ocrSources = draft.albums.filter((album) => album.role === 'SIZE_CHART').length
 
   return (
-    <div className="grid grid-cols-3 gap-2">
-      <SummaryMetric icon={Eye} label="Публичных фото" value={publicPhotos} />
-      <SummaryMetric icon={Type} label="Источников текста" value={textSources} />
-      <SummaryMetric icon={ScanText} label="OCR таблиц" value={ocrSources} />
+    <div>
+      <div className="grid grid-cols-4 gap-2">
+        <SummaryMetric icon={Eye} label="Медиа в карточке" value={mediaPlan.items.length} />
+        <SummaryMetric icon={ImageIcon} label="На модели" value={`${mediaPlan.on_model_included}/${mediaPlan.on_model_available}`} />
+        <SummaryMetric icon={Type} label="Источников текста" value={textSources} />
+        <SummaryMetric icon={ScanText} label="OCR таблиц" value={ocrSources} />
+      </div>
+      <p className="mt-2 text-center text-[10px] text-slate-500">
+        Порядок: основные → медиа + текст → на модели → дополнительные. Внутри ролей порядок поставщика сохраняется.
+      </p>
     </div>
   )
 }
 
-function SummaryMetric({ icon: Icon, label, value }: { icon: typeof Eye; label: string; value: number }) {
+function SummaryMetric({ icon: Icon, label, value }: { icon: typeof Eye; label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-lg bg-slate-950/70 p-2 text-center">
       <Icon className="mx-auto h-3.5 w-3.5 text-slate-500" />

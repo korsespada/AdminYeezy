@@ -1,7 +1,8 @@
 export type V2AlbumRole =
   | 'UNASSIGNED'
-  | 'PRIMARY_PHOTOS'
-  | 'PRODUCT_MEDIA'
+  | 'PRIMARY_MEDIA'
+  | 'ON_MODEL'
+  | 'MEDIA_WITH_TEXT'
   | 'EXTRA_MEDIA'
   | 'TEXT_ONLY'
   | 'SIZE_CHART'
@@ -71,6 +72,7 @@ export interface V2Album {
   draft_id: string | null
   role: V2AlbumRole | null
   use_text: boolean | null
+  use_media: boolean | null
   use_photos: boolean | null
   use_for_ai: boolean | null
 }
@@ -78,6 +80,7 @@ export interface V2Album {
 export interface V2DraftAlbum extends V2Album {
   role: V2AlbumRole
   use_text: boolean
+  use_media: boolean
   use_photos: boolean
   use_for_ai: boolean
 }
@@ -92,6 +95,7 @@ export interface V2Draft {
 
 export interface V2RunDetails extends V2RunSummary {
   source_batch_id: string | null
+  max_on_model_media: number
   total_albums: number
   page: number
   per_page: number
