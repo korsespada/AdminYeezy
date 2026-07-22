@@ -269,7 +269,7 @@ export default function V2RunWorkspace({
             <p className="mt-2 text-sm text-slate-400">{initialData.name}</p>
             {initialData.source_kind === 'DB_NATIVE' && (
               <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                <span>Последний проход: {initialData.last_received_count} получено · +{initialData.last_inserted_count} новых · {initialData.last_updated_count} изменено · {initialData.last_unchanged_count} без изменений</span>
+                <span>Последний проход: {initialData.last_received_count} получено · +{initialData.last_inserted_count} новых · {initialData.last_duplicate_count} уже были раньше · {initialData.last_updated_count} изменено · {initialData.last_unchanged_count} без изменений</span>
                 <button
                   type="button"
                   onClick={() => router.refresh()}

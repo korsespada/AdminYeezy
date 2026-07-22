@@ -10,11 +10,13 @@ import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse } from '@/lib/types'
 import type { V2AlbumRole } from '@/lib/exports-v2-types'
 import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
+import { normalizeExportsV2CampaignItems } from '@/lib/exports-v2-campaign'
 
 const ALBUMS_PER_PAGE = 80
 const MAX_GROUP_SIZE = 30
 const TRAINING_CONTEXT_RADIUS = 4
 const MAX_CONTIGUOUS_CONTEXT_SPAN = 40
+const INTERNAL_V2_QUEUE_SECRET = crypto.randomUUID()
 
 const ROLE_FLAGS: Record<V2AlbumRole, { useText: boolean, useMedia: boolean, useForAi: boolean }> = {
   UNASSIGNED: { useText: false, useMedia: false, useForAi: false },
@@ -59,9 +61,10 @@ type SourceMedia = {
   preview_url: string
 }
 
-type NativeIngestResult = 'inserted' | 'updated' | 'unchanged'
+type NativeIngestResult = 'inserted' | 'updated' | 'unchanged' | 'duplicate'
 
 async function requireAdminOrWorker(workerSecret?: string) {
+  if (workerSecret === INTERNAL_V2_QUEUE_SECRET) return
   if (process.env.NODE_ENV !== 'production' && workerSecret === 'dev-api-route') return
   if (
     workerSecret &&
@@ -306,6 +309,17 @@ async function ingestNativeAlbum(
       return 'updated'
     }
 
+    const previousCampaignAlbum = await client.query(`
+      SELECT id
+      FROM scraping_v2_albums
+      WHERE supplier_id=$1 AND external_id=$2 AND run_id<>$3
+      LIMIT 1
+    `, [supplierId, album.external_id, runId])
+    if (previousCampaignAlbum.rows[0]) {
+      await client.query('COMMIT')
+      return 'duplicate'
+    }
+
     const orderResult = await client.query(
       'SELECT COALESCE(MAX(source_order), 0)::int + 1 AS next_order FROM scraping_v2_albums WHERE run_id=$1',
       [runId],
@@ -354,7 +368,12 @@ async function ingestNativeAlbum(
   }
 }
 
-async function forwardExportsV2ToWorker(supplierId: number, endDate?: string): Promise<ActionResponse | null> {
+async function forwardExportsV2ToWorker(
+  supplierId: number,
+  endDate?: string,
+  runId?: string,
+  campaignId?: string,
+): Promise<ActionResponse | null> {
   const workerUrl = process.env.SCRAPER_WORKER_URL?.replace(/\/+$/, '')
   if (!workerUrl) return null
 
@@ -366,7 +385,7 @@ async function forwardExportsV2ToWorker(supplierId: number, endDate?: string): P
     const response = await fetch(`${workerUrl}/api/scraping/v2/start`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ supplierId, endDate }),
+      body: JSON.stringify({ supplierId, endDate, runId, campaignId }),
       cache: 'no-store',
     })
     const payload = await response.json().catch(() => null)
@@ -386,10 +405,181 @@ export async function startExportsV2ScrapingAction(supplierId: number, endDate?:
   return startExportsV2ScrapingLocalAction(supplierId, endDate)
 }
 
+async function claimNextExportsV2CampaignRun(campaignId: string) {
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock(20260722)')
+    const campaignResult = await client.query(`
+      SELECT id, status FROM scraping_v2_campaigns
+      WHERE id=$1 AND status <> 'ARCHIVED'
+      FOR UPDATE
+    `, [campaignId])
+    if (!campaignResult.rows[0]) {
+      await client.query('COMMIT')
+      return null
+    }
+    const activeResult = await client.query(`
+      SELECT id FROM scraping_v2_runs
+      WHERE source_kind='DB_NATIVE' AND status IN ('STARTING','RUNNING')
+      LIMIT 1
+    `)
+    if (activeResult.rows[0]) {
+      await client.query('COMMIT')
+      return null
+    }
+    const nextResult = await client.query(`
+      SELECT id, supplier_id, cutoff_date::text AS cutoff_date
+      FROM scraping_v2_runs
+      WHERE campaign_id=$1 AND status='QUEUED'
+      ORDER BY queue_position, created_at
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1
+    `, [campaignId])
+    const next = nextResult.rows[0]
+    if (!next) {
+      const failedResult = await client.query(`
+        SELECT EXISTS(
+          SELECT 1 FROM scraping_v2_runs WHERE campaign_id=$1 AND status='FAILED'
+        ) AS has_failed
+      `, [campaignId])
+      await client.query(`
+        UPDATE scraping_v2_campaigns
+        SET status=$2, completed_at=NOW(), updated_at=NOW()
+        WHERE id=$1
+      `, [campaignId, failedResult.rows[0]?.has_failed ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED'])
+      await client.query('COMMIT')
+      revalidatePath('/admin/exports-v2')
+      return null
+    }
+    await client.query(`
+      UPDATE scraping_v2_runs
+      SET status='STARTING', updated_at=NOW()
+      WHERE id=$1 AND status='QUEUED'
+    `, [next.id])
+    await client.query(`
+      UPDATE scraping_v2_campaigns
+      SET status='RUNNING', completed_at=NULL, updated_at=NOW()
+      WHERE id=$1
+    `, [campaignId])
+    await client.query('COMMIT')
+    return next
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+async function dispatchNextExportsV2CampaignRun(campaignId: string, useWorker: boolean): Promise<ActionResponse> {
+  const next = await claimNextExportsV2CampaignRun(campaignId)
+  if (!next) {
+    const waitingResult = await scrapingQuery(`
+      SELECT r.campaign_id
+      FROM scraping_v2_runs r
+      JOIN scraping_v2_campaigns c ON c.id=r.campaign_id
+      WHERE r.status='QUEUED' AND c.status <> 'ARCHIVED'
+        AND NOT EXISTS (
+          SELECT 1 FROM scraping_v2_runs active
+          WHERE active.source_kind='DB_NATIVE' AND active.status IN ('STARTING','RUNNING')
+        )
+      ORDER BY c.started_at, r.queue_position
+      LIMIT 1
+    `)
+    const waitingCampaignId = waitingResult.rows[0]?.campaign_id
+    if (waitingCampaignId && String(waitingCampaignId) !== campaignId) {
+      return dispatchNextExportsV2CampaignRun(String(waitingCampaignId), useWorker)
+    }
+    return { success: true, data: { campaignId, idle: true } }
+  }
+
+  const supplierId = Number(next.supplier_id)
+  const endDate = next.cutoff_date ? String(next.cutoff_date).slice(0, 10) : undefined
+  const result = useWorker
+    ? (await forwardExportsV2ToWorker(supplierId, endDate, next.id, campaignId)
+      || await startExportsV2ScrapingLocalAction(supplierId, endDate, INTERNAL_V2_QUEUE_SECRET, next.id, campaignId))
+    : await startExportsV2ScrapingLocalAction(supplierId, endDate, INTERNAL_V2_QUEUE_SECRET, next.id, campaignId)
+
+  if (!result.success) {
+    await scrapingQuery(`
+      UPDATE scraping_v2_runs
+      SET status='FAILED', last_error=$2, last_completed_at=NOW(), updated_at=NOW()
+      WHERE id=$1 AND status='STARTING'
+    `, [next.id, result.error || 'Не удалось запустить парсер'])
+    return dispatchNextExportsV2CampaignRun(campaignId, useWorker)
+  }
+  revalidatePath('/admin/exports-v2')
+  return result
+}
+
+export async function createExportsV2CampaignAction(items: Array<{
+  supplierId: number
+  endDate?: string
+}>): Promise<ActionResponse> {
+  const client = await getScrapingClient()
+  try {
+    await requireAdmin()
+    const normalized = normalizeExportsV2CampaignItems(items)
+    if (normalized.length === 0) return { success: false, error: 'Выберите хотя бы одного поставщика' }
+    if (normalized.length > 60) return { success: false, error: 'В одной папке может быть не более 60 поставщиков' }
+
+    await client.query('BEGIN')
+    const suppliersResult = await client.query(`
+      SELECT id, name FROM suppliers
+      WHERE id=ANY($1::int[]) AND NULLIF(TRIM(album_id), '') IS NOT NULL
+    `, [normalized.map((item) => item.supplierId)])
+    if (suppliersResult.rows.length !== normalized.length) {
+      throw new Error('Часть поставщиков не найдена или у них не указан album_id')
+    }
+    const suppliers = new Map(suppliersResult.rows.map((supplier) => [Number(supplier.id), supplier]))
+    const campaignId = crypto.randomUUID()
+    const startedAt = new Date()
+    const label = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    }).format(startedAt)
+    await client.query(`
+      INSERT INTO scraping_v2_campaigns (id, name, status, started_at)
+      VALUES ($1,$2,'QUEUED',$3)
+    `, [campaignId, `Выгрузка ${label}`, startedAt])
+    for (const [index, item] of normalized.entries()) {
+      const supplier = suppliers.get(item.supplierId)
+      const runId = crypto.randomUUID()
+      await client.query(`
+        INSERT INTO scraping_v2_runs (
+          id, campaign_id, queue_position, queued_at, cutoff_date,
+          supplier_id, name, status, source_kind, production_push_enabled
+        ) VALUES ($1,$2,$3,NOW(),$4,$5,$6,'QUEUED','DB_NATIVE',FALSE)
+      `, [runId, campaignId, index, item.endDate || null, item.supplierId, `V2 · ${supplier.name} · ${label}`])
+    }
+    await client.query('COMMIT')
+    const started = await dispatchNextExportsV2CampaignRun(campaignId, true)
+    revalidatePath('/admin/exports-v2')
+    return { success: true, data: { campaignId, count: normalized.length, firstRun: started.data } }
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => undefined)
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
+}
+
+export async function resumeExportsV2CampaignAction(campaignId: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    return await dispatchNextExportsV2CampaignRun(campaignId, true)
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 export async function startExportsV2ScrapingLocalAction(
   supplierId: number,
   endDate?: string,
   workerSecret?: string,
+  requestedRunId?: string,
+  requestedCampaignId?: string,
 ): Promise<ActionResponse> {
   let runId = ''
   let passId = ''
@@ -408,13 +598,17 @@ export async function startExportsV2ScrapingLocalAction(
     const client = await getScrapingClient()
     try {
       await client.query('BEGIN')
-      const existingResult = await client.query(`
-        SELECT id, status
+      const existingResult = requestedRunId ? await client.query(`
+        SELECT id, status, campaign_id
         FROM scraping_v2_runs
-        WHERE supplier_id=$1 AND source_kind='DB_NATIVE' AND status <> 'ARCHIVED'
+        WHERE id=$1 AND supplier_id=$2 AND source_kind='DB_NATIVE' AND status <> 'ARCHIVED'
         FOR UPDATE
-      `, [supplierId])
+      `, [requestedRunId, supplierId]) : { rows: [] }
       const existing = existingResult.rows[0]
+      if (requestedRunId && !existing) throw new Error('Запуск поставщика в папке не найден')
+      if (requestedCampaignId && String(existing?.campaign_id || '') !== requestedCampaignId) {
+        throw new Error('Запуск не относится к указанной папке')
+      }
       if (existing?.status === 'RUNNING') throw new Error('V2-выгрузка этого поставщика уже выполняется')
 
       runId = existing?.id || crypto.randomUUID()
@@ -423,9 +617,10 @@ export async function startExportsV2ScrapingLocalAction(
           UPDATE scraping_v2_runs
           SET status='RUNNING', last_started_at=NOW(), last_completed_at=NULL,
               last_error=NULL, last_received_count=0, last_inserted_count=0,
-              last_updated_count=0, last_unchanged_count=0, updated_at=NOW()
+              last_updated_count=0, last_unchanged_count=0, last_duplicate_count=0,
+              cutoff_date=$2, updated_at=NOW()
           WHERE id=$1
-        `, [runId])
+        `, [runId, endDate || null])
       } else {
         const date = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow' }).format(new Date())
         await client.query(`
@@ -469,6 +664,7 @@ export async function startExportsV2ScrapingLocalAction(
     let inserted = 0
     let updated = 0
     let unchanged = 0
+    let duplicate = 0
     let processing = Promise.resolve()
     let processError: Error | null = null
     let finalized = false
@@ -484,7 +680,8 @@ export async function startExportsV2ScrapingLocalAction(
         const result = await ingestNativeAlbum(runId, passId, supplierId, album)
         if (result === 'inserted') inserted += 1
         else if (result === 'updated') updated += 1
-        else unchanged += 1
+        else if (result === 'unchanged') unchanged += 1
+        else duplicate += 1
       }).catch((error) => {
         processError ||= error instanceof Error ? error : new Error(String(error))
       })
@@ -506,9 +703,9 @@ export async function startExportsV2ScrapingLocalAction(
         UPDATE scraping_v2_scrape_passes
         SET status=CASE WHEN $2::boolean THEN 'FAILED' ELSE 'COMPLETED' END,
             received_count=$3, inserted_count=$4, updated_count=$5,
-            unchanged_count=$6, error_message=$7, completed_at=NOW()
+            unchanged_count=$6, duplicate_count=$7, error_message=$8, completed_at=NOW()
         WHERE id=$1
-      `, [passId, failed, received, inserted, updated, unchanged, errorMessage])
+      `, [passId, failed, received, inserted, updated, unchanged, duplicate, errorMessage])
       await scrapingQuery(`
         UPDATE scraping_v2_runs r
         SET status = CASE
@@ -522,11 +719,15 @@ export async function startExportsV2ScrapingLocalAction(
             album_count=(SELECT COUNT(*)::int FROM scraping_v2_albums a WHERE a.run_id=r.id),
             last_completed_at=NOW(), last_error=$3,
             last_received_count=$4, last_inserted_count=$5,
-            last_updated_count=$6, last_unchanged_count=$7, updated_at=NOW()
+            last_updated_count=$6, last_unchanged_count=$7,
+            last_duplicate_count=$8, updated_at=NOW()
         WHERE r.id=$1
-      `, [runId, failed, errorMessage, received, inserted, updated, unchanged])
+      `, [runId, failed, errorMessage, received, inserted, updated, unchanged, duplicate])
       revalidatePath('/admin/exports-v2')
       revalidatePath(`/admin/exports-v2/${runId}`)
+      if (requestedCampaignId) {
+        await dispatchNextExportsV2CampaignRun(requestedCampaignId, false)
+      }
     }
 
     pythonProcess.on('error', (error) => {
@@ -597,7 +798,14 @@ export async function getExportsV2DashboardAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()
 
-    const [runsResult, sourcesResult, suppliersResult] = await Promise.all([
+    const [campaignsResult, runsResult, sourcesResult, suppliersResult] = await Promise.all([
+      scrapingQuery(`
+        SELECT id, name, status, started_at, completed_at, created_at
+        FROM scraping_v2_campaigns
+        WHERE status <> 'ARCHIVED'
+        ORDER BY started_at DESC
+        LIMIT 50
+      `),
       scrapingQuery(`
         SELECT
           r.id,
@@ -617,9 +825,16 @@ export async function getExportsV2DashboardAction(): Promise<ActionResponse> {
           r.last_inserted_count,
           r.last_updated_count,
           r.last_unchanged_count,
+          r.last_duplicate_count,
+          r.campaign_id,
+          r.queue_position,
+          r.cutoff_date::text AS cutoff_date,
           r.created_at,
           COUNT(DISTINCT da.album_id)::int AS assigned_count,
           COUNT(DISTINCT d.id)::int AS draft_count,
+          COUNT(DISTINCT d.id) FILTER (WHERE d.status='AI_PROCESSED')::int AS ai_processed_count,
+          COUNT(DISTINCT d.id) FILTER (WHERE d.status='READY_TO_PUSH')::int AS ready_to_push_count,
+          COUNT(DISTINCT d.id) FILTER (WHERE d.status='PUSHED')::int AS pushed_count,
           COUNT(DISTINCT te.id)::int AS training_example_count
         FROM scraping_v2_runs r
         JOIN suppliers s ON s.id = r.supplier_id
@@ -628,7 +843,7 @@ export async function getExportsV2DashboardAction(): Promise<ActionResponse> {
         LEFT JOIN scraping_v2_training_examples te ON te.run_id = r.id
         GROUP BY r.id, s.name, s.avatar_url
         ORDER BY r.created_at DESC
-        LIMIT 50
+        LIMIT 250
       `),
       scrapingQuery(`
         SELECT
@@ -666,9 +881,23 @@ export async function getExportsV2DashboardAction(): Promise<ActionResponse> {
       `),
     ])
 
+    const runsByCampaign = new Map<string, any[]>()
+    for (const run of runsResult.rows) {
+      if (!run.campaign_id) continue
+      const list = runsByCampaign.get(String(run.campaign_id)) || []
+      list.push(run)
+      runsByCampaign.set(String(run.campaign_id), list)
+    }
+    const campaigns = campaignsResult.rows.map((campaign) => ({
+      ...campaign,
+      runs: (runsByCampaign.get(String(campaign.id)) || [])
+        .sort((left, right) => Number(left.queue_position || 0) - Number(right.queue_position || 0)),
+    }))
+    const legacyRuns = runsResult.rows.filter((run) => !run.campaign_id)
+
     return {
       success: true,
-      data: { runs: runsResult.rows, sources: sourcesResult.rows, suppliers: suppliersResult.rows },
+      data: { campaigns, legacyRuns, sources: sourcesResult.rows, suppliers: suppliersResult.rows },
     }
   } catch (error: any) {
     return { success: false, error: error.message }

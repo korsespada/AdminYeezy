@@ -30,6 +30,8 @@ export async function POST(request: Request) {
       supplierId,
       body?.endDate || undefined,
       expectedSecret || (process.env.NODE_ENV !== 'production' ? 'dev-api-route' : undefined),
+      body?.runId || undefined,
+      body?.campaignId || undefined,
     )
     return NextResponse.json(result, { status: result.success ? 200 : 400 })
   } catch (error: any) {

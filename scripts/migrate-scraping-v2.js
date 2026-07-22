@@ -47,6 +47,25 @@ async function migrate() {
     `)
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS scraping_v2_campaigns (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'QUEUED',
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT scraping_v2_campaigns_status_check CHECK (
+          status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'COMPLETED_WITH_ERRORS', 'ARCHIVED')
+        )
+      )
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS scraping_v2_campaigns_started_idx
+      ON scraping_v2_campaigns (started_at DESC)
+    `)
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS scraping_v2_runs (
         id TEXT PRIMARY KEY,
         supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
@@ -84,7 +103,12 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS last_received_count INTEGER NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS last_inserted_count INTEGER NOT NULL DEFAULT 0,
         ADD COLUMN IF NOT EXISTS last_updated_count INTEGER NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS last_unchanged_count INTEGER NOT NULL DEFAULT 0
+        ADD COLUMN IF NOT EXISTS last_unchanged_count INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS last_duplicate_count INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS campaign_id TEXT REFERENCES scraping_v2_campaigns(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS queue_position INTEGER,
+        ADD COLUMN IF NOT EXISTS cutoff_date DATE,
+        ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ
     `)
     await client.query(`
       ALTER TABLE scraping_v2_runs
@@ -93,7 +117,7 @@ async function migrate() {
     await client.query(`
       ALTER TABLE scraping_v2_runs
       ADD CONSTRAINT scraping_v2_runs_status_check CHECK (
-        status IN ('RUNNING', 'READY_FOR_GROUPING', 'GROUPING', 'READY_FOR_AI', 'FAILED', 'ARCHIVED')
+        status IN ('QUEUED', 'STARTING', 'RUNNING', 'READY_FOR_GROUPING', 'GROUPING', 'READY_FOR_AI', 'FAILED', 'ARCHIVED')
       )
     `)
 
@@ -108,10 +132,16 @@ async function migrate() {
       ON scraping_v2_runs (supplier_id, created_at DESC)
     `)
 
+    await client.query('DROP INDEX IF EXISTS scraping_v2_runs_active_native_supplier_idx')
     await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS scraping_v2_runs_active_native_supplier_idx
-      ON scraping_v2_runs (supplier_id)
-      WHERE source_kind = 'DB_NATIVE' AND status <> 'ARCHIVED'
+      CREATE UNIQUE INDEX IF NOT EXISTS scraping_v2_runs_campaign_supplier_idx
+      ON scraping_v2_runs (campaign_id, supplier_id)
+      WHERE campaign_id IS NOT NULL
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS scraping_v2_runs_campaign_queue_idx
+      ON scraping_v2_runs (campaign_id, queue_position)
+      WHERE campaign_id IS NOT NULL
     `)
 
     await client.query(`
@@ -125,6 +155,7 @@ async function migrate() {
         inserted_count INTEGER NOT NULL DEFAULT 0,
         updated_count INTEGER NOT NULL DEFAULT 0,
         unchanged_count INTEGER NOT NULL DEFAULT 0,
+        duplicate_count INTEGER NOT NULL DEFAULT 0,
         error_message TEXT,
         started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         completed_at TIMESTAMPTZ,
@@ -137,6 +168,10 @@ async function migrate() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS scraping_v2_scrape_passes_run_started_idx
       ON scraping_v2_scrape_passes (run_id, started_at DESC)
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_scrape_passes
+      ADD COLUMN IF NOT EXISTS duplicate_count INTEGER NOT NULL DEFAULT 0
     `)
 
     await client.query(`

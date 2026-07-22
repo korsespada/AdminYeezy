@@ -32,6 +32,9 @@ export interface V2RunSummary {
   album_count: number
   assigned_count: number
   draft_count: number
+  ai_processed_count: number
+  ready_to_push_count: number
+  pushed_count: number
   training_example_count: number
   source_kind: string
   source_task_id: number | null
@@ -43,7 +46,21 @@ export interface V2RunSummary {
   last_inserted_count: number
   last_updated_count: number
   last_unchanged_count: number
+  last_duplicate_count: number
+  campaign_id: string | null
+  queue_position: number | null
+  cutoff_date: string | null
   created_at: string
+}
+
+export interface V2CampaignSummary {
+  id: string
+  name: string
+  status: string
+  started_at: string
+  completed_at: string | null
+  created_at: string
+  runs: V2RunSummary[]
 }
 
 export interface V2SupplierSource {
