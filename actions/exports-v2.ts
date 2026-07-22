@@ -762,6 +762,21 @@ export async function getExportsV2RunAction(
         s.name AS supplier_name,
         s.avatar_url AS supplier_avatar,
         s.max_on_model_media,
+        s.ai_instructions,
+        s.ai_cache_enabled,
+        s.ai_photo_enabled,
+        s.post_process_script,
+        s.post_process_description,
+        COALESCE(
+          (SELECT value FROM app_settings WHERE key='exports_v2_grouping_model'),
+          (SELECT value FROM app_settings WHERE key='selected_ai_model'),
+          'google/gemini-2.0-flash-lite:free'
+        ) AS grouping_model,
+        COALESCE(
+          (SELECT value FROM app_settings WHERE key='exports_v2_product_model'),
+          (SELECT value FROM app_settings WHERE key='selected_ai_model'),
+          'google/gemini-2.0-flash-lite:free'
+        ) AS product_model,
         COUNT(DISTINCT da.album_id)::int AS assigned_count,
         COUNT(DISTINCT d.id)::int AS draft_count,
         COUNT(DISTINCT te.id)::int AS training_example_count
@@ -771,7 +786,7 @@ export async function getExportsV2RunAction(
       LEFT JOIN scraping_v2_draft_albums da ON da.draft_id = d.id
       LEFT JOIN scraping_v2_training_examples te ON te.run_id = r.id
       WHERE r.id = $1
-      GROUP BY r.id, s.name, s.avatar_url, s.max_on_model_media
+      GROUP BY r.id, s.id
     `, [runId])
     if (!runResult.rows[0]) return { success: false, error: 'Запуск V2 не найден' }
 
@@ -839,6 +854,14 @@ export async function getExportsV2RunAction(
         d.id,
         d.status,
         d.name,
+        d.origin,
+        d.ai_confidence,
+        d.ai_group_reason,
+        d.ai_product,
+        d.ai_usage,
+        d.external_id,
+        d.pushed_product_id,
+        d.pushed_at,
         d.created_at,
         COALESCE(
           json_agg(
@@ -874,6 +897,13 @@ export async function getExportsV2RunAction(
       LIMIT 50
     `, [runId])
 
+    const lookupResult = await scrapingQuery(`
+      SELECT entity_type, canonical_id::text AS id, name, canonical_parent_id::text AS parent_id
+      FROM catalog_id_mappings
+      WHERE entity_type IN ('brand', 'category', 'subcategory')
+      ORDER BY name
+    `)
+
     return {
       success: true,
       data: {
@@ -883,6 +913,11 @@ export async function getExportsV2RunAction(
         per_page: ALBUMS_PER_PAGE,
         albums: albumsResult.rows,
         drafts: draftsResult.rows,
+        catalog_lookups: {
+          brands: lookupResult.rows.filter((row) => row.entity_type === 'brand'),
+          categories: lookupResult.rows.filter((row) => row.entity_type === 'category'),
+          subcategories: lookupResult.rows.filter((row) => row.entity_type === 'subcategory'),
+        },
       },
     }
   } catch (error: any) {
@@ -979,7 +1014,7 @@ export async function addExportsV2AlbumsToDraftAction(
     `, [draftId])
     const draft = draftResult.rows[0]
     if (!draft) throw new Error('Черновик товара не найден')
-    if (draft.status === 'GROUPED') {
+    if (!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status)) {
       throw new Error('Сначала отмените сохранение примера, затем изменяйте состав товара')
     }
 
@@ -1048,7 +1083,7 @@ export async function reopenExportsV2DraftAction(draftId: string): Promise<Actio
     const draftResult = await client.query(`
       SELECT run_id
       FROM scraping_v2_product_drafts
-      WHERE id=$1 AND status <> 'ARCHIVED'
+      WHERE id=$1 AND status IN ('GROUPED', 'READY_FOR_AI')
       FOR UPDATE
     `, [draftId])
     const runId = draftResult.rows[0]?.run_id
@@ -1091,7 +1126,7 @@ export async function updateExportsV2AlbumRoleAction(
       SET role=$1, use_text=$2, use_media=$3, use_photos=$3, use_for_ai=$4, updated_at=NOW()
       FROM scraping_v2_product_drafts d
       WHERE da.draft_id=$5 AND da.album_id=$6 AND d.id=da.draft_id
-        AND d.status <> 'GROUPED'
+        AND d.status IN ('GROUPING_DRAFT', 'NEEDS_REVIEW')
         AND NOT EXISTS (
           SELECT 1 FROM scraping_v2_training_examples te WHERE te.draft_id=da.draft_id
         )
@@ -1128,7 +1163,7 @@ export async function ungroupExportsV2AlbumAction(draftId: string, albumId: stri
     const draft = draftResult.rows[0]
     const runId = draft?.run_id
     if (!runId) throw new Error('Черновик товара не найден')
-    if (draft.status === 'GROUPED' || draft.has_example) {
+    if (!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) || draft.has_example) {
       throw new Error('Сначала отмените сохранение примера, затем изменяйте состав товара')
     }
 
@@ -1179,7 +1214,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
     `, [draftId])
     const draft = draftResult.rows[0]
     if (!draft) return { success: false, error: 'Черновик товара не найден' }
-    if (draft.status === 'GROUPED') return { success: false, error: 'Этот пример уже сохранён' }
+    if (!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status)) return { success: false, error: 'Эту группу нельзя сохранить как новый пример' }
 
     const existingExample = await scrapingQuery(
       'SELECT 1 FROM scraping_v2_training_examples WHERE draft_id=$1 LIMIT 1',

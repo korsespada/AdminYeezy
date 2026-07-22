@@ -8,12 +8,22 @@ interface AIRulesEditorProps {
   initialRules: string
   initialModels: string[]
   initialSelectedModel: string
+  initialV2GroupingModel: string
+  initialV2ProductModel: string
 }
 
-export default function AIRulesEditor({ initialRules, initialModels, initialSelectedModel }: AIRulesEditorProps) {
+export default function AIRulesEditor({
+  initialRules,
+  initialModels,
+  initialSelectedModel,
+  initialV2GroupingModel,
+  initialV2ProductModel,
+}: AIRulesEditorProps) {
   const [rules, setRules] = useState(initialRules)
   const [models, setModels] = useState<string[]>(initialModels)
   const [selectedModel, setSelectedModel] = useState(initialSelectedModel)
+  const [v2GroupingModel, setV2GroupingModel] = useState(initialV2GroupingModel)
+  const [v2ProductModel, setV2ProductModel] = useState(initialV2ProductModel)
   const [newModel, setNewModel] = useState('')
   
   const [isSaving, setIsSaving] = useState(false)
@@ -27,10 +37,12 @@ export default function AIRulesEditor({ initialRules, initialModels, initialSele
         const p1 = updateSettingAction('general_ai_rules', rules)
         const p2 = updateSettingAction('available_ai_models', JSON.stringify(models))
         const p3 = updateSettingAction('selected_ai_model', selectedModel)
+        const p4 = updateSettingAction('exports_v2_grouping_model', v2GroupingModel || selectedModel)
+        const p5 = updateSettingAction('exports_v2_product_model', v2ProductModel || selectedModel)
         
-        const [r1, r2, r3] = await Promise.all([p1, p2, p3])
+        const [r1, r2, r3, r4, r5] = await Promise.all([p1, p2, p3, p4, p5])
         
-        if (r1.success && r2.success && r3.success) {
+        if (r1.success && r2.success && r3.success && r4.success && r5.success) {
           setMessage({ type: 'success', text: 'Все настройки успешно сохранены!' })
           setTimeout(() => setMessage(null), 3000)
         } else {
@@ -51,8 +63,11 @@ export default function AIRulesEditor({ initialRules, initialModels, initialSele
   }
 
   const removeModel = (m: string) => {
-    setModels(models.filter(mod => mod !== m))
-    if (selectedModel === m) setSelectedModel(models[0] || '')
+    const remaining = models.filter(mod => mod !== m)
+    setModels(remaining)
+    if (selectedModel === m) setSelectedModel(remaining[0] || '')
+    if (v2GroupingModel === m) setV2GroupingModel(remaining[0] || '')
+    if (v2ProductModel === m) setV2ProductModel(remaining[0] || '')
   }
 
   return (
@@ -125,6 +140,20 @@ export default function AIRulesEditor({ initialRules, initialModels, initialSele
                         </div>
                     </div>
                 </div>
+            </div>
+            <div className="grid grid-cols-1 gap-4 border-t border-slate-700 pt-6 md:grid-cols-2">
+              <label className="space-y-2">
+                <span className="block text-xs font-bold uppercase tracking-widest text-slate-500">V2: группировка альбомов</span>
+                <select value={v2GroupingModel} onChange={(event) => setV2GroupingModel(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 font-mono text-sm text-white outline-none focus:border-cyan-500">
+                  {models.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
+              </label>
+              <label className="space-y-2">
+                <span className="block text-xs font-bold uppercase tracking-widest text-slate-500">V2: обработка товара</span>
+                <select value={v2ProductModel} onChange={(event) => setV2ProductModel(event.target.value)} className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500">
+                  {models.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
+              </label>
             </div>
         </div>
       </div>

@@ -13,11 +13,13 @@ import {
   ImageIcon,
   Layers3,
   Loader2,
-  LockKeyhole,
   MousePointer2,
+  PackageCheck,
+  Play,
   PlusCircle,
   RotateCcw,
   ScanText,
+  Settings2,
   Sparkles,
   Split,
   Type,
@@ -33,6 +35,13 @@ import {
   ungroupExportsV2AlbumAction,
   updateExportsV2AlbumRoleAction,
 } from '@/actions/exports-v2'
+import {
+  confirmExportsV2ProductAction,
+  pushExportsV2ProductsAction,
+  runExportsV2GroupingAiAction,
+  runExportsV2ProductAiAction,
+  updateExportsV2SupplierAiSettingsAction,
+} from '@/actions/exports-v2-ai'
 import type { V2Album, V2AlbumRole, V2Draft, V2RunDetails } from '@/lib/exports-v2-types'
 import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
 
@@ -66,6 +75,13 @@ export default function V2RunWorkspace({
   const [pending, setPending] = useState('')
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
   const [previewAlbum, setPreviewAlbum] = useState<V2Album | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [supplierSettings, setSupplierSettings] = useState({
+    ai_instructions: initialData.ai_instructions || '',
+    ai_cache_enabled: initialData.ai_cache_enabled,
+    ai_photo_enabled: initialData.ai_photo_enabled,
+    post_process_description: initialData.post_process_description || '',
+  })
   const totalPages = Math.max(1, Math.ceil(initialData.total_albums / initialData.per_page))
 
   const selectedAlbums = useMemo(
@@ -161,6 +177,65 @@ export default function V2RunWorkspace({
     router.refresh()
   }
 
+  const runAiStage = async (stage: 'grouping' | 'product') => {
+    const question = stage === 'grouping'
+      ? 'ИИ просмотрит все неразмеченные альбомы порциями и создаст предложения. Запустить этап 1?'
+      : 'ИИ обработает только подтверждённые группы и создаст карточки для ручной проверки. Запустить этап 2?'
+    if (!window.confirm(question)) return
+    setPending(`ai-${stage}`)
+    setMessage(null)
+    const result = stage === 'grouping'
+      ? await runExportsV2GroupingAiAction(initialData.id)
+      : await runExportsV2ProductAiAction(initialData.id)
+    setPending('')
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Этап ИИ завершился с ошибкой' })
+      return
+    }
+    const data = result.data || {}
+    setMessage({
+      type: 'success',
+      text: stage === 'grouping'
+        ? `ИИ проверил ${data.analyzed || 0} альбомов и предложил ${data.created || 0} товаров. Подтвердите их справа.`
+        : `Обработано карточек: ${data.processed || 0}; из кэша: ${data.cacheHits || 0}; ошибок: ${data.failed || 0}.`,
+    })
+    router.refresh()
+  }
+
+  const saveSupplierSettings = async () => {
+    setPending('supplier-settings')
+    setMessage(null)
+    const result = await updateExportsV2SupplierAiSettingsAction(initialData.id, supplierSettings)
+    setPending('')
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось сохранить настройки поставщика' })
+      return
+    }
+    setSettingsOpen(false)
+    setMessage({ type: 'success', text: 'Настройки поставщика сохранены.' })
+    router.refresh()
+  }
+
+  const pushReadyProducts = async () => {
+    const readyCount = initialData.drafts.filter((draft) => draft.status === 'READY_TO_PUSH').length
+    if (!readyCount) {
+      setMessage({ type: 'error', text: 'Сначала подтвердите хотя бы одну обработанную карточку.' })
+      return
+    }
+    if (!window.confirm(`Отправить в основную БД подтверждённые карточки: ${readyCount}?`)) return
+    setPending('push')
+    setMessage(null)
+    const result = await pushExportsV2ProductsAction(initialData.id)
+    setPending('')
+    const pushed = result.data?.pushed || 0
+    const failed = result.data?.failed || 0
+    setMessage({
+      type: result.success ? 'success' : 'error',
+      text: result.success ? `В основную БД отправлено товаров: ${pushed}.` : `Отправлено: ${pushed}; ошибок: ${failed}. ${result.error || ''}`,
+    })
+    router.refresh()
+  }
+
   const pageHref = (page: number) => {
     const params = new URLSearchParams()
     if (initialSearch) params.set('search', initialSearch)
@@ -187,8 +262,8 @@ export default function V2RunWorkspace({
               }`}>
                 {initialData.status === 'RUNNING' ? 'ВЫГРУЗКА ИДЁТ' : initialData.status === 'FAILED' ? 'ОШИБКА' : 'ГОТОВО К РАЗМЕТКЕ'}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-200">
-                <LockKeyhole className="h-3 w-3" /> Без пуша
+              <span className="inline-flex items-center gap-1 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2.5 py-1 text-xs font-semibold text-indigo-200">
+                <Sparkles className="h-3 w-3" /> AI в 2 этапа
               </span>
             </div>
             <p className="mt-2 text-sm text-slate-400">{initialData.name}</p>
@@ -214,6 +289,32 @@ export default function V2RunWorkspace({
           </div>
         </div>
       </header>
+
+      <section className="rounded-2xl border border-indigo-500/20 bg-slate-900/70 p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-sm font-bold text-white">Обработка выгрузки</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              1 — предложения объединения · ручное подтверждение · 2 — карточки товара · ручное подтверждение · пуш.
+            </p>
+            <p className="mt-1 text-[11px] text-slate-600">Модели: {initialData.grouping_model} / {initialData.product_model}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-700 px-3 text-xs font-bold text-slate-300 hover:bg-slate-800">
+              <Settings2 className="h-4 w-4" /> Поставщик
+            </button>
+            <button type="button" onClick={() => runAiStage('grouping')} disabled={pending.startsWith('ai-')} className="inline-flex h-10 items-center gap-2 rounded-lg bg-cyan-600 px-3 text-xs font-bold text-white hover:bg-cyan-500 disabled:opacity-50">
+              {pending === 'ai-grouping' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} 1. Объединить AI
+            </button>
+            <button type="button" onClick={() => runAiStage('product')} disabled={pending.startsWith('ai-')} className="inline-flex h-10 items-center gap-2 rounded-lg bg-indigo-600 px-3 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50">
+              {pending === 'ai-product' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />} 2. Создать карточки
+            </button>
+            <button type="button" onClick={pushReadyProducts} disabled={pending === 'push'} className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50">
+              {pending === 'push' ? <Loader2 className="h-4 w-4 animate-spin" /> : <PackageCheck className="h-4 w-4" />} Пуш готовых
+            </button>
+          </div>
+        </div>
+      </section>
 
       {message && (
         <div className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
@@ -323,8 +424,8 @@ export default function V2RunWorkspace({
             </div>
             <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">{initialData.drafts.length}</span>
           </div>
-          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-4 text-amber-100/80">
-            Сохранение примеров пока не запускает AI и не расходует токены. Автоматическая группировка будет отдельным следующим этапом.
+          <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-3 py-2 text-[11px] leading-4 text-indigo-100/80">
+            Примеры не расходуют токены сами по себе. Этап 1 использует их как подсказки; каждое AI-предложение нужно подтвердить до этапа 2.
           </div>
 
           {initialData.drafts.length === 0 ? (
@@ -336,17 +437,18 @@ export default function V2RunWorkspace({
               <div className="flex items-center justify-between gap-3 border-b border-slate-700 px-4 py-3">
                 <div>
                   <div className="font-semibold text-white">{draft.name}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{draft.albums.length} источника · {draft.status === 'GROUPED' ? 'пример сохранён' : 'черновик'}</div>
+                  <div className="mt-0.5 text-xs text-slate-500">{draft.albums.length} источника · {draftStatusLabel(draft.status)}</div>
                 </div>
-                {draft.status === 'GROUPED' && (
+                {(draft.status === 'GROUPED' || draft.status === 'READY_FOR_AI') && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase text-emerald-300">
                     <BookOpenCheck className="h-3 w-3" /> Пример
                   </span>
                 )}
+                {draft.origin === 'AI' && <span className="rounded-full bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-300">AI {draft.ai_confidence === null ? '' : `${Math.round(Number(draft.ai_confidence) * 100)}%`}</span>}
               </div>
 
               <div className="space-y-3 p-4">
-                {draft.status !== 'GROUPED' && selected.length > 0 && (
+                {['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) && selected.length > 0 && (
                   <button
                     type="button"
                     onClick={() => addToDraft(draft.id)}
@@ -365,8 +467,8 @@ export default function V2RunWorkspace({
                         <button
                           type="button"
                           onClick={() => ungroup(draft.id, album.id)}
-                          disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
-                          title={draft.status === 'GROUPED' ? 'Сначала отмените сохранение примера' : 'Вернуть альбом в сетку'}
+                          disabled={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) || pending === `ungroup-${album.id}`}
+                          title={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) ? 'Сначала верните группу к редактированию' : 'Вернуть альбом в сетку'}
                           className="shrink-0 overflow-hidden rounded-lg ring-offset-slate-900 hover:ring-2 hover:ring-red-400/60 disabled:opacity-50"
                         >
                           <AlbumThumb album={album} className="h-16 w-16" />
@@ -376,7 +478,7 @@ export default function V2RunWorkspace({
                             <button
                               type="button"
                               onClick={() => ungroup(draft.id, album.id)}
-                              disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
+                              disabled={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) || pending === `ungroup-${album.id}`}
                               className="truncate text-left text-xs font-bold text-slate-300 hover:text-red-300"
                               title="Вернуть альбом в сетку"
                             >
@@ -394,8 +496,8 @@ export default function V2RunWorkspace({
                               <button
                                 type="button"
                                 onClick={() => ungroup(draft.id, album.id)}
-                                disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
-                                title={draft.status === 'GROUPED' ? 'Сначала отмените сохранение примера' : 'Вернуть альбом в сетку'}
+                                disabled={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) || pending === `ungroup-${album.id}`}
+                                title={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) ? 'Сначала верните группу к редактированию' : 'Вернуть альбом в сетку'}
                                 className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-red-300"
                               >
                                 {pending === `ungroup-${album.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Split className="h-3.5 w-3.5" />}
@@ -405,7 +507,7 @@ export default function V2RunWorkspace({
                           <select
                             value={album.role}
                             onChange={(event) => updateRole(draft.id, album.id, event.target.value as V2AlbumRole)}
-                            disabled={draft.status === 'GROUPED' || pending === `role-${album.id}`}
+                            disabled={!['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) || pending === `role-${album.id}`}
                             className="mt-2 h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs font-semibold text-slate-200 outline-none focus:border-cyan-500"
                           >
                             {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -419,7 +521,11 @@ export default function V2RunWorkspace({
 
                 <RoleSummary draft={draft} maxOnModelMedia={initialData.max_on_model_media} />
 
-                {draft.status === 'GROUPED' ? (
+                {draft.origin === 'AI' && draft.ai_group_reason && (
+                  <p className="rounded-lg bg-cyan-500/5 px-3 py-2 text-[11px] leading-4 text-cyan-100/70">Почему AI объединил: {draft.ai_group_reason}</p>
+                )}
+
+                {draft.status === 'GROUPED' || draft.status === 'READY_FOR_AI' ? (
                   <button
                     type="button"
                     onClick={() => reopenDraft(draft.id)}
@@ -429,7 +535,7 @@ export default function V2RunWorkspace({
                     {pending === `reopen-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
                     Удалить пример и редактировать
                   </button>
-                ) : (
+                ) : ['GROUPING_DRAFT', 'NEEDS_REVIEW'].includes(draft.status) ? (
                   <button
                     type="button"
                     onClick={() => saveExample(draft)}
@@ -437,9 +543,22 @@ export default function V2RunWorkspace({
                     className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
                   >
                     {pending === `example-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                    Сохранить как пример поставщика
+                    {draft.origin === 'AI' ? 'Подтвердить группу и сохранить пример' : 'Сохранить как пример поставщика'}
                   </button>
-                )}
+                ) : draft.status === 'AI_PROCESSED' && draft.ai_product ? (
+                  <ProductReview
+                    draft={draft}
+                    lookups={initialData.catalog_lookups}
+                    pending={pending === `confirm-${draft.id}`}
+                    onPending={(value) => setPending(value ? `confirm-${draft.id}` : '')}
+                    onMessage={setMessage}
+                    onDone={() => router.refresh()}
+                  />
+                ) : draft.status === 'READY_TO_PUSH' ? (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-center text-xs font-bold text-emerald-200">Карточка подтверждена и готова к пушу</div>
+                ) : draft.status === 'PUSHED' ? (
+                  <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-center text-xs font-bold text-cyan-200">Отправлено в основную БД · {draft.pushed_product_id || 'ID получен'}</div>
+                ) : null}
               </div>
             </div>
           ))}
@@ -453,6 +572,144 @@ export default function V2RunWorkspace({
           onClose={() => setPreviewAlbum(null)}
         />
       )}
+      {settingsOpen && (
+        <SupplierSettingsModal
+          value={supplierSettings}
+          onChange={setSupplierSettings}
+          scriptName={initialData.post_process_script}
+          groupingModel={initialData.grouping_model}
+          productModel={initialData.product_model}
+          pending={pending === 'supplier-settings'}
+          onSave={saveSupplierSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+function draftStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    GROUPING_DRAFT: 'черновик',
+    NEEDS_REVIEW: 'предложение AI — проверьте',
+    GROUPED: 'группа подтверждена',
+    READY_FOR_AI: 'готово для AI',
+    AI_PROCESSED: 'карточка AI — проверьте',
+    READY_TO_PUSH: 'готово к пушу',
+    PUSHED: 'в основной БД',
+  }
+  return labels[status] || status
+}
+
+function ProductReview({
+  draft,
+  lookups,
+  pending,
+  onPending,
+  onMessage,
+  onDone,
+}: {
+  draft: V2Draft
+  lookups: V2RunDetails['catalog_lookups']
+  pending: boolean
+  onPending: (value: boolean) => void
+  onMessage: (value: { type: 'error' | 'success'; text: string }) => void
+  onDone: () => void
+}) {
+  const initial = draft.ai_product || {}
+  const [product, setProduct] = useState({
+    ...initial,
+    name: String(initial.name || ''),
+    description: String(initial.description || ''),
+    price: Number(initial.price || 0),
+    brand: String(initial.brand || ''),
+    category: String(initial.category || ''),
+    subcategory: String(initial.subcategory || ''),
+    gender: String(initial.gender || ''),
+  })
+  const [attributes, setAttributes] = useState(JSON.stringify(initial.attributes || {}, null, 2))
+  const subcategories = lookups.subcategories.filter((item) => !product.category || !item.parent_id || item.parent_id === product.category)
+
+  const confirm = async () => {
+    let parsedAttributes: Record<string, any>
+    try {
+      parsedAttributes = attributes.trim() ? JSON.parse(attributes) : {}
+    } catch {
+      onMessage({ type: 'error', text: `В карточке «${product.name}» атрибуты содержат неверный JSON.` })
+      return
+    }
+    onPending(true)
+    const result = await confirmExportsV2ProductAction(draft.id, { ...product, attributes: parsedAttributes })
+    onPending(false)
+    if (!result.success) {
+      onMessage({ type: 'error', text: result.error || 'Не удалось подтвердить карточку' })
+      return
+    }
+    onMessage({ type: 'success', text: `Карточка «${product.name}» подтверждена и готова к пушу.` })
+    onDone()
+  }
+
+  const fieldClass = 'h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500'
+  return (
+    <div className="space-y-2 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-3">
+      <div className="text-xs font-bold text-indigo-200">Проверка карточки товара</div>
+      <input value={product.name} onChange={(event) => setProduct({ ...product, name: event.target.value })} placeholder="Название" className={fieldClass} />
+      <textarea value={product.description} onChange={(event) => setProduct({ ...product, description: event.target.value })} placeholder="Описание" className="min-h-24 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-xs text-slate-200 outline-none focus:border-indigo-500" />
+      <div className="grid grid-cols-2 gap-2">
+        <input type="number" min="0" value={product.price} onChange={(event) => setProduct({ ...product, price: Number(event.target.value) })} placeholder="Цена" className={fieldClass} />
+        <select value={product.gender} onChange={(event) => setProduct({ ...product, gender: event.target.value })} className={fieldClass}>
+          <option value="">Гендер не выбран</option><option value="female">Женский</option><option value="male">Мужской</option><option value="unisex">Унисекс</option>
+        </select>
+      </div>
+      <select value={product.brand} onChange={(event) => setProduct({ ...product, brand: event.target.value })} className={fieldClass}>
+        <option value="">Бренд не выбран</option>{lookups.brands.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select>
+      <div className="grid grid-cols-2 gap-2">
+        <select value={product.category} onChange={(event) => setProduct({ ...product, category: event.target.value, subcategory: '' })} className={fieldClass}>
+          <option value="">Категория не выбрана</option>{lookups.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+        <select value={product.subcategory} onChange={(event) => setProduct({ ...product, subcategory: event.target.value })} className={fieldClass}>
+          <option value="">Подкатегория не выбрана</option>{subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </div>
+      <label className="block text-[10px] text-slate-500">Атрибуты (JSON по кодам)</label>
+      <textarea value={attributes} onChange={(event) => setAttributes(event.target.value)} className="min-h-24 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 font-mono text-[11px] text-slate-300 outline-none focus:border-indigo-500" />
+      <button type="button" onClick={confirm} disabled={pending || !product.name.trim()} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50">
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Подтвердить карточку для пуша
+      </button>
+    </div>
+  )
+}
+
+function SupplierSettingsModal({ value, onChange, scriptName, groupingModel, productModel, pending, onSave, onClose }: {
+  value: { ai_instructions: string; ai_cache_enabled: boolean; ai_photo_enabled: boolean; post_process_description: string }
+  onChange: (value: { ai_instructions: string; ai_cache_enabled: boolean; ai_photo_enabled: boolean; post_process_description: string }) => void
+  scriptName: string | null
+  groupingModel: string
+  productModel: string
+  pending: boolean
+  onSave: () => void
+  onClose: () => void
+}) {
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Настройки поставщика" className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/90 p-4 backdrop-blur-sm">
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-auto rounded-2xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div><h2 className="text-lg font-bold text-white">Настройки поставщика для AI</h2><p className="mt-1 text-xs text-slate-500">Доступны прямо из текущей выгрузки.</p></div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <label className="block"><span className="text-xs font-bold text-slate-300">Инструкции обработки карточек</span><textarea value={value.ai_instructions} onChange={(event) => onChange({ ...value, ai_instructions: event.target.value })} className="mt-2 min-h-32 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200 outline-none focus:border-indigo-500" placeholder="Например: футболки — 19000; формировать название..." /></label>
+          <label className="block"><span className="text-xs font-bold text-slate-300">Описание старого скрипта для объединения</span><textarea value={value.post_process_description} onChange={(event) => onChange({ ...value, post_process_description: event.target.value })} className="mt-2 min-h-28 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-slate-200 outline-none focus:border-cyan-500" placeholder="Опишите словами порядок и признаки объединения альбомов" /></label>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-xs leading-5 text-slate-400">
+            Скрипт: <span className="text-slate-200">{scriptName || 'не задан'}</span>. Его код не отправляется AI — используется только описание выше.<br />
+            Группировка: <span className="font-mono text-cyan-300">{groupingModel}</span><br />Карточки: <span className="font-mono text-indigo-300">{productModel}</span>. Модели меняются в «Настройках ИИ».
+          </div>
+          <label className="flex items-center gap-3 rounded-xl border border-slate-700 p-3 text-sm text-slate-200"><input type="checkbox" checked={value.ai_photo_enabled} onChange={(event) => onChange({ ...value, ai_photo_enabled: event.target.checked })} className="h-4 w-4" /><span><b>Использовать изображение при создании карточки</b><small className="block text-slate-500">Этап 1 всегда получает одну сжатую плитку каталога; здесь регулируется этап 2.</small></span></label>
+          <label className="flex items-center gap-3 rounded-xl border border-slate-700 p-3 text-sm text-slate-200"><input type="checkbox" checked={value.ai_cache_enabled} onChange={(event) => onChange({ ...value, ai_cache_enabled: event.target.checked })} className="h-4 w-4" /><span><b>Использовать безопасный кэш</b><small className="block text-slate-500">Повторно использует результат только при совпадении текста, настроек, модели, версии промпта и изображения.</small></span></label>
+          <button type="button" onClick={onSave} disabled={pending} className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 font-bold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Сохранить настройки</button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -91,6 +91,14 @@ export interface V2Draft {
   id: string
   status: string
   name: string
+  origin: 'MANUAL' | 'AI'
+  ai_confidence: number | null
+  ai_group_reason: string
+  ai_product: Record<string, any> | null
+  ai_usage: Record<string, any>
+  external_id: string | null
+  pushed_product_id: string | null
+  pushed_at: string | null
   created_at: string
   albums: V2DraftAlbum[]
 }
@@ -98,6 +106,18 @@ export interface V2Draft {
 export interface V2RunDetails extends V2RunSummary {
   source_batch_id: string | null
   max_on_model_media: number
+  ai_instructions: string
+  ai_cache_enabled: boolean
+  ai_photo_enabled: boolean
+  post_process_script: string | null
+  post_process_description: string
+  grouping_model: string
+  product_model: string
+  catalog_lookups: {
+    brands: Array<{ id: string; name: string }>
+    categories: Array<{ id: string; name: string }>
+    subcategories: Array<{ id: string; name: string; parent_id: string | null }>
+  }
   total_albums: number
   page: number
   per_page: number

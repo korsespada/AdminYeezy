@@ -22,6 +22,22 @@ async function migrate() {
     `)
     await client.query(`
       ALTER TABLE suppliers
+      ADD COLUMN IF NOT EXISTS post_process_description TEXT NOT NULL DEFAULT ''
+    `)
+    await client.query(`
+      INSERT INTO app_settings (key, value, updated_at)
+      SELECT key_name, COALESCE(
+        (SELECT value FROM app_settings WHERE key='selected_ai_model'),
+        'google/gemini-2.0-flash-lite:free'
+      ), NOW()
+      FROM (VALUES
+        ('exports_v2_grouping_model'),
+        ('exports_v2_product_model')
+      ) AS settings(key_name)
+      ON CONFLICT (key) DO NOTHING
+    `)
+    await client.query(`
+      ALTER TABLE suppliers
       DROP CONSTRAINT IF EXISTS suppliers_max_on_model_media_check
     `)
     await client.query(`
@@ -253,6 +269,39 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS scraping_v2_product_drafts_run_idx
       ON scraping_v2_product_drafts (run_id, created_at DESC)
     `)
+    await client.query(`
+      ALTER TABLE scraping_v2_product_drafts
+        ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'MANUAL',
+        ADD COLUMN IF NOT EXISTS ai_confidence NUMERIC(5,4),
+        ADD COLUMN IF NOT EXISTS ai_group_reason TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS ai_product JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS ai_usage JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS external_id TEXT,
+        ADD COLUMN IF NOT EXISTS pushed_product_id TEXT,
+        ADD COLUMN IF NOT EXISTS pushed_at TIMESTAMPTZ
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_product_drafts
+      DROP CONSTRAINT IF EXISTS scraping_v2_product_drafts_status_check
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_product_drafts
+      ADD CONSTRAINT scraping_v2_product_drafts_status_check CHECK (
+        status IN (
+          'GROUPING_DRAFT', 'GROUPED', 'READY_FOR_AI', 'NEEDS_REVIEW',
+          'AI_PROCESSED', 'READY_TO_PUSH', 'PUSHED', 'ARCHIVED'
+        )
+      )
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_product_drafts
+      DROP CONSTRAINT IF EXISTS scraping_v2_product_drafts_origin_check
+    `)
+    await client.query(`
+      ALTER TABLE scraping_v2_product_drafts
+      ADD CONSTRAINT scraping_v2_product_drafts_origin_check
+      CHECK (origin IN ('MANUAL', 'AI'))
+    `)
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS scraping_v2_draft_albums (
@@ -343,6 +392,37 @@ async function migrate() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS scraping_v2_training_examples_supplier_idx
       ON scraping_v2_training_examples (supplier_id, created_at DESC)
+    `)
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS scraping_v2_ai_jobs (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES scraping_v2_runs(id) ON DELETE CASCADE,
+        supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+        stage TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'RUNNING',
+        model TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        input_count INTEGER NOT NULL DEFAULT 0,
+        output_count INTEGER NOT NULL DEFAULT 0,
+        cache_hits INTEGER NOT NULL DEFAULT 0,
+        usage JSONB NOT NULL DEFAULT '{}'::jsonb,
+        result JSONB NOT NULL DEFAULT '{}'::jsonb,
+        error TEXT,
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMPTZ,
+        CONSTRAINT scraping_v2_ai_jobs_stage_check CHECK (stage IN ('GROUPING', 'PRODUCT_PROCESSING')),
+        CONSTRAINT scraping_v2_ai_jobs_status_check CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED'))
+      )
+    `)
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS scraping_v2_ai_jobs_run_started_idx
+      ON scraping_v2_ai_jobs (run_id, started_at DESC)
+    `)
+
+    await client.query(`
+      ALTER TABLE scraping_v2_runs
+      DROP CONSTRAINT IF EXISTS scraping_v2_runs_production_push_disabled
     `)
 
     await client.query(`

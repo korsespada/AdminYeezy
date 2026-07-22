@@ -8,6 +8,8 @@ export default async function AIRulesPage() {
   const rulesRes = await getSettingAction('general_ai_rules')
   const modelsRes = await getSettingAction('available_ai_models')
   const selectedModelRes = await getSettingAction('selected_ai_model')
+  const v2GroupingModelRes = await getSettingAction('exports_v2_grouping_model')
+  const v2ProductModelRes = await getSettingAction('exports_v2_product_model')
   
   const initialModels = modelsRes.data ? JSON.parse(modelsRes.data) : []
   const initialSelectedModel = selectedModelRes.data || ''
@@ -24,6 +26,8 @@ export default async function AIRulesPage() {
             initialRules={rulesRes.data || ''} 
             initialModels={initialModels} 
             initialSelectedModel={initialSelectedModel}
+            initialV2GroupingModel={v2GroupingModelRes.data || initialSelectedModel}
+            initialV2ProductModel={v2ProductModelRes.data || initialSelectedModel}
         />
       </div>
     </div>
