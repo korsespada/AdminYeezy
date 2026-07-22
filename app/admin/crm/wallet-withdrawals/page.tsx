@@ -1,9 +1,5 @@
 import Link from 'next/link'
-import {
-  approveWalletWithdrawalAction,
-  markWalletWithdrawalPaidAction,
-  rejectWalletWithdrawalAction,
-} from '@/actions/crm'
+import { WithdrawalActions } from '@/components/crm/CrmFinancialActions'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -120,45 +116,6 @@ function WithdrawalRow({ request }: { request: RailsCrmWalletWithdrawal }) {
       </td>
     </tr>
   )
-}
-
-export function WithdrawalActions({ request }: { request: RailsCrmWalletWithdrawal }) {
-  if (request.status === 'requested') {
-    return (
-      <div className="ml-auto grid max-w-64 gap-2">
-        <form action={approveWalletWithdrawalAction} className="flex justify-end">
-          <input type="hidden" name="withdrawalId" value={String(request.id)} />
-          <Button type="submit" size="sm" className="bg-emerald-600 hover:bg-emerald-500">
-            Approve
-          </Button>
-        </form>
-        <form action={rejectWalletWithdrawalAction} className="flex gap-2">
-          <input type="hidden" name="withdrawalId" value={String(request.id)} />
-          <input
-            name="message"
-            placeholder="Reject reason"
-            className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white outline-none transition focus:border-sky-500"
-          />
-          <Button type="submit" size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800">
-            Reject
-          </Button>
-        </form>
-      </div>
-    )
-  }
-
-  if (request.status === 'approved') {
-    return (
-      <form action={markWalletWithdrawalPaidAction} className="flex justify-end">
-        <input type="hidden" name="withdrawalId" value={String(request.id)} />
-        <Button type="submit" size="sm" className="bg-sky-600 hover:bg-sky-500">
-          Mark paid
-        </Button>
-      </form>
-    )
-  }
-
-  return <div className="text-right text-xs text-slate-600">-</div>
 }
 
 function formatMoney(value?: number, currency = 'RUB') {

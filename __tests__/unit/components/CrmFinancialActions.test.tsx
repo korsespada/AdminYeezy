@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { RefundActions } from '@/app/admin/crm/refunds/page'
-import { WithdrawalActions } from '@/app/admin/crm/wallet-withdrawals/page'
+import { RefundActions, WithdrawalActions } from '@/components/crm/CrmFinancialActions'
 
 vi.mock('@/actions/crm', () => ({
   approveRefundAction: vi.fn(),

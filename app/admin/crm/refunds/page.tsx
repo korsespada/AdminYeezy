@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { approveRefundAction, rejectRefundAction } from '@/actions/crm'
+import { RefundActions } from '@/components/crm/CrmFinancialActions'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -118,36 +118,6 @@ function RefundsTable({ refunds, totalItems }: { refunds: RailsCrmRefund[]; tota
         </table>
       </div>
     </section>
-  )
-}
-
-export function RefundActions({ refund }: { refund: RailsCrmRefund }) {
-  if (!['requested', 'pending'].includes(refund.status)) {
-    return <div className="text-right text-xs text-slate-600">-</div>
-  }
-
-  return (
-    <div className="ml-auto grid max-w-64 gap-2">
-      <form action={approveRefundAction} className="flex justify-end">
-        <input type="hidden" name="refundId" value={String(refund.id)} />
-        <input type="hidden" name="orderId" value={refund.order_id ? String(refund.order_id) : ''} />
-        <Button type="submit" size="sm" className="bg-emerald-600 hover:bg-emerald-500">
-          Approve
-        </Button>
-      </form>
-      <form action={rejectRefundAction} className="flex gap-2">
-        <input type="hidden" name="refundId" value={String(refund.id)} />
-        <input type="hidden" name="orderId" value={refund.order_id ? String(refund.order_id) : ''} />
-        <input
-          name="message"
-          placeholder="Reject reason"
-          className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-white outline-none transition focus:border-sky-500"
-        />
-        <Button type="submit" size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800">
-          Reject
-        </Button>
-      </form>
-    </div>
   )
 }
 
