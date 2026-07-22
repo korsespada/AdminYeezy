@@ -122,6 +122,17 @@ export interface RailsCrmCustomerSummary {
   wallet_total_cents: number
 }
 
+export interface RailsTelegramNotificationRecipient {
+  id: string
+  telegram_id: string
+  label?: string | null
+  notify_new_orders: boolean
+  notify_new_customers: boolean
+  is_active: boolean
+  created_at?: string
+  updated_at?: string
+}
+
 export interface RailsCrmSupplierRequest {
   id: number | string
   supplier_id?: number | string
@@ -935,6 +946,76 @@ export async function listRailsCrmCustomers(options: {
     totalItems: Number(result.meta?.total || 0),
     totalPages: Number(result.meta?.pages || 0),
   }
+}
+
+export async function listRailsTelegramNotificationRecipients(): Promise<RailsTelegramNotificationRecipient[]> {
+  const result = await railsFetch<{ recipients: RailsTelegramNotificationRecipient[] }>(
+    '/admin/telegram_notification_recipients'
+  )
+  return result.recipients || []
+}
+
+export async function createRailsTelegramNotificationRecipient(input: {
+  telegramId: string
+  label?: string
+  notifyNewOrders: boolean
+  notifyNewCustomers: boolean
+  isActive: boolean
+}) {
+  const result = await railsFetch<{ recipient: RailsTelegramNotificationRecipient }>(
+    '/admin/telegram_notification_recipients',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        label: input.label || '',
+        notify_new_orders: input.notifyNewOrders,
+        notify_new_customers: input.notifyNewCustomers,
+        is_active: input.isActive,
+      }),
+    }
+  )
+  return result.recipient
+}
+
+export async function updateRailsTelegramNotificationRecipient(
+  id: string,
+  input: {
+    telegramId: string
+    label?: string
+    notifyNewOrders: boolean
+    notifyNewCustomers: boolean
+    isActive: boolean
+  }
+) {
+  const result = await railsFetch<{ recipient: RailsTelegramNotificationRecipient }>(
+    `/admin/telegram_notification_recipients/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        telegram_id: input.telegramId,
+        label: input.label || '',
+        notify_new_orders: input.notifyNewOrders,
+        notify_new_customers: input.notifyNewCustomers,
+        is_active: input.isActive,
+      }),
+    }
+  )
+  return result.recipient
+}
+
+export async function deleteRailsTelegramNotificationRecipient(id: string) {
+  await railsFetch<Record<string, never>>(
+    `/admin/telegram_notification_recipients/${encodeURIComponent(id)}`,
+    { method: 'DELETE' }
+  )
+}
+
+export async function testRailsTelegramNotificationRecipient(id: string) {
+  await railsFetch<{ delivered: boolean }>(
+    `/admin/telegram_notification_recipients/${encodeURIComponent(id)}/test_delivery`,
+    { method: 'POST' }
+  )
 }
 
 export async function approveRailsCrmRefund(id: string) {

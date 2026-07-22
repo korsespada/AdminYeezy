@@ -4,6 +4,7 @@ import {
   listRailsCrmCustomers,
   listRailsCrmRefunds,
   listRailsCrmWalletWithdrawals,
+  listRailsTelegramNotificationRecipients,
   type RailsCrmCustomerSummary,
   type RailsCrmListResult,
   type RailsCrmOrder,
@@ -28,10 +29,11 @@ export default async function CrmPage() {
     pendingRefunds: null as number | null,
     pendingWithdrawals: null as number | null,
     customers: null as number | null,
+    notifications: null as number | null,
   }
 
   if (railsConfigured) {
-    const [recent, paid, problem, production, refundQueue, pendingRefunds, pendingWithdrawals, customers] = await Promise.allSettled([
+    const [recent, paid, problem, production, refundQueue, pendingRefunds, pendingWithdrawals, customers, notifications] = await Promise.allSettled([
       listRailsCrmOrders({ page: 1, perPage: 6 }),
       listRailsCrmOrders({ page: 1, perPage: 1, queue: 'paid' }),
       listRailsCrmOrders({ page: 1, perPage: 1, queue: 'problem' }),
@@ -40,6 +42,7 @@ export default async function CrmPage() {
       listRailsCrmRefunds({ page: 1, perPage: 1, status: 'requested' }),
       listRailsCrmWalletWithdrawals({ status: 'requested' }),
       listRailsCrmCustomers({ page: 1, perPage: 1 }),
+      listRailsTelegramNotificationRecipients(),
     ])
 
     recentOrders = fulfilledItems<RailsCrmOrder>(recent, errors)
@@ -50,6 +53,11 @@ export default async function CrmPage() {
     counts.pendingRefunds = fulfilledTotal<RailsCrmRefund>(pendingRefunds, errors)
     counts.pendingWithdrawals = fulfilledTotal<RailsCrmWalletWithdrawal>(pendingWithdrawals, errors)
     counts.customers = fulfilledTotal<RailsCrmCustomerSummary>(customers, errors)
+    if (notifications.status === 'fulfilled') {
+      counts.notifications = notifications.value.filter((recipient) => recipient.is_active).length
+    } else {
+      errors.push(notifications.reason?.message || 'Настройки Telegram-уведомлений недоступны')
+    }
   }
 
   return (

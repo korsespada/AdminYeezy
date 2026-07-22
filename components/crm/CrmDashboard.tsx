@@ -2,6 +2,7 @@ import Link from 'next/link'
 import {
   AlertTriangle,
   ArrowRight,
+  BellRing,
   ClipboardList,
   CreditCard,
   PackageCheck,
@@ -24,6 +25,7 @@ interface CrmDashboardProps {
     pendingRefunds?: number | null
     pendingWithdrawals?: number | null
     customers?: number | null
+    notifications?: number | null
   }
   errors?: string[]
 }
@@ -82,6 +84,15 @@ const workspaces = [
     tone: 'text-cyan-300',
     countKey: 'customers',
     countLabel: 'пользователей',
+  },
+  {
+    title: 'Уведомления',
+    description: 'Получатели Telegram-сообщений о новых клиентах и заказах с сайта.',
+    href: '/admin/crm/notifications',
+    icon: BellRing,
+    tone: 'text-violet-300',
+    countKey: 'notifications',
+    countLabel: 'активных получателей',
   },
 ] as const
 
