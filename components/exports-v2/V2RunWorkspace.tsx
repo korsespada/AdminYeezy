@@ -15,6 +15,8 @@ import {
   Loader2,
   LockKeyhole,
   MousePointer2,
+  PlusCircle,
+  RotateCcw,
   ScanText,
   Sparkles,
   Split,
@@ -24,7 +26,9 @@ import {
   X,
 } from 'lucide-react'
 import {
+  addExportsV2AlbumsToDraftAction,
   createExportsV2DraftAction,
+  reopenExportsV2DraftAction,
   saveExportsV2TrainingExampleAction,
   ungroupExportsV2AlbumAction,
   updateExportsV2AlbumRoleAction,
@@ -38,7 +42,7 @@ const ROLE_OPTIONS: Array<{
   hint: string
 }> = [
   { value: 'UNASSIGNED', label: 'Выберите роль', hint: 'Пока ничего не использовать' },
-  { value: 'PRIMARY_MEDIA', label: 'Основные медиа', hint: 'Фото и видео публикуются первыми; текст используется AI' },
+  { value: 'PRIMARY_MEDIA', label: 'Основные медиа + текст', hint: 'Фото и видео публикуются первыми; текст используется AI' },
   { value: 'ON_MODEL', label: 'На модели', hint: 'Медиа публикуются после основных с лимитом поставщика' },
   { value: 'MEDIA_WITH_TEXT', label: 'Медиа + текст', hint: 'Медиа публикуются, текст используется AI' },
   { value: 'EXTRA_MEDIA', label: 'Дополнительные медиа', hint: 'Медиа публикуются после основных и кадров на модели' },
@@ -65,7 +69,10 @@ export default function V2RunWorkspace({
   const totalPages = Math.max(1, Math.ceil(initialData.total_albums / initialData.per_page))
 
   const selectedAlbums = useMemo(
-    () => initialData.albums.filter((album) => selected.includes(album.id)),
+    () => {
+      const albumsById = new Map(initialData.albums.map((album) => [album.id, album]))
+      return selected.map((albumId) => albumsById.get(albumId)).filter((album): album is V2Album => Boolean(album))
+    },
     [initialData.albums, selected],
   )
 
@@ -86,7 +93,35 @@ export default function V2RunWorkspace({
       return
     }
     setSelected([])
-    setMessage({ type: 'success', text: 'Черновик создан. Теперь назначьте роль каждому альбому.' })
+    setMessage({ type: 'success', text: 'Черновик создан. Первый выбранный альбом назначен основным.' })
+    router.refresh()
+  }
+
+  const addToDraft = async (draftId: string) => {
+    setPending(`add-${draftId}`)
+    setMessage(null)
+    const result = await addExportsV2AlbumsToDraftAction(draftId, selected)
+    setPending('')
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось добавить альбомы в товар' })
+      return
+    }
+    setSelected([])
+    setMessage({ type: 'success', text: 'Выбранные альбомы добавлены в товар в порядке выбора.' })
+    router.refresh()
+  }
+
+  const reopenDraft = async (draftId: string) => {
+    if (!window.confirm('Удалить этот пример из обучения и вернуть товар в режим редактирования?')) return
+    setPending(`reopen-${draftId}`)
+    setMessage(null)
+    const result = await reopenExportsV2DraftAction(draftId)
+    setPending('')
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось отменить сохранение примера' })
+      return
+    }
+    setMessage({ type: 'success', text: 'Пример удалён из обучения. Теперь можно изменить состав и роли.' })
     router.refresh()
   }
 
@@ -223,7 +258,7 @@ export default function V2RunWorkspace({
                 <div className="text-sm font-semibold text-white">Выбрано: {selected.length}</div>
                 <div className="text-xs text-slate-500">
                   {selectedAlbums.length > 0
-                    ? `Позиции: ${selectedAlbums.map((album) => album.source_order).join(', ')}`
+                    ? `Порядок выбора: ${selectedAlbums.map((album) => album.source_order).join(' → ')}`
                     : 'Выберите альбомы, которые относятся к одному товару'}
                 </div>
               </div>
@@ -252,6 +287,7 @@ export default function V2RunWorkspace({
                 key={album.id}
                 album={album}
                 selected={selected.includes(album.id)}
+                selectionOrder={selected.indexOf(album.id) + 1}
                 onToggle={() => toggleAlbum(album)}
                 onPreview={() => setPreviewAlbum(album)}
               />
@@ -287,6 +323,9 @@ export default function V2RunWorkspace({
             </div>
             <span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">{initialData.drafts.length}</span>
           </div>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-4 text-amber-100/80">
+            Сохранение примеров пока не запускает AI и не расходует токены. Автоматическая группировка будет отдельным следующим этапом.
+          </div>
 
           {initialData.drafts.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-500">
@@ -301,12 +340,23 @@ export default function V2RunWorkspace({
                 </div>
                 {draft.status === 'GROUPED' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase text-emerald-300">
-                    <BookOpenCheck className="h-3 w-3" /> Обучение
+                    <BookOpenCheck className="h-3 w-3" /> Пример
                   </span>
                 )}
               </div>
 
               <div className="space-y-3 p-4">
+                {draft.status !== 'GROUPED' && selected.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => addToDraft(draft.id)}
+                    disabled={pending === `add-${draft.id}`}
+                    className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-xs font-bold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+                  >
+                    {pending === `add-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlusCircle className="h-4 w-4" />}
+                    Добавить выбранные альбомы ({selected.length})
+                  </button>
+                )}
                 {draft.albums.map((album) => {
                   const currentRole = ROLE_OPTIONS.find((option) => option.value === album.role)
                   return (
@@ -315,8 +365,8 @@ export default function V2RunWorkspace({
                         <button
                           type="button"
                           onClick={() => ungroup(draft.id, album.id)}
-                          disabled={pending === `ungroup-${album.id}`}
-                          title="Вернуть альбом в сетку"
+                          disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
+                          title={draft.status === 'GROUPED' ? 'Сначала отмените сохранение примера' : 'Вернуть альбом в сетку'}
                           className="shrink-0 overflow-hidden rounded-lg ring-offset-slate-900 hover:ring-2 hover:ring-red-400/60 disabled:opacity-50"
                         >
                           <AlbumThumb album={album} className="h-16 w-16" />
@@ -326,7 +376,7 @@ export default function V2RunWorkspace({
                             <button
                               type="button"
                               onClick={() => ungroup(draft.id, album.id)}
-                              disabled={pending === `ungroup-${album.id}`}
+                              disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
                               className="truncate text-left text-xs font-bold text-slate-300 hover:text-red-300"
                               title="Вернуть альбом в сетку"
                             >
@@ -344,8 +394,8 @@ export default function V2RunWorkspace({
                               <button
                                 type="button"
                                 onClick={() => ungroup(draft.id, album.id)}
-                                disabled={pending === `ungroup-${album.id}`}
-                                title="Вернуть альбом в сетку"
+                                disabled={draft.status === 'GROUPED' || pending === `ungroup-${album.id}`}
+                                title={draft.status === 'GROUPED' ? 'Сначала отмените сохранение примера' : 'Вернуть альбом в сетку'}
                                 className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-red-300"
                               >
                                 {pending === `ungroup-${album.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Split className="h-3.5 w-3.5" />}
@@ -355,7 +405,7 @@ export default function V2RunWorkspace({
                           <select
                             value={album.role}
                             onChange={(event) => updateRole(draft.id, album.id, event.target.value as V2AlbumRole)}
-                            disabled={pending === `role-${album.id}`}
+                            disabled={draft.status === 'GROUPED' || pending === `role-${album.id}`}
                             className="mt-2 h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs font-semibold text-slate-200 outline-none focus:border-cyan-500"
                           >
                             {ROLE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -369,15 +419,27 @@ export default function V2RunWorkspace({
 
                 <RoleSummary draft={draft} maxOnModelMedia={initialData.max_on_model_media} />
 
-                <button
-                  type="button"
-                  onClick={() => saveExample(draft)}
-                  disabled={pending === `example-${draft.id}` || draft.status === 'GROUPED'}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
-                >
-                  {pending === `example-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                  {draft.status === 'GROUPED' ? 'Пример сохранён' : 'Сохранить как пример поставщика'}
-                </button>
+                {draft.status === 'GROUPED' ? (
+                  <button
+                    type="button"
+                    onClick={() => reopenDraft(draft.id)}
+                    disabled={pending === `reopen-${draft.id}`}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-sm font-bold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                  >
+                    {pending === `reopen-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    Удалить пример и редактировать
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => saveExample(draft)}
+                    disabled={pending === `example-${draft.id}`}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 text-sm font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+                  >
+                    {pending === `example-${draft.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    Сохранить как пример поставщика
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -398,11 +460,13 @@ export default function V2RunWorkspace({
 function AlbumCard({
   album,
   selected,
+  selectionOrder,
   onToggle,
   onPreview,
 }: {
   album: V2Album
   selected: boolean
+  selectionOrder: number
   onToggle: () => void
   onPreview: () => void
 }) {
@@ -426,7 +490,7 @@ function AlbumCard({
             <ImageIcon className="h-3 w-3" /> {album.photos.length}
             {videoCount > 0 && <><Video className="ml-1 h-3 w-3" /> {videoCount}</>}
           </div>
-          {selected && <div className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-cyan-400 text-slate-950"><Check className="h-4 w-4" /></div>}
+          {selected && <div className="absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-cyan-400 px-1 text-xs font-black text-slate-950">{selectionOrder}</div>}
           {assigned && <div className="absolute inset-x-2 bottom-2 rounded-md bg-indigo-500/90 px-2 py-1 text-center text-[10px] font-bold text-white">Уже в товаре</div>}
         </div>
         <div className="p-3">
@@ -562,7 +626,7 @@ function RoleSummary({ draft, maxOnModelMedia }: { draft: V2Draft; maxOnModelMed
         <SummaryMetric icon={ScanText} label="OCR таблиц" value={ocrSources} />
       </div>
       <p className="mt-2 text-center text-[10px] text-slate-500">
-        Порядок: основные → медиа + текст → на модели → дополнительные. Внутри ролей порядок поставщика сохраняется.
+        Порядок: основные → медиа + текст → на модели → дополнительные. Внутри ролей сохраняется порядок выбора.
       </p>
     </div>
   )

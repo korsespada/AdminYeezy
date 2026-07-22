@@ -2,7 +2,7 @@ import type { V2AlbumRole, V2DraftAlbum } from '@/lib/exports-v2-types'
 
 type V2MediaPlanAlbum = Pick<
   V2DraftAlbum,
-  'id' | 'source_order' | 'photos' | 'media' | 'role' | 'use_media'
+  'id' | 'source_order' | 'draft_sort_order' | 'photos' | 'media' | 'role' | 'use_media'
 >
 
 export type V2PlannedMedia = {
@@ -12,6 +12,7 @@ export type V2PlannedMedia = {
   role: V2AlbumRole
   album_id: string
   source_album_order: number
+  draft_album_order: number
   source_media_order: number
   sort_order: number
 }
@@ -45,7 +46,7 @@ export function buildExportsV2MediaPlan(
 ): V2MediaPlan {
   const onModelLimit = Math.max(0, Math.floor(Number(maxOnModelMedia) || 0))
   const orderedAlbums = [...albums].sort(
-    (left, right) => left.source_order - right.source_order || left.id.localeCompare(right.id),
+    (left, right) => left.draft_sort_order - right.draft_sort_order || left.id.localeCompare(right.id),
   )
   const candidates: Omit<V2PlannedMedia, 'sort_order'>[] = []
   let onModelAvailable = 0
@@ -68,6 +69,7 @@ export function buildExportsV2MediaPlan(
         role: album.role,
         album_id: album.id,
         source_album_order: album.source_order,
+        draft_album_order: album.draft_sort_order,
         source_media_order: sourceMediaOrder,
       })
     })
@@ -76,7 +78,7 @@ export function buildExportsV2MediaPlan(
   const items = candidates
     .sort((left, right) =>
       (ROLE_PRIORITY[left.role] || 999) - (ROLE_PRIORITY[right.role] || 999)
-      || left.source_album_order - right.source_album_order
+      || left.draft_album_order - right.draft_album_order
       || left.source_media_order - right.source_media_order,
     )
     .map((media, sortOrder) => ({ ...media, sort_order: sortOrder }))

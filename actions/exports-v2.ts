@@ -811,6 +811,7 @@ export async function getExportsV2RunAction(
         a.photos,
         a.media,
         da.draft_id,
+        da.sort_order AS draft_sort_order,
         da.role,
         da.use_text,
         da.use_media,
@@ -852,12 +853,13 @@ export async function getExportsV2RunAction(
               'photos', a.photos,
               'media', a.media,
               'draft_id', da.draft_id,
+              'draft_sort_order', da.sort_order,
               'role', da.role,
               'use_text', da.use_text,
               'use_media', da.use_media,
               'use_photos', da.use_photos,
               'use_for_ai', da.use_for_ai
-            ) ORDER BY COALESCE(o.source_position, a.source_order), da.sort_order
+            ) ORDER BY da.sort_order, COALESCE(o.source_position, a.source_order)
           ) FILTER (WHERE a.id IS NOT NULL),
           '[]'::json
         ) AS albums
@@ -912,7 +914,6 @@ export async function createExportsV2DraftAction(runId: string, albumIds: string
       LEFT JOIN scraping_v2_album_observations o
         ON o.album_id=a.id AND o.pass_id=(SELECT id FROM latest_pass)
       WHERE a.run_id = $1 AND a.id = ANY($2::text[]) AND da.album_id IS NULL
-      ORDER BY COALESCE(o.source_position, a.source_order)
       FOR UPDATE OF a
     `, [runId, uniqueAlbumIds])
 
@@ -929,17 +930,144 @@ export async function createExportsV2DraftAction(runId: string, albumIds: string
       VALUES ($1,$2,$3,'GROUPING_DRAFT',$4)
     `, [draftId, runId, runResult.rows[0].supplier_id, `Товар из ${uniqueAlbumIds.length} альб.`])
 
-    for (const [index, album] of albumsResult.rows.entries()) {
+    const albumsById = new Map(albumsResult.rows.map((album) => [String(album.id), album]))
+    const orderedAlbums = uniqueAlbumIds.map((albumId) => albumsById.get(albumId))
+    if (orderedAlbums.some((album) => !album)) {
+      throw new Error('Не удалось сохранить порядок выбранных альбомов')
+    }
+
+    for (const [index, album] of orderedAlbums.entries()) {
+      const role: V2AlbumRole = index === 0 ? 'PRIMARY_MEDIA' : 'UNASSIGNED'
+      const flags = ROLE_FLAGS[role]
       await client.query(`
-        INSERT INTO scraping_v2_draft_albums (draft_id, album_id, role, sort_order)
-        VALUES ($1,$2,'UNASSIGNED',$3)
-      `, [draftId, album.id, index])
+        INSERT INTO scraping_v2_draft_albums (
+          draft_id, album_id, role, use_text, use_media, use_photos, use_for_ai, sort_order
+        )
+        VALUES ($1,$2,$3,$4,$5,$5,$6,$7)
+      `, [draftId, album.id, role, flags.useText, flags.useMedia, flags.useForAi, index])
     }
 
     await client.query("UPDATE scraping_v2_runs SET status='GROUPING', updated_at=NOW() WHERE id=$1", [runId])
     await client.query('COMMIT')
     revalidatePath(`/admin/exports-v2/${runId}`)
     return { success: true, data: { id: draftId } }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
+}
+
+export async function addExportsV2AlbumsToDraftAction(
+  draftId: string,
+  albumIds: string[],
+): Promise<ActionResponse> {
+  const client = await getScrapingClient()
+
+  try {
+    await requireAdmin()
+    const uniqueAlbumIds = [...new Set(albumIds.map(String).filter(Boolean))]
+    if (uniqueAlbumIds.length === 0) throw new Error('Выберите хотя бы один альбом')
+
+    await client.query('BEGIN')
+    const draftResult = await client.query(`
+      SELECT d.run_id, d.status
+      FROM scraping_v2_product_drafts d
+      WHERE d.id=$1 AND d.status <> 'ARCHIVED'
+      FOR UPDATE
+    `, [draftId])
+    const draft = draftResult.rows[0]
+    if (!draft) throw new Error('Черновик товара не найден')
+    if (draft.status === 'GROUPED') {
+      throw new Error('Сначала отмените сохранение примера, затем изменяйте состав товара')
+    }
+
+    const existingExample = await client.query(
+      'SELECT 1 FROM scraping_v2_training_examples WHERE draft_id=$1 LIMIT 1',
+      [draftId],
+    )
+    if (existingExample.rows[0]) {
+      throw new Error('Сначала отмените сохранение примера, затем изменяйте состав товара')
+    }
+
+    const countResult = await client.query(
+      'SELECT COUNT(*)::int AS count, COALESCE(MAX(sort_order), -1)::int AS max_sort_order FROM scraping_v2_draft_albums WHERE draft_id=$1',
+      [draftId],
+    )
+    const existingCount = Number(countResult.rows[0]?.count || 0)
+    if (existingCount + uniqueAlbumIds.length > MAX_GROUP_SIZE) {
+      throw new Error(`В одном товаре может быть не более ${MAX_GROUP_SIZE} альбомов`)
+    }
+
+    const albumsResult = await client.query(`
+      SELECT a.id
+      FROM scraping_v2_albums a
+      LEFT JOIN scraping_v2_draft_albums da ON da.album_id=a.id
+      WHERE a.run_id=$1 AND a.id=ANY($2::text[]) AND da.album_id IS NULL
+      FOR UPDATE OF a
+    `, [draft.run_id, uniqueAlbumIds])
+    if (albumsResult.rows.length !== uniqueAlbumIds.length) {
+      throw new Error('Часть альбомов уже входит в другой товар или относится к другому запуску')
+    }
+
+    const availableIds = new Set(albumsResult.rows.map((album) => String(album.id)))
+    let sortOrder = Number(countResult.rows[0]?.max_sort_order ?? -1) + 1
+    for (const albumId of uniqueAlbumIds) {
+      if (!availableIds.has(albumId)) throw new Error('Не удалось сохранить порядок выбранных альбомов')
+      await client.query(`
+        INSERT INTO scraping_v2_draft_albums (draft_id, album_id, role, sort_order)
+        VALUES ($1,$2,'UNASSIGNED',$3)
+      `, [draftId, albumId, sortOrder])
+      sortOrder += 1
+    }
+
+    const totalCount = existingCount + uniqueAlbumIds.length
+    await client.query(`
+      UPDATE scraping_v2_product_drafts
+      SET name=$2, status='GROUPING_DRAFT', updated_at=NOW()
+      WHERE id=$1
+    `, [draftId, `Товар из ${totalCount} альб.`])
+    await client.query('COMMIT')
+    revalidatePath(`/admin/exports-v2/${draft.run_id}`)
+    return { success: true }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
+}
+
+export async function reopenExportsV2DraftAction(draftId: string): Promise<ActionResponse> {
+  const client = await getScrapingClient()
+
+  try {
+    await requireAdmin()
+    await client.query('BEGIN')
+    const draftResult = await client.query(`
+      SELECT run_id
+      FROM scraping_v2_product_drafts
+      WHERE id=$1 AND status <> 'ARCHIVED'
+      FOR UPDATE
+    `, [draftId])
+    const runId = draftResult.rows[0]?.run_id
+    if (!runId) throw new Error('Черновик товара не найден')
+
+    const deleted = await client.query(
+      'DELETE FROM scraping_v2_training_examples WHERE draft_id=$1 RETURNING id',
+      [draftId],
+    )
+    await client.query(`
+      UPDATE scraping_v2_product_drafts
+      SET status='GROUPING_DRAFT', updated_at=NOW()
+      WHERE id=$1
+    `, [draftId])
+    await client.query('COMMIT')
+
+    revalidatePath(`/admin/exports-v2/${runId}`)
+    revalidatePath('/admin/exports-v2')
+    return { success: true, data: { removedExamples: deleted.rowCount || 0 } }
   } catch (error: any) {
     await client.query('ROLLBACK')
     return { success: false, error: error.message }
@@ -959,12 +1087,17 @@ export async function updateExportsV2AlbumRoleAction(
     if (!flags) return { success: false, error: 'Неизвестная роль альбома' }
 
     const result = await scrapingQuery(`
-      UPDATE scraping_v2_draft_albums
+      UPDATE scraping_v2_draft_albums da
       SET role=$1, use_text=$2, use_media=$3, use_photos=$3, use_for_ai=$4, updated_at=NOW()
-      WHERE draft_id=$5 AND album_id=$6
-      RETURNING draft_id
+      FROM scraping_v2_product_drafts d
+      WHERE da.draft_id=$5 AND da.album_id=$6 AND d.id=da.draft_id
+        AND d.status <> 'GROUPED'
+        AND NOT EXISTS (
+          SELECT 1 FROM scraping_v2_training_examples te WHERE te.draft_id=da.draft_id
+        )
+      RETURNING da.draft_id
     `, [role, flags.useText, flags.useMedia, flags.useForAi, draftId, albumId])
-    if (!result.rows[0]) return { success: false, error: 'Связь альбома с товаром не найдена' }
+    if (!result.rows[0]) return { success: false, error: 'Сначала отмените сохранение примера, затем меняйте роли' }
 
     const runResult = await scrapingQuery(`
       SELECT d.run_id
@@ -985,14 +1118,42 @@ export async function ungroupExportsV2AlbumAction(draftId: string, albumId: stri
   try {
     await requireAdmin()
     await client.query('BEGIN')
-    const draftResult = await client.query('SELECT run_id FROM scraping_v2_product_drafts WHERE id=$1 FOR UPDATE', [draftId])
-    const runId = draftResult.rows[0]?.run_id
+    const draftResult = await client.query(`
+      SELECT d.run_id, d.status,
+        EXISTS (SELECT 1 FROM scraping_v2_training_examples te WHERE te.draft_id=d.id) AS has_example
+      FROM scraping_v2_product_drafts d
+      WHERE d.id=$1
+      FOR UPDATE
+    `, [draftId])
+    const draft = draftResult.rows[0]
+    const runId = draft?.run_id
     if (!runId) throw new Error('Черновик товара не найден')
+    if (draft.status === 'GROUPED' || draft.has_example) {
+      throw new Error('Сначала отмените сохранение примера, затем изменяйте состав товара')
+    }
 
     await client.query('DELETE FROM scraping_v2_draft_albums WHERE draft_id=$1 AND album_id=$2', [draftId, albumId])
     const countResult = await client.query('SELECT COUNT(*)::int AS count FROM scraping_v2_draft_albums WHERE draft_id=$1', [draftId])
-    if (Number(countResult.rows[0]?.count || 0) === 0) {
+    const remainingCount = Number(countResult.rows[0]?.count || 0)
+    if (remainingCount === 0) {
       await client.query("UPDATE scraping_v2_product_drafts SET status='ARCHIVED', updated_at=NOW() WHERE id=$1", [draftId])
+    } else {
+      await client.query(`
+        WITH ordered AS (
+          SELECT album_id, ROW_NUMBER() OVER (ORDER BY sort_order, created_at, album_id) - 1 AS next_order
+          FROM scraping_v2_draft_albums
+          WHERE draft_id=$1
+        )
+        UPDATE scraping_v2_draft_albums da
+        SET sort_order=ordered.next_order
+        FROM ordered
+        WHERE da.draft_id=$1 AND da.album_id=ordered.album_id
+      `, [draftId])
+      await client.query(`
+        UPDATE scraping_v2_product_drafts
+        SET name=$2, updated_at=NOW()
+        WHERE id=$1
+      `, [draftId, `Товар из ${remainingCount} альб.`])
     }
 
     await client.query('COMMIT')
@@ -1010,7 +1171,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
   try {
     await requireAdmin()
     const draftResult = await scrapingQuery(`
-      SELECT d.id, d.run_id, d.supplier_id, d.name, r.source_kind, s.max_on_model_media
+      SELECT d.id, d.run_id, d.supplier_id, d.name, d.status, r.source_kind, s.max_on_model_media
       FROM scraping_v2_product_drafts d
       JOIN scraping_v2_runs r ON r.id=d.run_id
       JOIN suppliers s ON s.id=d.supplier_id
@@ -1018,6 +1179,13 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
     `, [draftId])
     const draft = draftResult.rows[0]
     if (!draft) return { success: false, error: 'Черновик товара не найден' }
+    if (draft.status === 'GROUPED') return { success: false, error: 'Этот пример уже сохранён' }
+
+    const existingExample = await scrapingQuery(
+      'SELECT 1 FROM scraping_v2_training_examples WHERE draft_id=$1 LIMIT 1',
+      [draftId],
+    )
+    if (existingExample.rows[0]) return { success: false, error: 'Этот пример уже сохранён' }
 
     const albumsResult = await scrapingQuery(`
       SELECT
@@ -1051,7 +1219,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
     if (albumsResult.rows.some((album) => album.role === 'UNASSIGNED')) {
       return { success: false, error: 'Сначала назначьте роль каждому альбому' }
     }
-    if (!albumsResult.rows.some((album) => album.role === 'PRIMARY_MEDIA' || album.role === 'MEDIA_WITH_TEXT')) {
+    if (!albumsResult.rows.some((album) => album.role === 'PRIMARY_MEDIA')) {
       return { success: false, error: 'Для примера нужен хотя бы один альбом с основными медиа' }
     }
 
@@ -1193,6 +1361,7 @@ export async function saveExportsV2TrainingExampleAction(draftId: string): Promi
       orderedAlbums.map((album) => ({
         id: String(album.id),
         source_order: Number(album.source_position),
+        draft_sort_order: Number(album.draft_sort_order),
         photos: Array.isArray(album.photos) ? album.photos : [],
         media: Array.isArray(album.media) ? album.media : [],
         role: album.role,

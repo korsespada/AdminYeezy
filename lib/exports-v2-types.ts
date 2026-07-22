@@ -70,6 +70,7 @@ export interface V2Album {
     preview_url: string
   }>
   draft_id: string | null
+  draft_sort_order: number | null
   role: V2AlbumRole | null
   use_text: boolean | null
   use_media: boolean | null
@@ -78,6 +79,7 @@ export interface V2Album {
 }
 
 export interface V2DraftAlbum extends V2Album {
+  draft_sort_order: number
   role: V2AlbumRole
   use_text: boolean
   use_media: boolean

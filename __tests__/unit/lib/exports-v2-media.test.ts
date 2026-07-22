@@ -7,6 +7,7 @@ function album(
   sourceOrder: number,
   role: V2AlbumRole,
   media: V2DraftAlbum['media'],
+  draftOrder = sourceOrder,
 ): V2DraftAlbum {
   return {
     id,
@@ -19,6 +20,7 @@ function album(
     photos: media.filter((item) => item.type === 'image').map((item) => item.url),
     media,
     draft_id: 'draft-1',
+    draft_sort_order: draftOrder,
     role,
     use_text: role === 'PRIMARY_MEDIA' || role === 'MEDIA_WITH_TEXT' || role === 'TEXT_ONLY' || role === 'SIZE_CHART',
     use_media: ['PRIMARY_MEDIA', 'ON_MODEL', 'MEDIA_WITH_TEXT', 'EXTRA_MEDIA'].includes(role),
@@ -43,13 +45,14 @@ describe('buildExportsV2MediaPlan', () => {
     expect(plan.items.map((item) => item.sort_order)).toEqual([0, 1, 2])
   })
 
-  it('preserves supplier album order and media order inside the same role', () => {
+  it('preserves click order and media order inside the same role', () => {
     const plan = buildExportsV2MediaPlan([
-      album('later', 4, 'PRIMARY_MEDIA', [image('later-1')]),
-      album('earlier', 2, 'PRIMARY_MEDIA', [image('earlier-1'), image('earlier-2')]),
+      album('later', 4, 'PRIMARY_MEDIA', [image('later-1')], 0),
+      album('earlier', 2, 'PRIMARY_MEDIA', [image('earlier-1'), image('earlier-2')], 1),
     ])
 
-    expect(plan.items.map((item) => item.url)).toEqual(['earlier-1', 'earlier-2', 'later-1'])
+    expect(plan.items.map((item) => item.url)).toEqual(['later-1', 'earlier-1', 'earlier-2'])
+    expect(plan.items.map((item) => item.source_album_order)).toEqual([4, 2, 2])
   })
 
   it('caps on-model media without reordering the retained items', () => {
