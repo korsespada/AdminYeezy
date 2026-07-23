@@ -22,33 +22,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { isPriceOnRequest } from '@/lib/product-pricing'
-
-type CatalogAttributeDefinition = {
-  code: string
-  label: string
-  values: string[]
-  categories?: string[]
-}
-
-// The API stores attributes as a flat object, while the editor presents a
-// controlled list of category-aware choices. Values are intentionally kept
-// editable through the "Другое" option for attributes not covered here.
-const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
-  { code: 'material', label: 'Материал', values: ['Кожа', 'Замша', 'Текстиль', 'Шёлк', 'Хлопок', 'Полиэстер', 'Металл', 'Пластик'] },
-  { code: 'colors', label: 'Цвет', values: ['Чёрный', 'Белый', 'Бежевый', 'Коричневый', 'Серый', 'Синий', 'Красный', 'Розовый', 'Зелёный', 'Мультиколор'] },
-  { code: 'sizes', label: 'Размеры', values: ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45'] },
-  { code: 'season', label: 'Сезон', values: ['Весна', 'Лето', 'Осень', 'Зима', 'Демисезон'] },
-  { code: 'model_name', label: 'Модель', values: [] },
-  { code: 'brand', label: 'Бренд', values: [], categories: ['обув', 'сум', 'одеж', 'аксессуар', 'украш', 'часы'] },
-  { code: 'heel_height', label: 'Высота каблука', values: [], categories: ['обув'] },
-  { code: 'water_resistance', label: 'Водонепроницаемость', values: ['Да', 'Нет'], categories: ['часы', 'сум', 'обув'] },
-  { code: 'watch_movement', label: 'Механизм часов', values: ['Кварцевый', 'Механический', 'Автоматический'], categories: ['часы'] },
-  { code: 'jewelry_metal', label: 'Металл', values: ['Золото', 'Серебро', 'Платина', 'Сталь'], categories: ['украш'] },
-  { code: 'stones', label: 'Камни', values: [], categories: ['украш'] },
-  { code: 'dimensions', label: 'Габариты', values: [], categories: ['сум', 'багаж', 'чемод'] },
-]
-
-const ATTRIBUTE_OTHER_VALUE = '__other__'
+import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
+import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 
 interface ProductFormProps {
   product?: Product | null
@@ -94,23 +69,14 @@ export default function ProductForm({ product, brands, categories, subcategories
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
 
-  const selectedCategoryText = useMemo(() => {
-    const categoryItem = categories.find((item) => item.id === category)
-    const subcategoryItem = subcategories.find((item) => item.id === subcategory)
-    return `${categoryItem?.name || ''} ${subcategoryItem?.name || ''}`.toLocaleLowerCase()
-  }, [categories, subcategories, category, subcategory])
-
-  const categoryAttributeDefinitions = useMemo(() => {
-    const filtered = CATALOG_ATTRIBUTE_DEFINITIONS.filter((definition) => {
-      if (!definition.categories?.length) return true
-      return definition.categories.some((term) => selectedCategoryText.includes(term))
-    })
-    const known = new Set(filtered.map((definition) => definition.code))
-    const existing: CatalogAttributeDefinition[] = Object.keys(catalogAttributes)
-      .filter((key) => key && !known.has(key))
-      .map((code) => ({ code, label: code, values: [] }))
-    return [...filtered, ...existing]
-  }, [selectedCategoryText, catalogAttributes])
+  const selectedCategoryName = useMemo(
+    () => categories.find((item) => item.id === category)?.name || '',
+    [categories, category],
+  )
+  const selectedSubcategoryName = useMemo(
+    () => subcategories.find((item) => item.id === subcategory)?.name || '',
+    [subcategories, subcategory],
+  )
 
   const handleDownload = async (url: string, index: number) => {
     try {
@@ -300,45 +266,6 @@ export default function ProductForm({ product, brands, categories, subcategories
     setDraggedIndex(null)
   }
 
-  const updateCatalogAttribute = (oldKey: string, nextKey: string, rawValue: string) => {
-    setCatalogAttributes((current) => {
-      const next = { ...current }
-      if (oldKey !== nextKey) delete next[oldKey]
-      const key = nextKey.trim()
-      if (!key) return next
-      let value: unknown = rawValue
-      try {
-        value = JSON.parse(rawValue)
-      } catch {
-        value = rawValue
-      }
-      next[key] = value
-      return next
-    })
-  }
-
-  const addCatalogAttribute = () => {
-    setCatalogAttributes((current) => ({
-      ...current,
-      [`__new_${Date.now()}`]: '',
-    }))
-  }
-
-  const updateCatalogAttributeValue = (key: string, value: string) => {
-    updateCatalogAttribute(key, key, value)
-  }
-
-  const getAttributeDefinition = (key: string) =>
-    categoryAttributeDefinitions.find((definition) => definition.code === key)
-
-  const removeCatalogAttribute = (key: string) => {
-    setCatalogAttributes((current) => {
-      const next = { ...current }
-      delete next[key]
-      return next
-    })
-  }
-
   const buildMediaPayload = () => {
     return existingPhotos.map((url, index) => {
       const media = existingMedia.find((item) =>
@@ -406,11 +333,11 @@ export default function ProductForm({ product, brands, categories, subcategories
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
     formData.append('canonical_url', canonicalUrl.trim())
-    const normalizedCatalogAttributes = Object.fromEntries(
-      Object.entries(catalogAttributes)
-        .filter(([key]) => key && !key.startsWith('__new_'))
-        .map(([key, value]) => [key, value === ATTRIBUTE_OTHER_VALUE ? '' : value])
-    )
+    const normalizedCatalogAttributes = normalizeCatalogAttributes(catalogAttributes, {
+      categoryName: selectedCategoryName,
+      subcategoryName: selectedSubcategoryName,
+      preserveUnknown: true,
+    })
     formData.append('catalog_attributes', JSON.stringify(normalizedCatalogAttributes))
     const priceOnRequest = isPriceOnRequest(priceNum)
     formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
@@ -492,7 +419,7 @@ export default function ProductForm({ product, brands, categories, subcategories
         } else {
           setError(result.error || 'Failed to save product')
         }
-      } catch (err) {
+      } catch {
         setError('An unexpected error occurred')
       }
     })
@@ -798,89 +725,13 @@ export default function ProductForm({ product, brands, categories, subcategories
               </div>
             </div>
 
-            <div className="space-y-3 border-t border-gray-700 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300">
-                    Атрибуты каталога
-                  </label>
-                  <p className="mt-1 text-xs text-gray-500">
-                    Выберите характеристики для текущей категории. Можно добавить несколько.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addCatalogAttribute}
-                  disabled={isPending}
-                >
-                  Добавить
-                </Button>
-              </div>
-              {Object.entries(catalogAttributes).length === 0 ? (
-                <div className="rounded-lg border border-dashed border-gray-700 p-3 text-xs text-gray-500">
-                  Атрибутов пока нет
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {Object.entries(catalogAttributes).map(([key, value]) => {
-                    const definition = getAttributeDefinition(key)
-                    const stringValue = Array.isArray(value) ? JSON.stringify(value) : String(value ?? '')
-                    const isOtherValue = stringValue === ATTRIBUTE_OTHER_VALUE
-                    const displayValue = isOtherValue ? '' : stringValue
-                    const valueIsPreset = Boolean(definition?.values.includes(displayValue))
-                    return (
-                    <div key={key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2">
-                      <select
-                        value={definition ? key : ''}
-                        onChange={(event) => {
-                          const nextKey = event.target.value
-                          if (nextKey) updateCatalogAttribute(key, nextKey, '')
-                        }}
-                        className="min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                        disabled={isPending}
-                      >
-                        <option value="">Выберите атрибут...</option>
-                        {categoryAttributeDefinitions.map((option) => (
-                          <option key={option.code} value={option.code}>{option.label}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={valueIsPreset ? displayValue : isOtherValue ? ATTRIBUTE_OTHER_VALUE : displayValue ? ATTRIBUTE_OTHER_VALUE : ''}
-                        onChange={(event) => updateCatalogAttributeValue(key, event.target.value === ATTRIBUTE_OTHER_VALUE ? ATTRIBUTE_OTHER_VALUE : event.target.value)}
-                        className="min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                        disabled={isPending || !definition}
-                      >
-                        <option value="">Выберите значение...</option>
-                        {(definition?.values || []).map((option) => <option key={option} value={option}>{option}</option>)}
-                        {definition && <option value={ATTRIBUTE_OTHER_VALUE}>Другое…</option>}
-                      </select>
-                      {definition && (!valueIsPreset && (isOtherValue || displayValue || !definition.values.length)) && (
-                        <input
-                          value={displayValue}
-                          onChange={(event) => updateCatalogAttributeValue(key, event.target.value)}
-                          placeholder="Своё значение"
-                          className="col-span-2 min-w-0 rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
-                          disabled={isPending}
-                        />
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeCatalogAttribute(key)}
-                        disabled={isPending}
-                        className="text-gray-400 hover:text-red-400"
-                        title="Удалить атрибут"
-                      >
-                        <Trash2 size={16} />
-                      </Button>
-                    </div>
-                    )
-                  })}
-                </div>
-              )}
+            <div className="border-t border-gray-700 pt-4">
+              <CatalogAttributeFields
+                value={catalogAttributes}
+                onChange={setCatalogAttributes}
+                categoryName={selectedCategoryName}
+                subcategoryName={selectedSubcategoryName}
+              />
             </div>
 
             <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">

@@ -1576,6 +1576,12 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
   if (formData.has('catalog_attributes')) {
     product.catalog_attributes = parseJsonObject(formData.get('catalog_attributes'))
+    const variants = catalogAttributeVariants(
+      product.catalog_attributes,
+      String(product.sku || product.external_id || ''),
+      product.price_cents,
+    )
+    product.variants = variants
   }
 
   if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined) {
@@ -1611,6 +1617,45 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   }
 
   return { product }
+}
+
+export function catalogAttributeVariants(
+  attributes: Record<string, any>,
+  baseSku: string,
+  priceCents?: number,
+) {
+  const sizes = attributeValues(attributes?.sizes)
+  if (sizes.length === 0) return []
+
+  const skuPrefix = String(baseSku || 'product').trim() || 'product'
+  return sizes.map((size) => ({
+    sku: `${skuPrefix}-size-${variantSkuPart(size)}`,
+    size,
+    price_cents: Number.isFinite(Number(priceCents)) ? Number(priceCents) : null,
+    status: 'active',
+    metadata: { generated_from: 'catalog_attributes.sizes' },
+  }))
+}
+
+function attributeValues(value: unknown): string[] {
+  let source: unknown = value
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const object = value as Record<string, any>
+    source = Array.isArray(object.values)
+      ? object.values
+      : Array.isArray(object.groups)
+        ? object.groups.flatMap((group: any) => Array.isArray(group?.values) ? group.values : [])
+        : []
+  }
+  const values = Array.isArray(source) ? source : String(source || '').split(/[,;/|]+/)
+  return [...new Set(values.map((item) => String(item || '').trim()).filter(Boolean))]
+}
+
+function variantSkuPart(value: string) {
+  return value
+    .toLocaleLowerCase('en-US')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'value'
 }
 
 export async function createRailsAdminProduct(formData: FormData) {

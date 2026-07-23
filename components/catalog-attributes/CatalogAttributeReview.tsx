@@ -23,27 +23,15 @@ import type {
 } from '@/lib/rails-admin'
 import type { Brand, Category, Subcategory } from '@/lib/types'
 import type { Product } from '@/lib/types'
+import { CATALOG_ATTRIBUTE_DEFINITIONS } from '@/lib/catalog-attribute-schema'
 
 const ATTRIBUTE_OPTIONS = [
   ['', 'Все атрибуты'],
   ['brand', 'Бренд'],
   ['subcategory', 'Подкатегория'],
   ['display_name', 'Название для показа'],
-  ['model_name', 'Модель'],
-  ['sizes', 'Размеры'],
-  ['colors', 'Цвет'],
-  ['materials', 'Материал'],
-  ['dimensions', 'Габариты'],
-  ['watch_reference', 'Референс часов'],
-  ['watch_movement', 'Механизм часов'],
-  ['watch_case_size', 'Размер часов'],
-  ['watch_case_material', 'Материал корпуса часов'],
-  ['water_resistance', 'Водозащита'],
-  ['luggage_size', 'Размер чемодана'],
-  ['jewelry_metal', 'Ювелирный металл'],
-  ['stones', 'Камни'],
-  ['weight', 'Вес'],
-] as const
+  ...CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => [item.code, item.label] as const),
+] as ReadonlyArray<readonly [string, string]>
 
 const ATTRIBUTE_LABELS = Object.fromEntries(
   ATTRIBUTE_OPTIONS.filter(([value]) => value)

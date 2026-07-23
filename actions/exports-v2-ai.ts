@@ -20,7 +20,13 @@ import {
   runExportsV2AiJson,
 } from '@/lib/exports-v2-ai'
 import { createRailsAdminProduct } from '@/lib/rails-admin'
-import { getSupplierAttributeDefinition, normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
+import {
+  getSupplierAttributeDefinition,
+  normalizeSupplierAttributeCodes,
+  resolveSupplierAttributeCodes,
+} from '@/lib/supplier-attributes'
+import { CATALOG_ATTRIBUTE_DEFINITIONS } from '@/lib/catalog-attribute-schema'
+import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 
 const ALLOWED_ROLES = new Set<V2AlbumRole>([
   'PRIMARY_MEDIA', 'ON_MODEL', 'MEDIA_WITH_TEXT', 'EXTRA_MEDIA',
@@ -61,6 +67,18 @@ async function loadRunAiContext(runId: string) {
       s.default_category,
       s.default_subcategory,
       s.default_attributes,
+      COALESCE((
+        SELECT name FROM catalog_id_mappings
+        WHERE entity_type='category'
+          AND (canonical_id=s.default_category OR legacy_id=s.default_category)
+        LIMIT 1
+      ), '') AS default_category_name,
+      COALESCE((
+        SELECT name FROM catalog_id_mappings
+        WHERE entity_type='subcategory'
+          AND (canonical_id=s.default_subcategory OR legacy_id=s.default_subcategory)
+        LIMIT 1
+      ), '') AS default_subcategory_name,
       s.max_on_model_media,
       s.post_process_script,
       s.post_process_description,
@@ -249,7 +267,16 @@ export async function runExportsV2GroupingAiAction(runId: string): Promise<Actio
   }
 }
 
-function normalizeProductResult(raw: any, context: any, validIds: Record<string, Set<string>>, attributeCodes: string[]) {
+function normalizeProductResult(
+  raw: any,
+  context: any,
+  validIds: Record<string, Set<string>>,
+  attributeCodes: string[],
+  lookups: {
+    categories: Array<{ id: string; name: string }>
+    subcategories: Array<{ id: string; name: string }>
+  },
+) {
   const result = raw?.product || raw || {}
   const chooseId = (kind: string, value: unknown, fallback: unknown) => {
     const requested = String(value || '')
@@ -257,11 +284,15 @@ function normalizeProductResult(raw: any, context: any, validIds: Record<string,
     const defaultValue = String(fallback || '')
     return validIds[kind]?.has(defaultValue) ? defaultValue : null
   }
-  const attributes: Record<string, any> = {}
-  for (const code of attributeCodes) {
-    const value = result.attributes?.[code]
-    if (value !== undefined && value !== null && value !== '') attributes[code] = value
-  }
+  const category = chooseId('category', result.category, context.default_category)
+  const subcategory = chooseId('subcategory', result.subcategory, context.default_subcategory)
+  const categoryName = lookups.categories.find((item) => String(item.id) === category)?.name || context.default_category_name
+  const subcategoryName = lookups.subcategories.find((item) => String(item.id) === subcategory)?.name || context.default_subcategory_name
+  const attributes = normalizeCatalogAttributes(result.attributes, {
+    categoryName,
+    subcategoryName,
+    allowedCodes: attributeCodes,
+  })
   const gender = ['male', 'female', 'unisex'].includes(String(result.gender))
     ? String(result.gender)
     : (['male', 'female', 'unisex'].includes(String(context.default_gender)) ? context.default_gender : null)
@@ -272,8 +303,8 @@ function normalizeProductResult(raw: any, context: any, validIds: Record<string,
       ? Number(result.price)
       : Number(context.default_price || 0),
     brand: chooseId('brand', result.brand, context.default_brand),
-    category: chooseId('category', result.category, context.default_category),
-    subcategory: chooseId('subcategory', result.subcategory, context.default_subcategory),
+    category,
+    subcategory,
     gender,
     attributes,
   }
@@ -329,10 +360,22 @@ export async function runExportsV2ProductAiAction(runId: string): Promise<Action
       category: new Set<string>(lookups.categories.map((item) => String(item.id))),
       subcategory: new Set<string>(lookups.subcategories.map((item) => String(item.id))),
     }
-    const attributeCodes = normalizeSupplierAttributeCodes(context.default_attributes)
+    const selectedAttributeCodes = normalizeSupplierAttributeCodes(context.default_attributes)
+    const attributeCodes = selectedAttributeCodes.length > 0
+      ? selectedAttributeCodes
+      : context.default_category_name
+        ? resolveSupplierAttributeCodes([], context.default_category_name, context.default_subcategory_name)
+        : CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => item.code)
     const attributeHints = attributeCodes.map((code) => {
       const definition = getSupplierAttributeDefinition(code)
-      return { code, label: definition?.label || code, description: definition?.description || '' }
+      return {
+        code,
+        label: definition?.label || code,
+        type: definition?.value_type || 'text',
+        allowed_values: definition?.values || [],
+        unit: definition?.unit || null,
+        description: definition?.description || '',
+      }
     })
     const usage: Record<string, number> = {}
     let cacheHits = 0
@@ -434,7 +477,7 @@ export async function runExportsV2ProductAiAction(runId: string): Promise<Action
             `, [cacheHash, JSON.stringify(rawResult)])
           }
         }
-        const product = normalizeProductResult(rawResult, context, validIds, attributeCodes)
+        const product = normalizeProductResult(rawResult, context, validIds, attributeCodes, lookups)
         if (!product.name) throw new Error('ИИ не сформировал название')
         const mediaPlan = buildExportsV2MediaPlan(albums, Number(context.max_on_model_media || 5))
         const externalId = `v2-${context.supplier_id}-${primary.external_id}`
@@ -505,20 +548,42 @@ export async function confirmExportsV2ProductAction(draftId: string, product: Re
     const name = String(product.name || '').trim()
     if (!name) return { success: false, error: 'Название товара обязательно' }
     const existingResult = await scrapingQuery(`
-      SELECT ai_product FROM scraping_v2_product_drafts
-      WHERE id=$1 AND status='AI_PROCESSED'
+      SELECT d.ai_product, s.default_attributes
+      FROM scraping_v2_product_drafts d
+      JOIN suppliers s ON s.id=d.supplier_id
+      WHERE d.id=$1 AND d.status='AI_PROCESSED'
     `, [draftId])
     const existing = existingResult.rows[0]?.ai_product
     if (!existing) return { success: false, error: 'Карточка не найдена или уже подтверждена' }
+    const category = product.category ? String(product.category) : null
+    const subcategory = product.subcategory ? String(product.subcategory) : null
+    const mappingResult = await scrapingQuery(`
+      SELECT entity_type, name
+      FROM catalog_id_mappings
+      WHERE (entity_type='category' AND canonical_id=$1)
+         OR (entity_type='subcategory' AND canonical_id=$2)
+    `, [category, subcategory])
+    const categoryName = mappingResult.rows.find((row) => row.entity_type === 'category')?.name || ''
+    const subcategoryName = mappingResult.rows.find((row) => row.entity_type === 'subcategory')?.name || ''
+    const allowedCodes = resolveSupplierAttributeCodes(
+      existingResult.rows[0]?.default_attributes,
+      categoryName,
+      subcategoryName,
+    )
     const editable = {
       name,
       description: String(product.description || '').slice(0, 8000),
       price: Math.max(0, Number(product.price || 0)),
       brand: product.brand ? String(product.brand) : null,
-      category: product.category ? String(product.category) : null,
-      subcategory: product.subcategory ? String(product.subcategory) : null,
+      category,
+      subcategory,
       gender: ['male', 'female', 'unisex'].includes(String(product.gender)) ? String(product.gender) : null,
-      attributes: product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes) ? product.attributes : {},
+      attributes: normalizeCatalogAttributes(product.attributes, {
+        categoryName,
+        subcategoryName,
+        allowedCodes,
+        preserveUnknown: true,
+      }),
     }
     const result = await scrapingQuery(`
       UPDATE scraping_v2_product_drafts

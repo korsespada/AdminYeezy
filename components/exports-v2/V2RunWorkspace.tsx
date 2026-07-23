@@ -44,6 +44,7 @@ import {
 } from '@/actions/exports-v2-ai'
 import type { V2Album, V2AlbumRole, V2Draft, V2RunDetails } from '@/lib/exports-v2-types'
 import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
+import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
 
 const ROLE_OPTIONS: Array<{
   value: V2AlbumRole
@@ -627,19 +628,16 @@ function ProductReview({
     subcategory: String(initial.subcategory || ''),
     gender: String(initial.gender || ''),
   })
-  const [attributes, setAttributes] = useState(JSON.stringify(initial.attributes || {}, null, 2))
+  const [attributes, setAttributes] = useState<Record<string, any>>(
+    initial.attributes && typeof initial.attributes === 'object' ? initial.attributes : {},
+  )
   const subcategories = lookups.subcategories.filter((item) => !product.category || !item.parent_id || item.parent_id === product.category)
+  const categoryName = lookups.categories.find((item) => item.id === product.category)?.name || ''
+  const subcategoryName = lookups.subcategories.find((item) => item.id === product.subcategory)?.name || ''
 
   const confirm = async () => {
-    let parsedAttributes: Record<string, any>
-    try {
-      parsedAttributes = attributes.trim() ? JSON.parse(attributes) : {}
-    } catch {
-      onMessage({ type: 'error', text: `В карточке «${product.name}» атрибуты содержат неверный JSON.` })
-      return
-    }
     onPending(true)
-    const result = await confirmExportsV2ProductAction(draft.id, { ...product, attributes: parsedAttributes })
+    const result = await confirmExportsV2ProductAction(draft.id, { ...product, attributes })
     onPending(false)
     if (!result.success) {
       onMessage({ type: 'error', text: result.error || 'Не удалось подтвердить карточку' })
@@ -672,8 +670,13 @@ function ProductReview({
           <option value="">Подкатегория не выбрана</option>{subcategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </div>
-      <label className="block text-[10px] text-slate-500">Атрибуты (JSON по кодам)</label>
-      <textarea value={attributes} onChange={(event) => setAttributes(event.target.value)} className="min-h-24 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 font-mono text-[11px] text-slate-300 outline-none focus:border-indigo-500" />
+      <CatalogAttributeFields
+        value={attributes}
+        onChange={setAttributes}
+        categoryName={categoryName}
+        subcategoryName={subcategoryName}
+        compact
+      />
       <button type="button" onClick={confirm} disabled={pending || !product.name.trim()} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50">
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Подтвердить карточку для пуша
       </button>

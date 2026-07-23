@@ -33,7 +33,7 @@ describe('product attributes', () => {
       Высота каблука: 4,5 см
     `)).toEqual({
       sizes: ['38', '39', '40'],
-      shoe_size_system: 'EU',
+      size_system: 'EU',
       upper_material: 'телячья кожа',
       lining_material: 'текстиль',
       sole_material: 'резина',
@@ -44,10 +44,10 @@ describe('product attributes', () => {
   it('keeps supplied structured values over text suggestions', () => {
     expect(extractProductAttributes({
       description: 'Размеры: 38-40',
-      attributes: { sizes: ['41'], shoe_size_system: 'IT' },
+      attributes: { sizes: ['41'], size_system: 'IT' },
     })).toMatchObject({
       sizes: ['41'],
-      shoe_size_system: 'IT',
+      size_system: 'IT',
     })
   })
 

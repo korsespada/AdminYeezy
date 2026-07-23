@@ -1,15 +1,17 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Plus, Edit2, Trash2, Play, ExternalLink, Calendar, Search, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
+import { Plus, Edit2, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
 import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
 import { useRouter } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import {
-  SUPPLIER_ATTRIBUTE_DEFINITIONS,
   getSupplierAttributeLabel,
   normalizeSupplierAttributeCodes,
 } from '@/lib/supplier-attributes'
+import {
+  getCatalogAttributeDefinitionsForCategory,
+} from '@/lib/catalog-attribute-schema'
 
 interface Supplier {
   id: number
@@ -98,6 +100,25 @@ export default function SupplierList({
   const [overrideValue, setOverrideValue] = useState('') // Format: "type:id"
 
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+
+  const selectedSupplierCategoryName = React.useMemo(() => {
+    if (!editingSupplier) return ''
+    return catalogLookups.categories.find((item) => item.id === editingSupplier.default_category)?.name
+      || editingSupplier.default_category_name
+      || ''
+  }, [catalogLookups.categories, editingSupplier])
+
+  const selectedSupplierSubcategoryName = React.useMemo(() => {
+    if (!editingSupplier) return ''
+    return catalogLookups.subcategories.find((item) => item.id === editingSupplier.default_subcategory)?.name
+      || editingSupplier.default_subcategory_name
+      || ''
+  }, [catalogLookups.subcategories, editingSupplier])
+
+  const automaticSupplierAttributes = React.useMemo(
+    () => getCatalogAttributeDefinitionsForCategory(selectedSupplierCategoryName, selectedSupplierSubcategoryName),
+    [selectedSupplierCategoryName, selectedSupplierSubcategoryName],
+  )
 
   const toggleFavorite = async (id: number) => {
     setSuppliers(prev => prev.map(s => s.id === id ? { ...s, is_favorite: !s.is_favorite } : s))
@@ -436,6 +457,11 @@ export default function SupplierList({
                       ))}
                     </div>
                   )}
+                  {(!s.default_attributes || s.default_attributes.length === 0) && s.default_category && (
+                    <div className="inline-flex rounded-md border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-[10px] text-cyan-200">
+                      Атрибуты автоматически по категории
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 text-sm text-slate-300">
                     <ExternalLink className="w-4 h-4 text-slate-500" />
@@ -649,53 +675,75 @@ export default function SupplierList({
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-700/70 bg-slate-900/60 p-3">
-                      <div className="mb-1 text-xs font-semibold text-slate-200">Атрибуты поставщика</div>
-                      <p className="mb-3 text-[11px] leading-4 text-slate-500">
-                        ИИ будет целенаправленно искать выбранные характеристики. Пустые значения автоматически не создаются.
-                      </p>
-                      <div className="max-h-48 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
-                        {Object.entries(
-                          SUPPLIER_ATTRIBUTE_DEFINITIONS.reduce<Record<string, typeof SUPPLIER_ATTRIBUTE_DEFINITIONS>>((groups, item) => {
-                            groups[item.group] ||= []
-                            groups[item.group].push(item)
-                            return groups
-                          }, {}),
-                        ).map(([group, items]) => (
-                          <div key={group}>
-                            <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">{group}</div>
-                            <div className="grid grid-cols-2 gap-1.5">
-                              {items.map((attribute) => {
-                                const checked = editingSupplier?.default_attributes?.includes(attribute.code) || false
-                                return (
-                                  <label
-                                    key={attribute.code}
-                                    title={attribute.description}
-                                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
-                                      checked
-                                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
-                                        : 'border-slate-700 bg-slate-950/60 text-slate-400 hover:border-slate-600'
-                                    }`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(event) => {
-                                        if (!editingSupplier) return
-                                        const selected = new Set(editingSupplier.default_attributes || [])
-                                        if (event.target.checked) selected.add(attribute.code)
-                                        else selected.delete(attribute.code)
-                                        setEditingSupplier({ ...editingSupplier, default_attributes: [...selected] })
-                                      }}
-                                      className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
-                                    />
-                                    {attribute.label}
-                                  </label>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold text-slate-200">Атрибуты поставщика</div>
+                          <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                            По умолчанию берутся из категории. ИИ пропускает характеристики, которых нет в источнике.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => editingSupplier && setEditingSupplier({ ...editingSupplier, default_attributes: [] })}
+                          className={`shrink-0 rounded-lg border px-2.5 py-1.5 text-[10px] font-semibold ${
+                            editingSupplier?.default_attributes?.length
+                              ? 'border-slate-700 text-slate-400 hover:text-white'
+                              : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+                          }`}
+                        >
+                          Автоматически
+                        </button>
                       </div>
+
+                      {!selectedSupplierCategoryName ? (
+                        <div className="mt-3 rounded-lg border border-amber-800/50 bg-amber-950/20 p-2 text-[11px] text-amber-200/80">
+                          Сначала выберите категорию поставщика.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            {selectedSupplierCategoryName}{selectedSupplierSubcategoryName ? ` · ${selectedSupplierSubcategoryName}` : ''}
+                          </div>
+                          <div className="mt-2 grid max-h-52 grid-cols-2 gap-1.5 overflow-y-auto pr-1 custom-scrollbar">
+                            {automaticSupplierAttributes.map((attribute) => {
+                              const automatic = !editingSupplier?.default_attributes?.length
+                              const checked = automatic || editingSupplier?.default_attributes?.includes(attribute.code) || false
+                              return (
+                                <label
+                                  key={attribute.code}
+                                  title={attribute.parser_rules.join('; ')}
+                                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs transition-colors ${
+                                    checked
+                                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100'
+                                      : 'border-slate-700 bg-slate-950/60 text-slate-400 hover:border-slate-600'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      if (!editingSupplier) return
+                                      const selected = new Set(
+                                        automatic
+                                          ? automaticSupplierAttributes.map((item) => item.code)
+                                          : editingSupplier.default_attributes || [],
+                                      )
+                                      if (event.target.checked) selected.add(attribute.code)
+                                      else selected.delete(attribute.code)
+                                      setEditingSupplier({ ...editingSupplier, default_attributes: [...selected] })
+                                    }}
+                                    className="h-3.5 w-3.5 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                                  />
+                                  <span>
+                                    {attribute.label}
+                                    {attribute.use_as_variant_dimension && <small className="ml-1 text-indigo-300">вариант</small>}
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2">
                       <label className="flex items-center gap-2 cursor-pointer group" title="Включает распознавание бренда и типа товара по фотографиям">

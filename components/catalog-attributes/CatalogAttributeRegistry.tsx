@@ -7,6 +7,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-registry'
+import {
+  categoryNames,
+  getCatalogAttributeDefinitionsForCategory,
+} from '@/lib/catalog-attribute-schema'
 
 export default function CatalogAttributeRegistry({
   initialDefinitions,
@@ -17,7 +21,14 @@ export default function CatalogAttributeRegistry({
   const [dirty, setDirty] = useState<Set<string>>(new Set())
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const [savingCode, setSavingCode] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState('')
   const [isPending, startTransition] = useTransition()
+  const categoryCodes = new Set(
+    selectedCategory
+      ? getCatalogAttributeDefinitionsForCategory(selectedCategory).map((item) => item.code)
+      : definitions.map((item) => item.code),
+  )
+  const visibleDefinitions = definitions.filter((item) => categoryCodes.has(item.code))
 
   function update(code: string, patch: Partial<CatalogAttributeDefinition>) {
     setDefinitions((current) => current.map((item) => item.code === code ? { ...item, ...patch } : item))
@@ -58,6 +69,23 @@ export default function CatalogAttributeRegistry({
         <InfoCard title="Вариант товара" text="Создаёт выбираемый вариант, например конкретный размер или цвет." />
       </div>
 
+      <div className="rounded-xl border border-slate-800 bg-slate-900 p-3">
+        <div className="mb-2 text-xs font-semibold text-slate-400">Показать схему категории</div>
+        <div className="flex flex-wrap gap-2">
+          <CategoryButton active={!selectedCategory} onClick={() => setSelectedCategory('')}>Все</CategoryButton>
+          {categoryNames().map((category) => (
+            <CategoryButton key={category} active={selectedCategory === category} onClick={() => setSelectedCategory(category)}>
+              {category}
+            </CategoryButton>
+          ))}
+        </div>
+        {selectedCategory && (
+          <p className="mt-3 text-xs text-slate-500">
+            Показаны общие атрибуты и характеристики категории «{selectedCategory}». Размеры могут быть вариантом, но не обязательны для публикации.
+          </p>
+        )}
+      </div>
+
       {message && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${
           message.kind === 'success'
@@ -83,7 +111,7 @@ export default function CatalogAttributeRegistry({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {definitions.map((definition) => (
+              {visibleDefinitions.map((definition) => (
                 <tr key={definition.code} className={definition.active ? 'text-slate-200' : 'text-slate-500'}>
                   <td className="px-5 py-4 align-top">
                     <div className="font-semibold text-white">{definition.label}</div>
@@ -95,6 +123,11 @@ export default function CatalogAttributeRegistry({
                         </Badge>
                       ))}
                     </div>
+                    {definition.aliases.length > 0 && (
+                      <div className="mt-2 text-[11px] text-slate-600">
+                        Старые коды: {definition.aliases.slice(0, 4).join(', ')}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-4 align-top">
                     <div>{definition.category_scope}</div>
@@ -152,6 +185,30 @@ export default function CatalogAttributeRegistry({
         </div>
       </div>
     </div>
+  )
+}
+
+function CategoryButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+        active
+          ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200'
+          : 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-white'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 

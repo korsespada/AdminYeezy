@@ -88,13 +88,12 @@ export function extractExplicitShoeAttributes(textValue: unknown): ProductAttrib
   if (sizes.length > 0) attributes.sizes = sizes
 
   const sizeSystem = sizesRaw.match(/\b(EU|US|UK|IT|RU)\b/i)?.[1]
-  if (sizeSystem) attributes.shoe_size_system = sizeSystem.toUpperCase()
+  if (sizeSystem) attributes.size_system = sizeSystem.toUpperCase()
 
   assignLabelled(attributes, 'colors', text, /(?:цвета?|colors?)/i, true)
   assignLabelled(attributes, 'upper_material', text, /(?:материал\s+верха|верх|upper(?:\s+material)?)/i)
   assignLabelled(attributes, 'lining_material', text, /(?:материал\s+подкладки|подкладка|lining(?:\s+material)?)/i)
   assignLabelled(attributes, 'sole_material', text, /(?:материал\s+подошвы|подошва|sole(?:\s+material)?)/i)
-  assignLabelled(attributes, 'season', text, /(?:сезон|season)/i)
   assignLabelled(attributes, 'model_name', text, /(?:модель|model)/i)
 
   const heel = text.match(/(?:высота\s+каблука|каблук|heel\s+height)\s*:?\s*(\d+(?:[.,]\d+)?)\s*(см|mm|мм|cm)(?=\s|$)/i)

@@ -1,0 +1,219 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import { Info, X } from 'lucide-react'
+import {
+  getCatalogAttributeDefinitionsForCategory,
+  type CatalogAttributeDefinition,
+} from '@/lib/catalog-attribute-schema'
+import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
+
+export default function CatalogAttributeFields({
+  value,
+  onChange,
+  categoryName,
+  subcategoryName,
+  compact = false,
+}: {
+  value: Record<string, any>
+  onChange: (value: Record<string, any>) => void
+  categoryName?: string | null
+  subcategoryName?: string | null
+  compact?: boolean
+}) {
+  const definitions = useMemo(
+    () => getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName),
+    [categoryName, subcategoryName],
+  )
+  const knownCodes = useMemo(() => new Set(definitions.map((item) => item.code)), [definitions])
+  const unknownEntries = Object.entries(value || {}).filter(([code]) => !knownCodes.has(code))
+
+  function update(code: string, nextValue: unknown) {
+    const next = { ...(value || {}) }
+    if (empty(nextValue)) delete next[code]
+    else next[code] = nextValue
+    onChange(next)
+  }
+
+  function normalizeAll() {
+    onChange(normalizeCatalogAttributes(value, {
+      categoryName,
+      subcategoryName,
+      preserveUnknown: true,
+    }))
+  }
+
+  return (
+    <div className={compact ? 'space-y-2' : 'space-y-3'}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold text-slate-200">Характеристики</div>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Пустые значения не сохраняются. Размеры рекомендуются, но не блокируют публикацию.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={normalizeAll}
+          className="shrink-0 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:border-indigo-500 hover:text-white"
+        >
+          Нормализовать
+        </button>
+      </div>
+
+      {!categoryName && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-200/80">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          Выберите категорию — появятся подходящие характеристики.
+        </div>
+      )}
+
+      <div className={`grid gap-2 ${compact ? 'grid-cols-1' : 'md:grid-cols-2'}`}>
+        {definitions.map((definition) => (
+          <AttributeField
+            key={definition.code}
+            definition={definition}
+            value={value?.[definition.code]}
+            onChange={(nextValue) => update(definition.code, nextValue)}
+          />
+        ))}
+      </div>
+
+      {unknownEntries.length > 0 && (
+        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-3">
+          <div className="mb-2 text-[11px] font-bold text-amber-200">Старые или неподходящие атрибуты</div>
+          <div className="space-y-1.5">
+            {unknownEntries.map(([code, entryValue]) => (
+              <div key={code} className="flex items-center gap-2 text-xs">
+                <span className="min-w-32 font-mono text-amber-300">{code}</span>
+                <span className="min-w-0 flex-1 truncate text-slate-400">{formatValue(entryValue)}</span>
+                <button type="button" onClick={() => update(code, undefined)} title="Удалить старый атрибут" className="text-slate-500 hover:text-red-400">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AttributeField({
+  definition,
+  value,
+  onChange,
+}: {
+  definition: CatalogAttributeDefinition
+  value: unknown
+  onChange: (value: unknown) => void
+}) {
+  const serialized = formatAttributeValue(definition, value)
+  const [draft, setDraft] = useState(serialized)
+  useEffect(() => setDraft(serialized), [serialized])
+
+  const isList = definition.value_type === 'size' || definition.value_type === 'multi_enum'
+  const datalistId = `attribute-values-${definition.code}`
+  const fieldClass = 'mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-xs text-slate-200 outline-none focus:border-indigo-500'
+
+  function commit(text: string) {
+    const trimmed = text.trim()
+    if (!trimmed) {
+      onChange(undefined)
+      return
+    }
+    onChange(isList
+      ? trimmed.split(/[,;/|]+/).map((item) => item.trim()).filter(Boolean)
+      : trimmed)
+  }
+
+  return (
+    <label className="block rounded-lg border border-slate-800 bg-slate-950/50 p-2.5">
+      <span className="flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-300">
+        <span>{definition.label}</span>
+        <span className="flex gap-1">
+          {definition.use_as_filter && <Marker>фильтр</Marker>}
+          {definition.use_as_variant_dimension && <Marker>вариант</Marker>}
+        </span>
+      </span>
+      {definition.value_type === 'enum' && definition.values?.length ? (
+        <select
+          value={serialized}
+          onChange={(event) => onChange(event.target.value || undefined)}
+          className={fieldClass}
+        >
+          <option value="">Не найдено</option>
+          {definition.values.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      ) : (
+        <>
+          <input
+            value={draft}
+            list={definition.values?.length ? datalistId : undefined}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={(event) => commit(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commit(event.currentTarget.value)
+                event.currentTarget.blur()
+              }
+            }}
+            placeholder={placeholder(definition)}
+            className={fieldClass}
+          />
+          {definition.values?.length ? (
+            <datalist id={datalistId}>
+              {definition.values.map((item) => <option key={item} value={item} />)}
+            </datalist>
+          ) : null}
+        </>
+      )}
+      {definition.unit && <span className="mt-1 block text-[10px] text-slate-600">Единица: {definition.unit}</span>}
+    </label>
+  )
+}
+
+function Marker({ children }: { children: React.ReactNode }) {
+  return <span className="rounded bg-indigo-500/10 px-1.5 py-0.5 text-[9px] font-medium text-indigo-300">{children}</span>
+}
+
+function placeholder(definition: CatalogAttributeDefinition) {
+  if (definition.value_type === 'size') return 'Например: S, M, L или 38, 39, 40'
+  if (definition.value_type === 'multi_enum') return 'Значения через запятую'
+  if (definition.unit) return `Значение в ${definition.unit}`
+  return 'Не найдено'
+}
+
+function formatValue(value: unknown) {
+  if (Array.isArray(value)) return value.join(', ')
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function formatAttributeValue(definition: CatalogAttributeDefinition, value: unknown) {
+  if (
+    (definition.value_type === 'size' || definition.code === 'jewelry_size')
+    && value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+  ) {
+    const values = (value as Record<string, unknown>).values
+    if (Array.isArray(values)) return values.join(', ')
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const item = value as Record<string, unknown>
+    for (const key of ['display_value', 'value', 'filter_value']) {
+      if (typeof item[key] === 'string' || typeof item[key] === 'number') return String(item[key])
+    }
+    for (const key of ['names', 'raw_values', 'display_values', 'filter_values', 'families', 'values']) {
+      if (Array.isArray(item[key])) return item[key].map(String).join(', ')
+    }
+  }
+  return formatValue(value)
+}
+
+function empty(value: unknown) {
+  return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
+}

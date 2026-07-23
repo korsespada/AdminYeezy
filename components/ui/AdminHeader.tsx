@@ -86,10 +86,10 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           </Link>
         </Button>
 
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Фильтры и характеристики">
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Схема атрибутов">
           <Link href="/admin/filter-characteristics">
             <SlidersHorizontal size={20} className="text-cyan-400" />
-            <span className="hidden xl:inline">Фильтры</span>
+            <span className="hidden xl:inline">Схема</span>
           </Link>
         </Button>
 

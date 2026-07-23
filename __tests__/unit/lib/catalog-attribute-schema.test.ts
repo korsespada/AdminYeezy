@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest'
+import {
+  getCatalogAttributeDefinitionsForCategory,
+  resolveCatalogAttributeCode,
+  resolveSupplierAttributeCodes,
+} from '@/lib/catalog-attribute-schema'
+import {
+  normalizeCatalogAttributes,
+  normalizeSizes,
+} from '@/lib/catalog-attribute-values'
+
+describe('catalog attribute schema', () => {
+  it('combines common and category-specific attributes', () => {
+    const clothing = getCatalogAttributeDefinitionsForCategory('Одежда').map((item) => item.code)
+    expect(clothing).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'materials', 'fit']))
+    expect(clothing).not.toContain('season')
+    expect(clothing).not.toContain('country_of_origin')
+  })
+
+  it('adds subcategory attributes without making sizes mandatory', () => {
+    const rings = getCatalogAttributeDefinitionsForCategory('Ювелирные изделия', 'Кольца')
+    expect(rings.map((item) => item.code)).toContain('jewelry_size')
+    expect(rings.find((item) => item.code === 'jewelry_size')?.use_as_variant_dimension).toBe(true)
+  })
+
+  it('uses category attributes automatically until a supplier overrides them', () => {
+    expect(resolveSupplierAttributeCodes([], 'Обувь')).toContain('upper_material')
+    expect(resolveSupplierAttributeCodes(['colors'], 'Обувь')).toEqual(['colors'])
+  })
+
+  it('maps legacy codes and moves generic shoe material to upper material', () => {
+    expect(resolveCatalogAttributeCode('bag_dimensions')).toBe('dimensions')
+    expect(normalizeCatalogAttributes({
+      material: 'leather',
+      shoe_size_system: 'eu',
+      sizes: '38-40',
+      season: 'Зима',
+    }, { categoryName: 'Обувь' })).toEqual({
+      upper_material: ['Кожа'],
+      size_system: 'EU',
+      sizes: { values: ['38', '39', '40'] },
+    })
+  })
+
+  it('normalizes letter and numeric sizes without requiring a value', () => {
+    expect(normalizeSizes(['xl', '38,5', '39'])).toEqual(['XL', '38.5', '39'])
+    expect(normalizeCatalogAttributes({}, { categoryName: 'Одежда' })).toEqual({})
+    expect(normalizeCatalogAttributes({
+      sizes: { groups: [{ system: 'eu', audience: 'male', values: ['39', '40'] }], values: ['39', '40'] },
+    }, { categoryName: 'Обувь' })).toEqual({
+      sizes: {
+        values: ['39', '40'],
+        groups: [{ system: 'EU', audience: 'male', values: ['39', '40'] }],
+      },
+    })
+  })
+
+  it('reads normalized Rails attribute objects when reopening a product', () => {
+    expect(normalizeCatalogAttributes({
+      colors: { raw_values: ['noir'], filter_values: ['black'] },
+      materials: { names: ['хлопок'], families: ['cotton'] },
+      size_system: { filter_value: 'EU', display_value: 'EU' },
+    }, { categoryName: 'Одежда' })).toEqual({
+      colors: ['Чёрный'],
+      materials: ['Хлопок'],
+      size_system: 'EU',
+    })
+  })
+})

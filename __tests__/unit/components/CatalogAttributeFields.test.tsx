@@ -1,0 +1,56 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
+
+describe('CatalogAttributeFields', () => {
+  it('shows only attributes for the selected category', () => {
+    render(
+      <CatalogAttributeFields
+        value={{}}
+        onChange={() => undefined}
+        categoryName="Обувь"
+      />,
+    )
+
+    expect(screen.getByText('Материал верха')).toBeInTheDocument()
+    expect(screen.getByText('Размеры')).toBeInTheDocument()
+    expect(screen.queryByText('Механизм часов')).not.toBeInTheDocument()
+    expect(screen.getByText(/Размеры рекомендуются, но не блокируют публикацию/)).toBeInTheDocument()
+  })
+
+  it('saves sizes as separate values and permits an empty field', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{}}
+        onChange={onChange}
+        categoryName="Одежда"
+      />,
+    )
+
+    const sizes = screen.getByPlaceholderText('Например: S, M, L или 38, 39, 40')
+    fireEvent.change(sizes, { target: { value: 's, m, xl' } })
+    fireEvent.blur(sizes)
+    expect(onChange).toHaveBeenCalledWith({ sizes: ['s', 'm', 'xl'] })
+
+    fireEvent.change(sizes, { target: { value: '' } })
+    fireEvent.blur(sizes)
+    expect(onChange).toHaveBeenLastCalledWith({})
+  })
+
+  it('shows normalized values returned by Rails as editable text', () => {
+    render(
+      <CatalogAttributeFields
+        value={{
+          colors: { display_value: 'Чёрный', filter_values: ['black'] },
+          materials: { names: ['Хлопок'], families: ['cotton'] },
+        }}
+        onChange={() => undefined}
+        categoryName="Одежда"
+      />,
+    )
+
+    expect(screen.getByDisplayValue('Чёрный')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Хлопок')).toBeInTheDocument()
+  })
+})

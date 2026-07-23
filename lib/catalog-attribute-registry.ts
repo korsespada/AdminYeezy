@@ -1,166 +1,12 @@
 import { scrapingQuery } from '@/lib/db'
+import {
+  CATALOG_ATTRIBUTE_DEFINITIONS,
+  type CatalogAttributeDefinition,
+  type CatalogAttributeValueType,
+} from '@/lib/catalog-attribute-schema'
 
-export type CatalogAttributeValueType = 'text' | 'number' | 'enum' | 'multi_enum' | 'size'
-
-export interface CatalogAttributeDefinition {
-  code: string
-  label: string
-  category_scope: string
-  value_type: CatalogAttributeValueType
-  show_as_characteristic: boolean
-  use_as_filter: boolean
-  use_as_variant_dimension: boolean
-  parser_rules: string[]
-  aliases: string[]
-  sort_order: number
-  active: boolean
-}
-
-export const DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
-  {
-    code: 'sizes',
-    label: 'Размеры',
-    category_scope: 'Обувь',
-    value_type: 'size',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: true,
-    parser_rules: ['Размеры: 35–41', 'EU 38', 'US 9 / UK 8', '38, 39, 40'],
-    aliases: ['размер', 'размеры', 'size', 'sizes', 'eu', 'us', 'uk'],
-    sort_order: 10,
-    active: true,
-  },
-  {
-    code: 'shoe_size_system',
-    label: 'Система размеров',
-    category_scope: 'Обувь',
-    value_type: 'enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['EU', 'US', 'UK', 'IT', 'RU'],
-    aliases: ['система размеров', 'size system'],
-    sort_order: 20,
-    active: true,
-  },
-  {
-    code: 'colors',
-    label: 'Цвет',
-    category_scope: 'Все категории',
-    value_type: 'multi_enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Цвет: чёрный', 'black / noir', 'бордовый'],
-    aliases: ['цвет', 'цвета', 'color', 'colors'],
-    sort_order: 30,
-    active: true,
-  },
-  {
-    code: 'upper_material',
-    label: 'Материал верха',
-    category_scope: 'Обувь',
-    value_type: 'enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Верх: телячья кожа', 'upper: leather', 'замша'],
-    aliases: ['верх', 'материал верха', 'upper material'],
-    sort_order: 40,
-    active: true,
-  },
-  {
-    code: 'lining_material',
-    label: 'Материал подкладки',
-    category_scope: 'Обувь',
-    value_type: 'enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Подкладка: кожа', 'lining: textile'],
-    aliases: ['подкладка', 'материал подкладки', 'lining'],
-    sort_order: 50,
-    active: true,
-  },
-  {
-    code: 'sole_material',
-    label: 'Материал подошвы',
-    category_scope: 'Обувь',
-    value_type: 'enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Подошва: резина', 'sole: rubber'],
-    aliases: ['подошва', 'материал подошвы', 'sole'],
-    sort_order: 60,
-    active: true,
-  },
-  {
-    code: 'heel_height',
-    label: 'Высота каблука',
-    category_scope: 'Обувь',
-    value_type: 'number',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Каблук 7 см', 'heel height: 70 mm'],
-    aliases: ['каблук', 'высота каблука', 'heel height'],
-    sort_order: 70,
-    active: true,
-  },
-  {
-    code: 'season',
-    label: 'Сезон',
-    category_scope: 'Обувь и одежда',
-    value_type: 'enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['сезон: демисезон', 'лето', 'зима'],
-    aliases: ['сезон', 'season'],
-    sort_order: 80,
-    active: true,
-  },
-  {
-    code: 'model_name',
-    label: 'Модель',
-    category_scope: 'Все категории',
-    value_type: 'text',
-    show_as_characteristic: true,
-    use_as_filter: false,
-    use_as_variant_dimension: false,
-    parser_rules: ['Модель: Triple S', 'model: Speed'],
-    aliases: ['модель', 'model', 'артикул модели'],
-    sort_order: 90,
-    active: true,
-  },
-  {
-    code: 'materials',
-    label: 'Материалы',
-    category_scope: 'Одежда и аксессуары',
-    value_type: 'multi_enum',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Состав: 100% хлопок', 'Материал: кожа'],
-    aliases: ['материал', 'материалы', 'состав', 'material', 'materials'],
-    sort_order: 100,
-    active: true,
-  },
-  {
-    code: 'water_resistance',
-    label: 'Водозащита',
-    category_scope: 'Часы',
-    value_type: 'text',
-    show_as_characteristic: true,
-    use_as_filter: true,
-    use_as_variant_dimension: false,
-    parser_rules: ['Водозащита: 100 м', 'water resistant 10 ATM'],
-    aliases: ['водозащита', 'водонепроницаемость', 'water resistance'],
-    sort_order: 110,
-    active: true,
-  },
-]
+export type { CatalogAttributeDefinition, CatalogAttributeValueType }
+export const DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS = CATALOG_ATTRIBUTE_DEFINITIONS
 
 let registryReady: Promise<void> | null = null
 
@@ -189,7 +35,13 @@ async function ensureRegistryTable() {
              (code, label, category_scope, value_type, show_as_characteristic, use_as_filter,
               use_as_variant_dimension, parser_rules, aliases, sort_order, active)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11)
-           ON CONFLICT (code) DO NOTHING`,
+           ON CONFLICT (code) DO UPDATE SET
+             label=EXCLUDED.label,
+             category_scope=EXCLUDED.category_scope,
+             value_type=EXCLUDED.value_type,
+             parser_rules=EXCLUDED.parser_rules,
+             aliases=EXCLUDED.aliases,
+             sort_order=EXCLUDED.sort_order`,
           [
             definition.code,
             definition.label,
@@ -217,9 +69,12 @@ export async function getCatalogAttributeDefinitions(): Promise<CatalogAttribute
       `SELECT code, label, category_scope, value_type, show_as_characteristic, use_as_filter,
               use_as_variant_dimension, parser_rules, aliases, sort_order, active
          FROM catalog_attribute_definitions
+        WHERE code = ANY($1::text[])
         ORDER BY sort_order ASC, label ASC`,
+      [DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => item.code)],
     )
-    return result.rows as CatalogAttributeDefinition[]
+    const schemaByCode = new Map(DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => [item.code, item]))
+    return result.rows.map((row) => ({ ...schemaByCode.get(row.code), ...row })) as CatalogAttributeDefinition[]
   } catch (error) {
     console.warn('[catalog-attribute-registry] fallback to defaults:', error)
     return DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS

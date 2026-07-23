@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  catalogAttributeVariants,
   approveRailsCrmRefund,
   approveRailsCrmWalletWithdrawal,
   buildRailsAdminProductsParams,
@@ -581,6 +582,44 @@ describe('rails admin product adapter', () => {
         price_on_request: true,
       },
     })
+  })
+
+  it('turns structured catalog sizes into Rails variants for storefront size buttons', () => {
+    expect(catalogAttributeVariants({
+      sizes: {
+        values: ['38', '39', '40'],
+        groups: [{ system: 'EU', values: ['38', '39', '40'] }],
+      },
+    }, 'shoe-1', 125000)).toEqual([
+      {
+        sku: 'shoe-1-size-38',
+        size: '38',
+        price_cents: 125000,
+        status: 'active',
+        metadata: { generated_from: 'catalog_attributes.sizes' },
+      },
+      {
+        sku: 'shoe-1-size-39',
+        size: '39',
+        price_cents: 125000,
+        status: 'active',
+        metadata: { generated_from: 'catalog_attributes.sizes' },
+      },
+      {
+        sku: 'shoe-1-size-40',
+        size: '40',
+        price_cents: 125000,
+        status: 'active',
+        metadata: { generated_from: 'catalog_attributes.sizes' },
+      },
+    ])
+  })
+
+  it('sends an empty variant list when optional sizes are cleared', () => {
+    const formData = new FormData()
+    formData.append('catalog_attributes', JSON.stringify({ colors: ['Чёрный'] }))
+
+    expect(productFormDataToRailsPayload(formData, { applyDefaults: false }).product.variants).toEqual([])
   })
 
   it('patches price and syncs price-on-request metadata from price', async () => {
