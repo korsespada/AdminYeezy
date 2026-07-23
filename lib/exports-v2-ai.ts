@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import sharp from 'sharp'
+import { openRouterChatCompletion } from '@/lib/openrouter'
 
 export const EXPORTS_V2_GROUPING_PROMPT_VERSION = 'grouping-v1'
 export const EXPORTS_V2_PRODUCT_PROMPT_VERSION = 'product-v1'
@@ -26,23 +27,14 @@ export async function runExportsV2AiJson({
   imageDataUrl?: string | null
   imageUrls?: string[]
 }) {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim()
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY не задан')
-
   const content: any[] = [{ type: 'text', text: userPrompt }]
   if (imageDataUrl) content.push({ type: 'image_url', image_url: { url: imageDataUrl } })
   for (const url of imageUrls || []) {
     if (url) content.push({ type: 'image_url', image_url: { url } })
   }
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      ...(process.env.NEXT_PUBLIC_APP_URL ? { 'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL } : {}),
-    },
-    body: JSON.stringify({
+  const payload = await openRouterChatCompletion(
+    {
       model,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -50,10 +42,9 @@ export async function runExportsV2AiJson({
       ],
       temperature: 0.1,
       response_format: { type: 'json_object' },
-    }),
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter error ${response.status}`)
+    },
+    process.env.NEXT_PUBLIC_APP_URL ? { 'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL } : {},
+  )
 
   const raw = String(payload?.choices?.[0]?.message?.content || '').trim()
   if (!raw) throw new Error('ИИ вернул пустой ответ')

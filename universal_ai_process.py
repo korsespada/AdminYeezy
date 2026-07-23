@@ -9,6 +9,7 @@ from openai import OpenAI
 import dotenv
 import re
 import hashlib
+import httpx
 from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables
@@ -16,6 +17,9 @@ dotenv.load_dotenv()
 
 # --- CONFIGURATION ---
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_PROXY_URL = os.getenv("OPENROUTER_PROXY_URL")
+if OPENROUTER_PROXY_URL and OPENROUTER_PROXY_URL.startswith("socks5h://"):
+    OPENROUTER_PROXY_URL = OPENROUTER_PROXY_URL.replace("socks5h://", "socks5://", 1)
 SCRAPING_DATABASE_URL = os.getenv("SCRAPING_DATABASE_URL") or os.getenv("DATABASE_URL")
 MODEL_NAME = "google/gemini-2.0-flash-lite:free" # Универсальная и быстрая модель
 
@@ -43,9 +47,11 @@ ATTRIBUTE_HINT_LABELS = {
     "country_of_origin": "Страна производства",
 }
 
+openrouter_http_client = httpx.Client(proxy=OPENROUTER_PROXY_URL) if OPENROUTER_PROXY_URL else None
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
+    http_client=openrouter_http_client,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

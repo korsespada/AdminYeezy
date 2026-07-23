@@ -48,6 +48,7 @@
     "recharts": "^3.7.0",
     "redis": "^5.11.0",
     "sharp": "^0.34.5",
+    "socks-proxy-agent": "^9.0.0",
     "tailwind-merge": "^2.2.0",
     "tailwindcss-animate": "^1.0.7",
     "telegraf": "^4.16.3"

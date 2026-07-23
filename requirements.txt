@@ -1,2 +1,6 @@
 requests
 beautifulsoup4
+openai
+httpx[socks]
+psycopg2-binary
+python-dotenv

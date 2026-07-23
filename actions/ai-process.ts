@@ -14,6 +14,7 @@ import {
   normalizeSupplierAttributeCodes,
 } from '@/lib/supplier-attributes'
 import { normalizeProductAttributes } from '@/lib/product-attributes'
+import { openRouterChatCompletion } from '@/lib/openrouter'
 
 const execFileAsync = promisify(execFile)
 
@@ -330,27 +331,12 @@ function findSourceProduct(item: TargetedAiEditItem, sourceContext: SourceCsvCon
 }
 
 async function runOpenRouterJsonRequest(model: string, content: any[]) {
-  const apiKey = process.env.OPENROUTER_API_KEY
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY не задан')
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content }],
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-    }),
+  const payload = await openRouterChatCompletion({
+    model,
+    messages: [{ role: 'user', content }],
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
   })
-
-  const payload = await response.json()
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || `OpenRouter error ${response.status}`)
-  }
 
   const text = payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ')
