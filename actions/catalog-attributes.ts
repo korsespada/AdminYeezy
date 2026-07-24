@@ -6,6 +6,7 @@ import {
   bulkApproveRailsCatalogAttributeSuggestions,
   bulkApproveFilteredRailsCatalogAttributeSuggestions,
   bulkRejectRailsCatalogAttributeSuggestions,
+  bulkUpdateRailsCatalogAttributeSuggestionValues,
   rejectRailsCatalogAttributeSuggestion,
   updateRailsCatalogAttributeSuggestionValue,
 } from '@/lib/rails-admin'
@@ -44,6 +45,22 @@ export async function updateCatalogAttributeSuggestionValueAction(id: string, va
     return { success: true, data: suggestion }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось изменить предложенное значение' }
+  }
+}
+
+export async function bulkUpdateCatalogAttributeSuggestionValuesAction(ids: string[], value: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const uniqueIds = [...new Set(ids)].filter(Boolean)
+    if (uniqueIds.length === 0) throw new Error('Не выбраны предложения')
+    if (uniqueIds.length > 100) throw new Error('За один раз можно изменить не более 100 предложений')
+    if (!value.trim()) throw new Error('Не выбрано новое значение')
+
+    const suggestions = await bulkUpdateRailsCatalogAttributeSuggestionValues(uniqueIds, value)
+    revalidatePath(CATALOG_ATTRIBUTES_PATH)
+    return { success: true, data: suggestions }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось изменить выбранные значения' }
   }
 }
 

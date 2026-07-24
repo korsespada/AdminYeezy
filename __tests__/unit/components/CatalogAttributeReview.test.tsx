@@ -6,6 +6,7 @@ import {
   approveCatalogAttributeSuggestionAction,
   bulkApproveCatalogAttributeSuggestionsAction,
   bulkApproveFilteredCatalogAttributeSuggestionsAction,
+  bulkUpdateCatalogAttributeSuggestionValuesAction,
   rejectCatalogAttributeSuggestionAction,
   updateCatalogAttributeSuggestionValueAction,
 } from '@/actions/catalog-attributes'
@@ -17,6 +18,7 @@ vi.mock('@/actions/catalog-attributes', () => ({
   bulkApproveCatalogAttributeSuggestionsAction: vi.fn(),
   bulkApproveFilteredCatalogAttributeSuggestionsAction: vi.fn(),
   bulkRejectCatalogAttributeSuggestionsAction: vi.fn(),
+  bulkUpdateCatalogAttributeSuggestionValuesAction: vi.fn(),
   rejectCatalogAttributeSuggestionAction: vi.fn(),
   updateCatalogAttributeSuggestionValueAction: vi.fn(),
 }))
@@ -115,7 +117,7 @@ describe('CatalogAttributeReview', () => {
     expect(screen.queryByRole('option', { name: 'Посадка' })).not.toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Все источники' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Проверить AI' })).not.toBeInTheDocument()
-    expect(screen.getByText('Выбрать все на странице').closest('.sticky')).toBeInTheDocument()
+    expect(screen.getByText('Выбрать все на странице').closest('.top-\\[60px\\]')).toBeInTheDocument()
   })
 
   it('shows a selector with unique proposed values for the selected attribute', () => {
@@ -279,6 +281,45 @@ describe('CatalogAttributeReview', () => {
 
     await waitFor(() => expect(screen.getByText('Предложений не найдено')).toBeInTheDocument())
     expect(bulkApproveCatalogAttributeSuggestionsAction).toHaveBeenCalledWith(['suggestion-1'])
+  })
+
+  it('changes the value for every selected suggestion from the common selector', async () => {
+    const secondSuggestion: RailsCatalogAttributeSuggestion = {
+      ...suggestion,
+      id: 'suggestion-2',
+      product: { ...suggestion.product, id: 'product-2', slug: 'hermes-oran-2' },
+    }
+    const updatedSuggestions = [suggestion, secondSuggestion].map((item) => ({
+      ...item,
+      normalized_value: { brand_id: 'brand-2', brand_name: 'Chanel' },
+    }))
+    vi.mocked(bulkUpdateCatalogAttributeSuggestionValuesAction).mockResolvedValue({
+      success: true,
+      data: updatedSuggestions,
+    })
+    const user = userEvent.setup()
+
+    render(
+      <CatalogAttributeReview
+        initialResult={{ items: [suggestion, secondSuggestion], page: 1, perPage: 30, totalItems: 2, totalPages: 1 }}
+        filters={filters}
+        brands={[
+          { id: 'brand-1', slug: 'hermes', name: 'Hermes', description: '', created: '', updated: '', collectionId: '', collectionName: 'brands' },
+          { id: 'brand-2', slug: 'chanel', name: 'Chanel', description: '', created: '', updated: '', collectionId: '', collectionName: 'brands' },
+        ]}
+        categories={[]}
+        subcategories={[]}
+      />
+    )
+
+    await user.click(screen.getByRole('checkbox', { name: /Выбрать все на странице/ }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Общее значение для выбранных' }), 'brand-2')
+
+    await waitFor(() => expect(screen.getByText('Изменено значений: 2')).toBeInTheDocument())
+    expect(bulkUpdateCatalogAttributeSuggestionValuesAction).toHaveBeenCalledWith(
+      ['suggestion-1', 'suggestion-2'],
+      'brand-2',
+    )
   })
 
   it('approves every suggestion matching current filters after confirmation', async () => {

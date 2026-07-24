@@ -1223,6 +1223,20 @@ export async function updateRailsCatalogAttributeSuggestionValue(id: string, val
   return result.catalog_attribute_suggestion
 }
 
+export async function bulkUpdateRailsCatalogAttributeSuggestionValues(ids: string[], value: string) {
+  const suggestions: RailsCatalogAttributeSuggestion[] = []
+
+  for (let index = 0; index < ids.length; index += 10) {
+    suggestions.push(
+      ...await Promise.all(
+        ids.slice(index, index + 10).map((id) => updateRailsCatalogAttributeSuggestionValue(id, value))
+      )
+    )
+  }
+
+  return suggestions
+}
+
 export async function bulkApproveRailsCatalogAttributeSuggestions(ids: string[]) {
   return railsFetch<{ reviewed_ids: string[]; status: 'approved' }>(
     '/admin/catalog_attribute_suggestions/bulk_approve',

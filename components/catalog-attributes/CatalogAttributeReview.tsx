@@ -9,6 +9,7 @@ import {
   bulkApproveCatalogAttributeSuggestionsAction,
   bulkApproveFilteredCatalogAttributeSuggestionsAction,
   bulkRejectCatalogAttributeSuggestionsAction,
+  bulkUpdateCatalogAttributeSuggestionValuesAction,
   rejectCatalogAttributeSuggestionAction,
   updateCatalogAttributeSuggestionValueAction,
 } from '@/actions/catalog-attributes'
@@ -167,6 +168,27 @@ export default function CatalogAttributeReview({
     .map((item) => item.id)
   const allSelected = reviewableIds.length > 0 && reviewableIds.every((id) => selectedIds.has(id))
   const bagSubcategories = subcategories.filter((item) => BAG_SUBCATEGORY_SLUGS.includes(item.slug as typeof BAG_SUBCATEGORY_SLUGS[number]))
+  const selectedItems = items.filter((item) => selectedIds.has(item.id) && reviewableIds.includes(item.id))
+  const selectedAttributeCodes = [...new Set(selectedItems.map((item) => item.attribute_code))]
+  const selectedAttributeCode = selectedAttributeCodes.length === 1 ? selectedAttributeCodes[0] : ''
+  const selectedCategoryNames = new Set(
+    selectedItems.map((item) => item.product.category?.name.toLocaleLowerCase('ru-RU')).filter(Boolean)
+  )
+  const selectedParentCategoryIds = new Set(
+    categories
+      .filter((item) => selectedCategoryNames.has(item.name.toLocaleLowerCase('ru-RU')))
+      .map((item) => item.id)
+  )
+  const selectedSubcategories = subcategories.filter((item) => selectedParentCategoryIds.has(item.category))
+  const bulkSubcategories = selectedSubcategories.length > 0
+    ? selectedSubcategories
+    : bagSubcategories.length > 0 ? bagSubcategories : subcategories
+  const bulkValueOptions = getBulkValueOptions({
+    attributeCode: selectedAttributeCode,
+    brands,
+    subcategories: bulkSubcategories,
+    attributeDefinitions,
+  })
 
   function toggleSelection(id: string) {
     setSelectedIds((current) => {
@@ -217,6 +239,31 @@ export default function CatalogAttributeReview({
           ? `Подтверждено значений: ${ids.length}`
           : `Отклонено предложений: ${ids.length}`,
       })
+      setBusyId(null)
+    })
+  }
+
+  function bulkUpdateValue(value: string) {
+    const ids = selectedItems
+      .filter((item) => item.attribute_code === selectedAttributeCode)
+      .map((item) => item.id)
+    if (ids.length === 0 || !value) return
+
+    setBusyId('bulk-value')
+    setMessage(null)
+    startTransition(async () => {
+      const result = await bulkUpdateCatalogAttributeSuggestionValuesAction(ids, value)
+
+      if (!result.success) {
+        setMessage({ kind: 'error', text: result.error || 'Не удалось изменить выбранные значения' })
+        setBusyId(null)
+        return
+      }
+
+      const updatedItems = result.data as RailsCatalogAttributeSuggestion[]
+      const updatedById = new Map(updatedItems.map((item) => [item.id, item]))
+      setItems((current) => current.map((item) => updatedById.get(item.id) || item))
+      setMessage({ kind: 'success', text: `Изменено значений: ${updatedItems.length}` })
       setBusyId(null)
     })
   }
@@ -289,14 +336,19 @@ export default function CatalogAttributeReview({
 
       <BulkToolbar
         selectedCount={selectedIds.size}
+        selectedAttributeCode={selectedAttributeCode}
+        hasMixedAttributes={selectedAttributeCodes.length > 1}
+        valueOptions={bulkValueOptions}
         allSelected={allSelected}
         reviewableCount={reviewableIds.length}
         busy={isPending && busyId === 'bulk'}
+        valueBusy={isPending && busyId === 'bulk-value'}
         filteredBusy={isPending && busyId === 'filtered'}
         filteredCount={filters.status === 'suggested' && filters.suggestedValue !== '__unknown__' ? totalItems : 0}
         onToggleAll={togglePageSelection}
         onApprove={() => bulkReview('approve')}
         onReject={() => bulkReview('reject')}
+        onValueChange={bulkUpdateValue}
         onApproveFiltered={approveAllFiltered}
       />
 
@@ -491,52 +543,119 @@ function FilterPanel({
   )
 }
 
+function getBulkValueOptions({
+  attributeCode,
+  brands,
+  subcategories,
+  attributeDefinitions,
+}: {
+  attributeCode: string
+  brands: Brand[]
+  subcategories: Subcategory[]
+  attributeDefinitions?: CatalogAttributeDefinition[]
+}): ReadonlyArray<readonly [string, string]> {
+  if (!attributeCode) return []
+  if (attributeCode === 'brand') {
+    return brands.map((item) => [item.id, item.name] as const)
+  }
+  if (attributeCode === 'subcategory') {
+    return subcategories.map((item) => [item.id, item.name] as const)
+  }
+
+  const definitions = attributeDefinitions?.length ? attributeDefinitions : CATALOG_ATTRIBUTE_DEFINITIONS
+  const definition = definitions.find((item) => item.code === attributeCode)
+  if (!definition) return []
+
+  const dictionaryValues = definition.dictionary_values
+    ?.filter((item) => item.active)
+    .map((item) => item.canonical_value)
+  const values = dictionaryValues?.length ? dictionaryValues : definition.values || []
+  return [...new Set(values)].map((value) => [value, value] as const)
+}
+
 function BulkToolbar({
   selectedCount,
+  selectedAttributeCode,
+  hasMixedAttributes,
+  valueOptions,
   allSelected,
   reviewableCount,
   busy,
+  valueBusy,
   filteredBusy,
   filteredCount,
   onToggleAll,
   onApprove,
   onReject,
+  onValueChange,
   onApproveFiltered,
 }: {
   selectedCount: number
+  selectedAttributeCode: string
+  hasMixedAttributes: boolean
+  valueOptions: ReadonlyArray<readonly [string, string]>
   allSelected: boolean
   reviewableCount: number
   busy: boolean
+  valueBusy: boolean
   filteredBusy: boolean
   filteredCount: number
   onToggleAll: () => void
   onApprove: () => void
   onReject: () => void
+  onValueChange: (value: string) => void
   onApproveFiltered: () => void
 }) {
+  const controlsBusy = busy || valueBusy
+  const bulkValuePlaceholder = hasMixedAttributes
+    ? 'Выбраны разные атрибуты'
+    : valueOptions.length === 0
+      ? `Нет справочника: ${ATTRIBUTE_LABELS[selectedAttributeCode] || selectedAttributeCode}`
+      : `Изменить «${ATTRIBUTE_LABELS[selectedAttributeCode] || selectedAttributeCode}» для выбранных`
+
   return (
-    <div className="sticky top-[72px] z-20 flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/95 px-4 py-3 shadow-xl shadow-slate-950/40 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+    <div className="sticky top-[60px] z-20 flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/95 px-4 py-3 shadow-xl shadow-slate-950/40 backdrop-blur xl:flex-row xl:items-center xl:justify-between">
       <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-300">
         <input
           type="checkbox"
           checked={allSelected}
           onChange={onToggleAll}
-          disabled={reviewableCount === 0 || busy}
+          disabled={reviewableCount === 0 || controlsBusy}
           className="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-indigo-500"
         />
         Выбрать все на странице
         <Badge variant="outline" className="border-slate-700 text-slate-400">{selectedCount}</Badge>
       </label>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onApprove} disabled={selectedCount === 0 || busy} size="sm" className="bg-emerald-600 hover:bg-emerald-500">
+      <div className="flex min-w-0 flex-1 flex-wrap gap-2 xl:justify-end">
+        {selectedCount > 0 && (
+          <div className="relative min-w-[260px] flex-1 xl:max-w-sm">
+            <select
+              defaultValue=""
+              onChange={(event) => {
+                onValueChange(event.target.value)
+                event.target.value = ''
+              }}
+              disabled={hasMixedAttributes || valueOptions.length === 0 || controlsBusy}
+              aria-label="Общее значение для выбранных"
+              className="h-9 w-full rounded-md border border-indigo-500/40 bg-slate-950 px-3 pr-9 text-sm text-slate-200 outline-none transition focus:border-indigo-400 disabled:border-slate-700 disabled:text-slate-500"
+            >
+              <option value="" disabled>{bulkValuePlaceholder}</option>
+              {valueOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            {valueBusy && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-indigo-300" />}
+          </div>
+        )}
+        <Button type="button" onClick={onApprove} disabled={selectedCount === 0 || controlsBusy} size="sm" className="bg-emerald-600 hover:bg-emerald-500">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
           Принять выбранные
         </Button>
-        <Button type="button" onClick={onApproveFiltered} disabled={filteredCount === 0 || busy || filteredBusy} size="sm" className="bg-sky-600 hover:bg-sky-500">
+        <Button type="button" onClick={onApproveFiltered} disabled={filteredCount === 0 || controlsBusy || filteredBusy} size="sm" className="bg-sky-600 hover:bg-sky-500">
           {filteredBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
           Принять всё по фильтрам ({filteredCount.toLocaleString('ru-RU')})
         </Button>
-        <Button type="button" onClick={onReject} disabled={selectedCount === 0 || busy} size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-300 hover:bg-red-500/10 hover:text-red-300">
+        <Button type="button" onClick={onReject} disabled={selectedCount === 0 || controlsBusy} size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-300 hover:bg-red-500/10 hover:text-red-300">
           <X className="h-4 w-4" /> Отклонить
         </Button>
       </div>
