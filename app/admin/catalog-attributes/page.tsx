@@ -39,19 +39,21 @@ export default async function CatalogAttributesPage({
   }
 
   try {
+    const lookupsPromise = getRailsCatalogLookups()
+    const lookupFacetsPromise = lookupsPromise.then((lookups) => getRailsCatalogLookupFacets({
+      search: filters.query,
+      brand: lookups.brands.find((item) => item.id === filters.brand)?.slug || filters.brand,
+      category: lookups.categories.find((item) => item.id === filters.category)?.slug || filters.category,
+      subcategory: lookups.subcategories.find((item) => item.id === filters.subcategory)?.slug || filters.subcategory,
+    }))
     const [result, lookups, lookupFacets, attributeDefinitions] = await Promise.all([
       listRailsCatalogAttributeSuggestions({
         page: Math.max(1, Number(params.page) || 1),
         ...filters,
         status: filters.status === 'all' ? '' : filters.status,
       }),
-      getRailsCatalogLookups(),
-      getRailsCatalogLookupFacets({
-        search: filters.query,
-        brand: filters.brand,
-        category: filters.category,
-        subcategory: filters.subcategory,
-      }),
+      lookupsPromise,
+      lookupFacetsPromise,
       getCatalogAttributeDefinitions(),
     ])
 
