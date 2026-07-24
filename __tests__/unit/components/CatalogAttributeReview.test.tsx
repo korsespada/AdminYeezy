@@ -13,7 +13,6 @@ import { getProductAction } from '@/actions/products'
 import type { RailsCatalogAttributeSuggestion } from '@/lib/rails-admin'
 
 vi.mock('@/actions/catalog-attributes', () => ({
-  aiRefineCatalogAttributeSuggestionsAction: vi.fn(),
   approveCatalogAttributeSuggestionAction: vi.fn(),
   bulkApproveCatalogAttributeSuggestionsAction: vi.fn(),
   bulkApproveFilteredCatalogAttributeSuggestionsAction: vi.fn(),
@@ -56,7 +55,7 @@ const suggestion: RailsCatalogAttributeSuggestion = {
 }
 
 const filters = {
-  query: '', status: 'suggested', attributeCode: '', source: '', brand: '', category: '',
+  query: '', status: 'suggested', attributeCode: '', brand: '', category: '',
   subcategory: '', perPage: 30,
 }
 
@@ -80,6 +79,43 @@ describe('CatalogAttributeReview', () => {
     expect(screen.getAllByText('Hermes')).not.toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Принять' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'Отклонить' })).toHaveLength(2)
+  })
+
+  it('narrows related filters, removes source and AI review, and keeps bulk actions sticky', () => {
+    render(
+      <CatalogAttributeReview
+        initialResult={{ items: [suggestion], page: 1, perPage: 30, totalItems: 1, totalPages: 1 }}
+        filters={{ ...filters, category: 'bags-id' }}
+        brands={[
+          { id: 'dior-id', slug: 'dior', name: 'Dior', description: '', created: '', updated: '', collectionId: '', collectionName: 'brands' },
+          { id: 'prada-id', slug: 'prada', name: 'Prada', description: '', created: '', updated: '', collectionId: '', collectionName: 'brands' },
+        ]}
+        categories={[
+          { id: 'bags-id', slug: 'bags', name: 'Сумки', description: '', created: '', updated: '', collectionId: '', collectionName: 'categories' },
+          { id: 'clothes-id', slug: 'clothes', name: 'Одежда', description: '', created: '', updated: '', collectionId: '', collectionName: 'categories' },
+        ]}
+        subcategories={[
+          { id: 'shoulder-id', slug: 'shoulder', category: 'bags-id', name: 'На плечо', description: '', created: '', updated: '', collectionId: '', collectionName: 'subcategories' },
+          { id: 'dresses-id', slug: 'dresses', category: 'clothes-id', name: 'Платья', description: '', created: '', updated: '', collectionId: '', collectionName: 'subcategories' },
+        ]}
+        lookupFacets={{
+          brandFacets: [{ slug: 'dior', count: 2 }],
+          categoryFacets: [{ slug: 'bags', count: 2 }],
+          subcategoryFacets: [{ slug: 'shoulder', count: 2 }],
+          genderFacets: [],
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('option', { name: 'Dior' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Prada' })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'На плечо' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Платья' })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Габариты' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Посадка' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Все источники' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Проверить AI' })).not.toBeInTheDocument()
+    expect(screen.getByText('Выбрать все на странице').closest('.sticky')).toBeInTheDocument()
   })
 
   it('shows a selector with unique proposed values for the selected attribute', () => {
@@ -266,7 +302,6 @@ describe('CatalogAttributeReview', () => {
     expect(bulkApproveFilteredCatalogAttributeSuggestionsAction).toHaveBeenCalledWith({
       query: '',
       attributeCode: 'brand',
-      source: '',
       brand: '',
       category: '',
       subcategory: '',

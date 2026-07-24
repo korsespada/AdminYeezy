@@ -2,10 +2,9 @@
 
 import Link from 'next/link'
 import Image from 'next/image'
-import { useEffect, useState, useTransition } from 'react'
-import { Bot, Check, CheckCheck, ChevronLeft, ChevronRight, Loader2, Save, Search, ShieldCheck, X } from 'lucide-react'
+import { type ChangeEvent, useEffect, useState, useTransition } from 'react'
+import { Check, CheckCheck, ChevronLeft, ChevronRight, Loader2, Save, Search, ShieldCheck, X } from 'lucide-react'
 import {
-  aiRefineCatalogAttributeSuggestionsAction,
   approveCatalogAttributeSuggestionAction,
   bulkApproveCatalogAttributeSuggestionsAction,
   bulkApproveFilteredCatalogAttributeSuggestionsAction,
@@ -21,10 +20,11 @@ import type {
   RailsCatalogAttributeSuggestion,
   RailsCatalogAttributeSuggestionList,
 } from '@/lib/rails-admin'
-import type { Brand, Category, Subcategory } from '@/lib/types'
+import type { Brand, Category, ProductFilterFacets, Subcategory } from '@/lib/types'
 import type { Product } from '@/lib/types'
 import {
   CATALOG_ATTRIBUTE_DEFINITIONS,
+  getCatalogAttributeDefinitionsForCategory,
   type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
 
@@ -77,7 +77,6 @@ interface CatalogAttributeReviewProps {
     query: string
     status: string
     attributeCode: string
-    source: string
     brand: string
     category: string
     subcategory: string
@@ -87,6 +86,7 @@ interface CatalogAttributeReviewProps {
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
+  lookupFacets?: ProductFilterFacets
   attributeDefinitions?: CatalogAttributeDefinition[]
 }
 
@@ -96,6 +96,7 @@ export default function CatalogAttributeReview({
   brands,
   categories,
   subcategories,
+  lookupFacets,
   attributeDefinitions,
 }: CatalogAttributeReviewProps) {
   const [items, setItems] = useState(initialResult.items)
@@ -233,7 +234,6 @@ export default function CatalogAttributeReview({
       const result = await bulkApproveFilteredCatalogAttributeSuggestionsAction({
         query: filters.query,
         attributeCode: filters.attributeCode,
-        source: filters.source,
         brand: filters.brand,
         category: filters.category,
         subcategory: filters.subcategory,
@@ -250,36 +250,6 @@ export default function CatalogAttributeReview({
       setTotalItems(0)
       setSelectedIds(new Set())
       setMessage({ kind: 'success', text: `Подтверждено по текущим фильтрам: ${approvedCount.toLocaleString('ru-RU')}` })
-      setBusyId(null)
-    })
-  }
-
-  function aiReview() {
-    const ids = [...selectedIds].filter((id) => reviewableIds.includes(id))
-    if (ids.length === 0) return
-    if (ids.length > 10) {
-      setMessage({ kind: 'error', text: 'Для одного AI-запуска выберите не более 10 предложений' })
-      return
-    }
-
-    setBusyId('ai')
-    setMessage(null)
-    startTransition(async () => {
-      const result = await aiRefineCatalogAttributeSuggestionsAction(ids)
-      if (!result.success) {
-        setMessage({ kind: 'error', text: result.error || 'AI-проверка не выполнена' })
-        setBusyId(null)
-        return
-      }
-
-      const aiItems = (result.data?.catalog_attribute_suggestions || []) as RailsCatalogAttributeSuggestion[]
-      setItems(aiItems)
-      setTotalItems(aiItems.length)
-      setSelectedIds(new Set())
-      setMessage({
-        kind: 'success',
-        text: `AI проверил товаров: ${result.data?.processed_products || 0}. Показаны новые AI-черновики.`,
-      })
       setBusyId(null)
     })
   }
@@ -312,6 +282,8 @@ export default function CatalogAttributeReview({
         brands={brands}
         categories={categories}
         subcategories={subcategories}
+        lookupFacets={lookupFacets}
+        attributeDefinitions={attributeDefinitions}
         suggestionValues={initialResult.availableValues || []}
       />
 
@@ -321,13 +293,11 @@ export default function CatalogAttributeReview({
         reviewableCount={reviewableIds.length}
         busy={isPending && busyId === 'bulk'}
         filteredBusy={isPending && busyId === 'filtered'}
-        aiBusy={isPending && busyId === 'ai'}
         filteredCount={filters.status === 'suggested' && filters.suggestedValue !== '__unknown__' ? totalItems : 0}
         onToggleAll={togglePageSelection}
         onApprove={() => bulkReview('approve')}
         onReject={() => bulkReview('reject')}
         onApproveFiltered={approveAllFiltered}
-        onAi={aiReview}
       />
 
       {message && (
@@ -397,18 +367,68 @@ function FilterPanel({
   brands,
   categories,
   subcategories,
+  lookupFacets,
+  attributeDefinitions,
   suggestionValues,
 }: {
   filters: CatalogAttributeReviewProps['filters']
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
+  lookupFacets?: ProductFilterFacets
+  attributeDefinitions?: CatalogAttributeDefinition[]
   suggestionValues: Array<{ value: string; label: string; count: number }>
 }) {
-  const [category, setCategory] = useState(filters.category)
-  const visibleSubcategories = category
-    ? subcategories.filter((item) => item.category === category)
-    : subcategories
+  const brandCounts = mapSlugFacetCounts(brands, lookupFacets?.brandFacets)
+  const categoryCounts = mapSlugFacetCounts(categories, lookupFacets?.categoryFacets)
+  const subcategoryCounts = mapSlugFacetCounts(subcategories, lookupFacets?.subcategoryFacets)
+
+  subcategories.forEach((subcategory) => {
+    const count = subcategoryCounts.get(subcategory.id) || 0
+    if (count > 0) categoryCounts.set(subcategory.category, (categoryCounts.get(subcategory.category) || 0) + count)
+  })
+
+  const availableBrands = brands.filter((item) => isAvailableFacet(item.id, filters.brand, brandCounts, lookupFacets))
+  const availableCategories = categories.filter((item) => isAvailableFacet(item.id, filters.category, categoryCounts, lookupFacets))
+  const visibleSubcategories = subcategories
+    .filter((item) => !filters.category || item.category === filters.category)
+    .filter((item) => isAvailableFacet(item.id, filters.subcategory, subcategoryCounts, lookupFacets))
+
+  const categoryName = categories.find((item) => item.id === filters.category)?.name || ''
+  const subcategoryName = subcategories.find((item) => item.id === filters.subcategory)?.name || ''
+  const registryDefinitions = attributeDefinitions || CATALOG_ATTRIBUTE_DEFINITIONS
+  const registryByCode = new Map(registryDefinitions.map((item) => [item.code, item]))
+  const scopedDefinitions = filters.category
+    ? getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName)
+      .map((definition) => ({ ...definition, ...registryByCode.get(definition.code) }))
+    : registryDefinitions
+  const availableDefinitions = scopedDefinitions.filter((item) => item.active)
+  const selectedDefinition = registryByCode.get(filters.attributeCode)
+  if (selectedDefinition?.active && !availableDefinitions.some((item) => item.code === selectedDefinition.code)) {
+    availableDefinitions.push(selectedDefinition)
+  }
+  const attributeOptions: ReadonlyArray<readonly [string, string]> = [
+    ['', 'Все атрибуты'],
+    ['brand', 'Бренд'],
+    ['subcategory', 'Подкатегория'],
+    ['display_name', 'Название для показа'],
+    ...availableDefinitions.map((item) => [item.code, item.label] as const),
+  ]
+
+  function autoSubmit(event: ChangeEvent<HTMLSelectElement>) {
+    event.currentTarget.form?.requestSubmit()
+  }
+
+  function changeCategory(event: ChangeEvent<HTMLSelectElement>) {
+    resetFormSelect(event.currentTarget.form, 'subcategory')
+    resetFormSelect(event.currentTarget.form, 'suggested_value')
+    autoSubmit(event)
+  }
+
+  function changeAttribute(event: ChangeEvent<HTMLSelectElement>) {
+    resetFormSelect(event.currentTarget.form, 'suggested_value')
+    autoSubmit(event)
+  }
 
   return (
     <form action="/admin/catalog-attributes" method="get" className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900 p-4 md:grid-cols-2 xl:grid-cols-4">
@@ -422,36 +442,34 @@ function FilterPanel({
           className="h-10 w-full rounded-md border border-slate-700 bg-slate-950 pl-9 pr-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-500"
         />
       </label>
-      <FilterSelect name="attribute" defaultValue={filters.attributeCode} options={ATTRIBUTE_OPTIONS} />
+      <FilterSelect name="attribute" defaultValue={filters.attributeCode} options={attributeOptions} onChange={changeAttribute} />
       <FilterSelect
         name="status"
         defaultValue={filters.status}
         options={[["all", "Все статусы"], ["suggested", "На проверке"], ["approved", "Подтверждено"], ["rejected", "Отклонено"]]}
-      />
-      <FilterSelect
-        name="source"
-        defaultValue={filters.source}
-        options={[["", "Все источники"], ["name", "Название"], ["description", "Описание"], ["legacy_metadata", "Старые размеры"], ["derived", "Рассчитано"], ["ai_text", "AI по тексту"], ["ai_vision", "AI по тексту и фото"]]}
+        onChange={autoSubmit}
       />
       <FilterSelect
         name="brand"
         defaultValue={filters.brand}
-        options={[["", "Все бренды"], ...brands.map((brand) => [brand.id, brand.name] as const)]}
+        options={[["", "Все бренды"], ...availableBrands.map((brand) => [brand.id, brand.name] as const)]}
+        onChange={autoSubmit}
       />
       <select
         name="category"
-        value={category}
-        onChange={(event) => setCategory(event.target.value)}
+        defaultValue={filters.category}
+        onChange={changeCategory}
+        aria-label="Категория"
         className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200 outline-none transition focus:border-indigo-500"
       >
         <option value="">Все категории</option>
-        {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        {availableCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
       </select>
       <FilterSelect
-        key={category || 'all-categories'}
         name="subcategory"
-        defaultValue={visibleSubcategories.some((item) => item.id === filters.subcategory) ? filters.subcategory : ''}
+        defaultValue={filters.subcategory}
         options={[["", "Все подкатегории"], ...visibleSubcategories.map((item) => [item.id, item.name] as const)]}
+        onChange={autoSubmit}
       />
       <FilterSelect
         name="suggested_value"
@@ -460,13 +478,15 @@ function FilterPanel({
           ['', filters.attributeCode ? 'Все предложенные значения' : 'Сначала выберите атрибут'],
           ...suggestionValues.map((item) => [item.value, `${item.label} (${item.count})`] as const),
         ]}
+        onChange={autoSubmit}
       />
       <FilterSelect
         name="per_page"
         defaultValue={String(filters.perPage)}
         options={[["20", "20 на странице"], ["30", "30 на странице"], ["50", "50 на странице"], ["100", "100 на странице"]]}
+        onChange={autoSubmit}
       />
-      <Button type="submit" className="bg-indigo-600 hover:bg-indigo-500 xl:col-start-4">Применить</Button>
+      <Button type="submit" className="bg-indigo-600 hover:bg-indigo-500">Применить поиск</Button>
     </form>
   )
 }
@@ -477,29 +497,25 @@ function BulkToolbar({
   reviewableCount,
   busy,
   filteredBusy,
-  aiBusy,
   filteredCount,
   onToggleAll,
   onApprove,
   onReject,
   onApproveFiltered,
-  onAi,
 }: {
   selectedCount: number
   allSelected: boolean
   reviewableCount: number
   busy: boolean
   filteredBusy: boolean
-  aiBusy: boolean
   filteredCount: number
   onToggleAll: () => void
   onApprove: () => void
   onReject: () => void
   onApproveFiltered: () => void
-  onAi: () => void
 }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="sticky top-[72px] z-20 flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/95 px-4 py-3 shadow-xl shadow-slate-950/40 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
       <label className="flex cursor-pointer items-center gap-3 text-sm text-slate-300">
         <input
           type="checkbox"
@@ -512,10 +528,6 @@ function BulkToolbar({
         <Badge variant="outline" className="border-slate-700 text-slate-400">{selectedCount}</Badge>
       </label>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" onClick={onAi} disabled={selectedCount === 0 || selectedCount > 10 || busy || aiBusy} size="sm" variant="outline" className="border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/20">
-          {aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-          Проверить AI
-        </Button>
         <Button type="button" onClick={onApprove} disabled={selectedCount === 0 || busy} size="sm" className="bg-emerald-600 hover:bg-emerald-500">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
           Принять выбранные
@@ -532,17 +544,69 @@ function BulkToolbar({
   )
 }
 
-function FilterSelect({ name, defaultValue, options }: { name: string; defaultValue: string; options: ReadonlyArray<readonly [string, string]> }) {
+function FilterSelect({
+  name,
+  defaultValue,
+  options,
+  onChange,
+}: {
+  name: string
+  defaultValue: string
+  options: ReadonlyArray<readonly [string, string]>
+  onChange?: (event: ChangeEvent<HTMLSelectElement>) => void
+}) {
   return (
     <select
       name={name}
       defaultValue={defaultValue}
-      aria-label={name === 'suggested_value' ? 'Предложенное значение' : undefined}
+      aria-label={FILTER_LABELS[name]}
+      onChange={onChange}
       className="h-10 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200 outline-none transition focus:border-indigo-500"
     >
       {options.map(([value, label]) => <option key={value || 'all'} value={value}>{label}</option>)}
     </select>
   )
+}
+
+const FILTER_LABELS: Record<string, string> = {
+  attribute: 'Атрибут',
+  status: 'Статус',
+  brand: 'Бренд',
+  subcategory: 'Подкатегория',
+  suggested_value: 'Предложенное значение',
+  per_page: 'Количество на странице',
+}
+
+function mapSlugFacetCounts<T extends { id: string; slug?: string }>(
+  items: T[],
+  facets: Array<{ slug: string; count: number }> = [],
+) {
+  const ids = new Map<string, string>()
+  items.forEach((item) => {
+    ids.set(item.id, item.id)
+    if (item.slug) ids.set(item.slug, item.id)
+  })
+
+  const counts = new Map<string, number>()
+  facets.forEach((facet) => {
+    const id = ids.get(facet.slug)
+    if (id) counts.set(id, Number(facet.count || 0))
+  })
+  return counts
+}
+
+function isAvailableFacet(
+  id: string,
+  selectedId: string,
+  counts: Map<string, number>,
+  facets: ProductFilterFacets | undefined,
+) {
+  return !facets || id === selectedId || (counts.get(id) || 0) > 0
+}
+
+function resetFormSelect(form: HTMLFormElement | null, name: string) {
+  const field = form?.elements.namedItem(name)
+  if (field instanceof HTMLSelectElement) field.value = ''
 }
 
 function SuggestionCard({
@@ -923,7 +987,6 @@ function Pagination({ result, filters }: { result: RailsCatalogAttributeSuggesti
     if (filters.query) params.set('query', filters.query)
     if (filters.status) params.set('status', filters.status)
     if (filters.attributeCode) params.set('attribute', filters.attributeCode)
-    if (filters.source) params.set('source', filters.source)
     if (filters.brand) params.set('brand', filters.brand)
     if (filters.category) params.set('category', filters.category)
     if (filters.subcategory) params.set('subcategory', filters.subcategory)

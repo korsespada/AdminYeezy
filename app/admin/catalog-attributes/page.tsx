@@ -1,7 +1,11 @@
 import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import CatalogAttributeReview from '@/components/catalog-attributes/CatalogAttributeReview'
-import { getRailsCatalogLookups, listRailsCatalogAttributeSuggestions } from '@/lib/rails-admin'
+import {
+  getRailsCatalogLookups,
+  getRailsCatalogLookupFacets,
+  listRailsCatalogAttributeSuggestions,
+} from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 export const dynamic = 'force-dynamic'
@@ -14,7 +18,6 @@ export default async function CatalogAttributesPage({
     query?: string
     status?: string
     attribute?: string
-    source?: string
     brand?: string
     category?: string
     subcategory?: string
@@ -28,7 +31,6 @@ export default async function CatalogAttributesPage({
     query: params.query?.trim() || '',
     status: params.status?.trim() || 'suggested',
     attributeCode: params.attribute?.trim() || '',
-    source: params.source?.trim() || '',
     brand: params.brand?.trim() || '',
     category: params.category?.trim() || '',
     subcategory: params.subcategory?.trim() || '',
@@ -37,13 +39,19 @@ export default async function CatalogAttributesPage({
   }
 
   try {
-    const [result, lookups, attributeDefinitions] = await Promise.all([
+    const [result, lookups, lookupFacets, attributeDefinitions] = await Promise.all([
       listRailsCatalogAttributeSuggestions({
         page: Math.max(1, Number(params.page) || 1),
         ...filters,
         status: filters.status === 'all' ? '' : filters.status,
       }),
       getRailsCatalogLookups(),
+      getRailsCatalogLookupFacets({
+        search: filters.query,
+        brand: filters.brand,
+        category: filters.category,
+        subcategory: filters.subcategory,
+      }),
       getCatalogAttributeDefinitions(),
     ])
 
@@ -63,6 +71,7 @@ export default async function CatalogAttributesPage({
             brands={lookups.brands}
             categories={lookups.categories}
             subcategories={lookups.subcategories}
+            lookupFacets={lookupFacets}
             attributeDefinitions={attributeDefinitions}
           />
         </div>

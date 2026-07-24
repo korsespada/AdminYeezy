@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import {
   approveRailsCatalogAttributeSuggestion,
-  aiRefineRailsCatalogAttributeSuggestions,
   bulkApproveRailsCatalogAttributeSuggestions,
   bulkApproveFilteredRailsCatalogAttributeSuggestions,
   bulkRejectRailsCatalogAttributeSuggestions,
@@ -73,7 +72,6 @@ export async function bulkRejectCatalogAttributeSuggestionsAction(ids: string[])
 export async function bulkApproveFilteredCatalogAttributeSuggestionsAction(filters: {
   query?: string
   attributeCode?: string
-  source?: string
   brand?: string
   category?: string
   subcategory?: string
@@ -86,23 +84,5 @@ export async function bulkApproveFilteredCatalogAttributeSuggestionsAction(filte
     return { success: true, data: result }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось подтвердить предложения по фильтрам' }
-  }
-}
-
-export async function aiRefineCatalogAttributeSuggestionsAction(ids: string[]): Promise<ActionResponse> {
-  try {
-    await requireAdmin()
-    const result = await aiRefineRailsCatalogAttributeSuggestions(ids)
-    revalidatePath(CATALOG_ATTRIBUTES_PATH)
-    return { success: true, data: result }
-  } catch (error: any) {
-    const message = error.message || 'AI-проверка не выполнена'
-    if (/access denied by security policy/i.test(message)) {
-      return {
-        success: false,
-        error: 'OpenRouter блокирует бесплатные модели настройкой приватности. Разрешите free-провайдеров в Settings → Privacy и повторите.',
-      }
-    }
-    return { success: false, error: message }
   }
 }

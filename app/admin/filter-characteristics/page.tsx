@@ -21,7 +21,7 @@ export default async function FilterCharacteristicsPage() {
             </p>
           </div>
           <Button asChild variant="outline" className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white">
-            <Link href="/admin/catalog-attributes">Проверить предложения AI</Link>
+            <Link href="/admin/catalog-attributes">Открыть предложения</Link>
           </Button>
         </header>
         <CatalogAttributeRegistry initialDefinitions={definitions} />

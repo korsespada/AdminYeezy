@@ -4,6 +4,7 @@ import {
   approveRailsCrmRefund,
   approveRailsCrmWalletWithdrawal,
   buildRailsAdminProductsParams,
+  getRailsCatalogLookupFacets,
   getRailsProductFilterFacets,
   listRailsCrmCustomers,
   listRailsAdminProducts,
@@ -391,6 +392,44 @@ describe('rails admin product adapter', () => {
     expect(calls[4].get('gender')).toBe('unisex')
     expect(calls[5].get('attribute_key')).toBeNull()
     expect(calls[5].get('attribute_value')).toBeNull()
+  })
+
+  it('loads only catalog lookup facets for the attribute review filters', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const params = new URL(url).searchParams
+      return {
+        ok: true,
+        json: async () => ({
+          facets: {
+            brands: [{ slug: params.has('brand') ? 'selected' : 'gucci', count: 2 }],
+            categories: [{ slug: params.has('category') ? 'child' : 'bags', count: 3 }],
+          },
+          products: [],
+          meta: { total: 3, pages: 1 },
+        }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getRailsCatalogLookupFacets({
+      search: 'bag',
+      brand: 'gucci',
+      category: 'bags',
+      subcategory: 'child',
+    })
+
+    expect(result.brandFacets).toEqual([{ slug: 'gucci', count: 2 }])
+    expect(result.categoryFacets).toEqual([{ slug: 'bags', count: 3 }])
+    expect(result.subcategoryFacets).toEqual([{ slug: 'child', count: 3 }])
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+
+    const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
+    expect(calls[0].get('brand')).toBeNull()
+    expect(calls[0].get('category')).toBe('child')
+    expect(calls[1].get('brand')).toBe('gucci')
+    expect(calls[1].get('category')).toBeNull()
+    expect(calls[2].get('brand')).toBe('gucci')
+    expect(calls[2].get('category')).toBe('bags')
   })
 
   it('loads 500-product admin pages in chunks', async () => {

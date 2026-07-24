@@ -1233,7 +1233,6 @@ export async function bulkApproveRailsCatalogAttributeSuggestions(ids: string[])
 export async function bulkApproveFilteredRailsCatalogAttributeSuggestions(options: {
   query?: string
   attributeCode?: string
-  source?: string
   brand?: string
   category?: string
   subcategory?: string
@@ -1242,7 +1241,6 @@ export async function bulkApproveFilteredRailsCatalogAttributeSuggestions(option
   const params = new URLSearchParams()
   if (options.query) params.set('query', options.query)
   if (options.attributeCode) params.set('attribute_code', options.attributeCode)
-  if (options.source) params.set('source', options.source)
   if (options.brand) params.set('brand', options.brand)
   if (options.category) params.set('category', options.category)
   if (options.subcategory) params.set('subcategory', options.subcategory)
@@ -1260,16 +1258,6 @@ export async function bulkRejectRailsCatalogAttributeSuggestions(ids: string[]) 
     '/admin/catalog_attribute_suggestions/bulk_reject',
     { method: 'POST', body: JSON.stringify({ ids }) }
   )
-}
-
-export async function aiRefineRailsCatalogAttributeSuggestions(ids: string[]) {
-  return railsFetch<{
-    catalog_attribute_suggestions: RailsCatalogAttributeSuggestion[]
-    processed_products: number
-  }>('/admin/catalog_attribute_suggestions/ai_refine', {
-    method: 'POST',
-    body: JSON.stringify({ ids, ...openRouterRuntimeKeyPayload() }),
-  })
 }
 
 export async function deleteRailsSeoAiDraft(id: string) {
@@ -1413,6 +1401,35 @@ async function fetchRailsProductFacets(options: ProductFacetFilters) {
     attributeValue: options.attributeValue,
   })
   return publicRailsFetch<RailsProductFacetPayload>(`/catalog/products?${params}`)
+}
+
+export async function getRailsCatalogLookupFacets(filters: Pick<
+  ProductFacetFilters,
+  'search' | 'brand' | 'category' | 'subcategory'
+>): Promise<ProductFilterFacets> {
+  const [brandPayload, categoryPayload, subcategoryPayload] = await Promise.all([
+    fetchRailsProductFacets({
+      search: filters.search,
+      category: filters.category,
+      subcategory: filters.subcategory,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+    }),
+    fetchRailsProductFacets({
+      search: filters.search,
+      brand: filters.brand,
+      category: filters.category,
+    }),
+  ])
+
+  return {
+    brandFacets: brandPayload.facets?.brands || [],
+    categoryFacets: categoryPayload.facets?.categories || [],
+    subcategoryFacets: subcategoryPayload.facets?.categories || [],
+    genderFacets: [],
+  }
 }
 
 export async function getRailsProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
