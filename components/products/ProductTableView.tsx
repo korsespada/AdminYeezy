@@ -284,7 +284,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                             </TableHead>
                             <TableHead className="w-16 border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">Фото</TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
-                                <div className="min-w-[120px] max-w-xs resize-x overflow-hidden pr-2" title="Потяните за правый край, чтобы изменить ширину">Product ID</div>
+                                <div className="min-w-[120px] max-w-xs resize-x overflow-hidden pr-2" title="Потяните за правый край, чтобы изменить ширину">External ID</div>
                             </TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[200px] max-w-md resize-x overflow-hidden pr-2">Название</div>
@@ -331,14 +331,12 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                         </div>
                                     </TableCell>
                                     <TableCell className="p-2 align-top">
-                                        <Input
-                                            type="text"
-                                            value={getValue(product, 'productId')}
-                                            onChange={(e) => handleLocalChange(product.id, 'productId', e.target.value)}
-                                            onBlur={() => handleSaveField(product, 'productId')}
-                                            className="h-auto min-w-[100px] border-transparent bg-transparent px-2 py-1.5 font-mono text-sm text-slate-300 placeholder:text-slate-600 hover:border-slate-600 focus:bg-slate-800"
-                                            placeholder="SKU"
-                                        />
+                                        <div
+                                            className="min-w-[100px] px-2 py-1.5 font-mono text-xs text-slate-500"
+                                            title="Системный идентификатор нельзя изменить"
+                                        >
+                                            {getValue(product, 'productId')}
+                                        </div>
                                     </TableCell>
                                     <TableCell className="p-2 align-top">
                                         <Textarea

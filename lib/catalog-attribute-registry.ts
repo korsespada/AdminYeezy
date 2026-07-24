@@ -62,6 +62,15 @@ const DEFAULT_VALUE_ALIASES: Record<string, Record<string, string[]>> = {
     'Кодовый': ['combination', 'код'],
     TSA: ['tsa lock'],
   },
+  jewelry_metal: {
+    'Жёлтое золото': ['желтое золото', 'yellow gold', 'gold', 'золото'],
+    'Белое золото': ['white gold'],
+    'Розовое золото': ['rose gold', 'pink gold'],
+    'Серебро': ['silver', 'sterling silver'],
+    'Платина': ['platinum'],
+    'Сталь': ['steel', 'нержавеющая сталь'],
+    'Латунь': ['brass'],
+  },
 }
 
 const MATERIAL_VALUE_ALIASES: Record<string, string[]> = {
@@ -99,7 +108,6 @@ for (const code of [
   'sole_material',
   'watch_case_material',
   'strap_material',
-  'jewelry_metal',
 ]) {
   DEFAULT_VALUE_ALIASES[code] = MATERIAL_VALUE_ALIASES
 }
@@ -163,6 +171,26 @@ async function ensureRegistryTable() {
           ],
         )
       }
+      await scrapingQuery(`
+        UPDATE catalog_attribute_values
+           SET canonical_value='Жёлтое золото',
+               aliases='["желтое золото","yellow gold","gold","золото"]'::jsonb,
+               updated_at=NOW()
+         WHERE attribute_code='jewelry_metal'
+           AND canonical_value='Золото'
+           AND NOT EXISTS (
+             SELECT 1
+               FROM catalog_attribute_values existing
+              WHERE existing.attribute_code='jewelry_metal'
+                AND existing.canonical_value='Жёлтое золото'
+           )
+      `)
+      await scrapingQuery(`
+        UPDATE catalog_attribute_values
+           SET active=FALSE, updated_at=NOW()
+         WHERE attribute_code='jewelry_metal'
+           AND canonical_value='Золото'
+      `)
       const defaultValues = DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.flatMap((definition) => (
         (definition.values || []).map((canonicalValue, index) => ({
           attribute_code: definition.code,

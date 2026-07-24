@@ -15,6 +15,7 @@ import ProductDescription, { normalizeDescription } from '@/components/products/
 import { imagePresets, productImageUrl } from '@/lib/image';
 import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
+import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
 
 interface ProductCardProps {
     product: Product;
@@ -295,6 +296,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 )}
 
                 <div className="flex-1">
+                    <ProductAttributeSummary product={product} />
                     {product.description && (
                         <p className="mb-4 line-clamp-2 text-sm text-slate-400">
                             <ProductDescription text={product.description} />

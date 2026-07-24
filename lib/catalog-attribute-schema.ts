@@ -128,10 +128,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     filter: true,
     aliases: ['водозащита', 'водонепроницаемость', 'water resistance'],
   }),
-  definition('jewelry_metal', 'Металл', 'Ювелирные изделия и бижутерия', 'multi_enum', 210, {
+  definition('jewelry_metal', 'Ювелирный металл', 'Ювелирные изделия и бижутерия', 'multi_enum', 210, {
     filter: true,
     aliases: ['metal', 'металл украшения'],
-    values: ['Золото', 'Серебро', 'Платина', 'Сталь', 'Латунь'],
+    values: ['Жёлтое золото', 'Белое золото', 'Розовое золото', 'Серебро', 'Платина', 'Сталь', 'Латунь'],
   }),
   definition('stones', 'Камни', 'Ювелирные изделия и бижутерия', 'multi_enum', 220, {
     filter: true,

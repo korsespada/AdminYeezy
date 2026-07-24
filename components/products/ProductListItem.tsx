@@ -10,6 +10,7 @@ import { normalizeDescription } from '@/components/products/ProductDescription';
 import { imagePresets, productImageUrl } from '@/lib/image';
 import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
+import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
 
 interface ProductListItemProps {
     product: Product;
@@ -234,6 +235,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                                     })()}
                                 </p>
                             </div>
+                            <ProductAttributeSummary product={product} compact />
                         </>
                     )}
                 </div>

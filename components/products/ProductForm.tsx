@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
-import { Upload, Trash2, GripVertical, Download } from 'lucide-react'
+import { Download, ExternalLink, GripVertical, Settings2, Trash2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -131,7 +131,7 @@ export default function ProductForm({
     if (isOpen) {
       if (product) {
         setProductId(product.productId || '')
-        setSku(product.sku || product.productId || '')
+        setSku(product.sku || '')
         setName(product.name)
         setDescription(normalizeDescription(product.description))
         setPrice(Number(product.price).toString())
@@ -208,7 +208,7 @@ export default function ProductForm({
         }
       } else {
         // Reset for new product
-        setProductId('')
+        setProductId(createManualProductId())
         setSku('')
         setName('')
         setDescription('')
@@ -444,10 +444,20 @@ export default function ProductForm({
       if (!open) onClose()
     }}>
       <SheetContent side="right" className="flex w-full max-w-2xl flex-col overflow-y-auto bg-gray-800 p-0 sm:max-w-2xl">
-          <SheetHeader className="sticky top-0 z-10 border-b border-gray-700 bg-gray-900 px-5 py-3">
-            <SheetTitle>
-              {product ? 'Изменить товар' : 'Новый товар'}
-            </SheetTitle>
+          <SheetHeader className="sticky top-0 z-10 flex-row items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-5 py-3">
+            <SheetTitle>{product ? 'Изменить товар' : 'Новый товар'}</SheetTitle>
+            {product?.slug && (
+              <Button asChild type="button" variant="outline" size="sm" className="border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700">
+                <a
+                  href={`${process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://yeezyunique.ru'}/product/${product.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Открыть на сайте
+                </a>
+              </Button>
+            )}
           </SheetHeader>
 
           {/* Form */}
@@ -551,55 +561,6 @@ export default function ProductForm({
               )}
 
               {/* New Photos (Removed, as we now use URL input directly to existing photos list) */}
-            </div>
-
-            {/* Product ID */}
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Product ID *
-              </label>
-              <input
-                type="text"
-                value={productId}
-                onChange={(e) => setProductId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                placeholder="например SKU-12345"
-                required
-                disabled={isPending}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  SKU
-                </label>
-                <input
-                  type="text"
-                  value={sku}
-                  onChange={(e) => setSku(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                  placeholder="SKU товара"
-                  disabled={isPending}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Статус
-                </label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as Product['status'])}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white"
-                  disabled={isPending}
-                >
-                  <option value="draft">Черновик</option>
-                  <option value="active">Активен</option>
-                  <option value="hidden">Скрыт</option>
-                  <option value="archived">Архив</option>
-                </select>
-              </div>
             </div>
 
             {/* Name */}
@@ -747,6 +708,51 @@ export default function ProductForm({
               />
             </div>
 
+            <details className="rounded-lg border border-slate-700 bg-slate-900/40">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-300">
+                <Settings2 className="h-3.5 w-3.5" />
+                Технические данные
+              </summary>
+              <div className="grid gap-4 border-t border-slate-700 p-3 md:grid-cols-2">
+                <div className="space-y-2 md:col-span-2">
+                  <label className="block text-xs font-medium text-slate-500">External ID</label>
+                  <input
+                    type="text"
+                    value={productId}
+                    readOnly
+                    aria-label="External ID"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-500"
+                  />
+                  <p className="text-[10px] text-slate-600">Системный идентификатор. Изменение запрещено.</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-400">SKU</label>
+                  <input
+                    type="text"
+                    value={sku}
+                    onChange={(event) => setSku(event.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                    placeholder="Отдельный товарный артикул"
+                    disabled={isPending}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-400">Статус</label>
+                  <select
+                    value={status}
+                    onChange={(event) => setStatus(event.target.value as Product['status'])}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500"
+                    disabled={isPending}
+                  >
+                    <option value="draft">Черновик</option>
+                    <option value="active">Активен</option>
+                    <option value="hidden">Скрыт</option>
+                    <option value="archived">Архив</option>
+                  </select>
+                </div>
+              </div>
+            </details>
+
             <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -838,4 +844,11 @@ export default function ProductForm({
       </Dialog>
     </Sheet>
   )
+}
+
+function createManualProductId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `manual-${crypto.randomUUID()}`
+  }
+  return `manual-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }

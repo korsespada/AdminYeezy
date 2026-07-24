@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import Sidebar from '@/components/ui/Sidebar'
 import type { Brand, Category, ProductFilterFacets, Subcategory } from '@/lib/types'
+import { CATALOG_ATTRIBUTE_DEFINITIONS } from '@/lib/catalog-attribute-schema'
 
 const navigationMock = vi.hoisted(() => ({
   push: vi.fn(),
@@ -68,6 +70,9 @@ const filterFacets: ProductFilterFacets = {
   categoryFacets: [{ slug: 'totes', name: 'Шопперы', count: 3 }],
   subcategoryFacets: [{ slug: 'totes', name: 'Шопперы', count: 3 }],
   genderFacets: [{ value: null, count: 3 }],
+  attributeFacets: {
+    colors: [{ value: 'gray', count: 3 }],
+  },
 }
 
 function renderSidebar() {
@@ -78,6 +83,21 @@ function renderSidebar() {
       subcategories={subcategories}
       activeSubcategoryIds={[]}
       filterFacets={filterFacets}
+      attributeDefinitions={CATALOG_ATTRIBUTE_DEFINITIONS.map((definition) => (
+        definition.code === 'colors'
+          ? {
+            ...definition,
+            dictionary_values: [{
+              id: 'gray',
+              attribute_code: 'colors',
+              canonical_value: 'Серый',
+              aliases: ['gray', 'grey'],
+              sort_order: 10,
+              active: true,
+            }],
+          }
+          : definition
+      ))}
       isOpen
       onClose={vi.fn()}
       count={3}
@@ -130,5 +150,20 @@ describe('Sidebar faceted filters', () => {
     })
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?priceMin=0')
+  })
+
+  it('uses dependent attribute and value selects with dictionary labels', async () => {
+    const user = userEvent.setup()
+    renderSidebar()
+
+    await user.click(screen.getByRole('combobox', { name: 'Атрибут' }))
+    await user.click(screen.getByRole('option', { name: 'Цвет' }))
+    expect(navigationMock.push).toHaveBeenCalledWith('/admin?attributeKey=colors')
+
+    await user.click(screen.getByRole('combobox', { name: 'Значение атрибута' }))
+    await user.click(screen.getByRole('option', { name: 'Серый (3)' }))
+    const finalUrl = new URL(navigationMock.push.mock.calls.at(-1)?.[0], 'https://admin.example')
+    expect(finalUrl.searchParams.get('attributeKey')).toBe('colors')
+    expect(finalUrl.searchParams.get('attributeValue')).toBe('gray')
   })
 })

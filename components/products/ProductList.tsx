@@ -146,6 +146,7 @@ export default function ProductList({
         brands={brands}
         categories={categories}
         subcategories={subcategories}
+        attributeDefinitions={attributeDefinitions}
         activeSubcategoryIds={activeSubcategoryIds}
         filterFacets={filterFacets}
         isOpen={isSidebarOpen}

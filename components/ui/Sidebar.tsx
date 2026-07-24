@@ -11,6 +11,10 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import {
+    getCatalogAttributeDefinitionsForCategory,
+    type CatalogAttributeDefinition,
+} from '@/lib/catalog-attribute-schema'
 
 interface SidebarProps {
     brands: Brand[]
@@ -18,12 +22,22 @@ interface SidebarProps {
     subcategories: Subcategory[]
     activeSubcategoryIds: string[]
     filterFacets?: ProductFilterFacets
+    attributeDefinitions?: CatalogAttributeDefinition[]
     isOpen: boolean
     onClose: () => void
     count: number
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, filterFacets, isOpen, onClose, count }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+    brands,
+    categories,
+    subcategories,
+    filterFacets,
+    attributeDefinitions = [],
+    isOpen,
+    onClose,
+    count,
+}) => {
     const router = useRouter()
     const searchParams = useSearchParams()
     const [brandSearch, setBrandSearch] = useState('')
@@ -65,9 +79,15 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
         if (key === 'category') {
             params.delete('subcategory')
         }
+        if (key === 'attributeKey') {
+            params.delete('attributeValue')
+        }
+        if (key === 'attributeValue' && attributeKeyValue) {
+            params.set('attributeKey', attributeKeyValue)
+        }
 
         router.push(`/admin?${params.toString()}`)
-    }, [router, searchParams])
+    }, [attributeKeyValue, router, searchParams])
 
     // Debounce text/price filters
     useEffect(() => {
@@ -105,24 +125,6 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
         }, 500)
         return () => clearTimeout(timer)
     }, [applyFilter, currentPriceMax, priceMaxValue])
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (attributeKeyValue !== currentAttributeKey) {
-                applyFilter('attributeKey', attributeKeyValue || null)
-            }
-        }, 500)
-        return () => clearTimeout(timer)
-    }, [applyFilter, currentAttributeKey, attributeKeyValue])
-
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (attributeValueValue !== currentAttributeValue) {
-                applyFilter('attributeValue', attributeValueValue || null)
-            }
-        }, 500)
-        return () => clearTimeout(timer)
-    }, [applyFilter, currentAttributeValue, attributeValueValue])
 
     // Update local filter values when URL changes (e.g. on reset)
     useEffect(() => {
@@ -212,6 +214,42 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
             .filter(sub => sub.category === currentCategory)
             .filter(sub => isFacetAvailable(facetState.subcategoryCounts, sub.id, currentSubcategory))
         : []
+
+    const availableAttributeDefinitions = useMemo(() => {
+        const registryByCode = new Map(attributeDefinitions.map((item) => [item.code, item]))
+        const categoryName = categories.find((item) => item.id === currentCategory)?.name || ''
+        const subcategoryName = subcategories.find((item) => item.id === currentSubcategory)?.name || ''
+        const categoryDefinitions = currentCategory
+            ? getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName)
+                .map((definition) => ({ ...definition, ...registryByCode.get(definition.code) }))
+            : attributeDefinitions
+
+        return categoryDefinitions.filter((definition) => {
+            if (!definition.active || !definition.use_as_filter) return false
+            const hasValues = (filterFacets?.attributeFacets?.[definition.code]?.length || 0) > 0
+            return hasValues || definition.code === currentAttributeKey
+        })
+    }, [
+        attributeDefinitions,
+        categories,
+        currentAttributeKey,
+        currentCategory,
+        currentSubcategory,
+        filterFacets?.attributeFacets,
+        subcategories,
+    ])
+
+    const selectedAttributeDefinition = availableAttributeDefinitions
+        .find((definition) => definition.code === attributeKeyValue)
+        || attributeDefinitions.find((definition) => definition.code === attributeKeyValue)
+    const attributeValueOptions = useMemo(() => {
+        const facets = filterFacets?.attributeFacets?.[attributeKeyValue] || []
+        return facets.map((facet) => ({
+            value: String(facet.value || ''),
+            label: dictionaryLabel(selectedAttributeDefinition, String(facet.value || '')),
+            count: Number(facet.count || 0),
+        })).filter((item) => item.value)
+    }, [attributeKeyValue, filterFacets?.attributeFacets, selectedAttributeDefinition])
 
     const genderFacetValue = (value: string) => {
         if (value === 'Для мужчин') return 'male'
@@ -357,21 +395,51 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
                         <div>
                             <Label className="mb-2 block text-slate-300">Атрибуты</Label>
                             <div className="space-y-2">
-                                <Input
-                                    value={attributeKeyValue}
-                                    onChange={(event) => setAttributeKeyValue(event.target.value)}
-                                    placeholder="Ключ, например material"
-                                    className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
-                                />
-                                <Input
-                                    value={attributeValueValue}
-                                    onChange={(event) => setAttributeValueValue(event.target.value)}
-                                    placeholder="Значение, например leather"
-                                    className="bg-slate-700 text-slate-200 placeholder:text-slate-500"
-                                />
+                                <Select
+                                    value={attributeKeyValue || '__all__'}
+                                    onValueChange={(value) => {
+                                        const next = value === '__all__' ? '' : value
+                                        setAttributeKeyValue(next)
+                                        setAttributeValueValue('')
+                                        applyFilter('attributeKey', next || null)
+                                    }}
+                                >
+                                    <SelectTrigger aria-label="Атрибут" className="bg-slate-700 text-slate-200">
+                                        <SelectValue placeholder="Выберите атрибут" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__all__">Все атрибуты</SelectItem>
+                                        {availableAttributeDefinitions.map((definition) => (
+                                            <SelectItem key={definition.code} value={definition.code}>
+                                                {definition.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <Select
+                                    value={attributeValueValue || '__all__'}
+                                    onValueChange={(value) => {
+                                        const next = value === '__all__' ? '' : value
+                                        setAttributeValueValue(next)
+                                        applyFilter('attributeValue', next || null)
+                                    }}
+                                    disabled={!attributeKeyValue}
+                                >
+                                    <SelectTrigger aria-label="Значение атрибута" className="bg-slate-700 text-slate-200">
+                                        <SelectValue placeholder="Любое значение" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__all__">Любое значение</SelectItem>
+                                        {attributeValueOptions.map((item) => (
+                                            <SelectItem key={item.value} value={item.value}>
+                                                {item.label} ({item.count})
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
                             <p className="mt-1 text-[11px] text-slate-500">
-                                Можно указать только ключ, чтобы найти все товары с этим атрибутом.
+                                Список зависит от выбранной категории и остальных фильтров.
                             </p>
                         </div>
 
@@ -527,3 +595,16 @@ const Sidebar: React.FC<SidebarProps> = ({ brands, categories, subcategories, fi
 }
 
 export default Sidebar
+
+function dictionaryLabel(definition: CatalogAttributeDefinition | undefined, value: string) {
+    const normalized = normalizeDictionaryText(value)
+    const match = definition?.dictionary_values?.find((item) => (
+        normalizeDictionaryText(item.canonical_value) === normalized
+        || item.aliases.some((alias) => normalizeDictionaryText(alias) === normalized)
+    ))
+    return match?.canonical_value || value
+}
+
+function normalizeDictionaryText(value: string) {
+    return value.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').trim()
+}

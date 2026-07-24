@@ -349,6 +349,7 @@ describe('rails admin product adapter', () => {
             brands: [{ slug: hasBrand ? 'unexpected' : 'gucci', name: 'Gucci', count: 2 }],
             categories: [{ slug: hasCategory ? 'bags-child' : 'bags-parent', name: 'Сумки', count: 3 }],
             genders: gender === 'unisex' ? [] : [{ value: 'female', count: 4 }],
+            sizes: [{ value: 'M', count: 3 }],
           },
           meta: { total: gender === 'unisex' ? 2 : 4, pages: 1 },
           products: [],
@@ -369,7 +370,8 @@ describe('rails admin product adapter', () => {
     expect(result.categoryFacets).toEqual([{ slug: 'bags-parent', name: 'Сумки', count: 3 }])
     expect(result.subcategoryFacets).toEqual([{ slug: 'bags-child', name: 'Сумки', count: 3 }])
     expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }, { value: 'unisex', count: 2 }])
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(result.attributeFacets?.sizes).toEqual([{ value: 'M', count: 3 }])
+    expect(fetchMock).toHaveBeenCalledTimes(6)
 
     const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
     expect(calls[0].get('brand')).toBeNull()
@@ -387,6 +389,8 @@ describe('rails admin product adapter', () => {
     expect(calls[4].get('brand')).toBe('gucci')
     expect(calls[4].get('category')).toBe('bags-child')
     expect(calls[4].get('gender')).toBe('unisex')
+    expect(calls[5].get('attribute_key')).toBeNull()
+    expect(calls[5].get('attribute_value')).toBeNull()
   })
 
   it('loads 500-product admin pages in chunks', async () => {
@@ -565,6 +569,15 @@ describe('rails admin product adapter', () => {
         processing_status: 'processed',
       },
     ])
+  })
+
+  it('does not copy external_id into SKU when SKU was not submitted', () => {
+    const formData = new FormData()
+    formData.append('productId', 'external-1')
+
+    expect(productFormDataToRailsPayload(formData, { applyDefaults: false }).product).toEqual({
+      external_id: 'external-1',
+    })
   })
 
   it('marks zero-price products as price-on-request in payload metadata', () => {

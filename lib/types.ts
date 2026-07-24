@@ -57,6 +57,7 @@ export interface ProductFilterFacets {
   categoryFacets: CatalogSlugFacet[]
   subcategoryFacets: CatalogSlugFacet[]
   genderFacets: CatalogValueFacet[]
+  attributeFacets?: Record<string, CatalogValueFacet[]>
 }
 
 export interface ProductMedia {

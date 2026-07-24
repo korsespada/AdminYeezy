@@ -14,6 +14,7 @@ import {
 import { cookies } from 'next/headers'
 import { ADMIN_TOKEN_COOKIE } from './admin-session'
 import { isPriceCentsOnRequest, isPriceOnRequest } from './product-pricing'
+import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
@@ -1393,6 +1394,7 @@ type RailsProductFacetPayload = {
     brands?: CatalogSlugFacet[]
     categories?: CatalogSlugFacet[]
     genders?: CatalogValueFacet[]
+    [key: string]: CatalogSlugFacet[] | CatalogValueFacet[] | undefined
   }
   meta?: {
     total?: number
@@ -1424,7 +1426,7 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     attributeValue: filters.attributeValue,
   }
 
-  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload] = await Promise.all([
+  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload, attributePayload] = await Promise.all([
     fetchRailsProductFacets({
       ...sharedFilters,
       category: filters.category,
@@ -1461,6 +1463,17 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
       subcategory: filters.subcategory,
       gender: 'unisex',
     }),
+    fetchRailsProductFacets({
+      ...sharedFilters,
+      brand: filters.brand,
+      category: filters.category,
+      subcategory: filters.subcategory,
+      gender: filters.gender,
+      genderExact: filters.genderExact,
+      noGender: filters.noGender,
+      attributeKey: '',
+      attributeValue: '',
+    }),
   ])
 
   const genderFacets = [...(genderPayload.facets?.genders || [])]
@@ -1474,6 +1487,12 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     categoryFacets: categoryPayload.facets?.categories || [],
     subcategoryFacets: subcategoryPayload.facets?.categories || [],
     genderFacets,
+    attributeFacets: Object.fromEntries(
+      CATALOG_ATTRIBUTE_DEFINITIONS.map((definition) => [
+        definition.code,
+        (attributePayload.facets?.[definition.code] || []) as CatalogValueFacet[],
+      ]),
+    ),
   }
 }
 
@@ -1543,9 +1562,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('productId') || formData.has('external_id')) {
     product.external_id = String(formData.get('external_id') || formData.get('productId') || '')
   }
-  if (formData.has('sku') || formData.has('productId')) {
-    product.sku = String(formData.get('sku') || formData.get('productId') || '')
-  }
+  if (formData.has('sku')) product.sku = String(formData.get('sku') || '')
   if (formData.has('name')) product.name = String(formData.get('name') || '')
   if (formData.has('description')) product.description = String(formData.get('description') || '')
   if (formData.has('price')) {

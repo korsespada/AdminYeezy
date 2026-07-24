@@ -20,7 +20,6 @@ Production-доступ к `/admin/*` должен быть только по Ra
 | `/admin/brands` | Бренды | Rails catalog lookups, read-only |
 | `/admin/categories` | Категории и подкатегории | Rails catalog lookups, read-only |
 | `/admin/trash` | Архивированные товары | Rails admin/products |
-| `/admin/gender-backfill` | Проставление gender | Rails product updates |
 
 Все изменения опубликованного каталога идут через Rails API. Прямые SQL-записи в Rails CRM Postgres запрещены.
 
