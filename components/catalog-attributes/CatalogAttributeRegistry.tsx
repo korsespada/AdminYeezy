@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { CheckCircle2, Loader2, Save, Sparkles } from 'lucide-react'
+import { BookOpen, CheckCircle2, Loader2, Save, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { updateCatalogAttributeDefinitionAction } from '@/actions/catalog-attribute-registry'
+import CatalogAttributeDictionaryEditor from '@/components/catalog-attributes/CatalogAttributeDictionaryEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -22,6 +23,7 @@ export default function CatalogAttributeRegistry({
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const [savingCode, setSavingCode] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState('')
+  const [activeView, setActiveView] = useState<'schema' | 'dictionary'>('schema')
   const [isPending, startTransition] = useTransition()
   const categoryCodes = new Set(
     selectedCategory
@@ -63,6 +65,23 @@ export default function CatalogAttributeRegistry({
 
   return (
     <div className="space-y-5">
+      <div className="inline-flex rounded-xl border border-slate-800 bg-slate-900 p-1">
+        <ViewButton
+          active={activeView === 'schema'}
+          onClick={() => setActiveView('schema')}
+          icon={<SlidersHorizontal className="h-4 w-4" />}
+        >
+          Схема применения
+        </ViewButton>
+        <ViewButton
+          active={activeView === 'dictionary'}
+          onClick={() => setActiveView('dictionary')}
+          icon={<BookOpen className="h-4 w-4" />}
+        >
+          Справочники значений
+        </ViewButton>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-3">
         <InfoCard title="Характеристика" text="Показывается в карточке товара как структурированное значение." />
         <InfoCard title="Фильтр" text="Используется для фильтрации товаров на сайте и в админке." />
@@ -96,6 +115,9 @@ export default function CatalogAttributeRegistry({
         </div>
       )}
 
+      {activeView === 'dictionary' ? (
+        <CatalogAttributeDictionaryEditor definitions={visibleDefinitions} />
+      ) : (
       <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left text-sm">
@@ -116,13 +138,20 @@ export default function CatalogAttributeRegistry({
                   <td className="px-5 py-4 align-top">
                     <div className="font-semibold text-white">{definition.label}</div>
                     <div className="mt-1 font-mono text-xs text-slate-500">{definition.code}</div>
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      {definition.parser_rules.slice(0, 3).map((rule) => (
-                        <Badge key={rule} variant="outline" className="border-slate-700 bg-slate-950 text-slate-400">
-                          {rule}
-                        </Badge>
-                      ))}
-                    </div>
+                    {definition.parser_rules.length > 0 && (
+                      <>
+                        <div className="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                          Примеры распознавания
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {definition.parser_rules.slice(0, 3).map((rule) => (
+                            <Badge key={rule} variant="outline" className="border-slate-700 bg-slate-950 text-slate-400">
+                              {rule}
+                            </Badge>
+                          ))}
+                        </div>
+                      </>
+                    )}
                     {definition.aliases.length > 0 && (
                       <div className="mt-2 text-[11px] text-slate-600">
                         Старые коды: {definition.aliases.slice(0, 4).join(', ')}
@@ -171,6 +200,7 @@ export default function CatalogAttributeRegistry({
           </table>
         </div>
       </div>
+      )}
 
       <div className="rounded-2xl border border-indigo-900/70 bg-indigo-950/30 p-5">
         <div className="flex items-start gap-3">
@@ -185,6 +215,31 @@ export default function CatalogAttributeRegistry({
         </div>
       </div>
     </div>
+  )
+}
+
+function ViewButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+        active ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
   )
 }
 

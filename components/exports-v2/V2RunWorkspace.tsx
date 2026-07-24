@@ -45,6 +45,7 @@ import {
 import type { V2Album, V2AlbumRole, V2Draft, V2RunDetails } from '@/lib/exports-v2-types'
 import { buildExportsV2MediaPlan } from '@/lib/exports-v2-media'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
+import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 
 const ROLE_OPTIONS: Array<{
   value: V2AlbumRole
@@ -66,10 +67,12 @@ export default function V2RunWorkspace({
   initialData,
   initialSearch,
   initialAssignment,
+  attributeDefinitions,
 }: {
   initialData: V2RunDetails
   initialSearch: string
   initialAssignment: 'all' | 'assigned' | 'unassigned'
+  attributeDefinitions?: CatalogAttributeDefinition[]
 }) {
   const router = useRouter()
   const [selected, setSelected] = useState<string[]>([])
@@ -550,6 +553,7 @@ export default function V2RunWorkspace({
                   <ProductReview
                     draft={draft}
                     lookups={initialData.catalog_lookups}
+                    attributeDefinitions={attributeDefinitions}
                     pending={pending === `confirm-${draft.id}`}
                     onPending={(value) => setPending(value ? `confirm-${draft.id}` : '')}
                     onMessage={setMessage}
@@ -605,6 +609,7 @@ function draftStatusLabel(status: string) {
 function ProductReview({
   draft,
   lookups,
+  attributeDefinitions,
   pending,
   onPending,
   onMessage,
@@ -612,6 +617,7 @@ function ProductReview({
 }: {
   draft: V2Draft
   lookups: V2RunDetails['catalog_lookups']
+  attributeDefinitions?: CatalogAttributeDefinition[]
   pending: boolean
   onPending: (value: boolean) => void
   onMessage: (value: { type: 'error' | 'success'; text: string }) => void
@@ -675,6 +681,7 @@ function ProductReview({
         onChange={setAttributes}
         categoryName={categoryName}
         subcategoryName={subcategoryName}
+        registryDefinitions={attributeDefinitions}
         compact
       />
       <button type="button" onClick={confirm} disabled={pending || !product.name.trim()} className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50">

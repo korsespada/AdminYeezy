@@ -13,6 +13,7 @@ import ProductTableView from '@/components/products/ProductTableView'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 
 interface ProductListProps {
   initialData: Product[]
@@ -20,13 +21,25 @@ interface ProductListProps {
   allBrands?: Brand[] // Complete list of brands for editing
   categories: Category[]
   subcategories: Subcategory[]
+  attributeDefinitions?: CatalogAttributeDefinition[]
   activeSubcategoryIds?: string[]
   filterFacets?: ProductFilterFacets
   totalItems: number
   pagination?: React.ReactNode
 }
 
-export default function ProductList({ initialData, brands, allBrands = [], categories, subcategories, activeSubcategoryIds = [], filterFacets, totalItems, pagination }: ProductListProps) {
+export default function ProductList({
+  initialData,
+  brands,
+  allBrands = [],
+  categories,
+  subcategories,
+  attributeDefinitions,
+  activeSubcategoryIds = [],
+  filterFacets,
+  totalItems,
+  pagination,
+}: ProductListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const routeKey = searchParams.toString()
@@ -266,6 +279,7 @@ export default function ProductList({ initialData, brands, allBrands = [], categ
         brands={editingBrands}
         categories={categories}
         subcategories={subcategories}
+        attributeDefinitions={attributeDefinitions}
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false)

@@ -26,6 +26,7 @@ import {
   resolveSupplierAttributeCodes,
 } from '@/lib/supplier-attributes'
 import { CATALOG_ATTRIBUTE_DEFINITIONS } from '@/lib/catalog-attribute-schema'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 
 const ALLOWED_ROLES = new Set<V2AlbumRole>([
@@ -276,6 +277,7 @@ function normalizeProductResult(
     categories: Array<{ id: string; name: string }>
     subcategories: Array<{ id: string; name: string }>
   },
+  registryDefinitions = CATALOG_ATTRIBUTE_DEFINITIONS,
 ) {
   const result = raw?.product || raw || {}
   const chooseId = (kind: string, value: unknown, fallback: unknown) => {
@@ -292,6 +294,7 @@ function normalizeProductResult(
     categoryName,
     subcategoryName,
     allowedCodes: attributeCodes,
+    definitions: registryDefinitions,
   })
   const gender = ['male', 'female', 'unisex'].includes(String(result.gender))
     ? String(result.gender)
@@ -366,15 +369,24 @@ export async function runExportsV2ProductAiAction(runId: string): Promise<Action
       : context.default_category_name
         ? resolveSupplierAttributeCodes([], context.default_category_name, context.default_subcategory_name)
         : CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => item.code)
+    const registryDefinitions = await getCatalogAttributeDefinitions()
+    const registryByCode = new Map(registryDefinitions.map((item) => [item.code, item]))
     const attributeHints = attributeCodes.map((code) => {
-      const definition = getSupplierAttributeDefinition(code)
+      const supplierDefinition = getSupplierAttributeDefinition(code)
+      const definition = registryByCode.get(code) || supplierDefinition
       return {
         code,
         label: definition?.label || code,
         type: definition?.value_type || 'text',
         allowed_values: definition?.values || [],
         unit: definition?.unit || null,
-        description: definition?.description || '',
+        value_dictionary: definition && 'dictionary_values' in definition
+          ? definition.dictionary_values?.filter((item) => item.active).map((item) => ({
+            value: item.canonical_value,
+            aliases: item.aliases,
+          })) || []
+          : [],
+        description: supplierDefinition?.description || '',
       }
     })
     const usage: Record<string, number> = {}
@@ -477,7 +489,14 @@ export async function runExportsV2ProductAiAction(runId: string): Promise<Action
             `, [cacheHash, JSON.stringify(rawResult)])
           }
         }
-        const product = normalizeProductResult(rawResult, context, validIds, attributeCodes, lookups)
+        const product = normalizeProductResult(
+          rawResult,
+          context,
+          validIds,
+          attributeCodes,
+          lookups,
+          registryDefinitions,
+        )
         if (!product.name) throw new Error('ИИ не сформировал название')
         const mediaPlan = buildExportsV2MediaPlan(albums, Number(context.max_on_model_media || 5))
         const externalId = `v2-${context.supplier_id}-${primary.external_id}`
@@ -570,6 +589,7 @@ export async function confirmExportsV2ProductAction(draftId: string, product: Re
       categoryName,
       subcategoryName,
     )
+    const registryDefinitions = await getCatalogAttributeDefinitions()
     const editable = {
       name,
       description: String(product.description || '').slice(0, 8000),
@@ -583,6 +603,7 @@ export async function confirmExportsV2ProductAction(draftId: string, product: Re
         subcategoryName,
         allowedCodes,
         preserveUnknown: true,
+        definitions: registryDefinitions,
       }),
     }
     const result = await scrapingQuery(`

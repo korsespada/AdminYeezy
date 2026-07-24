@@ -66,4 +66,34 @@ describe('catalog attribute schema', () => {
       size_system: 'EU',
     })
   })
+
+  it('uses editable dictionary aliases as the canonical product value', () => {
+    expect(normalizeCatalogAttributes({
+      colors: ['jet black'],
+    }, {
+      categoryName: 'Одежда',
+      definitions: [{
+        code: 'colors',
+        label: 'Цвет',
+        category_scope: 'Все категории',
+        value_type: 'multi_enum',
+        show_as_characteristic: true,
+        use_as_filter: true,
+        use_as_variant_dimension: false,
+        parser_rules: [],
+        aliases: [],
+        values: ['Чёрный'],
+        dictionary_values: [{
+          id: '1',
+          attribute_code: 'colors',
+          canonical_value: 'Чёрный',
+          aliases: ['jet black'],
+          sort_order: 10,
+          active: true,
+        }],
+        sort_order: 10,
+        active: true,
+      }],
+    })).toEqual({ colors: ['Чёрный'] })
+  })
 })

@@ -1,6 +1,7 @@
 import {
   getCatalogAttributeDefinitionsForCategory,
   resolveCatalogAttributeCode,
+  type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
 
 const COLOR_VALUES: Record<string, string> = {
@@ -69,6 +70,7 @@ export function normalizeCatalogAttributes(
     subcategoryName?: string | null
     allowedCodes?: string[]
     preserveUnknown?: boolean
+    definitions?: CatalogAttributeDefinition[]
   } = {},
 ) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
@@ -86,11 +88,44 @@ export function normalizeCatalogAttributes(
     if (isShoes && code === 'materials') code = 'upper_material'
     if (!allowed.has(code) && !options.preserveUnknown) continue
 
-    const normalized = normalizeAttributeValue(code, rawValue)
+    const normalized = applyDictionaryValue(
+      code,
+      normalizeAttributeValue(code, rawValue),
+      options.definitions,
+    )
     if (!isEmpty(normalized)) result[code] = normalized
   }
 
   return result
+}
+
+function applyDictionaryValue(
+  code: string,
+  value: unknown,
+  definitions?: CatalogAttributeDefinition[],
+): unknown {
+  const dictionary = definitions
+    ?.find((definition) => definition.code === code)
+    ?.dictionary_values
+    ?.filter((item) => item.active)
+  if (!dictionary?.length) return value
+
+  const canonicalByText = new Map<string, string>()
+  for (const item of dictionary) {
+    canonicalByText.set(normalizeText(item.canonical_value), item.canonical_value)
+    for (const alias of item.aliases) canonicalByText.set(normalizeText(alias), item.canonical_value)
+  }
+  const canonicalize = (item: unknown) => canonicalByText.get(normalizeText(String(item))) || item
+
+  if (Array.isArray(value)) return value.map(canonicalize)
+  if (value && typeof value === 'object') {
+    const structured = value as Record<string, unknown>
+    if (Array.isArray(structured.values)) {
+      return { ...structured, values: structured.values.map(canonicalize) }
+    }
+  }
+  if (typeof value === 'string' || typeof value === 'number') return canonicalize(value)
+  return value
 }
 
 export function normalizeAttributeValue(code: string, value: unknown): unknown {

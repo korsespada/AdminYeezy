@@ -23,7 +23,10 @@ import type {
 } from '@/lib/rails-admin'
 import type { Brand, Category, Subcategory } from '@/lib/types'
 import type { Product } from '@/lib/types'
-import { CATALOG_ATTRIBUTE_DEFINITIONS } from '@/lib/catalog-attribute-schema'
+import {
+  CATALOG_ATTRIBUTE_DEFINITIONS,
+  type CatalogAttributeDefinition,
+} from '@/lib/catalog-attribute-schema'
 
 const ATTRIBUTE_OPTIONS = [
   ['', 'Все атрибуты'],
@@ -84,6 +87,7 @@ interface CatalogAttributeReviewProps {
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
+  attributeDefinitions?: CatalogAttributeDefinition[]
 }
 
 export default function CatalogAttributeReview({
@@ -92,6 +96,7 @@ export default function CatalogAttributeReview({
   brands,
   categories,
   subcategories,
+  attributeDefinitions,
 }: CatalogAttributeReviewProps) {
   const [items, setItems] = useState(initialResult.items)
   const [totalItems, setTotalItems] = useState(initialResult.totalItems)
@@ -364,6 +369,7 @@ export default function CatalogAttributeReview({
           brands={brands}
           categories={categories}
           subcategories={subcategories}
+          attributeDefinitions={attributeDefinitions}
           isOpen={drawerOpen}
           onClose={() => {
             setDrawerOpen(false)

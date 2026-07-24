@@ -128,6 +128,20 @@ async function migrate() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS catalog_attribute_values (
+        id BIGSERIAL PRIMARY KEY,
+        attribute_code TEXT NOT NULL REFERENCES catalog_attribute_definitions(code) ON DELETE CASCADE,
+        canonical_value TEXT NOT NULL,
+        aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (attribute_code, canonical_value)
+      );
+    `);
+
+    await pool.query(`
       UPDATE suppliers
       SET default_gender = CASE
         WHEN lower(trim(default_gender)) IN ('для мужчин', 'мужской', 'male') THEN 'male'

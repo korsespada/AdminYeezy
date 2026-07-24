@@ -4,6 +4,7 @@ import { getRailsCatalogLookups, getRailsProductFilterFacets, listRailsAdminProd
 import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 const PRODUCT_PAGE_SIZES = [40, 100, 500]
 type AdminSearchParams = {
@@ -92,7 +93,7 @@ export default async function AdminPage({
       attributeValue: attributeValueFilter,
     }
 
-    const [productPage, filterFacets] = await Promise.all([
+    const [productPage, filterFacets, attributeDefinitions] = await Promise.all([
       listRailsAdminProducts(productFilters),
       getRailsProductFilterFacets({
         name: nameSearch,
@@ -108,6 +109,7 @@ export default async function AdminPage({
         attributeKey: attributeKeyFilter,
         attributeValue: attributeValueFilter,
       }),
+      getCatalogAttributeDefinitions(),
     ])
 
     const products = productPage.products
@@ -123,6 +125,7 @@ export default async function AdminPage({
         allBrands={brands}
         categories={categories}
         subcategories={subcategories}
+        attributeDefinitions={attributeDefinitions}
         activeSubcategoryIds={[]}
         filterFacets={filterFacets}
         totalItems={totalItems}

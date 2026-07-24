@@ -1,5 +1,14 @@
 export type CatalogAttributeValueType = 'text' | 'number' | 'enum' | 'multi_enum' | 'size'
 
+export interface CatalogAttributeDictionaryValue {
+  id: string
+  attribute_code: string
+  canonical_value: string
+  aliases: string[]
+  sort_order: number
+  active: boolean
+}
+
 export interface CatalogAttributeDefinition {
   code: string
   label: string
@@ -11,6 +20,7 @@ export interface CatalogAttributeDefinition {
   parser_rules: string[]
   aliases: string[]
   values?: string[]
+  dictionary_values?: CatalogAttributeDictionaryValue[]
   unit?: string
   sort_order: number
   active: boolean

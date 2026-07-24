@@ -13,17 +13,24 @@ export default function CatalogAttributeFields({
   onChange,
   categoryName,
   subcategoryName,
+  registryDefinitions,
   compact = false,
 }: {
   value: Record<string, any>
   onChange: (value: Record<string, any>) => void
   categoryName?: string | null
   subcategoryName?: string | null
+  registryDefinitions?: CatalogAttributeDefinition[]
   compact?: boolean
 }) {
   const definitions = useMemo(
-    () => getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName),
-    [categoryName, subcategoryName],
+    () => {
+      const storedByCode = new Map((registryDefinitions || []).map((item) => [item.code, item]))
+      return getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName)
+        .map((definition) => ({ ...definition, ...storedByCode.get(definition.code) }))
+        .filter((definition) => definition.active !== false)
+    },
+    [categoryName, subcategoryName, registryDefinitions],
   )
   const knownCodes = useMemo(() => new Set(definitions.map((item) => item.code)), [definitions])
   const unknownEntries = Object.entries(value || {}).filter(([code]) => !knownCodes.has(code))
@@ -40,6 +47,7 @@ export default function CatalogAttributeFields({
       categoryName,
       subcategoryName,
       preserveUnknown: true,
+      definitions: registryDefinitions,
     }))
   }
 

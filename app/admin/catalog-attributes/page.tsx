@@ -2,6 +2,7 @@ import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import CatalogAttributeReview from '@/components/catalog-attributes/CatalogAttributeReview'
 import { getRailsCatalogLookups, listRailsCatalogAttributeSuggestions } from '@/lib/rails-admin'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,13 +37,14 @@ export default async function CatalogAttributesPage({
   }
 
   try {
-    const [result, lookups] = await Promise.all([
+    const [result, lookups, attributeDefinitions] = await Promise.all([
       listRailsCatalogAttributeSuggestions({
         page: Math.max(1, Number(params.page) || 1),
         ...filters,
         status: filters.status === 'all' ? '' : filters.status,
       }),
       getRailsCatalogLookups(),
+      getCatalogAttributeDefinitions(),
     ])
 
     return (
@@ -61,6 +63,7 @@ export default async function CatalogAttributesPage({
             brands={lookups.brands}
             categories={lookups.categories}
             subcategories={lookups.subcategories}
+            attributeDefinitions={attributeDefinitions}
           />
         </div>
       </main>

@@ -24,18 +24,29 @@ import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
+import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 
 interface ProductFormProps {
   product?: Product | null
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
+  attributeDefinitions?: CatalogAttributeDefinition[]
   isOpen: boolean
   onClose: () => void
   onSave?: (updatedProduct: Product) => void
 }
 
-export default function ProductForm({ product, brands, categories, subcategories, isOpen, onClose, onSave }: ProductFormProps) {
+export default function ProductForm({
+  product,
+  brands,
+  categories,
+  subcategories,
+  attributeDefinitions,
+  isOpen,
+  onClose,
+  onSave,
+}: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState('')
@@ -337,6 +348,7 @@ export default function ProductForm({ product, brands, categories, subcategories
       categoryName: selectedCategoryName,
       subcategoryName: selectedSubcategoryName,
       preserveUnknown: true,
+      definitions: attributeDefinitions,
     })
     formData.append('catalog_attributes', JSON.stringify(normalizedCatalogAttributes))
     const priceOnRequest = isPriceOnRequest(priceNum)
@@ -731,6 +743,7 @@ export default function ProductForm({ product, brands, categories, subcategories
                 onChange={setCatalogAttributes}
                 categoryName={selectedCategoryName}
                 subcategoryName={selectedSubcategoryName}
+                registryDefinitions={attributeDefinitions}
               />
             </div>
 

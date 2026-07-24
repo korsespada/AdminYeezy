@@ -4,6 +4,7 @@ import { getExportsV2RunAction } from '@/actions/exports-v2'
 import V2RunWorkspace from '@/components/exports-v2/V2RunWorkspace'
 import ImportTabs from '@/components/ui/ImportTabs'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,11 +17,14 @@ export default async function ExportsV2RunPage({
 }) {
   const { id } = await params
   const query = await searchParams
-  const result = await getExportsV2RunAction(id, {
-    page: Number(query.page || 1),
-    search: query.search || '',
-    assignment: query.assignment || 'all',
-  })
+  const [result, attributeDefinitions] = await Promise.all([
+    getExportsV2RunAction(id, {
+      page: Number(query.page || 1),
+      search: query.search || '',
+      assignment: query.assignment || 'all',
+    }),
+    getCatalogAttributeDefinitions(),
+  ])
 
   return (
     <div className="p-8">
@@ -39,6 +43,7 @@ export default async function ExportsV2RunPage({
             initialData={result.data}
             initialSearch={query.search || ''}
             initialAssignment={query.assignment || 'all'}
+            attributeDefinitions={attributeDefinitions}
           />
         )}
       </div>

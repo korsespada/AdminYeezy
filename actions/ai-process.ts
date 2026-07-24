@@ -15,6 +15,7 @@ import {
 } from '@/lib/supplier-attributes'
 import { normalizeProductAttributes } from '@/lib/product-attributes'
 import { openRouterChatCompletion } from '@/lib/openrouter'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 const execFileAsync = promisify(execFile)
 
@@ -79,12 +80,22 @@ async function getSupplierAttributeHints(supplierId?: number | null) {
       'SELECT default_attributes FROM suppliers WHERE id=$1',
       [supplierId],
     )
+    const registryDefinitions = await getCatalogAttributeDefinitions()
+    const registryByCode = new Map(registryDefinitions.map((item) => [item.code, item]))
     return normalizeSupplierAttributeCodes(result.rows[0]?.default_attributes).map((code) => {
-      const definition = getSupplierAttributeDefinition(code)
+      const supplierDefinition = getSupplierAttributeDefinition(code)
+      const definition = registryByCode.get(code) || supplierDefinition
       return {
         code,
         label: definition?.label || code,
-        description: definition?.description || '',
+        allowed_values: definition?.values || [],
+        value_dictionary: definition && 'dictionary_values' in definition
+          ? definition.dictionary_values?.filter((item) => item.active).map((item) => ({
+            value: item.canonical_value,
+            aliases: item.aliases,
+          })) || []
+          : [],
+        description: supplierDefinition?.description || '',
       }
     })
   } catch {
