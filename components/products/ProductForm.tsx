@@ -131,7 +131,7 @@ export default function ProductForm({
     if (isOpen) {
       if (product) {
         setProductId(product.productId || '')
-        setSku(product.sku || '')
+        setSku(product.sku && product.sku !== product.productId ? product.sku : '')
         setName(product.name)
         setDescription(normalizeDescription(product.description))
         setPrice(Number(product.price).toString())
