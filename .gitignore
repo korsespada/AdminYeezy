@@ -35,6 +35,7 @@ Thumbs.db
 
 # Vite/TS temp
 **/*.timestamp-*.mjs
+**/*.tsbuildinfo
 
 # Local browser verification artifacts
 .playwright-cli/
