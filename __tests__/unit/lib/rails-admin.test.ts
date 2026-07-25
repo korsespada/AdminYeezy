@@ -47,7 +47,7 @@ describe('rails admin product adapter', () => {
     expect(params.toString()).toContain('page=2')
     expect(params.toString()).toContain('per_page=100')
     expect(params.get('q')).toBe('mules')
-    expect(params.get('name')).toBe('Gucci mule')
+    expect(params.get('name')).toBeNull()
     expect(params.get('description')).toBe('leather')
     expect(params.get('price_min')).toBe('0')
     expect(params.get('price_max')).toBe('125099')
@@ -68,6 +68,17 @@ describe('rails admin product adapter', () => {
     })
 
     expect(params.get('q')).toBe('ext-1')
+  })
+
+  it('maps the product name filter to the Rails text search parameter', () => {
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      name: "  Chaine D'Ancre To Go  ",
+    })
+
+    expect(params.get('q')).toBe("Chaine D'Ancre To Go")
+    expect(params.get('name')).toBeNull()
   })
 
   it('normalizes pasted product URLs to product slugs for search', () => {
@@ -171,7 +182,7 @@ describe('rails admin product adapter', () => {
 
     const [url] = fetchMock.mock.calls[0]
     expect(String(url)).toBe(
-      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&name=bag&description=leather&price_min=0&price_max=5000000'
+      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=bag&description=leather&price_min=0&price_max=5000000'
     )
   })
 

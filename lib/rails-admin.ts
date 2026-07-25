@@ -1310,10 +1310,10 @@ export function buildRailsAdminProductsParams(options: {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
   params.set('per_page', String(options.perPage))
-  const search = normalizeProductSearchInput(options.search)
+  // Rails product endpoints expose text search through `q`. Keep accepting the
+  // admin UI's `name` option, but send it through the supported API parameter.
+  const search = normalizeProductSearchInput(options.search || options.name)
   if (search) params.set('q', search)
-  const name = options.name?.trim() || ''
-  if (name) params.set('name', name)
   const description = options.description?.trim() || ''
   if (description) params.set('description', description)
   const priceMin = normalizePriceRublesFilter(options.priceMin)
