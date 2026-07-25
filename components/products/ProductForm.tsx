@@ -732,7 +732,20 @@ export default function ProductForm({
                 Технические данные
               </summary>
               <div className="grid gap-4 border-t border-slate-700 p-3 md:grid-cols-2">
-                <div className="space-y-2 md:col-span-2">
+                {product && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-400">Артикул</label>
+                    <input
+                      type="text"
+                      value={product.seo_article || 'Не присвоен'}
+                      readOnly
+                      aria-label="Артикул"
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-200"
+                    />
+                    <p className="text-[10px] text-slate-600">Формируется автоматически. Изменение запрещено.</p>
+                  </div>
+                )}
+                <div className="space-y-2">
                   <label className="block text-xs font-medium text-slate-500">External ID</label>
                   <input
                     type="text"

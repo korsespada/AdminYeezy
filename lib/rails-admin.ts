@@ -487,6 +487,7 @@ export function mapRailsProduct(product: any): Product {
     productId: product.external_id || product.sku || String(product.id),
     external_id: product.external_id || '',
     sku: product.sku || '',
+    seo_article: product.seo_article || '',
     slug: product.slug || '',
     name: product.name || '',
     description: product.description || '',

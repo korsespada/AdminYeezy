@@ -50,6 +50,7 @@ const category: Category = {
 const product: Product = {
   id: 'product-1',
   productId: 'external-1',
+  seo_article: 'GOY-48225',
   name: 'Goyard Jouvence',
   description: 'Описание',
   price: 38000,
@@ -115,5 +116,22 @@ describe('ProductForm save shortcut', () => {
 
     await waitFor(() => expect(updateProductAction).toHaveBeenCalledOnce())
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('shows the SEO article as read-only technical data', async () => {
+    render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const articleInput = await screen.findByLabelText('Артикул')
+    expect(articleInput).toHaveValue('GOY-48225')
+    expect(articleInput).toHaveAttribute('readonly')
   })
 })

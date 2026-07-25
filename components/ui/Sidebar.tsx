@@ -364,7 +364,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <Input
                                     id="product-name-search"
                                     type="text"
-                                    placeholder="Поиск по названию..."
+                                    placeholder="Название или артикул..."
                                     value={nameValue}
                                     onChange={(e) => setNameValue(e.target.value)}
                                     className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500"

@@ -79,6 +79,7 @@ export interface Product {
   productId: string
   external_id?: string
   sku?: string
+  seo_article?: string
   slug?: string
   name: string
   description: string
