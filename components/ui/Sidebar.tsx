@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useCallback, useState, useEffect, useMemo } from 'react'
-import { X, Filter, Search, RotateCcw } from 'lucide-react'
+import { X, Filter, LoaderCircle, Search, RotateCcw } from 'lucide-react'
 import { type Brand, type Category, type ProductFilterFacets, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,8 @@ interface SidebarProps {
     isOpen: boolean
     onClose: () => void
     count: number
+    isTextSearchPending?: boolean
+    onTextSearch?: (url: string) => void
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -37,6 +39,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     isOpen,
     onClose,
     count,
+    isTextSearchPending = false,
+    onTextSearch,
 }) => {
     const router = useRouter()
     const searchParams = useSearchParams()
@@ -108,7 +112,12 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         params.delete('search')
         params.delete('page')
-        router.push(`/admin?${params.toString()}`)
+        const url = `/admin?${params.toString()}`
+        if (onTextSearch) {
+            onTextSearch(url)
+        } else {
+            router.push(url)
+        }
     }
 
     // Debounce price filters
@@ -358,9 +367,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                             </div>
-                            <Button type="submit" className="mt-3 w-full">
-                                <Search className="w-4 h-4" />
-                                <span>Найти</span>
+                            <Button type="submit" className="mt-3 w-full" disabled={isTextSearchPending}>
+                                {isTextSearchPending ? (
+                                    <LoaderCircle className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Search className="w-4 h-4" />
+                                )}
+                                <span>{isTextSearchPending ? 'Ищем товары...' : 'Найти'}</span>
                             </Button>
                         </form>
 

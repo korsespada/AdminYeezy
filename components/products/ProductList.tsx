@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
@@ -60,6 +60,7 @@ export default function ProductList({
   const [selectedGender, setSelectedGender] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [isSearchPending, startSearchTransition] = useTransition()
   const lastRouteKeyRef = useRef(routeKey)
 
   // Update local state when initialData changes (e.g. after search/filter)
@@ -137,6 +138,12 @@ export default function ProductList({
     )
   }, [])
 
+  const handleTextSearch = useCallback((url: string) => {
+    setSelectedProductIds([])
+    startSearchTransition(() => {
+      router.push(url)
+    })
+  }, [router])
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans text-slate-200">
@@ -152,6 +159,8 @@ export default function ProductList({
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         count={totalItems}
+        isTextSearchPending={isSearchPending}
+        onTextSearch={handleTextSearch}
       />
 
       {/* Main Content Area */}
@@ -201,7 +210,9 @@ export default function ProductList({
             </div>
 
             {/* Content Display */}
-            {products.length === 0 ? (
+            {isSearchPending ? (
+              <ProductSearchSkeleton viewMode={viewMode} />
+            ) : products.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mb-4">
                   <Search className="w-10 h-10 text-slate-600" />
@@ -269,7 +280,7 @@ export default function ProductList({
             )}
 
             {/* Pagination injection */}
-            {pagination}
+            {!isSearchPending && pagination}
           </div>
         </div>
       </main>
@@ -435,6 +446,67 @@ export default function ProductList({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+export function ProductSearchSkeleton({ viewMode }: { viewMode: 'grid' | 'list' }) {
+  const items = Array.from({ length: viewMode === 'grid' ? 8 : 7 })
+
+  return (
+    <div role="status" aria-live="polite" aria-label="Поиск товаров" className="space-y-4">
+      <div className="flex items-center gap-3 px-1 text-sm font-medium text-indigo-300">
+        <span className="relative flex h-2.5 w-2.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-indigo-500" />
+        </span>
+        Собираем подходящие товары...
+      </div>
+
+      {viewMode === 'grid' ? (
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {items.map((_, index) => (
+            <div
+              key={index}
+              className="animate-pulse overflow-hidden rounded-xl border border-slate-700 bg-slate-800"
+              style={{ animationDelay: `${index * 70}ms` }}
+            >
+              <div className="aspect-[4/5] bg-slate-700/80" />
+              <div className="space-y-3 p-4">
+                <div className="h-3 w-1/3 rounded-full bg-slate-700" />
+                <div className="h-5 w-4/5 rounded-full bg-slate-700" />
+                <div className="h-3 w-full rounded-full bg-slate-700/80" />
+                <div className="h-3 w-2/3 rounded-full bg-slate-700/80" />
+                <div className="h-5 w-2/5 rounded-full bg-slate-700" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800">
+          <div className="grid grid-cols-[48px_96px_1fr_140px] gap-4 border-b border-slate-700 px-4 py-3">
+            <div className="h-4 rounded bg-slate-700" />
+            <div className="h-4 rounded bg-slate-700" />
+            <div className="h-4 w-1/3 rounded bg-slate-700" />
+            <div className="h-4 rounded bg-slate-700" />
+          </div>
+          {items.map((_, index) => (
+            <div
+              key={index}
+              className="grid animate-pulse grid-cols-[48px_96px_1fr_140px] items-center gap-4 border-b border-slate-700/70 px-4 py-3 last:border-b-0"
+              style={{ animationDelay: `${index * 70}ms` }}
+            >
+              <div className="h-5 w-5 rounded bg-slate-700" />
+              <div className="h-16 w-16 rounded-lg bg-slate-700/80" />
+              <div className="space-y-2">
+                <div className="h-4 w-2/3 rounded-full bg-slate-700" />
+                <div className="h-3 w-1/3 rounded-full bg-slate-700/80" />
+              </div>
+              <div className="h-4 w-20 rounded-full bg-slate-700" />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

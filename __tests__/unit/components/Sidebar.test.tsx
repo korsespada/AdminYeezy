@@ -75,7 +75,10 @@ const filterFacets: ProductFilterFacets = {
   },
 }
 
-function renderSidebar() {
+function renderSidebar(searchProps: {
+  isTextSearchPending?: boolean
+  onTextSearch?: (url: string) => void
+} = {}) {
   return render(
     <Sidebar
       brands={brands}
@@ -101,6 +104,7 @@ function renderSidebar() {
       isOpen
       onClose={vi.fn()}
       count={3}
+      {...searchProps}
     />
   )
 }
@@ -172,6 +176,21 @@ describe('Sidebar faceted filters', () => {
     await user.type(screen.getByLabelText('Название'), 'sneakers{Enter}')
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?name=sneakers')
+  })
+
+  it('delegates search navigation and exposes its pending state', async () => {
+    const user = userEvent.setup()
+    const onTextSearch = vi.fn()
+    renderSidebar({ onTextSearch })
+
+    await user.type(screen.getByLabelText('Описание'), 'orthopaedic')
+    await user.click(screen.getByRole('button', { name: 'Найти' }))
+
+    expect(onTextSearch).toHaveBeenCalledWith('/admin?description=orthopaedic')
+    expect(navigationMock.push).not.toHaveBeenCalled()
+
+    renderSidebar({ isTextSearchPending: true })
+    expect(screen.getByRole('button', { name: 'Ищем товары...' })).toBeDisabled()
   })
 
   it('uses dependent attribute and value selects with dictionary labels', async () => {
