@@ -91,6 +91,8 @@ describe('ProductForm save shortcut', () => {
     fireEvent.keyDown(window, { key: 's', ctrlKey: true })
 
     await waitFor(() => expect(updateProductAction).toHaveBeenCalledOnce())
+    const submittedFormData = vi.mocked(updateProductAction).mock.calls[0][1] as FormData
+    expect(submittedFormData.has('canonical_url')).toBe(false)
     expect(onClose).toHaveBeenCalledOnce()
   })
 

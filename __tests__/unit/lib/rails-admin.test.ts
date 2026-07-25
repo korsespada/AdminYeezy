@@ -307,6 +307,41 @@ describe('rails admin product adapter', () => {
     expect(init).toMatchObject({ cache: 'no-store' })
   })
 
+  it('loads attribute-only filters from the catalog endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        products: [],
+        meta: { total: 0, pages: 0 },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listRailsAdminProducts({
+      page: 1,
+      perPage: 40,
+      attributeKey: 'colors',
+      attributeValue: 'black',
+    })
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe(
+      'https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&attribute_key=colors&attribute_value=black'
+    )
+    expect(init).toMatchObject({ cache: 'no-store' })
+  })
+
+  it('does not send an orphan attribute value without an attribute key', () => {
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      attributeValue: 'black',
+    })
+
+    expect(params.get('attribute_key')).toBeNull()
+    expect(params.get('attribute_value')).toBeNull()
+  })
+
   it('loads products without gender through the Rails gender_missing filter', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,

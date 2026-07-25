@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useState, useEffect, useMemo } from 'react'
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { X, Filter, LoaderCircle, Search, RotateCcw } from 'lucide-react'
 import { type Brand, type Category, type ProductFilterFacets, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -26,8 +26,8 @@ interface SidebarProps {
     isOpen: boolean
     onClose: () => void
     count: number
-    isTextSearchPending?: boolean
-    onTextSearch?: (url: string) => void
+    isNavigationPending?: boolean
+    onNavigate?: (url: string) => void
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -39,11 +39,13 @@ const Sidebar: React.FC<SidebarProps> = ({
     isOpen,
     onClose,
     count,
-    isTextSearchPending = false,
-    onTextSearch,
+    isNavigationPending = false,
+    onNavigate,
 }) => {
     const router = useRouter()
     const searchParams = useSearchParams()
+    const searchParamsKey = searchParams.toString()
+    const pendingParamsRef = useRef(searchParamsKey)
     const [brandSearch, setBrandSearch] = useState('')
     const [nameValue, setNameValue] = useState(searchParams.get('name') || searchParams.get('search') || '')
     const [descriptionValue, setDescriptionValue] = useState(searchParams.get('description') || '')
@@ -66,8 +68,28 @@ const Sidebar: React.FC<SidebarProps> = ({
         currentBrand || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
     )
 
+    const navigate = useCallback((url: string) => {
+        if (onNavigate) {
+            onNavigate(url)
+        } else {
+            router.push(url)
+        }
+    }, [onNavigate, router])
+
+    useEffect(() => {
+        if (!isNavigationPending) {
+            pendingParamsRef.current = searchParamsKey
+        }
+    }, [isNavigationPending, searchParamsKey])
+
+    const navigateWithParams = useCallback((params: URLSearchParams) => {
+        const nextParams = params.toString()
+        pendingParamsRef.current = nextParams
+        navigate(nextParams ? `/admin?${nextParams}` : '/admin')
+    }, [navigate])
+
     const applyFilter = useCallback((key: string, value: string | null) => {
-        const params = new URLSearchParams(searchParams.toString())
+        const params = new URLSearchParams(pendingParamsRef.current)
         const cleanValue = value?.trim() || ''
         if (cleanValue) {
             params.set(key, cleanValue)
@@ -79,9 +101,15 @@ const Sidebar: React.FC<SidebarProps> = ({
         // Reset page when filters change
         params.delete('page')
 
-        // Special case: if category changes, reset subcategory
+        // Category-dependent filters must not leak into the next catalog branch.
         if (key === 'category') {
             params.delete('subcategory')
+        }
+        if (key === 'category' || key === 'subcategory') {
+            params.delete('attributeKey')
+            params.delete('attributeValue')
+            setAttributeKeyValue('')
+            setAttributeValueValue('')
         }
         if (key === 'attributeKey') {
             params.delete('attributeValue')
@@ -90,12 +118,12 @@ const Sidebar: React.FC<SidebarProps> = ({
             params.set('attributeKey', attributeKeyValue)
         }
 
-        router.push(`/admin?${params.toString()}`)
-    }, [attributeKeyValue, router, searchParams])
+        navigateWithParams(params)
+    }, [attributeKeyValue, navigateWithParams])
 
     const handleTextSearch = (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault()
-        const params = new URLSearchParams(searchParams.toString())
+        const params = new URLSearchParams(pendingParamsRef.current)
         const cleanName = nameValue.trim()
         const cleanDescription = descriptionValue.trim()
 
@@ -112,12 +140,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         params.delete('search')
         params.delete('page')
-        const url = `/admin?${params.toString()}`
-        if (onTextSearch) {
-            onTextSearch(url)
-        } else {
-            router.push(url)
-        }
+        navigateWithParams(params)
     }
 
     // Debounce price filters
@@ -172,9 +195,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         setAttributeKeyValue('')
         setAttributeValueValue('')
         const params = new URLSearchParams()
-        const perPage = searchParams.get('perPage')
+        const perPage = new URLSearchParams(pendingParamsRef.current).get('perPage')
         if (perPage) params.set('perPage', perPage)
-        router.push(params.size > 0 ? `/admin?${params.toString()}` : '/admin')
+        navigateWithParams(params)
     }
 
     const facetState = useMemo(() => {
@@ -228,7 +251,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             .filter(sub => isFacetAvailable(facetState.subcategoryCounts, sub.id, currentSubcategory))
         : []
 
-    const availableAttributeDefinitions = useMemo(() => {
+    const availableAttributeDefinitions = (() => {
         const registryByCode = new Map(attributeDefinitions.map((item) => [item.code, item]))
         const categoryName = categories.find((item) => item.id === currentCategory)?.name || ''
         const subcategoryName = subcategories.find((item) => item.id === currentSubcategory)?.name || ''
@@ -242,27 +265,19 @@ const Sidebar: React.FC<SidebarProps> = ({
             const hasValues = (filterFacets?.attributeFacets?.[definition.code]?.length || 0) > 0
             return hasValues || definition.code === currentAttributeKey
         })
-    }, [
-        attributeDefinitions,
-        categories,
-        currentAttributeKey,
-        currentCategory,
-        currentSubcategory,
-        filterFacets?.attributeFacets,
-        subcategories,
-    ])
+    })()
 
     const selectedAttributeDefinition = availableAttributeDefinitions
         .find((definition) => definition.code === attributeKeyValue)
         || attributeDefinitions.find((definition) => definition.code === attributeKeyValue)
-    const attributeValueOptions = useMemo(() => {
+    const attributeValueOptions = (() => {
         const facets = filterFacets?.attributeFacets?.[attributeKeyValue] || []
         return facets.map((facet) => ({
             value: String(facet.value || ''),
             label: dictionaryLabel(selectedAttributeDefinition, String(facet.value || '')),
             count: Number(facet.count || 0),
         })).filter((item) => item.value)
-    }, [attributeKeyValue, filterFacets?.attributeFacets, selectedAttributeDefinition])
+    })()
 
     const genderFacetValue = (value: string) => {
         if (value === 'Для мужчин') return 'male'
@@ -326,12 +341,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <Button
                                 type="button"
                                 variant="outline"
-                                size="sm"
+                                size="icon"
                                 onClick={handleReset}
+                                aria-label="Сбросить фильтры"
+                                title="Сбросить фильтры"
                                 className="shrink-0 border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white"
                             >
-                                <RotateCcw className="w-4 h-4" />
-                                <span>Сбросить фильтры</span>
+                                <RotateCcw aria-hidden="true" className="h-4 w-4" />
                             </Button>
                         )}
                         <Button variant="ghost" size="icon" onClick={onClose} className="lg:hidden text-slate-400 hover:text-slate-200">
@@ -367,13 +383,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                             </div>
-                            <Button type="submit" className="mt-3 w-full" disabled={isTextSearchPending}>
-                                {isTextSearchPending ? (
+                            <Button type="submit" className="mt-3 w-full" disabled={isNavigationPending}>
+                                {isNavigationPending ? (
                                     <LoaderCircle className="w-4 h-4 animate-spin" />
                                 ) : (
                                     <Search className="w-4 h-4" />
                                 )}
-                                <span>{isTextSearchPending ? 'Ищем товары...' : 'Найти'}</span>
+                                <span>{isNavigationPending ? 'Обновляем товары...' : 'Найти'}</span>
                             </Button>
                         </form>
 
@@ -471,7 +487,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 value={currentCategory || '__all__'}
                                 onValueChange={(value) => applyFilter('category', value === '__all__' ? null : value)}
                             >
-                                <SelectTrigger className="bg-slate-700 text-slate-200">
+                                <SelectTrigger aria-label="Категория" className="bg-slate-700 text-slate-200">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -491,7 +507,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 onValueChange={(value) => applyFilter('subcategory', value === '__all__' ? null : value)}
                                 disabled={!currentCategory}
                             >
-                                <SelectTrigger className="bg-slate-700 text-slate-200">
+                                <SelectTrigger aria-label="Подкатегория" className="bg-slate-700 text-slate-200">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>

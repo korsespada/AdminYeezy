@@ -17,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
@@ -68,7 +68,6 @@ export default function ProductForm({
   const [seoTitle, setSeoTitle] = useState('')
   const [seoDescription, setSeoDescription] = useState('')
   const [h1, setH1] = useState('')
-  const [canonicalUrl, setCanonicalUrl] = useState('')
   const [catalogAttributes, setCatalogAttributes] = useState<Record<string, any>>({})
   const [brandIds, setBrandIds] = useState<string[]>([])
   const [category, setCategory] = useState('')
@@ -150,7 +149,6 @@ export default function ProductForm({
         setSeoTitle(product.seo_title || product.name || '')
         setSeoDescription(product.seo_description || productDescription)
         setH1(product.h1 || product.name || '')
-        setCanonicalUrl(product.canonical_url || '')
         setCatalogAttributes(product.catalog_attributes || product.attributes || {})
         // Handle brand as array or single value
         const b = product.brand || product.expand?.brand
@@ -225,7 +223,6 @@ export default function ProductForm({
         setSeoTitle('')
         setSeoDescription('')
         setH1('')
-        setCanonicalUrl('')
         setCatalogAttributes({})
         setBrandIds([])
         setCategory(categories[0]?.id || '')
@@ -344,7 +341,6 @@ export default function ProductForm({
     formData.append('seo_title', seoTitle.trim())
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
-    formData.append('canonical_url', canonicalUrl.trim())
     const normalizedCatalogAttributes = normalizeCatalogAttributes(catalogAttributes, {
       categoryName: selectedCategoryName,
       subcategoryName: selectedSubcategoryName,
@@ -391,7 +387,6 @@ export default function ProductForm({
           seo_title: seoTitle.trim(),
           seo_description: seoDescription.trim(),
           h1: h1.trim(),
-          canonical_url: canonicalUrl.trim(),
           catalog_attributes: normalizedCatalogAttributes,
           attributes: normalizedCatalogAttributes,
           price_on_request: priceOnRequest,
@@ -464,6 +459,9 @@ export default function ProductForm({
       <SheetContent side="right" className="flex w-full max-w-2xl flex-col overflow-y-auto bg-gray-800 p-0 sm:max-w-2xl">
           <SheetHeader className="sticky top-0 z-10 flex-row items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-5 py-3">
             <SheetTitle>{product ? 'Изменить товар' : 'Новый товар'}</SheetTitle>
+            <SheetDescription className="sr-only">
+              Редактирование данных, цены и фотографий товара
+            </SheetDescription>
             {product?.slug && (
               <Button asChild type="button" variant="outline" size="sm" className="border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700">
                 <a
@@ -487,7 +485,7 @@ export default function ProductForm({
             )}
 
             {/* Photos Upload */}
-            <div className="space-y-4">
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                   Фотографии товара
@@ -497,32 +495,34 @@ export default function ProductForm({
                     <Button
                       type="button"
                       variant="outline"
+                      size="sm"
                       onClick={handleDownloadAll}
                       className="border-green-800/50 bg-green-900/20 text-green-400 hover:bg-green-900/30 hover:text-green-300"
                       disabled={isPending || isDownloading}
                     >
                       <Download size={16} />
-                      {isDownloading ? 'Скачивание...' : 'Скачать все фото'}
+                      {isDownloading ? 'Скачивание...' : 'Скачать'}
                     </Button>
                   )}
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     onClick={() => setIsPhotoModalOpen(true)}
                     className="h-fit border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/30 hover:text-blue-300"
                     disabled={isPending}
                   >
                     <Upload size={16} />
-                    Добавить фото по ссылкам
+                    Добавить фото
                   </Button>
                 </div>
               </div>
 
               {/* Existing Photos with Drag and Drop */}
               {existingPhotos.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-xs text-gray-500 mb-2">Текущие фото (перетащите для изменения порядка):</p>
-                  <div className="grid grid-cols-3 gap-2">
+                <div className="mb-2">
+                  <p className="mb-1.5 text-xs text-gray-500">Перетащите фото, чтобы изменить порядок:</p>
+                  <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5">
                     {existingPhotos.map((url, index) => (
                       <div
                         key={index}
@@ -530,20 +530,20 @@ export default function ProductForm({
                         onDragStart={() => handleDragStart(index)}
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDragEnd={handleDragEnd}
-                        className={`relative aspect-square group cursor-move ${draggedIndex === index ? 'opacity-50' : ''
+                        className={`group relative aspect-[4/3] cursor-move ${draggedIndex === index ? 'opacity-50' : ''
                           }`}
                       >
                         <Image
                           src={resizeImageUrl(url, imagePresets.productForm)}
                           alt={`Photo ${index + 1}`}
                           fill
-                          sizes="(max-width: 768px) 33vw, 200px"
-                          loading={index < 3 ? 'eager' : 'lazy'}
+                          sizes="(max-width: 640px) 25vw, 130px"
+                          loading={index < 5 ? 'eager' : 'lazy'}
                           className="object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
                           unoptimized
                         />
-                        <div className="absolute top-1 left-1 p-1 bg-gray-800/70 text-white rounded">
-                          <GripVertical size={14} />
+                        <div className="absolute left-1 top-1 rounded bg-gray-800/70 p-0.5 text-white">
+                          <GripVertical size={12} />
                         </div>
                         <div className="absolute top-1 right-1 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
@@ -551,10 +551,10 @@ export default function ProductForm({
                             variant="destructive"
                             size="icon"
                             onClick={() => removeExistingPhoto(index)}
-                            className="h-7 w-7 rounded-full shadow"
+                            className="h-6 w-6 rounded-full shadow"
                             title="Удалить"
                           >
-                            <Trash2 size={14} />
+                            <Trash2 size={12} />
                           </Button>
                           <Button
                             type="button"
@@ -563,13 +563,13 @@ export default function ProductForm({
                               e.preventDefault();
                               handleDownload(url, index);
                             }}
-                            className="h-7 w-7 rounded-full shadow"
+                            className="h-6 w-6 rounded-full shadow"
                             title="Скачать исходное фото"
                           >
-                            <Download size={14} />
+                            <Download size={12} />
                           </Button>
                         </div>
-                        <div className="absolute bottom-1 right-1 px-2 py-0.5 bg-gray-800/70 text-white text-xs rounded">
+                        <div className="absolute bottom-1 right-1 rounded bg-gray-800/70 px-1.5 py-0.5 text-[10px] text-white">
                           {index + 1}
                         </div>
                       </div>
@@ -791,12 +791,6 @@ export default function ProductForm({
                   SEO description
                 </label>
                 <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} rows={2} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Canonical URL
-                </label>
-                <input type="url" value={canonicalUrl} onChange={(e) => setCanonicalUrl(e.target.value)} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
               </div>
             </div>
           </form>

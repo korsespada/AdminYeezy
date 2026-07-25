@@ -1,19 +1,21 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef, useTransition } from 'react'
+import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
 import { deleteProductAction } from '@/actions/products'
-import { bulkUpdateProductsAction, bulkDeleteProductsAction } from '@/actions/bulk-update'
+import { bulkUpdateProductsAction, bulkDeleteProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
-import { LayoutGrid, List, Search, Plus, CheckSquare, Square } from 'lucide-react'
+import { LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
 import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
+import { isPriceOnRequest } from '@/lib/product-pricing'
 
 interface ProductListProps {
   initialData: Product[]
@@ -58,37 +60,16 @@ export default function ProductList({
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
+  const [selectedPrice, setSelectedPrice] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
-  const [isSearchPending, startSearchTransition] = useTransition()
-  const lastRouteKeyRef = useRef(routeKey)
+  const [isNavigationPending, startNavigationTransition] = useTransition()
 
   // Update local state when initialData changes (e.g. after search/filter)
   useEffect(() => {
-    const routeChanged = routeKey !== lastRouteKeyRef.current
-    lastRouteKeyRef.current = routeKey
-
-    setProducts(prev => {
-      if (routeChanged || prev.length !== initialData.length) {
-        return initialData
-      }
-
-      const nextById = new Map(initialData.map(product => [product.id, product]))
-      if (prev.some(product => !nextById.has(product.id))) {
-        return initialData
-      }
-
-      return prev.map(product => nextById.get(product.id) || product)
-    })
+    setProducts(initialData)
+    setSelectedProductIds([])
   }, [initialData, routeKey])
-
-  // Auto-select category if all selected products share the same one
-  const autoCategory = useMemo(() => {
-    if (selectedProductIds.length === 0) return ''
-    const selectedProducts = products.filter(p => selectedProductIds.includes(p.id))
-    const uniqueCategories = [...new Set(selectedProducts.map(p => p.category).filter(Boolean))]
-    return uniqueCategories.length === 1 ? uniqueCategories[0] : ''
-  }, [selectedProductIds, products])
 
   // Load view mode from localStorage
   useEffect(() => {
@@ -123,7 +104,7 @@ export default function ProductList({
       } else {
         alert(result.error || 'Ошибка при переносе товара в корзину')
       }
-    } catch (error) {
+    } catch {
       alert('Ошибка при переносе товара в корзину')
     }
   }, [])
@@ -138,12 +119,89 @@ export default function ProductList({
     )
   }, [])
 
-  const handleTextSearch = useCallback((url: string) => {
+  const handleNavigation = useCallback((url: string) => {
     setSelectedProductIds([])
-    startSearchTransition(() => {
+    startNavigationTransition(() => {
       router.push(url)
     })
   }, [router])
+
+  const hasBulkUpdates = Boolean(
+    selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim(),
+  )
+
+  const handleBulkUpdate = async () => {
+    if (!hasBulkUpdates) return
+
+    const hasPriceUpdate = selectedPrice.trim() !== ''
+    const price = Number(selectedPrice)
+    if (hasPriceUpdate && (!Number.isFinite(price) || price < 0)) {
+      alert('Введите корректную цену')
+      return
+    }
+    if (!confirm(`Обновить ${selectedProductIds.length} товаров?`)) return
+
+    setIsBulkUpdating(true)
+    const updates: BulkProductUpdates = {}
+    if (selectedCategory) updates.category = selectedCategory
+    if (selectedSubcategory) updates.subcategory = selectedSubcategory
+    if (selectedGender) updates.gender = selectedGender
+    if (hasPriceUpdate) updates.price = price
+
+    const result = await bulkUpdateProductsAction(selectedProductIds, updates)
+    if (!result.success) {
+      alert(result.error || 'Не удалось обновить товары')
+      setIsBulkUpdating(false)
+      return
+    }
+
+    setProducts((currentProducts) => currentProducts.map((product) => {
+      if (!selectedProductIds.includes(product.id)) return product
+
+      const priceOnRequest = hasPriceUpdate ? isPriceOnRequest(price) : product.price_on_request
+      return {
+        ...product,
+        ...(selectedCategory ? { category: selectedCategory } : {}),
+        ...(selectedSubcategory ? { subcategory: selectedSubcategory === '__none__' ? '' : selectedSubcategory } : {}),
+        ...(selectedGender ? { gender: selectedGender } : {}),
+        ...(hasPriceUpdate ? {
+          price,
+          price_cents: Math.round(price * 100),
+          price_on_request: priceOnRequest,
+          metadata: {
+            ...(product.metadata || {}),
+            price_on_request: priceOnRequest,
+          },
+        } : {}),
+        expand: {
+          ...product.expand,
+          ...(selectedCategory ? { category: undefined } : {}),
+          ...(selectedSubcategory ? { subcategory: undefined } : {}),
+        },
+      }
+    }))
+    setIsBulkUpdating(false)
+    setSelectedProductIds([])
+    setSelectedSubcategory('')
+    setSelectedCategory('')
+    setSelectedGender('')
+    setSelectedPrice('')
+    router.refresh()
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Переместить ${selectedProductIds.length} товаров в корзину?`)) return
+
+    setIsBulkDeleting(true)
+    const result = await bulkDeleteProductsAction(selectedProductIds)
+    if (result.success) {
+      setProducts((currentProducts) => currentProducts.filter((product) => !selectedProductIds.includes(product.id)))
+      setSelectedProductIds([])
+    } else {
+      alert(result.error || 'Ошибка при переносе товаров в корзину')
+    }
+    setIsBulkDeleting(false)
+  }
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans text-slate-200">
@@ -159,15 +217,15 @@ export default function ProductList({
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         count={totalItems}
-        isTextSearchPending={isSearchPending}
-        onTextSearch={handleTextSearch}
+        isNavigationPending={isNavigationPending}
+        onNavigate={handleNavigation}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Scrollable Content */}
-        <div className={`flex-1 p-6 scroll-smooth ${selectedProductIds.length > 0 ? 'pb-56 lg:pb-40 2xl:pb-32' : ''}`}>
-          <div className="max-w-7xl mx-auto">
+        <div className={`flex-1 p-6 scroll-smooth ${selectedProductIds.length > 0 ? 'pb-24' : ''}`}>
+          <div className="mx-auto max-w-[1600px]">
 
             {/* Page Header & Controls */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
@@ -210,7 +268,7 @@ export default function ProductList({
             </div>
 
             {/* Content Display */}
-            {isSearchPending ? (
+            {isNavigationPending ? (
               <ProductSearchSkeleton viewMode={viewMode} />
             ) : products.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -245,7 +303,7 @@ export default function ProductList({
                         <span>{selectedProductIds.length === products.length ? 'Снять всё' : 'Выбрать все на странице'}</span>
                       </Button>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+                    <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                       {products.map(product => (
                         <ProductCard
                           key={product.id}
@@ -280,7 +338,7 @@ export default function ProductList({
             )}
 
             {/* Pagination injection */}
-            {!isSearchPending && pagination}
+            {!isNavigationPending && pagination}
           </div>
         </div>
       </main>
@@ -301,31 +359,35 @@ export default function ProductList({
       />
 
       {/* Bulk Action Toolbar */}
-      <div className={`fixed bottom-0 left-0 lg:left-72 right-0 max-h-[55vh] overflow-y-auto bg-slate-800 border-t border-slate-700 p-3 sm:p-4 transform transition-transform duration-300 z-40 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
-        <div className="max-w-7xl mx-auto flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-          <div className="flex shrink-0 flex-wrap items-center gap-3 text-sm text-slate-300">
+      <div className={`fixed bottom-0 left-0 right-0 z-40 overflow-x-auto border-t border-slate-700 bg-slate-800 px-3 py-2 shadow-2xl shadow-black/40 transition-transform duration-300 lg:left-72 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="mx-auto flex min-w-max max-w-[1600px] items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 text-sm text-slate-300">
             <Badge>{selectedProductIds.length}</Badge>
             <span>выбрано</span>
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => setSelectedProductIds([])}
-              className="text-slate-500 hover:text-slate-300"
+              className="h-8 w-8 text-slate-500 hover:text-slate-300"
+              aria-label="Снять выделение"
+              title="Снять выделение"
             >
-              Сбросить
+              <X className="h-4 w-4" />
             </Button>
           </div>
 
-          <div className="grid w-full min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(190px,220px)_minmax(240px,290px)_minmax(260px,320px)_auto_auto] 2xl:flex 2xl:flex-1 2xl:flex-wrap 2xl:justify-end">
+          <div className="h-7 w-px shrink-0 bg-slate-700" />
+
+          <div className="flex flex-1 items-center justify-end gap-2">
             {/* Gender Select */}
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Гендер:</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="text-xs text-slate-500">Пол</span>
               <Select
                 value={selectedGender || '__unchanged__'}
                 onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
               >
-                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-44">
+                <SelectTrigger aria-label="Пол для выбранных товаров" className="h-9 w-36 bg-slate-700 px-2 text-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -338,20 +400,20 @@ export default function ProductList({
             </div>
 
             {/* Category Select */}
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Категория:</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="text-xs text-slate-500">Кат.</span>
               <Select
-                value={selectedCategory || '__select__'}
+                value={selectedCategory || '__unchanged__'}
                 onValueChange={(value) => {
-                  setSelectedCategory(value === '__select__' ? '' : value)
+                  setSelectedCategory(value === '__unchanged__' ? '' : value)
                   setSelectedSubcategory('') // Reset subcategory when category changes
                 }}
               >
-                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-56">
+                <SelectTrigger aria-label="Категория для выбранных товаров" className="h-9 w-44 bg-slate-700 px-2 text-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                <SelectItem value="__select__">Выберите категорию...</SelectItem>
+                <SelectItem value="__unchanged__">Без изменений</SelectItem>
                 {categories.map(c => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
@@ -360,14 +422,14 @@ export default function ProductList({
             </div>
 
             {/* Subcategory Select */}
-            <div className="flex min-w-0 items-center gap-2 sm:col-span-2 xl:col-span-1">
-              <span className="shrink-0 text-sm text-slate-400 whitespace-nowrap">Подкатегория:</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="text-xs text-slate-500">Подкат.</span>
               <Select
                 value={selectedSubcategory || '__unchanged__'}
                 onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
                 disabled={!selectedCategory}
               >
-                <SelectTrigger className="min-w-0 flex-1 bg-slate-700 text-slate-200 2xl:w-60">
+                <SelectTrigger aria-label="Подкатегория для выбранных товаров" className="h-9 w-48 bg-slate-700 px-2 text-slate-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -381,67 +443,38 @@ export default function ProductList({
               </Select>
             </div>
 
+            <Input
+              type="number"
+              value={selectedPrice}
+              onChange={(event) => setSelectedPrice(event.target.value)}
+              min="0"
+              step="1"
+              inputMode="decimal"
+              aria-label="Цена для выбранных товаров"
+              placeholder="Цена, ₽"
+              className="h-9 w-28 shrink-0 border-slate-600 bg-slate-700 px-2 text-sm text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              disabled={isBulkUpdating || isBulkDeleting}
+            />
+
             <Button
               type="button"
-              onClick={async () => {
-                if (!selectedCategory && !selectedSubcategory && !selectedGender) return
-                if (confirm(`Обновить ${selectedProductIds.length} товаров?`)) {
-                  setIsBulkUpdating(true)
-                  const updates: any = {}
-                  if (selectedCategory) updates.category = selectedCategory
-                  if (selectedSubcategory) updates.subcategory = selectedSubcategory
-                  if (selectedGender) updates.gender = selectedGender
-
-                  const res = await bulkUpdateProductsAction(selectedProductIds, updates)
-                  if (res.success) {
-                    setProducts(prev => prev.map(product => {
-                      if (!selectedProductIds.includes(product.id)) return product
-                      return {
-                        ...product,
-                        ...(selectedCategory ? { category: selectedCategory } : {}),
-                        ...(selectedSubcategory ? { subcategory: selectedSubcategory === '__none__' ? '' : selectedSubcategory } : {}),
-                        ...(selectedGender ? { gender: selectedGender } : {}),
-                      }
-                    }))
-                    setIsBulkUpdating(false)
-                    setSelectedProductIds([])
-                    setSelectedSubcategory('')
-                    setSelectedCategory('')
-                    setSelectedGender('')
-                    router.refresh()
-                  } else {
-                    alert('Error updating products')
-                    setIsBulkUpdating(false)
-                  }
-                }
-              }}
-              disabled={(!selectedCategory && !selectedSubcategory && !selectedGender) || isBulkUpdating || isBulkDeleting}
-              className="w-full whitespace-nowrap px-5 sm:w-auto"
+              onClick={handleBulkUpdate}
+              disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting}
+              className="h-9 shrink-0 whitespace-nowrap px-4"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
             </Button>
             <Button
               type="button"
               variant="destructive"
-              onClick={async () => {
-                if (confirm(`Переместить ${selectedProductIds.length} товаров в корзину?`)) {
-                  setIsBulkDeleting(true)
-                  const res = await bulkDeleteProductsAction(selectedProductIds)
-                  if (res.success) {
-                    // Update local state by removing trashed products
-                    setProducts(prev => prev.filter(p => !selectedProductIds.includes(p.id)))
-                    setIsBulkDeleting(false)
-                    setSelectedProductIds([])
-                  } else {
-                    alert('Ошибка при переносе товаров в корзину')
-                    setIsBulkDeleting(false)
-                  }
-                }
-              }}
+              size="icon"
+              onClick={handleBulkDelete}
               disabled={isBulkUpdating || isBulkDeleting}
-              className="w-full whitespace-nowrap px-5 sm:w-auto"
+              className="h-9 w-9 shrink-0"
+              aria-label="Переместить выбранные товары в корзину"
+              title="В корзину"
             >
-              {isBulkDeleting ? 'Перенос...' : 'В корзину'}
+              <Trash2 className={`h-4 w-4 ${isBulkDeleting ? 'animate-pulse' : ''}`} />
             </Button>
           </div>
         </div>
@@ -451,7 +484,7 @@ export default function ProductList({
 }
 
 export function ProductSearchSkeleton({ viewMode }: { viewMode: 'grid' | 'list' }) {
-  const items = Array.from({ length: viewMode === 'grid' ? 8 : 7 })
+  const items = Array.from({ length: viewMode === 'grid' ? 10 : 7 })
 
   return (
     <div role="status" aria-live="polite" aria-label="Поиск товаров" className="space-y-4">
@@ -464,15 +497,15 @@ export function ProductSearchSkeleton({ viewMode }: { viewMode: 'grid' | 'list' 
       </div>
 
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {items.map((_, index) => (
             <div
               key={index}
               className="animate-pulse overflow-hidden rounded-xl border border-slate-700 bg-slate-800"
               style={{ animationDelay: `${index * 70}ms` }}
             >
-              <div className="aspect-[4/5] bg-slate-700/80" />
-              <div className="space-y-3 p-4">
+              <div className="aspect-[4/3] bg-slate-700/80" />
+              <div className="space-y-2 p-3">
                 <div className="h-3 w-1/3 rounded-full bg-slate-700" />
                 <div className="h-5 w-4/5 rounded-full bg-slate-700" />
                 <div className="h-3 w-full rounded-full bg-slate-700/80" />

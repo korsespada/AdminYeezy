@@ -63,12 +63,26 @@ const subcategories: Subcategory[] = [
     collectionId: '',
     collectionName: 'subcategories',
   },
+  {
+    id: 'crossbody-id',
+    slug: 'crossbody',
+    category: 'bags-id',
+    name: 'Кросс-боди',
+    description: '',
+    created: '',
+    updated: '',
+    collectionId: '',
+    collectionName: 'subcategories',
+  },
 ]
 
 const filterFacets: ProductFilterFacets = {
   brandFacets: [{ slug: 'adidas', name: 'Adidas', count: 3 }],
   categoryFacets: [{ slug: 'totes', name: 'Шопперы', count: 3 }],
-  subcategoryFacets: [{ slug: 'totes', name: 'Шопперы', count: 3 }],
+  subcategoryFacets: [
+    { slug: 'totes', name: 'Шопперы', count: 3 },
+    { slug: 'crossbody', name: 'Кросс-боди', count: 2 },
+  ],
   genderFacets: [{ value: null, count: 3 }],
   attributeFacets: {
     colors: [{ value: 'gray', count: 3 }],
@@ -76,8 +90,8 @@ const filterFacets: ProductFilterFacets = {
 }
 
 function renderSidebar(searchProps: {
-  isTextSearchPending?: boolean
-  onTextSearch?: (url: string) => void
+  isNavigationPending?: boolean
+  onNavigate?: (url: string) => void
 } = {}) {
   return render(
     <Sidebar
@@ -139,7 +153,10 @@ describe('Sidebar faceted filters', () => {
 
     renderSidebar()
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Сбросить фильтры' })[0])
+    const resetButtons = screen.getAllByRole('button', { name: 'Сбросить фильтры' })
+    expect(resetButtons[0]).toHaveAttribute('title', 'Сбросить фильтры')
+    expect(resetButtons[0]).not.toHaveTextContent('Сбросить фильтры')
+    fireEvent.click(resetButtons[0])
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?perPage=500')
   })
@@ -180,17 +197,85 @@ describe('Sidebar faceted filters', () => {
 
   it('delegates search navigation and exposes its pending state', async () => {
     const user = userEvent.setup()
-    const onTextSearch = vi.fn()
-    renderSidebar({ onTextSearch })
+    const onNavigate = vi.fn()
+    renderSidebar({ onNavigate })
 
     await user.type(screen.getByLabelText('Описание'), 'orthopaedic')
     await user.click(screen.getByRole('button', { name: 'Найти' }))
 
-    expect(onTextSearch).toHaveBeenCalledWith('/admin?description=orthopaedic')
+    expect(onNavigate).toHaveBeenCalledWith('/admin?description=orthopaedic')
     expect(navigationMock.push).not.toHaveBeenCalled()
 
-    renderSidebar({ isTextSearchPending: true })
-    expect(screen.getByRole('button', { name: 'Ищем товары...' })).toBeDisabled()
+    renderSidebar({ isNavigationPending: true })
+    expect(screen.getByRole('button', { name: 'Обновляем товары...' })).toBeDisabled()
+  })
+
+  it('delegates subcategory changes through the pending navigation path', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    navigationMock.searchParams = new URLSearchParams('category=bags-id&subcategory=totes-id')
+    renderSidebar({ onNavigate })
+
+    await user.click(screen.getByRole('combobox', { name: 'Подкатегория' }))
+    await user.click(screen.getByRole('option', { name: 'Кросс-боди' }))
+
+    expect(onNavigate).toHaveBeenCalledWith('/admin?category=bags-id&subcategory=crossbody-id')
+    expect(navigationMock.push).not.toHaveBeenCalled()
+  })
+
+  it('keeps earlier pending filters during rapid consecutive changes', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    renderSidebar({ onNavigate, isNavigationPending: true })
+
+    await user.click(screen.getByRole('checkbox', { name: 'Adidas' }))
+    await user.click(screen.getByRole('button', { name: 'Без гендера' }))
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, '/admin?brand=adidas-id')
+    expect(onNavigate).toHaveBeenNthCalledWith(2, '/admin?brand=adidas-id&gender=__none__')
+  })
+
+  it('clears category-dependent attribute filters when subcategory changes', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    navigationMock.searchParams = new URLSearchParams(
+      'category=bags-id&subcategory=totes-id&attributeKey=colors&attributeValue=gray'
+    )
+    renderSidebar({ onNavigate })
+
+    await user.click(screen.getByRole('combobox', { name: 'Подкатегория' }))
+    await user.click(screen.getByRole('option', { name: 'Кросс-боди' }))
+
+    expect(onNavigate).toHaveBeenCalledWith('/admin?category=bags-id&subcategory=crossbody-id')
+  })
+
+  it('clears subcategory and attributes when the parent category is cleared', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    navigationMock.searchParams = new URLSearchParams(
+      'category=bags-id&subcategory=totes-id&attributeKey=colors&attributeValue=gray'
+    )
+    renderSidebar({ onNavigate })
+
+    await user.click(screen.getByRole('combobox', { name: 'Категория' }))
+    await user.click(screen.getByRole('option', { name: 'Все категории' }))
+
+    expect(onNavigate).toHaveBeenCalledWith('/admin')
+  })
+
+  it('merges both debounced price bounds into one pending filter state', () => {
+    vi.useFakeTimers()
+    const onNavigate = vi.fn()
+    renderSidebar({ onNavigate, isNavigationPending: true })
+
+    fireEvent.change(screen.getByLabelText('Цена от'), { target: { value: '1000' } })
+    fireEvent.change(screen.getByLabelText('Цена до'), { target: { value: '5000' } })
+    act(() => {
+      vi.advanceTimersByTime(500)
+    })
+
+    expect(onNavigate).toHaveBeenNthCalledWith(1, '/admin?priceMin=1000')
+    expect(onNavigate).toHaveBeenNthCalledWith(2, '/admin?priceMin=1000&priceMax=5000')
   })
 
   it('uses dependent attribute and value selects with dictionary labels', async () => {

@@ -44,7 +44,7 @@ export default async function AdminPage({
   const subcategoryFilter = params.subcategory || ''
   const genderFilter = params.gender || ''
   const attributeKeyFilter = params.attributeKey || ''
-  const attributeValueFilter = params.attributeValue || ''
+  const attributeValueFilter = attributeKeyFilter ? params.attributeValue || '' : ''
 
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
@@ -117,9 +117,24 @@ export default async function AdminPage({
     const totalPages = productPage.totalPages
     const shownFrom = products.length > 0 ? offset + 1 : 0
     const shownTo = products.length > 0 ? offset + products.length : 0
+    const productListKey = [
+      page,
+      perPage,
+      nameSearch,
+      descriptionSearch,
+      priceMin,
+      priceMax,
+      brandFilter,
+      categoryFilter,
+      subcategoryFilter,
+      genderFilter,
+      attributeKeyFilter,
+      attributeValueFilter,
+    ].join('\u001f')
 
     return (
       <ProductList
+        key={productListKey}
         initialData={products}
         brands={brands}
         allBrands={brands}

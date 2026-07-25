@@ -2,7 +2,6 @@
 
 import crypto from 'crypto'
 import { spawn } from 'child_process'
-import path from 'path'
 import { createInterface } from 'readline'
 import { revalidatePath } from 'next/cache'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
@@ -643,7 +642,7 @@ export async function startExportsV2ScrapingLocalAction(
       client.release()
     }
 
-    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParserV2.py')
+    const scriptPath = 'scripts/parser/SzwegoParserV2.py'
     const args = [
       scriptPath,
       '--album_id', String(supplier.album_id),
@@ -654,8 +653,7 @@ export async function startExportsV2ScrapingLocalAction(
     if (supplier.tag_id) args.push('--tag_id', String(supplier.tag_id))
     if (supplier.parse_tags_enabled) args.push('--parse_tags')
 
-    const pythonProcess = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', args, {
-      cwd: process.cwd(),
+    const pythonProcess = spawn('python', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     const output = createInterface({ input: pythonProcess.stdout })

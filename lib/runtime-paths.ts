@@ -8,22 +8,22 @@ function workspaceRoot() {
 export function runtimeWritableDirs() {
   const root = workspaceRoot()
   const dirs = [
-    path.join(root, 'tmp'),
-    path.join(root, 'scratch'),
+    path.join(/* turbopackIgnore: true */ root, 'tmp'),
+    path.join(/* turbopackIgnore: true */ root, 'scratch'),
   ]
 
   if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     dirs.push(os.tmpdir())
   }
 
-  return Array.from(new Set(dirs.map((dir) => path.resolve(dir))))
+  return Array.from(new Set(dirs.map((dir) => path.resolve(/* turbopackIgnore: true */ dir))))
 }
 
 export function resolveSafeRuntimePath(filePath: string) {
   const cleanPath = filePath.replace(/"/g, '').trim()
   if (!cleanPath) throw new Error('File path is required')
 
-  const resolved = path.resolve(cleanPath)
+  const resolved = path.resolve(/* turbopackIgnore: true */ cleanPath)
   const allowedDirs = runtimeWritableDirs()
   const allowed = allowedDirs.some((dir) => (
     resolved === dir || resolved.startsWith(`${dir}${path.sep}`)

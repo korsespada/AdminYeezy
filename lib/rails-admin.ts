@@ -580,7 +580,16 @@ export async function listRailsAdminProducts(options: {
   attributeKey?: string
   attributeValue?: string
 }) {
-  if ((options.brand || options.category || options.subcategory || options.gender || options.noGender) && !options.status) {
+  if (
+    (options.brand
+      || options.category
+      || options.subcategory
+      || options.gender
+      || options.noGender
+      || options.attributeKey
+      || options.attributeValue)
+    && !options.status
+  ) {
     return listRailsCatalogProducts(options)
   }
 
@@ -612,7 +621,7 @@ async function listRailsCatalogProducts(options: {
   subcategory?: string
   gender?: string
   genderExact?: boolean
-  genderMissing?: boolean
+  noGender?: boolean
   attributeKey?: string
   attributeValue?: string
 }) {
@@ -644,7 +653,9 @@ async function listRailsCatalogProductsInChunks(options: {
   subcategory?: string
   gender?: string
   genderExact?: boolean
-  genderMissing?: boolean
+  noGender?: boolean
+  attributeKey?: string
+  attributeValue?: string
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
   const firstSourcePage = Math.floor(requestedOffset / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) + 1
@@ -693,6 +704,8 @@ async function listRailsAdminProductsInChunks(options: {
   gender?: string
   genderExact?: boolean
   status?: Product['status']
+  attributeKey?: string
+  attributeValue?: string
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
   const firstSourcePage = Math.floor(requestedOffset / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) + 1
@@ -1329,8 +1342,11 @@ export function buildRailsAdminProductsParams(options: {
     if (options.genderExact) params.set('gender_exact', 'true')
   }
   if (options.status) params.set('status', options.status)
-  if (options.attributeKey?.trim()) params.set('attribute_key', options.attributeKey.trim())
-  if (options.attributeValue?.trim()) params.set('attribute_value', options.attributeValue.trim())
+  const attributeKey = options.attributeKey?.trim() || ''
+  if (attributeKey) {
+    params.set('attribute_key', attributeKey)
+    if (options.attributeValue?.trim()) params.set('attribute_value', options.attributeValue.trim())
+  }
   return params
 }
 

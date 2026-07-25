@@ -4,14 +4,33 @@ import { revalidatePath } from 'next/cache'
 import { deleteRailsAdminProduct, moveRailsAdminProductToTrash, patchRailsAdminProduct } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
 
-export async function bulkUpdateProductsAction(ids: string[], updates: { category?: string, subcategory?: string, gender?: string }) {
+export interface BulkProductUpdates {
+  category?: string
+  subcategory?: string
+  gender?: string
+  price?: number
+}
+
+export async function bulkUpdateProductsAction(ids: string[], updates: BulkProductUpdates) {
   try {
     await requireAdmin()
-    for (const id of ids) {
-      await patchRailsAdminProduct(id, updates)
+    const uniqueIds = [...new Set(ids.map(String).filter(Boolean))]
+    if (uniqueIds.length === 0) {
+      return { success: false, error: 'Не выбраны товары' }
+    }
+    if (updates.price !== undefined && (!Number.isFinite(updates.price) || updates.price < 0)) {
+      return { success: false, error: 'Цена должна быть неотрицательным числом' }
+    }
+
+    // A small concurrency window keeps large selections responsive without
+    // flooding the Rails admin API with hundreds of simultaneous requests.
+    for (let index = 0; index < uniqueIds.length; index += 5) {
+      await Promise.all(
+        uniqueIds.slice(index, index + 5).map((id) => patchRailsAdminProduct(id, updates)),
+      )
     }
     revalidatePath('/admin')
-    return { success: true }
+    return { success: true, data: { updated: uniqueIds.length } }
   } catch (error: any) {
     console.error('Bulk update error:', error)
     return { success: false, error: error.message || 'Failed to update products' }

@@ -36,6 +36,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     const router = useRouter();
 
     const thumb = useMemo(() => productImageUrl(product, imagePresets.productGrid), [product])
+    const brandLabel = useMemo(() => {
+        const brand = product.expand?.brand
+        if (Array.isArray(brand)) return brand.map((item) => item.name).join(', ')
+        if (brand && typeof brand === 'object') return brand.name
+        return 'Без бренда'
+    }, [product.expand?.brand])
 
     const categoryLabel = useMemo(() => {
         const categoryName = product.expand?.category?.name
@@ -114,7 +120,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 };
                 onUpdate(updatedProduct);
             }
-        } catch (e) {
+        } catch {
             // update failed silently
         }
         setEditingField(null);
@@ -192,7 +198,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         <Card className="group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 transition-all duration-300 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20">
             {/* Image area - clickable to edit */}
             <div
-                className="relative aspect-square overflow-hidden bg-slate-900 cursor-pointer"
+                className="relative aspect-[4/3] cursor-pointer overflow-hidden bg-slate-900"
                 onClick={() => onEdit(product)}
             >
                 {thumb ? (
@@ -211,7 +217,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 )}
 
                 {/* Selection Checkbox */}
-                <div className="absolute top-3 left-3 z-10">
+                <div className="absolute left-2 top-2 z-10">
                     <Checkbox
                         checked={selected}
                         onCheckedChange={() => onToggleSelect(product.id)}
@@ -220,7 +226,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     />
                 </div>
                 {/* Delete button on hover */}
-                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2">
+                <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <Button
                         type="button"
                         variant="ghost"
@@ -246,28 +252,19 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 {/* Photo Count Tag */}
                 {product.photos && product.photos.length > 0 && (
-                    <Badge variant="outline" className="absolute bottom-3 right-3 z-10 border-slate-700/50 bg-slate-900/80 text-[10px] text-slate-300 backdrop-blur-sm">
+                    <Badge variant="outline" className="absolute bottom-2 right-2 z-10 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-300 backdrop-blur-sm">
                         {product.photos.length} фото
                     </Badge>
                 )}
             </div>
 
-            <CardContent className="flex flex-1 flex-col p-5">
-                {/* Product ID under the photo */}
-                <div className="mb-2">
-                    <div className="text-[10px] text-slate-500 font-mono">{product.productId}</div>
-                    <div className="text-[10px] text-indigo-400 font-semibold truncate">
-                        {useMemo(() => {
-                            const b = product.expand?.brand;
-                            if (Array.isArray(b)) return b.map(x => x.name).join(', ');
-                            if (b && typeof b === 'object') return b.name;
-                            return 'No Brand';
-                        }, [product.expand?.brand])}
-                    </div>
+            <CardContent className="flex flex-1 flex-col p-3">
+                <div className="mb-1 truncate text-[10px] font-semibold text-indigo-400">
+                    {brandLabel}
                 </div>
 
-                <div className="mb-2">
-                    <div className="text-xs text-slate-500">
+                <div className="mb-1.5">
+                    <div className="truncate text-[11px] text-slate-500">
                         {categoryLabel.category}
                         {categoryLabel.subcategory && ` • ${categoryLabel.subcategory}`}
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
@@ -283,12 +280,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         onBlur={handleSave}
                         onKeyDown={handleKeyDown}
                         autoFocus
-                        className="mb-2 h-auto bg-slate-700 px-2 py-1 text-base font-bold leading-tight text-slate-100"
+                        className="mb-1.5 h-auto bg-slate-700 px-2 py-1 text-sm font-bold leading-tight text-slate-100"
                         onClick={(e) => e.stopPropagation()}
                     />
                 ) : (
                     <h3
-                        className="text-base font-bold text-slate-100 mb-2 leading-tight cursor-text hover:bg-slate-700/50 rounded px-1 -mx-1"
+                        className="-mx-1 mb-1.5 line-clamp-2 cursor-text rounded px-1 text-sm font-bold leading-tight text-slate-100 hover:bg-slate-700/50"
                         onClick={(e) => startEdit('name', e)}
                     >
                         {product.name}
@@ -296,15 +293,15 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 )}
 
                 <div className="flex-1">
-                    <ProductAttributeSummary product={product} />
+                    <ProductAttributeSummary product={product} compact />
                     {product.description && (
-                        <p className="mb-4 line-clamp-2 text-sm text-slate-400">
+                        <p className="mb-2 mt-1 line-clamp-2 text-xs leading-snug text-slate-400">
                             <ProductDescription text={product.description} />
                         </p>
                     )}
                 </div>
 
-                <div className="flex items-center justify-between pt-4 border-t border-slate-700 mt-auto">
+                <div className="mt-auto flex items-center justify-between border-t border-slate-700 pt-2">
                     {/* Editable Price */}
                     {editingField === 'price' ? (
                         <Input
@@ -314,12 +311,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                             onBlur={handleSave}
                             onKeyDown={handleKeyDown}
                             autoFocus
-                            className="h-auto w-28 bg-slate-700 px-2 py-1 text-lg font-bold text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            className="h-7 w-24 bg-slate-700 px-2 py-1 text-sm font-bold text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                             onClick={(e) => e.stopPropagation()}
                         />
                     ) : (
                         <div
-                            className="font-bold text-lg text-slate-200 cursor-text hover:bg-slate-700/50 rounded px-1 -mx-1"
+                            className="-mx-1 cursor-text rounded px-1 text-sm font-bold leading-none text-slate-200 hover:bg-slate-700/50"
                             onClick={(e) => startEdit('price', e)}
                         >
                             {isPriceOnRequest(product.price)
