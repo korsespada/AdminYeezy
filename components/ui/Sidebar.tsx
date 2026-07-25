@@ -89,25 +89,29 @@ const Sidebar: React.FC<SidebarProps> = ({
         router.push(`/admin?${params.toString()}`)
     }, [attributeKeyValue, router, searchParams])
 
-    // Debounce text/price filters
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (nameValue !== currentName) {
-                applyFilter('name', nameValue || null)
-            }
-        }, 500)
-        return () => clearTimeout(timer)
-    }, [applyFilter, currentName, nameValue])
+    const handleTextSearch = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault()
+        const params = new URLSearchParams(searchParams.toString())
+        const cleanName = nameValue.trim()
+        const cleanDescription = descriptionValue.trim()
 
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (descriptionValue !== currentDescription) {
-                applyFilter('description', descriptionValue || null)
-            }
-        }, 500)
-        return () => clearTimeout(timer)
-    }, [applyFilter, currentDescription, descriptionValue])
+        if (cleanName) {
+            params.set('name', cleanName)
+        } else {
+            params.delete('name')
+        }
+        if (cleanDescription) {
+            params.set('description', cleanDescription)
+        } else {
+            params.delete('description')
+        }
 
+        params.delete('search')
+        params.delete('page')
+        router.push(`/admin?${params.toString()}`)
+    }
+
+    // Debounce price filters
     useEffect(() => {
         const timer = setTimeout(() => {
             if (priceMinValue !== currentPriceMin) {
@@ -329,7 +333,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                     <div className="space-y-6">
 
                         {/* Search */}
-                        <div>
+                        <form onSubmit={handleTextSearch}>
                             <Label htmlFor="product-name-search" className="mb-2 block text-slate-300">Название</Label>
                             <div className="relative mb-3">
                                 <Input
@@ -354,7 +358,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 />
                                 <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
                             </div>
-                        </div>
+                            <Button type="submit" className="mt-3 w-full">
+                                <Search className="w-4 h-4" />
+                                <span>Найти</span>
+                            </Button>
+                        </form>
 
                         {/* Price Filter */}
                         <div>

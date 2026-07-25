@@ -152,6 +152,28 @@ describe('Sidebar faceted filters', () => {
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?priceMin=0')
   })
 
+  it('runs text search only after clicking the search button', async () => {
+    const user = userEvent.setup()
+    renderSidebar()
+
+    await user.type(screen.getByLabelText('Название'), '  leather bag  ')
+
+    expect(navigationMock.push).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Найти' }))
+
+    expect(navigationMock.push).toHaveBeenCalledWith('/admin?name=leather+bag')
+  })
+
+  it('runs text search by pressing Enter', async () => {
+    const user = userEvent.setup()
+    renderSidebar()
+
+    await user.type(screen.getByLabelText('Название'), 'sneakers{Enter}')
+
+    expect(navigationMock.push).toHaveBeenCalledWith('/admin?name=sneakers')
+  })
+
   it('uses dependent attribute and value selects with dictionary labels', async () => {
     const user = userEvent.setup()
     renderSidebar()
