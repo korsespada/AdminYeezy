@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
@@ -49,6 +49,7 @@ export default function ProductForm({
 }: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const formRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
 
   const [productId, setProductId] = useState('')
@@ -437,6 +438,23 @@ export default function ProductForm({
     })
   }
 
+  useEffect(() => {
+    if (!isOpen) return
+
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      const isSaveShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's'
+      if (!isSaveShortcut) return
+
+      event.preventDefault()
+      if (event.repeat || isPending || isPhotoModalOpen) return
+
+      formRef.current?.requestSubmit()
+    }
+
+    window.addEventListener('keydown', handleSaveShortcut)
+    return () => window.removeEventListener('keydown', handleSaveShortcut)
+  }, [isOpen, isPending, isPhotoModalOpen])
+
   if (!isOpen) return null
 
   return (
@@ -461,7 +479,7 @@ export default function ProductForm({
           </SheetHeader>
 
           {/* Form */}
-          <form onSubmit={handleSubmit} className="flex-1 p-5 space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="flex-1 p-5 space-y-4">
             {error && (
               <Alert variant="destructive" className="border-red-800 bg-red-900/20 text-red-400">
                 <AlertDescription>{error}</AlertDescription>
@@ -795,9 +813,10 @@ export default function ProductForm({
               Отмена
             </Button>
             <Button
-              type="submit"
-              onClick={handleSubmit}
+              type="button"
+              onClick={() => formRef.current?.requestSubmit()}
               disabled={isPending}
+              title="Сохранить (Ctrl+S)"
             >
               {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
             </Button>
