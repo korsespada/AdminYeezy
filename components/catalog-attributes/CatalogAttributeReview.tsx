@@ -157,6 +157,15 @@ export default function CatalogAttributeReview({
 
       const updated = result.data as RailsCatalogAttributeSuggestion
       setItems((current) => current.map((item) => item.id === id ? updated : item))
+      if (updated.id !== id) {
+        setSelectedIds((current) => {
+          if (!current.has(id)) return current
+          const next = new Set(current)
+          next.delete(id)
+          next.add(updated.id)
+          return next
+        })
+      }
       setMessage({ kind: 'success', text: 'Предложенное значение изменено' })
       setBusyId(null)
     })
@@ -166,9 +175,13 @@ export default function CatalogAttributeReview({
   const reviewableIds = items
     .filter((item) => item.status === 'suggested' && item.source !== 'unknown')
     .map((item) => item.id)
-  const allSelected = reviewableIds.length > 0 && reviewableIds.every((id) => selectedIds.has(id))
+  const selectableIds = items
+    .filter((item) => item.status === 'suggested')
+    .map((item) => item.id)
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id))
   const bagSubcategories = subcategories.filter((item) => BAG_SUBCATEGORY_SLUGS.includes(item.slug as typeof BAG_SUBCATEGORY_SLUGS[number]))
-  const selectedItems = items.filter((item) => selectedIds.has(item.id) && reviewableIds.includes(item.id))
+  const selectedItems = items.filter((item) => selectedIds.has(item.id) && selectableIds.includes(item.id))
+  const selectedReviewableCount = selectedItems.filter((item) => item.source !== 'unknown').length
   const selectedAttributeCodes = [...new Set(selectedItems.map((item) => item.attribute_code))]
   const selectedAttributeCode = selectedAttributeCodes.length === 1 ? selectedAttributeCodes[0] : ''
   const selectedCategoryNames = new Set(
@@ -202,8 +215,8 @@ export default function CatalogAttributeReview({
   function togglePageSelection() {
     setSelectedIds((current) => {
       const next = new Set(current)
-      if (allSelected) reviewableIds.forEach((id) => next.delete(id))
-      else reviewableIds.forEach((id) => next.add(id))
+      if (allSelected) selectableIds.forEach((id) => next.delete(id))
+      else selectableIds.forEach((id) => next.add(id))
       return next
     })
   }
@@ -261,8 +274,17 @@ export default function CatalogAttributeReview({
       }
 
       const updatedItems = result.data as RailsCatalogAttributeSuggestion[]
-      const updatedById = new Map(updatedItems.map((item) => [item.id, item]))
-      setItems((current) => current.map((item) => updatedById.get(item.id) || item))
+      const replacements = new Map(ids.map((id, index) => [id, updatedItems[index]]))
+      setItems((current) => current.map((item) => replacements.get(item.id) || item))
+      setSelectedIds((current) => {
+        const next = new Set(current)
+        replacements.forEach((updated, previousId) => {
+          if (!updated || !next.has(previousId)) return
+          next.delete(previousId)
+          next.add(updated.id)
+        })
+        return next
+      })
       setMessage({ kind: 'success', text: `Изменено значений: ${updatedItems.length}` })
       setBusyId(null)
     })
@@ -340,7 +362,8 @@ export default function CatalogAttributeReview({
         hasMixedAttributes={selectedAttributeCodes.length > 1}
         valueOptions={bulkValueOptions}
         allSelected={allSelected}
-        reviewableCount={reviewableIds.length}
+        selectableCount={selectableIds.length}
+        selectedReviewableCount={selectedReviewableCount}
         busy={isPending && busyId === 'bulk'}
         valueBusy={isPending && busyId === 'bulk-value'}
         filteredBusy={isPending && busyId === 'filtered'}
@@ -579,7 +602,8 @@ function BulkToolbar({
   hasMixedAttributes,
   valueOptions,
   allSelected,
-  reviewableCount,
+  selectableCount,
+  selectedReviewableCount,
   busy,
   valueBusy,
   filteredBusy,
@@ -595,7 +619,8 @@ function BulkToolbar({
   hasMixedAttributes: boolean
   valueOptions: ReadonlyArray<readonly [string, string]>
   allSelected: boolean
-  reviewableCount: number
+  selectableCount: number
+  selectedReviewableCount: number
   busy: boolean
   valueBusy: boolean
   filteredBusy: boolean
@@ -620,7 +645,7 @@ function BulkToolbar({
           type="checkbox"
           checked={allSelected}
           onChange={onToggleAll}
-          disabled={reviewableCount === 0 || controlsBusy}
+          disabled={selectableCount === 0 || controlsBusy}
           className="h-4 w-4 rounded border-slate-600 bg-slate-950 accent-indigo-500"
         />
         Выбрать все на странице
@@ -647,7 +672,7 @@ function BulkToolbar({
             {valueBusy && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-indigo-300" />}
           </div>
         )}
-        <Button type="button" onClick={onApprove} disabled={selectedCount === 0 || controlsBusy} size="sm" className="bg-emerald-600 hover:bg-emerald-500">
+        <Button type="button" onClick={onApprove} disabled={selectedReviewableCount === 0 || controlsBusy} size="sm" className="bg-emerald-600 hover:bg-emerald-500">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
           Принять выбранные
         </Button>
@@ -655,7 +680,7 @@ function BulkToolbar({
           {filteredBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
           Принять всё по фильтрам ({filteredCount.toLocaleString('ru-RU')})
         </Button>
-        <Button type="button" onClick={onReject} disabled={selectedCount === 0 || controlsBusy} size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-300 hover:bg-red-500/10 hover:text-red-300">
+        <Button type="button" onClick={onReject} disabled={selectedReviewableCount === 0 || controlsBusy} size="sm" variant="outline" className="border-slate-700 bg-slate-950 text-slate-300 hover:bg-red-500/10 hover:text-red-300">
           <X className="h-4 w-4" /> Отклонить
         </Button>
       </div>
@@ -753,11 +778,12 @@ function SuggestionCard({
 }) {
   const isUnknown = item.source === 'unknown'
   const isReviewable = item.status === 'suggested' && !isUnknown
+  const isSelectable = item.status === 'suggested'
   return (
     <article className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900 shadow-sm transition hover:border-slate-700">
       <div className="grid gap-5 p-4 lg:grid-cols-[minmax(240px,0.85fr)_minmax(0,1.3fr)_auto] lg:items-center">
         <div className="flex min-w-0 gap-3">
-          {isReviewable && (
+          {isSelectable && (
             <input
               type="checkbox"
               checked={selected}

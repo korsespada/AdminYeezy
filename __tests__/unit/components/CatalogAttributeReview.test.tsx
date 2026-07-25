@@ -180,6 +180,87 @@ describe('CatalogAttributeReview', () => {
     expect(getProductAction).toHaveBeenCalledWith('product-1')
   })
 
+  it('selects unknown products and assigns one subcategory to all of them', async () => {
+    const unknownSuggestions: RailsCatalogAttributeSuggestion[] = ['product-1', 'product-2'].map((productId) => ({
+      ...suggestion,
+      id: `unknown:${productId}`,
+      attribute_code: 'subcategory',
+      normalized_value: {},
+      raw_value: '',
+      source: 'unknown',
+      confidence: 0,
+      product: {
+        ...suggestion.product,
+        id: productId,
+        slug: `hermes-hac-a-dos-${productId}`,
+        name: 'Hermes Hac a Dos',
+        category: { id: 'generic-bags-id', name: 'Сумки', slug: 'sumki-sumki' },
+      },
+    }))
+    const updatedSuggestions = unknownSuggestions.map((item, index) => ({
+      ...item,
+      id: `created-suggestion-${index + 1}`,
+      source: 'manual',
+      normalized_value: {
+        category_id: 'laptop-bags-id',
+        category_name: 'Сумки для ноутбуков',
+        category_slug: 'sumki-dlya-noutbukov',
+      },
+    }))
+    vi.mocked(bulkUpdateCatalogAttributeSuggestionValuesAction).mockResolvedValue({
+      success: true,
+      data: updatedSuggestions,
+    })
+    const user = userEvent.setup()
+
+    render(
+      <CatalogAttributeReview
+        initialResult={{
+          items: unknownSuggestions,
+          page: 1,
+          perPage: 30,
+          totalItems: 2,
+          totalPages: 1,
+          availableValues: [{ value: '__unknown__', label: 'Неизвестно', count: 2 }],
+        }}
+        filters={{ ...filters, attributeCode: 'subcategory', suggestedValue: '__unknown__' }}
+        brands={[]}
+        categories={[
+          { id: 'bags-id', slug: 'bags', name: 'Сумки', description: '', created: '', updated: '', collectionId: '', collectionName: 'categories' },
+        ]}
+        subcategories={[
+          {
+            id: 'laptop-bags-id',
+            name: 'Сумки для ноутбуков',
+            slug: 'sumki-dlya-noutbukov',
+            category: 'bags-id',
+            description: '',
+            created: '',
+            updated: '',
+            collectionId: '',
+            collectionName: 'subcategories',
+          },
+        ]}
+      />
+    )
+
+    await user.click(screen.getByRole('checkbox', { name: /Выбрать все на странице/ }))
+    expect(screen.getByRole('combobox', { name: 'Общее значение для выбранных' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Принять выбранные' })).toBeDisabled()
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Общее значение для выбранных' }),
+      'laptop-bags-id',
+    )
+
+    await waitFor(() => expect(screen.getByText('Изменено значений: 2')).toBeInTheDocument())
+    expect(bulkUpdateCatalogAttributeSuggestionValuesAction).toHaveBeenCalledWith(
+      ['unknown:product-1', 'unknown:product-2'],
+      'laptop-bags-id',
+    )
+    expect(screen.getByRole('button', { name: 'Принять выбранные' })).toBeEnabled()
+  })
+
   it('changes a subcategory proposal from the selector inside the card', async () => {
     const subcategorySuggestion: RailsCatalogAttributeSuggestion = {
       ...suggestion,
