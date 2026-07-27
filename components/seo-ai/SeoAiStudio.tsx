@@ -619,7 +619,7 @@ function DraftCard({
         {Array.isArray(draft.output?.conflicts) && draft.output.conflicts.length > 0 && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
             <p className="font-semibold">Обнаружены противоречия</p>
-            {draft.output.conflicts.map((conflict: any, index: number) => <p key={index} className="mt-1 break-words"><strong>{fieldLabel(conflict.field)}:</strong> {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
+            {draft.output.conflicts.map((conflict: any, index: number) => <p key={index} className="mt-1 break-words"><strong>{fieldLabel(conflict.field, attributeDefinitionsByCode)}:</strong> {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
           </div>
         )}
         {Array.isArray(draft.output?.image_alt_texts) && draft.output.image_alt_texts.length > 0 && (
@@ -684,10 +684,13 @@ function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefin
   }).join(', ')
 }
 
-function fieldLabel(field: string) {
+function fieldLabel(field: string, attributeDefinitions?: Map<string, CatalogAttributeDefinition>) {
   const direct = PRODUCT_FIELDS.find((item) => item.key === field || item.outputKey === field)?.label
   if (direct) return direct
-  if (field.startsWith('catalog_attributes.')) return `Характеристика «${field.split('.').pop()}»`
+  const attributeCode = field.replace(/^catalog_attributes\./, '')
+  const definition = attributeDefinitions?.get(attributeCode)
+  if (definition) return definition.label
+  if (field.startsWith('catalog_attributes.')) return `Характеристика «${attributeCode}»`
   return field || 'Поле товара'
 }
 

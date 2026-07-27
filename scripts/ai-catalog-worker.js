@@ -2,6 +2,7 @@ require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' })
 
 const sharp = require('sharp')
 const { readSseContent } = require('./lib/cockpit-sse')
+const { sanitizeCatalogOutput } = require('./lib/catalog-output')
 
 const RAILS_API_URL = trimTrailingSlash(requiredEnv('RAILS_API_URL'))
 const WORKER_TOKEN = requiredEnv('AI_CATALOG_WORKER_TOKEN')
@@ -74,6 +75,8 @@ async function processJob({ generation, lease_token: leaseToken }) {
       })))
       finalOutput = await refineDraft(generation, firstOutput, detailImages)
     }
+
+    finalOutput = sanitizeCatalogOutput(finalOutput)
 
     await reportProgress(id, leaseToken, 'saving_draft')
     await workerRequest(`/admin/seo_ai/worker/generations/${encodeURIComponent(id)}/complete`, {
