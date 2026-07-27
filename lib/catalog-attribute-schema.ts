@@ -101,6 +101,12 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   definition('capacity', 'Вместимость', 'Сумки и багаж', 'text', 140, {
     aliases: ['bag_capacity', 'luggage_capacity', 'объём', 'вместимость'],
   }),
+  definition('hardware_color', 'Цвет фурнитуры', 'Сумки', 'enum', 145, {
+    filter: true,
+    aliases: ['цвет фурнитуры', 'hardware color', 'hardware_colour', 'metal fittings color'],
+    values: ['Золотистая', 'Серебристая', 'Палладиевая', 'Розовое золото', 'Чёрная', 'Графитовая', 'Бронзовая'],
+    rules: ['Золотистая фурнитура', 'Palladium hardware', 'Silver-tone hardware'],
+  }),
   definition('watch_movement', 'Механизм часов', 'Часы', 'enum', 150, {
     filter: true,
     aliases: ['механизм часов', 'movement'],
@@ -171,7 +177,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Сумки',
-    attributes: ['materials', 'dimensions', 'strap_length', 'capacity'],
+    attributes: ['materials', 'dimensions', 'strap_length', 'capacity', 'hardware_color'],
   },
   {
     category: 'Часы',
