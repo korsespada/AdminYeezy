@@ -53,6 +53,13 @@ const PRODUCT_FIELDS = [
   { key: 'image_alt_texts', outputKey: 'image_alt_texts', label: 'Alt фото' },
 ]
 
+const AI_FIELD_LABELS: Record<string, string> = {
+  materials: 'Материал / состав',
+  stones: 'Камни и декоративные вставки',
+  jewelry_metal: 'Металл украшения',
+  center_material: 'Материал центральной части',
+}
+
 interface SeoAiStudioProps {
   initialSettings: SeoAiSetting[]
   initialDrafts: SeoAiGeneration[]
@@ -690,6 +697,7 @@ function fieldLabel(field: string, attributeDefinitions?: Map<string, CatalogAtt
   const attributeCode = field.replace(/^catalog_attributes\./, '')
   const definition = attributeDefinitions?.get(attributeCode)
   if (definition) return definition.label
+  if (AI_FIELD_LABELS[attributeCode]) return AI_FIELD_LABELS[attributeCode]
   if (field.startsWith('catalog_attributes.')) return `Характеристика «${attributeCode}»`
   return field || 'Поле товара'
 }
