@@ -638,7 +638,7 @@ function buildDecisionGroups(drafts: SeoAiGeneration[], attributeDefinitions: Ca
         attributeCode: code,
         filterValue: registryFilterValue(candidate),
         canonicalValue: registryCanonicalValue(value, candidate),
-      })).filter((candidate) => candidate.filterValue)
+      })).filter((candidate) => candidate.filterValue && candidate.canonicalValue)
       if (registryValues.length === 0) return
 
       const suggested = registryValues.map((candidate) => candidate.canonicalValue).join(', ')
@@ -726,9 +726,13 @@ function registryFilterValue(value: string) {
 }
 
 function registryCanonicalValue(value: unknown, fallback: string) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
   const record = value as Record<string, unknown>
-  return String(record.canonical_value || record.label || record.name || record.display_value || fallback).trim()
+  const explicit = String(record.canonical_value || record.label || record.name || '').trim()
+  if (explicit) return explicit
+
+  const display = String(record.display_value || '').trim()
+  return display && normalizeRegistryValue(display) !== normalizeRegistryValue(fallback) ? display : ''
 }
 
 function decisionKindLabel(kind: SeoAiDecisionKind) {
