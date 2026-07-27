@@ -44,14 +44,16 @@ async function processJob({ generation, lease_token: leaseToken }) {
   const id = generation.id
   try {
     await reportProgress(id, leaseToken, 'building_contact_sheet')
-    const images = Array(generation.input_snapshot?.images).slice(0, MAX_IMAGES)
+    const images = Array.isArray(generation.input_snapshot?.images)
+      ? generation.input_snapshot.images.slice(0, MAX_IMAGES)
+      : []
     const contactSheet = images.length > 0 ? await buildContactSheet(images) : null
 
     await reportProgress(id, leaseToken, 'analyzing_product')
     const firstOutput = await generateDraft(generation, contactSheet)
     let finalOutput = firstOutput
 
-    const detailNumbers = Array(firstOutput.inspect_image_numbers)
+    const detailNumbers = (Array.isArray(firstOutput.inspect_image_numbers) ? firstOutput.inspect_image_numbers : [])
       .map(Number)
       .filter((number) => Number.isInteger(number) && number >= 1 && number <= images.length)
       .slice(0, 3)
