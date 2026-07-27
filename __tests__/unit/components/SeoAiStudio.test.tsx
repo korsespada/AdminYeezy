@@ -50,7 +50,7 @@ const metalDefinition: CatalogAttributeDefinition = {
   code: 'jewelry_metal',
   label: 'Ювелирный металл',
   dictionary_values: [{
-    ...colorDefinition.dictionary_values[0],
+    ...colorDefinition.dictionary_values![0],
     id: 'silver',
     attribute_code: 'jewelry_metal',
     filter_value: 'silver',
