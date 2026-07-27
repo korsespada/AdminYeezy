@@ -1,14 +1,15 @@
 import SeoAiStudio from '@/components/seo-ai/SeoAiStudio'
-import { getRailsCatalogLookups, getRailsSeoAiSettings, listRailsSeoAiDrafts } from '@/lib/rails-admin'
+import { getRailsCatalogLookups, getRailsSeoAiSettings, listRailsSeoAiBatches, listRailsSeoAiDrafts } from '@/lib/rails-admin'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 export const dynamic = 'force-dynamic'
 
 export default async function SeoAiPage() {
   try {
-    const [settings, drafts, lookups] = await Promise.all([
+    const [settings, drafts, batches, lookups] = await Promise.all([
       getRailsSeoAiSettings(),
       listRailsSeoAiDrafts({ limit: 100 }),
+      listRailsSeoAiBatches(),
       getRailsCatalogLookups(),
     ])
 
@@ -16,14 +17,15 @@ export default async function SeoAiPage() {
       <div className="p-6 lg:p-8">
         <div className="mx-auto max-w-7xl space-y-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">AI SEO Studio</h1>
+            <h1 className="text-3xl font-bold tracking-tight text-white">AI-каталог</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-              Генерация SEO-черновиков для товаров, брендов, категорий и лендингов. OpenRouter вызывается только через Rails API, публикация происходит вручную через apply.
+              Названия, описания, SEO, гендер, характеристики и предложения подкатегорий для опубликованных товаров. Задания выполняет локальный Cockpit Tools worker, изменения сначала попадают в сравнение.
             </p>
           </div>
           <SeoAiStudio
-            initialSettings={settings}
+            initialSettings={settings.filter((setting) => setting.task_key === 'catalog_product_enricher')}
             initialDrafts={drafts}
+            initialBatches={batches}
             brands={lookups.brands}
             categories={lookups.categories}
             subcategories={lookups.subcategories}

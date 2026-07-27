@@ -68,7 +68,7 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="AI SEO Studio">
           <Link href="/admin/seo-ai">
             <Sparkles size={20} className="text-fuchsia-400" />
-            <span className="hidden md:inline">AI SEO</span>
+            <span className="hidden md:inline">AI-каталог</span>
           </Link>
         </Button>
 

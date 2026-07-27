@@ -86,11 +86,11 @@ POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
 
 | URL | Назначение | Источник |
 |---|---|---|
-| `/admin/seo-ai` | SEO AI drafts/settings/batches | Rails SEO AI API |
+| `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + local Cockpit Tools worker |
 | `/admin/ai-rules` | AI processing rules | local/scraping settings |
 | `/admin/analytics` | Операционные метрики | AdminYeezy analytics |
 
-SEO landings, redirects, audits и SEO AI относятся к Rails CRM/API. Если добавляется новый SEO workflow, он должен идти через `/api/v1/admin/seo*`, а не через прямую правку БД.
+SEO landings, redirects, audits и AI-каталог относятся к Rails CRM/API. Production создаёт задания и хранит черновики, а локальный worker забирает их через защищённые `/api/v1/admin/seo_ai/worker/*` endpoints. Прямые записи в CRM-БД запрещены.
 
 ## Что важно не сломать
 

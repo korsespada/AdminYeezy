@@ -165,7 +165,7 @@ export interface SeoAiGeneration {
   target_id?: string | null
   target_label?: string | null
   draft_type: 'product' | 'brand' | 'category' | 'landing_ideas'
-  status: 'draft' | 'applied' | 'rejected' | 'failed'
+  status: 'queued' | 'processing' | 'draft' | 'applied' | 'rejected' | 'failed' | 'canceled'
   input_snapshot: Record<string, any>
   text_result: Record<string, any>
   vision_result: Record<string, any>
@@ -173,6 +173,11 @@ export interface SeoAiGeneration {
   prompt_snapshot: Record<string, any>
   model_snapshot: Record<string, any>
   error_message?: string | null
+  attempt_count?: number
+  progress_stage?: string | null
+  cancel_requested?: boolean
+  lease_expires_at?: string | null
+  completed_at?: string | null
   batch_id?: string | null
   created_at: string
   updated_at: string
@@ -182,7 +187,7 @@ export interface SeoAiGeneration {
 export interface SeoAiBatch {
   id: string
   target_type: string
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
   ids: string[]
   brand?: string | null
   category?: string | null
@@ -191,6 +196,7 @@ export interface SeoAiBatch {
   target_status?: string | null
   missing_seo_only: boolean
   include_images: boolean
+  auto_apply?: boolean
   total_count: number
   success_count: number
   failure_count: number

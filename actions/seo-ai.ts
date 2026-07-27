@@ -4,16 +4,20 @@ import { revalidatePath } from 'next/cache'
 import {
   applyRailsSeoAiDraft,
   createRailsSeoAiBatch,
+  createRailsSeoAiSuggestedSubcategory,
   createRailsSeoAiLandingIdeas,
   deleteRailsSeoAiDraft,
   getRailsAdminProduct,
   getRailsSeoAiSettings,
   listRailsAdminProducts,
   listRailsSeoAiDrafts,
+  listRailsSeoAiBatches,
   rejectRailsSeoAiDraft,
+  retryRailsSeoAiGeneration,
   runRailsSeoAiGeneration,
   searchRailsAdminProductsExact,
   updateRailsSeoAiSettings,
+  updateRailsSeoAiBatchState,
 } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse, SeoAiSetting } from '@/lib/types'
@@ -91,6 +95,7 @@ export async function createSeoAiBatchAction(input: {
   status?: string
   missingSeoOnly?: boolean
   includeImages?: boolean
+  autoApply?: boolean
 }): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -108,6 +113,48 @@ export async function listSeoAiDraftsAction(options: { status?: string; draftTyp
     return { success: true, data: await listRailsSeoAiDrafts(options) }
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to load SEO AI drafts' }
+  }
+}
+
+export async function listSeoAiBatchesAction(): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    return { success: true, data: await listRailsSeoAiBatches() }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to load AI batches' }
+  }
+}
+
+export async function updateSeoAiBatchStateAction(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const batch = await updateRailsSeoAiBatchState(id, action)
+    revalidatePath(SEO_AI_PATH)
+    return { success: true, data: batch }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to update AI batch' }
+  }
+}
+
+export async function retrySeoAiGenerationAction(id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const generation = await retryRailsSeoAiGeneration(id)
+    revalidatePath(SEO_AI_PATH)
+    return { success: true, data: generation }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to retry AI generation' }
+  }
+}
+
+export async function createSeoAiSuggestedSubcategoryAction(id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const result = await createRailsSeoAiSuggestedSubcategory(id)
+    revalidatePath(SEO_AI_PATH)
+    return { success: true, data: result }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to create suggested subcategory' }
   }
 }
 

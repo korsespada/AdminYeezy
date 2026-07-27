@@ -17,6 +17,7 @@
     "db:backfill:scraping-files": "node scripts/backfill-scraping-files.js",
     "db:repair:gender": "node scripts/repair-canonical-gender.js",
     "db:normalize-result-paths": "node scripts/normalize-result-paths.js",
+    "ai:catalog-worker": "node scripts/ai-catalog-worker.js",
     "lint": "eslint .",
     "test": "vitest",
     "test:ui": "vitest --ui"

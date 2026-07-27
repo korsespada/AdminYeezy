@@ -107,8 +107,8 @@ const sections = [
     tone: 'text-purple-300',
   },
   {
-    title: 'AI SEO',
-    description: 'Генерация и ревью SEO-черновиков через Rails SEO AI studio.',
+    title: 'AI-каталог',
+    description: 'Названия, описания, характеристики, гендер и подкатегории через локальный Cockpit Tools.',
     href: '/admin/seo-ai',
     icon: Sparkles,
     tone: 'text-fuchsia-300',

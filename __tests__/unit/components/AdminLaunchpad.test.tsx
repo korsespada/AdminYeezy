@@ -19,7 +19,7 @@ describe('AdminLaunchpad', () => {
     expect(screen.getByRole('link', { name: 'Открыть раздел: CRM' })).toHaveAttribute('href', '/admin/crm')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Выгрузки' })).toHaveAttribute('href', '/admin/batches')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Поставщики' })).toHaveAttribute('href', '/admin/suppliers')
-    expect(screen.getByRole('link', { name: 'Открыть раздел: AI SEO' })).toHaveAttribute('href', '/admin/seo-ai')
+    expect(screen.getByRole('link', { name: 'Открыть раздел: AI-каталог' })).toHaveAttribute('href', '/admin/seo-ai')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Выгрузка 2.0' })).toHaveAttribute('href', '/admin/exports-v2')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Бренды' })).toHaveAttribute('href', '/admin/brands')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Категории' })).toHaveAttribute('href', '/admin/categories')

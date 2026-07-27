@@ -1130,6 +1130,7 @@ export async function createRailsSeoAiBatch(input: {
   status?: string
   missingSeoOnly?: boolean
   includeImages?: boolean
+  autoApply?: boolean
 }) {
   const result = await railsFetch<{ batch: SeoAiBatch; generations: SeoAiGeneration[] }>('/admin/seo_ai/batches', {
     method: 'POST',
@@ -1144,10 +1145,37 @@ export async function createRailsSeoAiBatch(input: {
         status: input.status || '',
         missing_seo_only: Boolean(input.missingSeoOnly),
         include_images: Boolean(input.includeImages),
+        auto_apply: Boolean(input.autoApply),
       },
     }),
   })
   return result
+}
+
+export async function listRailsSeoAiBatches(limit = 50) {
+  const result = await railsFetch<{ batches: SeoAiBatch[] }>(`/admin/seo_ai/batches?limit=${limit}`)
+  return result.batches
+}
+
+export async function updateRailsSeoAiBatchState(id: string, action: 'pause' | 'resume' | 'cancel') {
+  const result = await railsFetch<{ batch: SeoAiBatch }>(`/admin/seo_ai/batches/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST',
+  })
+  return result.batch
+}
+
+export async function retryRailsSeoAiGeneration(id: string) {
+  const result = await railsFetch<{ generation: SeoAiGeneration }>(`/admin/seo_ai/generations/${encodeURIComponent(id)}/retry`, {
+    method: 'POST',
+  })
+  return result.generation
+}
+
+export async function createRailsSeoAiSuggestedSubcategory(id: string) {
+  return railsFetch<{ generation: SeoAiGeneration; category: Category }>(
+    `/admin/seo_ai/generations/${encodeURIComponent(id)}/create_subcategory`,
+    { method: 'POST' },
+  )
 }
 
 export async function applyRailsSeoAiDraft(id: string, fields?: string[]) {
