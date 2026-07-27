@@ -587,7 +587,7 @@ function storefrontProductUrl(slug: string) {
   return `https://yeezyunique.ru/product/${encodeURIComponent(slug)}`
 }
 
-type SeoAiDecisionKind = 'subcategory' | 'attribute' | 'value'
+type SeoAiDecisionKind = 'subcategory' | 'value'
 
 interface SeoAiDecisionGroup {
   key: string
@@ -596,6 +596,11 @@ interface SeoAiDecisionGroup {
   detail: string
   confidence: number
   draftIds: string[]
+  registryValues?: Array<{
+    attributeCode: string
+    filterValue: string
+    canonicalValue: string
+  }>
   examples: Array<{
     draftId: string
     label: string
@@ -609,7 +614,6 @@ function buildDecisionGroups(drafts: SeoAiGeneration[], attributeDefinitions: Ca
   const groups = new Map<string, SeoAiDecisionGroup>()
 
   drafts.filter((draft) => draft.status === 'draft' && draft.draft_type === 'product').forEach((draft) => {
-    const product = draft.input_snapshot?.product || {}
     const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
     const suggestion = draft.output?.subcategory_suggestion
 
@@ -623,18 +627,21 @@ function buildDecisionGroups(drafts: SeoAiGeneration[], attributeDefinitions: Ca
       }, draft)
     }
 
-    const before = product.catalog_attributes || {}
     const after = normalizeVisibleAttributes(draft.output?.catalog_attributes || {}, isWatch)
     Object.entries(after).forEach(([code, value]) => {
       const definition = definitions.get(code)
       if (!definition || !['enum', 'multi_enum'].includes(definition.value_type)) return
       if ((definition.dictionary_values?.length || 0) === 0 && (definition.values?.length || 0) === 0) return
 
-      const suggested = formatAttributeValue(value, definition)
-      const current = formatAttributeValue(before[code], definition)
-      if (!suggested || suggested === '—' || normalizeDecisionValue(suggested) === normalizeDecisionValue(current)) return
+      const unknownValues = registryCandidateValues(code, value).filter((candidate) => !registryValueKnown(definition, candidate))
+      const registryValues = unknownValues.map((candidate) => ({
+        attributeCode: code,
+        filterValue: registryFilterValue(candidate),
+        canonicalValue: registryCanonicalValue(value, candidate),
+      })).filter((candidate) => candidate.filterValue)
+      if (registryValues.length === 0) return
 
-      const kind: SeoAiDecisionKind = current === '—' ? 'attribute' : 'value'
+      const suggested = registryValues.map((candidate) => candidate.canonicalValue).join(', ')
       const confidence = Number(
         draft.output?.field_confidence?.[`catalog_attributes.${code}`]
         || draft.output?.field_confidence?.[code]
@@ -644,24 +651,25 @@ function buildDecisionGroups(drafts: SeoAiGeneration[], attributeDefinitions: Ca
         || draft.output?.field_evidence?.[code]
         || ''
       addDecisionGroup(groups, {
-        key: `${kind}:${code}:${normalizeDecisionValue(suggested)}`,
-        kind,
-        title: `${definition.label}: ${suggested}`,
+        key: `value:${code}:${registryValues.map((candidate) => candidate.filterValue).sort().join(',')}`,
+        kind: 'value',
+        title: `Добавить в «${definition.label}»: ${suggested}`,
         detail: String(evidence),
         confidence,
+        registryValues,
       }, draft)
     })
   })
 
   return [...groups.values()].sort((left, right) => {
-    const priority = { subcategory: 0, attribute: 1, value: 2 }
+    const priority = { subcategory: 0, value: 1 }
     return priority[left.kind] - priority[right.kind] || right.draftIds.length - left.draftIds.length
   })
 }
 
 function addDecisionGroup(
   groups: Map<string, SeoAiDecisionGroup>,
-  proposal: Pick<SeoAiDecisionGroup, 'key' | 'kind' | 'title' | 'detail' | 'confidence'>,
+  proposal: Pick<SeoAiDecisionGroup, 'key' | 'kind' | 'title' | 'detail' | 'confidence' | 'registryValues'>,
   draft: SeoAiGeneration,
 ) {
   const current: SeoAiDecisionGroup = groups.get(proposal.key) || { ...proposal, draftIds: [], examples: [] }
@@ -684,9 +692,47 @@ function normalizeDecisionValue(value: unknown) {
   return String(value || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
 }
 
+function registryCandidateValues(code: string, value: unknown): string[] {
+  if (value === undefined || value === null || value === '') return []
+  if (Array.isArray(value)) return [...new Set(value.flatMap((item) => registryCandidateValues(code, item)))]
+  if (typeof value !== 'object') return [String(value)]
+
+  const record = value as Record<string, unknown>
+  const field = code === 'materials'
+    ? 'families'
+    : ['colors', 'watch_case_material'].includes(code)
+      ? 'filter_values'
+      : 'filter_value'
+  return registryCandidateValues(code, record[field])
+}
+
+function registryValueKnown(definition: CatalogAttributeDefinition, value: string) {
+  const normalized = normalizeRegistryValue(value)
+  const dictionaryCandidates = (definition.dictionary_values || []).flatMap((candidate) => [
+    candidate.filter_value,
+    candidate.canonical_value,
+    ...(candidate.aliases || []),
+  ])
+  return [...dictionaryCandidates, ...(definition.values || [])].some((candidate) => normalizeRegistryValue(candidate) === normalized)
+}
+
+function normalizeRegistryValue(value: unknown) {
+  return normalizeDecisionValue(value).replace(/[\s-]+/g, '_').replace(/_+/g, '_')
+}
+
+function registryFilterValue(value: string) {
+  const normalized = normalizeRegistryValue(value)
+  return /^[a-z0-9_:-]{1,80}$/.test(normalized) ? normalized : ''
+}
+
+function registryCanonicalValue(value: unknown, fallback: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback
+  const record = value as Record<string, unknown>
+  return String(record.canonical_value || record.label || record.name || record.display_value || fallback).trim()
+}
+
 function decisionKindLabel(kind: SeoAiDecisionKind) {
   if (kind === 'subcategory') return 'Новая подкатегория'
-  if (kind === 'attribute') return 'Новая характеристика'
   return 'Новое значение'
 }
 
@@ -785,13 +831,16 @@ function DraftFolder({
   }
 
   function applyDecisionGroup(group: SeoAiDecisionGroup) {
-    const entityText = group.kind === 'subcategory' ? 'Подкатегория будет создана и назначена товарам. ' : ''
+    const entityText = group.kind === 'subcategory'
+      ? 'Подкатегория будет создана и назначена товарам. '
+      : 'Значение будет добавлено в справочник. '
     if (!window.confirm(`${entityText}Будут применены все подготовленные изменения для ${group.draftIds.length} товаров. Продолжить?`)) return
 
     setDecisionInFlight(group.key)
     void applySeoAiDecisionGroupAction({
       draftIds: group.draftIds,
       createSubcategory: group.kind === 'subcategory',
+      registryValues: group.registryValues,
     }).then((result) => {
       setDecisionInFlight(null)
       if (!result.success) {
@@ -1310,7 +1359,13 @@ function attributeDisplayValues(value: unknown): string[] {
   if (typeof value !== 'object') return [String(value)]
 
   const record = value as Record<string, unknown>
-  if (record.display_value) return attributeDisplayValues([record.display_value, record.purity])
+  if (record.display_value) {
+    const displayValue = String(record.display_value)
+    const purity = record.purity ? String(record.purity) : ''
+    return purity && !displayValue.includes(purity)
+      ? [displayValue, `${purity} проба`]
+      : [displayValue]
+  }
   const preferredKey = ['canonical_value', 'label', 'value', 'name', 'normalized_value', 'values', 'filter_value'].find((key) => attributeDisplayValues(record[key]).length > 0)
   if (preferredKey) return attributeDisplayValues(record[preferredKey])
 

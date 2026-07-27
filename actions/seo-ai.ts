@@ -22,6 +22,7 @@ import {
   searchRailsAdminProductsExact,
   updateRailsSeoAiSettings,
   updateRailsSeoAiBatchState,
+  upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse, SeoAiGeneration, SeoAiSetting } from '@/lib/types'
@@ -230,6 +231,11 @@ const SEO_AI_PRODUCT_BULK_FIELDS = [
 export async function applySeoAiDecisionGroupAction(input: {
   draftIds: string[]
   createSubcategory?: boolean
+  registryValues?: Array<{
+    attributeCode: string
+    filterValue: string
+    canonicalValue: string
+  }>
 }): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -237,6 +243,25 @@ export async function applySeoAiDecisionGroupAction(input: {
     const generations: SeoAiGeneration[] = []
     const errors: Array<{ id: string; message: string }> = []
     const readyIds: string[] = []
+    const registryValues = input.registryValues?.filter((value) => (
+      /^[a-z0-9_:-]{1,80}$/.test(value.filterValue)
+      && /^[a-z0-9_:-]{1,80}$/.test(value.attributeCode)
+      && value.canonicalValue.trim().length > 0
+      && value.canonicalValue.trim().length <= 120
+    )) || []
+    if (registryValues.length !== (input.registryValues?.length || 0)) {
+      return { success: false, error: 'Некорректное новое значение справочника' }
+    }
+
+    for (const value of registryValues) {
+      await upsertRailsCatalogAttributeValue({
+        attribute_code: value.attributeCode,
+        filter_value: value.filterValue,
+        canonical_value: value.canonicalValue.trim(),
+        aliases: [],
+        active: true,
+      })
+    }
 
     if (input.createSubcategory) {
       for (const id of draftIds) {
@@ -271,6 +296,7 @@ export async function applySeoAiDecisionGroupAction(input: {
     }
 
     revalidatePath(SEO_AI_PATH)
+    revalidatePath('/admin/catalog-attributes')
     revalidatePath('/admin')
     return { success: true, data: { generations, processed: generations.length, errors } }
   } catch (error: any) {
