@@ -1,7 +1,8 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { Bot, Check, Layers, Loader2, Pause, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import Image from 'next/image'
+import { Bot, Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Layers, Loader2, Pause, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
 import {
   applySeoAiDraftAction,
   createSeoAiBatchAction,
@@ -17,6 +18,7 @@ import {
   updateSeoAiBatchStateAction,
 } from '@/actions/seo-ai'
 import type { Brand, Category, Product, SeoAiBatch, SeoAiGeneration, SeoAiSetting, Subcategory } from '@/lib/types'
+import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -58,9 +60,10 @@ interface SeoAiStudioProps {
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
+  attributeDefinitions: CatalogAttributeDefinition[]
 }
 
-export default function SeoAiStudio({ initialSettings, initialDrafts, initialBatches, brands, categories, subcategories }: SeoAiStudioProps) {
+export default function SeoAiStudio({ initialSettings, initialDrafts, initialBatches, brands, categories, subcategories, attributeDefinitions }: SeoAiStudioProps) {
   const [settings, setSettings] = useState(initialSettings)
   const [drafts, setDrafts] = useState(initialDrafts)
   const [batches, setBatches] = useState(initialBatches)
@@ -81,6 +84,29 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   const [batchMissingOnly, setBatchMissingOnly] = useState(false)
   const [batchImages, setBatchImages] = useState(true)
   const [batchAutoApply, setBatchAutoApply] = useState(false)
+  const [batchLimit, setBatchLimit] = useState(100)
+  const [now, setNow] = useState(() => Date.now())
+
+  const hasActiveBatches = batches.some((batch) => batch.status === 'pending' || batch.status === 'running')
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!hasActiveBatches) return
+
+    const timer = window.setInterval(async () => {
+      const [draftResult, batchResult] = await Promise.all([
+        listSeoAiDraftsAction({ limit: 100 }),
+        listSeoAiBatchesAction(),
+      ])
+      if (draftResult.success) setDrafts(draftResult.data || [])
+      if (batchResult.success) setBatches(batchResult.data || [])
+    }, 5000)
+    return () => window.clearInterval(timer)
+  }, [hasActiveBatches])
 
   const subcategoriesForBatch = useMemo(
     () => subcategories.filter((subcategory) => subcategory.category === batchCategory),
@@ -152,6 +178,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         missingSeoOnly: batchMissingOnly,
         includeImages: batchImages,
         autoApply: batchAutoApply,
+        itemLimit: batchLimit,
       })
 
       if (result.success) {
@@ -202,7 +229,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden">
       {message && (
         <div className={`rounded-lg border px-4 py-3 text-sm ${message.type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}`}>
           {message.text}
@@ -210,11 +237,11 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
       )}
 
       <Tabs defaultValue="test" className="space-y-6">
-        <TabsList className="flex h-auto flex-wrap justify-start gap-1 bg-slate-800 p-1">
-          <TabsTrigger value="test">Один товар</TabsTrigger>
-          <TabsTrigger value="batch">Массово</TabsTrigger>
-          <TabsTrigger value="drafts">Очередь и сравнение</TabsTrigger>
-          <TabsTrigger value="settings">Настройки</TabsTrigger>
+        <TabsList className="flex h-auto w-full max-w-full flex-nowrap justify-start gap-1 overflow-x-auto bg-slate-800 p-1">
+          <TabsTrigger value="test" className="shrink-0">Один товар</TabsTrigger>
+          <TabsTrigger value="batch" className="shrink-0">Массово</TabsTrigger>
+          <TabsTrigger value="drafts" className="shrink-0">Очередь и сравнение</TabsTrigger>
+          <TabsTrigger value="settings" className="shrink-0">Настройки</TabsTrigger>
         </TabsList>
 
         <TabsContent value="test">
@@ -239,10 +266,13 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                       type="button"
                       key={product.id}
                       onClick={() => setSelectedProduct(product)}
-                      className={`rounded-lg border p-3 text-left text-sm transition ${selectedProduct?.id === product.id ? 'border-fuchsia-400 bg-fuchsia-500/10' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}`}
+                      className={`flex min-w-0 items-center gap-3 rounded-lg border p-3 text-left text-sm transition ${selectedProduct?.id === product.id ? 'border-fuchsia-400 bg-fuchsia-500/10' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}`}
                     >
-                      <span className="block font-semibold text-slate-100">{product.name}</span>
-                      <span className="mt-1 block text-xs text-slate-400">{product.slug || product.id}</span>
+                      {productImageUrl(product) ? <Image src={productImageUrl(product)} alt="" width={56} height={56} className="h-14 w-14 shrink-0 rounded-md bg-slate-800 object-cover" /> : <div className="h-14 w-14 shrink-0 rounded-md bg-slate-800" />}
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold text-slate-100">{product.name}</span>
+                        <span className="mt-1 block truncate text-xs text-slate-400">{product.slug || product.id}</span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -250,10 +280,14 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
 
               {selectedProduct && (
                 <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
+                  <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {productImageUrl(selectedProduct) ? <Image src={productImageUrl(selectedProduct)} alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-lg bg-slate-800 object-cover" /> : null}
+                      <div className="min-w-0">
                       <p className="text-sm font-semibold text-white">{selectedProduct.name}</p>
                       <p className="text-xs text-slate-400">{productBrandLabel(selectedProduct) || 'Без бренда'} · {selectedProduct.gender || 'Без гендера'}</p>
+                      {selectedProduct.slug && <a href={storefrontProductUrl(selectedProduct.slug)} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300"><ExternalLink className="h-3 w-3" /> Открыть карточку</a>}
+                      </div>
                     </div>
                     <label className="flex items-center gap-2 text-sm text-slate-300">
                       <Checkbox checked={includeImages} onCheckedChange={(value) => setIncludeImages(Boolean(value))} />
@@ -276,7 +310,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
               <CardTitle className="flex items-center gap-2 text-white"><Layers className="h-5 w-5 text-indigo-400" /> Массовая генерация</CardTitle>
               <CardDescription>До 500 опубликованных товаров за запуск. Очередь продолжится после повторного запуска локального worker.</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-4 lg:grid-cols-2">
+            <CardContent className="grid min-w-0 gap-4 xl:grid-cols-2">
               <div className="space-y-4">
                 <Label>ID товаров, если нужен точный список</Label>
                 <Textarea value={batchIds} onChange={(event) => setBatchIds(event.target.value)} placeholder="uuid-1, uuid-2 или с новой строки" className="min-h-28 bg-slate-900 font-mono" />
@@ -301,6 +335,19 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Статус" /></SelectTrigger>
                     <SelectContent><SelectItem value="__all__">Любой статус</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="hidden">Hidden</SelectItem></SelectContent>
                   </Select>
+                  <div className="space-y-1">
+                    <Label htmlFor="batch-limit">Сколько товаров проверить</Label>
+                    <Input
+                      id="batch-limit"
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={batchLimit}
+                      onChange={(event) => setBatchLimit(Math.min(500, Math.max(1, Number(event.target.value) || 1)))}
+                      className="bg-slate-900"
+                    />
+                    <p className="text-xs text-slate-500">От 1 до 500 за одну партию</p>
+                  </div>
                 </div>
               </div>
               <div className="space-y-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
@@ -322,7 +369,8 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                 <div key={batch.id} className="flex flex-col gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3 md:flex-row md:items-center md:justify-between">
                   <div>
                     <p className="text-sm font-medium text-white">{batch.total_count} товаров · {batch.success_count} готово · {batch.failure_count} ошибок</p>
-                    <p className="mt-1 text-xs text-slate-500">{new Date(batch.created_at).toLocaleString('ru-RU')} · {batch.status}{batch.auto_apply ? ' · автоприменение' : ''}</p>
+                    <p className="mt-1 text-xs text-slate-500">Запрошено: {batch.item_limit || batch.total_count} · {new Date(batch.created_at).toLocaleString('ru-RU')} · {batchStatusLabel(batch.status)}{batch.auto_apply ? ' · автоприменение' : ''}</p>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-cyan-300"><Clock3 className="h-3.5 w-3.5" /> {batchTimingLabel(batch, now)}</p>
                   </div>
                   <div className="flex gap-2">
                     {batch.status === 'running' && <Button type="button" size="sm" variant="outline" onClick={() => updateBatchState(batch.id, 'pause')} disabled={isPending}><Pause className="h-4 w-4" /> Пауза</Button>}
@@ -337,7 +385,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
 
         <TabsContent value="drafts">
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-xl font-bold text-white">Очередь и сравнение</h2>
               <Button type="button" variant="outline" onClick={refreshDrafts} disabled={isPending}><RefreshCw className="h-4 w-4" /> Обновить</Button>
             </div>
@@ -346,6 +394,8 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                 <DraftCard
                   key={draft.id}
                   draft={draft}
+                  compact={drafts.length > 3}
+                  attributeDefinitions={attributeDefinitions}
                   onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))}
                   onDelete={(id) => setDrafts((prev) => prev.filter((item) => item.id !== id))}
                 />
@@ -403,11 +453,46 @@ function productBrandLabel(product: Product) {
   return brand?.name || ''
 }
 
-function DraftCard({ draft, onChange, onDelete }: { draft: SeoAiGeneration; onChange: (draft: SeoAiGeneration) => void; onDelete: (id: string) => void }) {
+function productImageUrl(product: Product) {
+  const medium = product.media?.[0]
+  return medium?.thumb_url || medium?.preview_url || medium?.original_url || product.thumb || product.photos?.[0] || ''
+}
+
+function draftImageUrl(draft: SeoAiGeneration) {
+  const image = Array.isArray(draft.input_snapshot?.images) ? draft.input_snapshot.images[0] : null
+  return image?.thumb_url || image?.preview_url || image?.original_url || ''
+}
+
+function storefrontProductUrl(slug: string) {
+  return `https://yeezyunique.ru/product/${encodeURIComponent(slug)}`
+}
+
+function DraftCard({
+  draft,
+  compact,
+  attributeDefinitions,
+  onChange,
+  onDelete,
+}: {
+  draft: SeoAiGeneration
+  compact: boolean
+  attributeDefinitions: CatalogAttributeDefinition[]
+  onChange: (draft: SeoAiGeneration) => void
+  onDelete: (id: string) => void
+}) {
   const [fields, setFields] = useState(PRODUCT_FIELDS.filter((field) => field.key !== 'catalog_attributes.model_name' && field.key !== 'subcategory_suggestion').map((field) => field.key))
+  const [expanded, setExpanded] = useState(!compact)
   const [isPending, startTransition] = useTransition()
   const outputText = JSON.stringify(draft.output, null, 2)
   const productBefore = draft.input_snapshot?.product || {}
+  const attributesBefore = productBefore.catalog_attributes || {}
+  const attributesAfter = draft.output?.catalog_attributes || {}
+  const subcategorySuggestion = draft.output?.subcategory_suggestion
+  const imageUrl = draftImageUrl(draft)
+  const productSlug = productBefore.slug
+  const taxonomy = draft.input_snapshot?.catalog?.current_taxonomy
+  const categoryPath = [taxonomy?.top_level?.name, taxonomy?.assigned?.name].filter((name, index, values) => name && values.indexOf(name) === index).join(' → ')
+  const attributeDefinitionsByCode = new Map(attributeDefinitions.map((definition) => [definition.code, definition]))
 
   function toggleField(field: string) {
     setFields((prev) => prev.includes(field) ? prev.filter((item) => item !== field) : [...prev, field])
@@ -456,48 +541,94 @@ function DraftCard({ draft, onChange, onDelete }: { draft: SeoAiGeneration; onCh
   }
 
   return (
-    <Card className="border-slate-700 bg-slate-800">
-      <CardHeader className="pb-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle className="text-base text-white">{draft.target_label || draft.target_type} <span className="text-slate-500">· {draft.draft_type}</span></CardTitle>
-            <CardDescription className="mt-1">{new Date(draft.created_at).toLocaleString('ru-RU')}</CardDescription>
+    <Card className="min-w-0 overflow-hidden border-slate-700 bg-slate-800">
+      <CardHeader className="p-3 sm:p-4">
+        <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            {imageUrl ? <Image src={imageUrl} alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-lg bg-slate-900 object-cover" /> : <div className="h-16 w-16 shrink-0 rounded-lg bg-slate-900" />}
+            <div className="min-w-0">
+              <CardTitle className="truncate text-base text-white">{draft.target_label || draft.target_type}</CardTitle>
+              <CardDescription className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{new Date(draft.created_at).toLocaleString('ru-RU')}</span>
+                {draft.completed_at && <span>· {formatDuration(new Date(draft.completed_at).getTime() - new Date(draft.created_at).getTime())}</span>}
+              </CardDescription>
+              {categoryPath && <p className="mt-1 truncate text-xs text-slate-400">{categoryPath}</p>}
+              {productSlug && <a href={storefrontProductUrl(productSlug)} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300"><ExternalLink className="h-3 w-3" /> Оригинальная карточка</a>}
+            </div>
           </div>
-          <Badge className={draft.status === 'draft' ? 'bg-indigo-600' : draft.status === 'failed' ? 'bg-red-600' : draft.status === 'processing' ? 'bg-amber-600' : draft.status === 'queued' ? 'bg-cyan-700' : 'bg-slate-600'}>{statusLabel(draft)}</Badge>
+          <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
+            <Badge className={draft.status === 'draft' ? 'bg-indigo-600' : draft.status === 'failed' ? 'bg-red-600' : draft.status === 'processing' ? 'bg-amber-600' : draft.status === 'queued' ? 'bg-cyan-700' : 'bg-slate-600'}>{statusLabel(draft)}</Badge>
+            <Button type="button" size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
+              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              <span className="hidden sm:inline">{expanded ? 'Свернуть' : 'Подробнее'}</span>
+            </Button>
+          </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      {expanded && <CardContent className="min-w-0 space-y-4 px-3 pb-4 pt-0 sm:px-4">
         {draft.error_message && <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{draft.error_message}</div>}
         {draft.status === 'draft' && draft.draft_type === 'product' && (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {PRODUCT_FIELDS.filter((field) => field.key !== 'catalog_attributes.model_name').map((field) => {
-              const before = field.key === 'catalog_attributes' ? productBefore.catalog_attributes : productBefore[field.key]
+          <div className="grid min-w-0 gap-3 xl:grid-cols-2">
+            {PRODUCT_FIELDS.filter((field) => !['catalog_attributes', 'catalog_attributes.model_name', 'subcategory_suggestion', 'image_alt_texts'].includes(field.key)).map((field) => {
+              const before = productBefore[field.key]
               const after = nestedOutputValue(draft.output, field.outputKey)
               if (after === undefined || after === null || after === '') return null
               return (
-                <div key={field.key} className="rounded-lg border border-slate-700 bg-slate-900 p-3">
+                <div key={field.key} className={`min-w-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-900 p-3 ${field.key === 'description' ? 'xl:col-span-2' : ''}`}>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">{field.label}</p>
-                  <div className="grid gap-2 text-xs md:grid-cols-2">
-                    <div><span className="text-slate-500">Было</span><pre className="mt-1 whitespace-pre-wrap text-slate-300">{formatValue(before)}</pre></div>
-                    <div><span className="text-emerald-500">Предложение</span><pre className="mt-1 whitespace-pre-wrap text-emerald-200">{formatValue(after)}</pre></div>
+                  <div className="grid min-w-0 gap-3 text-sm md:grid-cols-2">
+                    <div className="min-w-0"><span className="text-xs text-slate-500">Было</span><p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-slate-300">{formatValue(before, field.key)}</p></div>
+                    <div className="min-w-0"><span className="text-xs text-emerald-500">Предложение</span><p className="mt-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-emerald-200">{formatValue(after, field.key)}</p></div>
                   </div>
                 </div>
               )
             })}
           </div>
         )}
+        {draft.status === 'draft' && Object.keys(attributesAfter).length > 0 && (
+          <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Характеристики</p>
+            <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+              {Object.entries(attributesAfter).map(([code, value]) => {
+                const definition = attributeDefinitionsByCode.get(code)
+                return (
+                  <div key={code} className="min-w-0 rounded-md border border-slate-700/70 bg-slate-950/60 p-3">
+                    <p className="font-medium text-white">{definition?.label || code}</p>
+                    <p className="mt-0.5 break-all text-[11px] text-slate-500"><code>{code}</code>{definition?.category_scope ? ` · для категории: ${definition.category_scope}` : ' · характеристика товара'}</p>
+                    <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                      <div><span className="text-xs text-slate-500">Было</span><p className="mt-0.5 break-words text-slate-300">{formatAttributeValue(attributesBefore[code], definition)}</p></div>
+                      <div><span className="text-xs text-emerald-500">Предложение</span><p className="mt-0.5 break-words text-emerald-200">{formatAttributeValue(value, definition)}</p></div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {draft.status === 'draft' && subcategorySuggestion?.kind && subcategorySuggestion.kind !== 'none' && (
+          <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-white">Подкатегория: {subcategorySuggestion.name || 'Без названия'}</p>
+              <Badge variant="outline">{subcategorySuggestion.kind === 'new' ? 'Новая' : 'Существующая'}</Badge>
+            </div>
+            <p className="mt-2 break-words text-sm text-slate-300">{subcategorySuggestion.evidence || 'Без пояснения'}</p>
+            <p className="mt-1 text-xs text-slate-500">Уверенность: {Math.round(Number(subcategorySuggestion.confidence || 0) * 100)}%</p>
+            {subcategorySuggestion.kind === 'new' && <Button type="button" size="sm" className="mt-3" onClick={createSubcategory} disabled={isPending}>Создать и назначить товару</Button>}
+          </div>
+        )}
         {Array.isArray(draft.output?.conflicts) && draft.output.conflicts.length > 0 && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
             <p className="font-semibold">Обнаружены противоречия</p>
-            {draft.output.conflicts.map((conflict: any, index: number) => <p key={index} className="mt-1">{conflict.field}: {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
+            {draft.output.conflicts.map((conflict: any, index: number) => <p key={index} className="mt-1 break-words"><strong>{fieldLabel(conflict.field)}:</strong> {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
           </div>
         )}
-        {draft.status === 'draft' && draft.output?.subcategory_suggestion?.kind === 'new' && (
-          <div className="rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/10 p-3">
-            <p className="text-sm font-semibold text-fuchsia-200">Новая подкатегория: {draft.output.subcategory_suggestion.name}</p>
-            <p className="mt-1 text-xs text-fuchsia-300">{draft.output.subcategory_suggestion.evidence} · уверенность {Math.round(Number(draft.output.subcategory_suggestion.confidence || 0) * 100)}%</p>
-            <Button type="button" size="sm" className="mt-3" onClick={createSubcategory} disabled={isPending}>Создать и назначить товару</Button>
-          </div>
+        {Array.isArray(draft.output?.image_alt_texts) && draft.output.image_alt_texts.length > 0 && (
+          <details className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300">
+            <summary className="cursor-pointer font-medium text-white">Alt-тексты фотографий ({draft.output.image_alt_texts.length})</summary>
+            <ol className="mt-3 space-y-1 pl-5 text-xs">
+              {draft.output.image_alt_texts.map((alt: string, index: number) => <li key={index} className="list-decimal break-words">{alt}</li>)}
+            </ol>
+          </details>
         )}
         {draft.draft_type === 'product' && draft.status === 'draft' && (
           <div className="flex flex-wrap gap-3">
@@ -509,9 +640,12 @@ function DraftCard({ draft, onChange, onDelete }: { draft: SeoAiGeneration; onCh
             ))}
           </div>
         )}
-        <pre className="max-h-96 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-300">{outputText}</pre>
+        <details className="rounded-lg border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
+          <summary className="cursor-pointer font-medium text-slate-300">Технический JSON</summary>
+          <pre className="mt-3 max-h-96 max-w-full overflow-auto whitespace-pre-wrap break-all">{outputText}</pre>
+        </details>
         {draft.status === 'draft' && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={applyDraft} disabled={isPending}><Check className="h-4 w-4" /> Применить</Button>
             <Button type="button" variant="outline" onClick={rejectDraft} disabled={isPending}><X className="h-4 w-4" /> Отклонить</Button>
           </div>
@@ -525,7 +659,7 @@ function DraftCard({ draft, onChange, onDelete }: { draft: SeoAiGeneration; onCh
           <Trash2 className="h-4 w-4" />
           Удалить
         </Button>
-      </CardContent>
+      </CardContent>}
     </Card>
   )
 }
@@ -534,9 +668,61 @@ function nestedOutputValue(output: Record<string, any>, path: string) {
   return path.split('.').reduce<any>((value, key) => value?.[key], output)
 }
 
-function formatValue(value: any) {
+function formatValue(value: any, field?: string) {
   if (value === undefined || value === null || value === '') return '—'
+  if (field === 'gender') return ({ female: 'Женский', male: 'Мужской', unisex: 'Унисекс' } as Record<string, string>)[String(value)] || String(value)
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+}
+
+function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefinition) {
+  if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return '—'
+  const values = Array.isArray(value) ? value : [value]
+  return values.map((item) => {
+    const text = String(item)
+    const dictionaryValue = definition?.dictionary_values?.find((candidate) => candidate.filter_value === text || candidate.canonical_value === text)
+    return dictionaryValue?.canonical_value || text
+  }).join(', ')
+}
+
+function fieldLabel(field: string) {
+  const direct = PRODUCT_FIELDS.find((item) => item.key === field || item.outputKey === field)?.label
+  if (direct) return direct
+  if (field.startsWith('catalog_attributes.')) return `Характеристика «${field.split('.').pop()}»`
+  return field || 'Поле товара'
+}
+
+function batchTimingLabel(batch: SeoAiBatch, now: number) {
+  const start = new Date(batch.started_at || batch.created_at).getTime()
+  const end = batch.completed_at
+    ? new Date(batch.completed_at).getTime()
+    : ['completed', 'failed', 'canceled'].includes(batch.status)
+      ? new Date(batch.updated_at).getTime()
+      : now
+  const elapsed = Math.max(0, end - start)
+  const processed = batch.status === 'completed' ? batch.total_count : batch.success_count + batch.failure_count
+  const average = processed > 0 ? elapsed / processed : 0
+  return `Всего ${formatDuration(elapsed)} · в среднем ${processed > 0 ? formatDuration(average) : '—'} на товар`
+}
+
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.round(milliseconds / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) return `${hours} ч ${minutes} мин ${seconds} сек`
+  if (minutes > 0) return `${minutes} мин ${seconds} сек`
+  return `${seconds} сек`
+}
+
+function batchStatusLabel(status: SeoAiBatch['status']) {
+  return ({
+    pending: 'Ожидает',
+    running: 'В работе',
+    paused: 'На паузе',
+    completed: 'Готово',
+    failed: 'Ошибка',
+    canceled: 'Отменено',
+  } as Record<SeoAiBatch['status'], string>)[status]
 }
 
 function statusLabel(draft: SeoAiGeneration) {

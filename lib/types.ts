@@ -197,9 +197,12 @@ export interface SeoAiBatch {
   missing_seo_only: boolean
   include_images: boolean
   auto_apply?: boolean
+  item_limit: number
   total_count: number
   success_count: number
   failure_count: number
+  started_at?: string | null
+  completed_at?: string | null
   error_message?: string | null
   created_at: string
   updated_at: string

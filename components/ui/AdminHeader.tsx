@@ -13,8 +13,8 @@ interface AdminHeaderProps {
 
 export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
   return (
-    <header className="bg-slate-800 border-b border-slate-700 py-3 px-6 sticky top-0 z-30 flex items-center justify-between shadow-sm">
-      <div className="flex items-center gap-4">
+    <header className="sticky top-0 z-30 flex min-w-0 items-center gap-2 border-b border-slate-700 bg-slate-800 px-2 py-3 shadow-sm sm:px-4 xl:px-6">
+      <div className="flex shrink-0 items-center gap-4">
         {onMenuClick && (
           <Button
             variant="ghost"
@@ -36,67 +36,67 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-2 [&::-webkit-scrollbar]:hidden">
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="CRM">
           <Link href="/admin/crm">
             <ClipboardList size={20} className="text-sky-400" />
-            <span className="hidden md:inline">CRM</span>
+            <span className="hidden min-[2100px]:inline">CRM</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Выгрузка и парсинг">
           <Link href="/admin/batches">
             <RefreshCw size={20} className="text-orange-400" />
-            <span className="hidden md:inline">Выгрузка</span>
+            <span className="hidden min-[2100px]:inline">Выгрузка</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Аналитика">
           <Link href="/admin/analytics">
             <BarChart3 size={20} className="text-indigo-400" />
-            <span className="hidden md:inline">Аналитика</span>
+            <span className="hidden min-[2100px]:inline">Аналитика</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Новая DB-native выгрузка">
           <Link href="/admin/exports-v2">
             <FlaskConical size={20} className="text-cyan-400" />
-            <span className="hidden 2xl:inline">Выгрузка 2.0</span>
+            <span className="hidden min-[2100px]:inline">Выгрузка 2.0</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="AI SEO Studio">
           <Link href="/admin/seo-ai">
             <Sparkles size={20} className="text-fuchsia-400" />
-            <span className="hidden md:inline">AI-каталог</span>
+            <span className="hidden min-[2100px]:inline">AI-каталог</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Атрибуты товаров">
           <Link href="/admin/catalog-attributes">
             <ListChecks size={20} className="text-emerald-400" />
-            <span className="hidden xl:inline">Атрибуты</span>
+            <span className="hidden min-[2100px]:inline">Атрибуты</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Схема атрибутов">
           <Link href="/admin/filter-characteristics">
             <SlidersHorizontal size={20} className="text-cyan-400" />
-            <span className="hidden xl:inline">Схема</span>
+            <span className="hidden min-[2100px]:inline">Схема</span>
           </Link>
         </Button>
 
         <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Корзина">
           <Link href="/admin/trash">
             <Trash2 size={20} className="text-red-400" />
-            <span className="hidden md:inline">Корзина</span>
+            <span className="hidden min-[2100px]:inline">Корзина</span>
           </Link>
         </Button>
 
-        <Separator orientation="vertical" className="mx-1 h-6 bg-slate-700" />
+        <Separator orientation="vertical" className="mx-1 hidden h-6 bg-slate-700 min-[2100px]:block" />
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 pl-2 pr-1 py-1 rounded-full bg-slate-700/30 border border-slate-700">
+        <div className="flex shrink-0 items-center gap-1 min-[2100px]:gap-3">
+          <div className="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-700/30 py-1 pl-2 pr-1 min-[2100px]:flex">
             <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-xs border border-indigo-500/30">
               AD
             </div>

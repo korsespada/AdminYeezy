@@ -1,21 +1,23 @@
 import SeoAiStudio from '@/components/seo-ai/SeoAiStudio'
 import { getRailsCatalogLookups, getRailsSeoAiSettings, listRailsSeoAiBatches, listRailsSeoAiDrafts } from '@/lib/rails-admin'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 export const dynamic = 'force-dynamic'
 
 export default async function SeoAiPage() {
   try {
-    const [settings, drafts, batches, lookups] = await Promise.all([
+    const [settings, drafts, batches, lookups, attributeDefinitions] = await Promise.all([
       getRailsSeoAiSettings(),
       listRailsSeoAiDrafts({ limit: 100 }),
       listRailsSeoAiBatches(),
       getRailsCatalogLookups(),
+      getCatalogAttributeDefinitions(),
     ])
 
     return (
-      <div className="p-6 lg:p-8">
-        <div className="mx-auto max-w-7xl space-y-6">
+      <div className="min-w-0 overflow-x-hidden p-3 sm:p-4 lg:p-6 2xl:p-8">
+        <div className="mx-auto w-full min-w-0 max-w-[1800px] space-y-6">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-white">AI-каталог</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
@@ -29,6 +31,7 @@ export default async function SeoAiPage() {
             brands={lookups.brands}
             categories={lookups.categories}
             subcategories={lookups.subcategories}
+            attributeDefinitions={attributeDefinitions}
           />
         </div>
       </div>

@@ -96,6 +96,7 @@ export async function createSeoAiBatchAction(input: {
   missingSeoOnly?: boolean
   includeImages?: boolean
   autoApply?: boolean
+  itemLimit?: number
 }): Promise<ActionResponse> {
   try {
     await requireAdmin()
