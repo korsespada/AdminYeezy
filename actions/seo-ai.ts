@@ -13,6 +13,7 @@ import {
   listRailsSeoAiDrafts,
   listRailsSeoAiBatches,
   rejectRailsSeoAiDraft,
+  renameRailsSeoAiBatch,
   retryRailsSeoAiGeneration,
   runRailsSeoAiGeneration,
   searchRailsAdminProductsExact,
@@ -134,6 +135,17 @@ export async function updateSeoAiBatchStateAction(id: string, action: 'pause' | 
     return { success: true, data: batch }
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to update AI batch' }
+  }
+}
+
+export async function renameSeoAiBatchAction(id: string, name: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const batch = await renameRailsSeoAiBatch(id, name.trim())
+    revalidatePath(SEO_AI_PATH)
+    return { success: true, data: batch }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось переименовать выгрузку' }
   }
 }
 

@@ -2,7 +2,7 @@ require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' })
 
 const sharp = require('sharp')
 const { readSseContent } = require('./lib/cockpit-sse')
-const { sanitizeCatalogOutput } = require('./lib/catalog-output')
+const { catalogQualityIssues, sanitizeCatalogOutput } = require('./lib/catalog-output')
 
 const RAILS_API_URL = trimTrailingSlash(requiredEnv('RAILS_API_URL'))
 const WORKER_TOKEN = requiredEnv('AI_CATALOG_WORKER_TOKEN')
@@ -76,7 +76,15 @@ async function processJob({ generation, lease_token: leaseToken }) {
       finalOutput = await refineDraft(generation, firstOutput, detailImages)
     }
 
-    finalOutput = sanitizeCatalogOutput(finalOutput)
+    const qualityIssues = catalogQualityIssues(generation, finalOutput)
+    if (qualityIssues.length > 0) {
+      await reportProgress(id, leaseToken, 'quality_review')
+      finalOutput = await auditDraft(generation, finalOutput, qualityIssues)
+    }
+
+    finalOutput = sanitizeCatalogOutput(finalOutput, {
+      internalIdentifiers: generation.input_snapshot?.catalog?.internal_identifiers || [],
+    })
 
     await reportProgress(id, leaseToken, 'saving_draft')
     await workerRequest(`/admin/seo_ai/worker/generations/${encodeURIComponent(id)}/complete`, {
@@ -92,6 +100,7 @@ async function processJob({ generation, lease_token: leaseToken }) {
             model: COCKPIT_MODEL,
             contact_sheet: Boolean(contactSheet),
             detail_images: detailNumbers,
+            quality_review: qualityIssues.length > 0,
           },
         },
       },
@@ -182,6 +191,25 @@ async function refineDraft(generation, firstOutput, detailImages) {
     systemPrompt: generation.prompt_snapshot?.system_prompt || 'Верни только JSON.',
     content,
     temperature: generation.model_snapshot?.temperature,
+    maxTokens: generation.model_snapshot?.max_tokens,
+  })
+}
+
+async function auditDraft(generation, draft, issues) {
+  return cockpitJson({
+    systemPrompt: generation.prompt_snapshot?.system_prompt || 'Верни только JSON.',
+    content: [{
+      type: 'text',
+      text: [
+        'Проведи финальную редакторскую проверку черновика и верни исправленный JSON в той же схеме.',
+        'Не сокращай подтверждённые свойства исходного товара. Не добавляй новых фактов.',
+        'Исправь каждую проблему из списка:',
+        ...issues.map((issue, index) => `${index + 1}. ${issue}`),
+        `Черновик: ${JSON.stringify(draft)}`,
+        `Полный контекст товара: ${JSON.stringify(generation.input_snapshot || {})}`,
+      ].join('\n'),
+    }],
+    temperature: 0.05,
     maxTokens: generation.model_snapshot?.max_tokens,
   })
 }

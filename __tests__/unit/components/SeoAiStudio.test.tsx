@@ -14,6 +14,7 @@ vi.mock('@/actions/seo-ai', () => ({
   listSeoAiDraftsAction: vi.fn(),
   listSeoAiBatchesAction: vi.fn(),
   rejectSeoAiDraftAction: vi.fn(),
+  renameSeoAiBatchAction: vi.fn(),
   retrySeoAiGenerationAction: vi.fn(),
   runSeoAiGenerationAction: vi.fn(),
   searchSeoAiProductsAction: vi.fn(),
@@ -53,7 +54,7 @@ function draft(id: string): SeoAiGeneration {
     draft_type: 'product',
     status: 'draft',
     input_snapshot: {
-      product: { name: 'Chanel Серьги', slug: 'chanel-earrings', catalog_attributes: {} },
+      product: { name: 'Chanel Серьги', slug: 'chanel-earrings', catalog_attributes: { colors: { normalized_value: { value: 'pink' } } } },
       images: [{ preview_url: 'https://static.yeezyunique.ru/test.webp' }],
       catalog: { current_taxonomy: { top_level: { name: 'Бижутерия' }, assigned: { name: 'Серьги' } } },
     },
@@ -89,10 +90,11 @@ describe('SeoAiStudio queue', () => {
     await user.click(screen.getByRole('tab', { name: 'Очередь и сравнение' }))
     expect(screen.queryByText('Цвет')).not.toBeInTheDocument()
 
-    await user.click(screen.getAllByRole('button', { name: /Подробнее/ })[0])
+    await user.click(screen.getAllByRole('button', { name: /Chanel Серьги/ })[0])
 
     expect(screen.getByText('Цвет')).toBeInTheDocument()
-    expect(screen.getByText('Розовый')).toBeInTheDocument()
+    expect(screen.getAllByText('Розовый')).toHaveLength(2)
+    expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
     expect(screen.getByText('Подкатегория: Серьги')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Оригинальная карточка' })[0]).toHaveAttribute('href', 'https://yeezyunique.ru/product/chanel-earrings')
   })

@@ -186,6 +186,7 @@ export interface SeoAiGeneration {
 
 export interface SeoAiBatch {
   id: string
+  name: string
   target_type: string
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
   ids: string[]

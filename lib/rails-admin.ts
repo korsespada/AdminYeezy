@@ -1166,6 +1166,14 @@ export async function updateRailsSeoAiBatchState(id: string, action: 'pause' | '
   return result.batch
 }
 
+export async function renameRailsSeoAiBatch(id: string, name: string) {
+  const result = await railsFetch<{ batch: SeoAiBatch }>(`/admin/seo_ai/batches/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ batch: { name } }),
+  })
+  return result.batch
+}
+
 export async function retryRailsSeoAiGeneration(id: string) {
   const result = await railsFetch<{ generation: SeoAiGeneration }>(`/admin/seo_ai/generations/${encodeURIComponent(id)}/retry`, {
     method: 'POST',

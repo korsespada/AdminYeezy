@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import Image from 'next/image'
-import { Bot, Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Layers, Loader2, Pause, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { Bot, Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Folder, Layers, Loader2, Pause, Pencil, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
 import {
   applySeoAiDraftAction,
   createSeoAiBatchAction,
@@ -11,6 +11,7 @@ import {
   listSeoAiDraftsAction,
   listSeoAiBatchesAction,
   rejectSeoAiDraftAction,
+  renameSeoAiBatchAction,
   retrySeoAiGenerationAction,
   runSeoAiGenerationAction,
   searchSeoAiProductsAction,
@@ -119,6 +120,16 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     () => subcategories.filter((subcategory) => subcategory.category === batchCategory),
     [batchCategory, subcategories]
   )
+  const draftGroups = useMemo(() => {
+    const knownBatchIds = new Set(batches.map((batch) => batch.id))
+    const batchGroups = batches
+      .map((batch) => ({ batch, drafts: drafts.filter((draft) => draft.batch_id === batch.id) }))
+      .filter((group) => group.drafts.length > 0)
+    const standaloneDrafts = drafts.filter((draft) => !draft.batch_id || !knownBatchIds.has(draft.batch_id))
+    return standaloneDrafts.length > 0
+      ? [...batchGroups, { batch: null, drafts: standaloneDrafts }]
+      : batchGroups
+  }, [batches, drafts])
 
   function setStatus(type: 'success' | 'error', text: string) {
     setMessage({ type, text })
@@ -224,6 +235,17 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         setStatus('error', result.error || 'Не удалось изменить состояние партии')
       }
     })
+  }
+
+  async function renameBatch(id: string, name: string) {
+    const result = await renameSeoAiBatchAction(id, name)
+    if (result.success) {
+      setBatches((prev) => prev.map((batch) => batch.id === id ? result.data : batch))
+      setStatus('success', 'Выгрузка переименована')
+      return true
+    }
+    setStatus('error', result.error || 'Не удалось переименовать выгрузку')
+    return false
   }
 
   function handleGenerationResult(result: any, successText: string) {
@@ -375,6 +397,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
               {batches.slice(0, 10).map((batch) => (
                 <div key={batch.id} className="flex flex-col gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3 md:flex-row md:items-center md:justify-between">
                   <div>
+                    <p className="mb-1 text-sm font-semibold text-white">{batch.name || `Выгрузка ${new Date(batch.created_at).toLocaleString('ru-RU')}`}</p>
                     <p className="text-sm font-medium text-white">{batch.total_count} товаров · {batch.success_count} готово · {batch.failure_count} ошибок</p>
                     <p className="mt-1 text-xs text-slate-500">Запрошено: {batch.item_limit || batch.total_count} · {new Date(batch.created_at).toLocaleString('ru-RU')} · {batchStatusLabel(batch.status)}{batch.auto_apply ? ' · автоприменение' : ''}</p>
                     <p className="mt-1 flex items-center gap-1.5 text-xs text-cyan-300"><Clock3 className="h-3.5 w-3.5" /> {batchTimingLabel(batch, now)}</p>
@@ -397,12 +420,13 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
               <Button type="button" variant="outline" onClick={refreshDrafts} disabled={isPending}><RefreshCw className="h-4 w-4" /> Обновить</Button>
             </div>
             <div className="grid gap-4">
-              {drafts.length === 0 ? <p className="text-sm text-slate-400">Черновиков пока нет.</p> : drafts.map((draft) => (
-                <DraftCard
-                  key={draft.id}
-                  draft={draft}
-                  compact={drafts.length > 3}
+              {drafts.length === 0 ? <p className="text-sm text-slate-400">Черновиков пока нет.</p> : draftGroups.map((group) => (
+                <DraftFolder
+                  key={group.batch?.id || 'standalone'}
+                  batch={group.batch}
+                  drafts={group.drafts}
                   attributeDefinitions={attributeDefinitions}
+                  onRename={renameBatch}
                   onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))}
                   onDelete={(id) => setDrafts((prev) => prev.filter((item) => item.id !== id))}
                 />
@@ -472,6 +496,81 @@ function draftImageUrl(draft: SeoAiGeneration) {
 
 function storefrontProductUrl(slug: string) {
   return `https://yeezyunique.ru/product/${encodeURIComponent(slug)}`
+}
+
+function DraftFolder({
+  batch,
+  drafts,
+  attributeDefinitions,
+  onRename,
+  onChange,
+  onDelete,
+}: {
+  batch: SeoAiBatch | null
+  drafts: SeoAiGeneration[]
+  attributeDefinitions: CatalogAttributeDefinition[]
+  onRename: (id: string, name: string) => Promise<boolean>
+  onChange: (draft: SeoAiGeneration) => void
+  onDelete: (id: string) => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(batch?.name || '')
+  const [isRenaming, startRenaming] = useTransition()
+  const label = batch?.name || (batch ? `Выгрузка ${new Date(batch.created_at).toLocaleString('ru-RU')}` : 'Отдельные товары')
+
+  function saveName() {
+    if (!batch || !name.trim()) return
+    startRenaming(async () => {
+      if (await onRename(batch.id, name.trim())) setEditing(false)
+    })
+  }
+
+  return (
+    <section className="min-w-0 overflow-hidden rounded-xl border border-slate-700 bg-slate-900/60">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        className="flex cursor-pointer items-center justify-between gap-3 p-3 hover:bg-slate-800/70 sm:p-4"
+        onClick={(event) => { if (!isInteractiveElement(event.target)) setExpanded((value) => !value) }}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded((value) => !value) } }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <Folder className="h-5 w-5 shrink-0 text-indigo-400" />
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-white">{label}</p>
+            <p className="text-xs text-slate-400">{drafts.length} товаров{batch ? ` · ${batchStatusLabel(batch.status)}` : ''}</p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {batch && <Button type="button" size="icon" variant="ghost" aria-label="Переименовать выгрузку" onClick={(event) => { event.stopPropagation(); setEditing(true) }}><Pencil className="h-4 w-4" /></Button>}
+          {expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+        </div>
+      </div>
+      {editing && batch && (
+        <div className="flex flex-col gap-2 border-t border-slate-700 p-3 sm:flex-row sm:items-center">
+          <Input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') saveName() }} className="bg-slate-950" autoFocus />
+          <Button type="button" size="sm" onClick={saveName} disabled={isRenaming || !name.trim()}>{isRenaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Сохранить</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => { setName(batch.name); setEditing(false) }}>Отмена</Button>
+        </div>
+      )}
+      {expanded && (
+        <div className="grid gap-3 border-t border-slate-700 p-3 sm:p-4">
+          {drafts.map((draft) => (
+            <DraftCard
+              key={draft.id}
+              draft={draft}
+              compact={drafts.length > 3}
+              attributeDefinitions={attributeDefinitions}
+              onChange={onChange}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function DraftCard({
@@ -549,7 +648,14 @@ function DraftCard({
 
   return (
     <Card className="min-w-0 overflow-hidden border-slate-700 bg-slate-800">
-      <CardHeader className="p-3 sm:p-4">
+      <CardHeader
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        className="cursor-pointer p-3 hover:bg-slate-700/30 sm:p-4"
+        onClick={(event) => { if (!isInteractiveElement(event.target)) setExpanded((value) => !value) }}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded((value) => !value) } }}
+      >
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             {imageUrl ? <Image src={imageUrl} alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-lg bg-slate-900 object-cover" /> : <div className="h-16 w-16 shrink-0 rounded-lg bg-slate-900" />}
@@ -565,10 +671,10 @@ function DraftCard({
           </div>
           <div className="flex shrink-0 items-center gap-2 self-start sm:self-auto">
             <Badge className={draft.status === 'draft' ? 'bg-indigo-600' : draft.status === 'failed' ? 'bg-red-600' : draft.status === 'processing' ? 'bg-amber-600' : draft.status === 'queued' ? 'bg-cyan-700' : 'bg-slate-600'}>{statusLabel(draft)}</Badge>
-            <Button type="button" size="sm" variant="outline" onClick={() => setExpanded((value) => !value)}>
+            <span className="flex items-center gap-1 text-sm text-slate-300">
               {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               <span className="hidden sm:inline">{expanded ? 'Свернуть' : 'Подробнее'}</span>
-            </Button>
+            </span>
           </div>
         </div>
       </CardHeader>
@@ -678,17 +784,33 @@ function nestedOutputValue(output: Record<string, any>, path: string) {
 function formatValue(value: any, field?: string) {
   if (value === undefined || value === null || value === '') return '—'
   if (field === 'gender') return ({ female: 'Женский', male: 'Мужской', unisex: 'Унисекс' } as Record<string, string>)[String(value)] || String(value)
-  return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  return typeof value === 'string' ? value.replace(/\\n/g, '\n') : JSON.stringify(value, null, 2)
 }
 
 function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefinition) {
-  if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return '—'
-  const values = Array.isArray(value) ? value : [value]
-  return values.map((item) => {
-    const text = String(item)
+  const values = attributeDisplayValues(value)
+  if (values.length === 0) return '—'
+  return values.map((text) => {
     const dictionaryValue = definition?.dictionary_values?.find((candidate) => candidate.filter_value === text || candidate.canonical_value === text)
     return dictionaryValue?.canonical_value || text
   }).join(', ')
+}
+
+function attributeDisplayValues(value: unknown): string[] {
+  if (value === undefined || value === null || value === '') return []
+  if (Array.isArray(value)) return [...new Set(value.flatMap(attributeDisplayValues))]
+  if (typeof value !== 'object') return [String(value)]
+
+  const record = value as Record<string, unknown>
+  const preferredKey = ['canonical_value', 'label', 'value', 'name', 'normalized_value', 'values'].find((key) => attributeDisplayValues(record[key]).length > 0)
+  if (preferredKey) return attributeDisplayValues(record[preferredKey])
+
+  const ignored = new Set(['confidence', 'evidence', 'code', 'source'])
+  return [...new Set(Object.entries(record).filter(([key]) => !ignored.has(key)).flatMap(([, item]) => attributeDisplayValues(item)))]
+}
+
+function isInteractiveElement(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest('a,button,input,textarea,select,label,[role="checkbox"]'))
 }
 
 function fieldLabel(field: string, attributeDefinitions?: Map<string, CatalogAttributeDefinition>) {
