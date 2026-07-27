@@ -94,6 +94,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   const [batchGender, setBatchGender] = useState('__none__')
   const [batchStatus, setBatchStatus] = useState('active')
   const [batchMissingOnly, setBatchMissingOnly] = useState(false)
+  const [batchIncludeProcessed, setBatchIncludeProcessed] = useState(false)
   const [batchImages, setBatchImages] = useState(false)
   const [batchAutoApply, setBatchAutoApply] = useState(false)
   const [batchLimit, setBatchLimit] = useState(100)
@@ -140,6 +141,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         gender: batchGender === '__none__' ? undefined : batchGender,
         status: batchStatus,
         missingSeoOnly: batchMissingOnly,
+        includeProcessed: batchIncludeProcessed,
       })
       if (!current) return
       setBatchPreviewLoading(false)
@@ -159,7 +161,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
       current = false
       window.clearTimeout(timer)
     }
-  }, [batchBrand, batchCategory, batchGender, batchIdsParsed, batchMissingOnly, batchStatus, batchSubcategory])
+  }, [batchBrand, batchCategory, batchGender, batchIdsParsed, batchIncludeProcessed, batchMissingOnly, batchStatus, batchSubcategory])
 
   const subcategoriesForBatch = useMemo(
     () => (batchPreview?.subcategories || subcategories.map((subcategory) => ({
@@ -238,6 +240,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         gender: batchGender === '__none__' ? undefined : batchGender,
         status: batchStatus === '__all__' ? undefined : batchStatus,
         missingSeoOnly: batchMissingOnly,
+        includeProcessed: batchIncludeProcessed,
         includeImages: batchImages,
         autoApply: batchAutoApply,
         itemLimit: batchLimit,
@@ -465,6 +468,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   {batchPreview && batchPreview.total_count > batchLimit && <p className="mt-1 text-xs text-indigo-300">В эту партию попадут первые {batchLimit}. Следующую можно запустить с теми же фильтрами.</p>}
                 </div>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchMissingOnly} onCheckedChange={(value) => setBatchMissingOnly(Boolean(value))} /> Только товары с пустым SEO/описанием</label>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchIncludeProcessed} onCheckedChange={(value) => setBatchIncludeProcessed(Boolean(value))} /> Включать уже обработанные товары</label>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchImages} onCheckedChange={(value) => setBatchImages(Boolean(value))} /> Анализировать до 9 фото сеткой 3×3</label>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchAutoApply} onCheckedChange={(value) => setBatchAutoApply(Boolean(value))} /> Автоприменение безопасных полей</label>
                 <p className="text-xs leading-5 text-slate-500">Модель и новая подкатегория всегда остаются на ручной проверке. Гендер, характеристики и существующая подкатегория применяются автоматически только при уверенности от 90%.</p>

@@ -196,6 +196,7 @@ export interface SeoAiBatch {
   gender?: string | null
   target_status?: string | null
   missing_seo_only: boolean
+  include_processed?: boolean
   include_images: boolean
   auto_apply?: boolean
   item_limit: number

@@ -1143,6 +1143,7 @@ export async function createRailsSeoAiBatch(input: {
   gender?: string
   status?: string
   missingSeoOnly?: boolean
+  includeProcessed?: boolean
   includeImages?: boolean
   autoApply?: boolean
   itemLimit?: number
@@ -1160,6 +1161,7 @@ export async function createRailsSeoAiBatch(input: {
         gender: input.gender || '',
         status: input.status || '',
         missing_seo_only: Boolean(input.missingSeoOnly),
+        include_processed: Boolean(input.includeProcessed),
         include_images: Boolean(input.includeImages),
         auto_apply: Boolean(input.autoApply),
         item_limit: Math.min(500, Math.max(1, Math.round(input.itemLimit || 100))),
@@ -1189,6 +1191,7 @@ export async function previewRailsSeoAiBatch(input: {
   gender?: string
   status?: string
   missingSeoOnly?: boolean
+  includeProcessed?: boolean
 }) {
   const params = new URLSearchParams()
   input.ids?.forEach((id) => params.append('ids[]', id))
@@ -1198,6 +1201,7 @@ export async function previewRailsSeoAiBatch(input: {
   if (input.gender) params.set('gender', input.gender)
   if (input.status) params.set('status', input.status)
   if (input.missingSeoOnly) params.set('missing_seo_only', 'true')
+  if (input.includeProcessed) params.set('include_processed', 'true')
   return railsFetch<SeoAiBatchPreview>(`/admin/seo_ai/batches/preview?${params}`)
 }
 

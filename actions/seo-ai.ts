@@ -98,6 +98,7 @@ export async function createSeoAiBatchAction(input: {
   gender?: string
   status?: string
   missingSeoOnly?: boolean
+  includeProcessed?: boolean
   includeImages?: boolean
   autoApply?: boolean
   itemLimit?: number
@@ -148,6 +149,7 @@ export async function previewSeoAiBatchAction(input: {
   gender?: string
   status?: string
   missingSeoOnly?: boolean
+  includeProcessed?: boolean
 }): Promise<ActionResponse> {
   try {
     await requireAdmin()
