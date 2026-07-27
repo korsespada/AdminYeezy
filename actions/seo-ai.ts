@@ -24,7 +24,7 @@ import {
   updateRailsSeoAiBatchState,
 } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
-import type { ActionResponse, SeoAiSetting } from '@/lib/types'
+import type { ActionResponse, SeoAiGeneration, SeoAiSetting } from '@/lib/types'
 
 const SEO_AI_PATH = '/admin/seo-ai'
 
@@ -210,6 +210,69 @@ export async function createSeoAiSuggestedSubcategoryAction(id: string): Promise
     return { success: true, data: result }
   } catch (error: any) {
     return { success: false, error: error.message || 'Failed to create suggested subcategory' }
+  }
+}
+
+const SEO_AI_PRODUCT_BULK_FIELDS = [
+  'name',
+  'description',
+  'h1',
+  'seo_title',
+  'seo_description',
+  'gender',
+  'catalog_attributes',
+  'subcategory_suggestion',
+  'image_alt_texts',
+]
+
+export async function applySeoAiDecisionGroupAction(input: {
+  draftIds: string[]
+  createSubcategory?: boolean
+}): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const draftIds = [...new Set(input.draftIds.map((id) => id.trim()).filter(Boolean))].slice(0, 500)
+    const generations: SeoAiGeneration[] = []
+    const errors: Array<{ id: string; message: string }> = []
+    const readyIds: string[] = []
+
+    if (input.createSubcategory) {
+      for (const id of draftIds) {
+        try {
+          await createRailsSeoAiSuggestedSubcategory(id)
+          readyIds.push(id)
+        } catch (error: any) {
+          errors.push({ id, message: error.message || 'Не удалось создать подкатегорию' })
+        }
+      }
+    } else {
+      readyIds.push(...draftIds)
+    }
+
+    for (let index = 0; index < readyIds.length; index += 10) {
+      const results: Array<{
+        generation?: SeoAiGeneration
+        error?: { id: string; message: string }
+      }> = await Promise.all(readyIds.slice(index, index + 10).map(async (id) => {
+        try {
+          const result = await applyRailsSeoAiDraft(id, SEO_AI_PRODUCT_BULK_FIELDS)
+          return { generation: result.generation }
+        } catch (error: any) {
+          return { error: { id, message: error.message || 'Не удалось применить решение' } }
+        }
+      }))
+
+      results.forEach((result) => {
+        if (result.generation) generations.push(result.generation)
+        if (result.error) errors.push(result.error)
+      })
+    }
+
+    revalidatePath(SEO_AI_PATH)
+    revalidatePath('/admin')
+    return { success: true, data: { generations, processed: generations.length, errors } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось применить групповое решение' }
   }
 }
 

@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { Bot, Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Folder, Layers, Loader2, Pause, Pencil, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
 import {
   applySeoAiDraftAction,
+  applySeoAiDecisionGroupAction,
   createSeoAiBatchAction,
   createSeoAiSuggestedSubcategoryAction,
   deleteSeoAiDraftAction,
@@ -582,6 +583,109 @@ function storefrontProductUrl(slug: string) {
   return `https://yeezyunique.ru/product/${encodeURIComponent(slug)}`
 }
 
+type SeoAiDecisionKind = 'subcategory' | 'attribute' | 'value'
+
+interface SeoAiDecisionGroup {
+  key: string
+  kind: SeoAiDecisionKind
+  title: string
+  detail: string
+  confidence: number
+  draftIds: string[]
+  examples: Array<{
+    draftId: string
+    label: string
+    imageUrl: string
+    url: string
+  }>
+}
+
+function buildDecisionGroups(drafts: SeoAiGeneration[], attributeDefinitions: CatalogAttributeDefinition[]) {
+  const definitions = new Map(attributeDefinitions.map((definition) => [definition.code, definition]))
+  const groups = new Map<string, SeoAiDecisionGroup>()
+
+  drafts.filter((draft) => draft.status === 'draft' && draft.draft_type === 'product').forEach((draft) => {
+    const product = draft.input_snapshot?.product || {}
+    const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
+    const suggestion = draft.output?.subcategory_suggestion
+
+    if (!isWatch && suggestion?.kind === 'new' && suggestion?.name) {
+      addDecisionGroup(groups, {
+        key: `subcategory:${suggestion.parent_category_id || ''}:${normalizeDecisionValue(suggestion.name)}`,
+        kind: 'subcategory',
+        title: `Создать подкатегорию «${suggestion.name}»`,
+        detail: suggestion.evidence || '',
+        confidence: Number(suggestion.confidence || 0),
+      }, draft)
+    }
+
+    const before = product.catalog_attributes || {}
+    const after = normalizeVisibleAttributes(draft.output?.catalog_attributes || {}, isWatch)
+    Object.entries(after).forEach(([code, value]) => {
+      const definition = definitions.get(code)
+      if (!definition || !['enum', 'multi_enum'].includes(definition.value_type)) return
+      if ((definition.dictionary_values?.length || 0) === 0 && (definition.values?.length || 0) === 0) return
+
+      const suggested = formatAttributeValue(value, definition)
+      const current = formatAttributeValue(before[code], definition)
+      if (!suggested || suggested === '—' || normalizeDecisionValue(suggested) === normalizeDecisionValue(current)) return
+
+      const kind: SeoAiDecisionKind = current === '—' ? 'attribute' : 'value'
+      const confidence = Number(
+        draft.output?.field_confidence?.[`catalog_attributes.${code}`]
+        || draft.output?.field_confidence?.[code]
+        || 0
+      )
+      const evidence = draft.output?.field_evidence?.[`catalog_attributes.${code}`]
+        || draft.output?.field_evidence?.[code]
+        || ''
+      addDecisionGroup(groups, {
+        key: `${kind}:${code}:${normalizeDecisionValue(suggested)}`,
+        kind,
+        title: `${definition.label}: ${suggested}`,
+        detail: String(evidence),
+        confidence,
+      }, draft)
+    })
+  })
+
+  return [...groups.values()].sort((left, right) => {
+    const priority = { subcategory: 0, attribute: 1, value: 2 }
+    return priority[left.kind] - priority[right.kind] || right.draftIds.length - left.draftIds.length
+  })
+}
+
+function addDecisionGroup(
+  groups: Map<string, SeoAiDecisionGroup>,
+  proposal: Pick<SeoAiDecisionGroup, 'key' | 'kind' | 'title' | 'detail' | 'confidence'>,
+  draft: SeoAiGeneration,
+) {
+  const current: SeoAiDecisionGroup = groups.get(proposal.key) || { ...proposal, draftIds: [], examples: [] }
+  if (!current.draftIds.includes(draft.id)) current.draftIds.push(draft.id)
+  current.confidence = Math.max(current.confidence, proposal.confidence)
+  if (!current.detail && proposal.detail) current.detail = proposal.detail
+  if (current.examples.length < 4) {
+    const slug = draft.input_snapshot?.product?.slug || ''
+    current.examples.push({
+      draftId: draft.id,
+      label: draft.target_label || draft.input_snapshot?.product?.name || 'Товар',
+      imageUrl: draftImageUrl(draft),
+      url: slug ? storefrontProductUrl(slug) : '',
+    })
+  }
+  groups.set(proposal.key, current)
+}
+
+function normalizeDecisionValue(value: unknown) {
+  return String(value || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+}
+
+function decisionKindLabel(kind: SeoAiDecisionKind) {
+  if (kind === 'subcategory') return 'Новая подкатегория'
+  if (kind === 'attribute') return 'Новая характеристика'
+  return 'Новое значение'
+}
+
 function DraftFolder({
   batch,
   drafts,
@@ -604,6 +708,8 @@ function DraftFolder({
   const [name, setName] = useState(batch?.name || '')
   const [folderDrafts, setFolderDrafts] = useState(drafts)
   const [view, setView] = useState<'attention' | 'errors' | 'all'>('attention')
+  const [selectedDecision, setSelectedDecision] = useState<string | null>(null)
+  const [decisionInFlight, setDecisionInFlight] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isRenaming, startRenaming] = useTransition()
   const [isReviewing, startReviewing] = useTransition()
@@ -615,7 +721,10 @@ function DraftFolder({
   const safeCount = summary.safe_count || 0
   const rejectedCount = summary.status_counts.rejected || 0
   const failedCount = summary.status_counts.failed || 0
+  const decisionGroups = buildDecisionGroups(folderDrafts, attributeDefinitions)
+  const selectedDecisionGroup = decisionGroups.find((group) => group.key === selectedDecision)
   const visibleDrafts = folderDrafts.filter((draft) => {
+    if (selectedDecisionGroup && !selectedDecisionGroup.draftIds.includes(draft.id)) return false
     if (view === 'errors') return draft.status === 'failed'
     if (view === 'attention') return draftNeedsAttention(draft)
     return true
@@ -657,16 +766,43 @@ function DraftFolder({
     setExpanded(true)
   }
 
-  function runBulkAction(action: 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
+  function runBulkAction(action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
     if (!batch) return
-    const confirmation = action === 'apply_safe_drafts'
-      ? `Применить ${safeCount} безопасных черновиков? Спорные товары останутся на проверке.`
-      : action === 'reject_drafts'
-        ? `Отклонить ${readyCount} готовых черновиков? Их можно будет вернуть в очередь отдельной кнопкой.`
-        : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
+    const confirmation = action === 'apply_drafts'
+      ? `Применить все ${readyCount} готовых черновиков? ${summary.attention_count > 0 ? `${summary.attention_count} из них требуют внимания.` : ''}`
+      : action === 'apply_safe_drafts'
+        ? `Применить ${safeCount} безопасных черновиков? Спорные товары останутся на проверке.`
+        : action === 'reject_drafts'
+          ? `Отклонить ${readyCount} готовых черновиков? Их можно будет вернуть в очередь отдельной кнопкой.`
+          : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
     if (!window.confirm(confirmation)) return
 
     startReviewing(async () => { await onBulkAction(batch.id, action) })
+  }
+
+  function applyDecisionGroup(group: SeoAiDecisionGroup) {
+    const entityText = group.kind === 'subcategory' ? 'Подкатегория будет создана и назначена товарам. ' : ''
+    if (!window.confirm(`${entityText}Будут применены все подготовленные изменения для ${group.draftIds.length} товаров. Продолжить?`)) return
+
+    setDecisionInFlight(group.key)
+    void applySeoAiDecisionGroupAction({
+      draftIds: group.draftIds,
+      createSubcategory: group.kind === 'subcategory',
+    }).then((result) => {
+      setDecisionInFlight(null)
+      if (!result.success) {
+        alert(result.error || 'Не удалось применить групповое решение')
+        return
+      }
+
+      const updated: SeoAiGeneration[] = result.data.generations || []
+      const updatedById = new Map(updated.map((draft) => [draft.id, draft]))
+      setFolderDrafts((current) => current.map((draft) => updatedById.get(draft.id) || draft))
+      updated.forEach(onChange)
+      const errors = result.data.errors?.length || 0
+      if (errors > 0) alert(`Применено: ${result.data.processed}. Ошибок: ${errors}.`)
+      setSelectedDecision(null)
+    })
   }
 
   return (
@@ -691,6 +827,7 @@ function DraftFolder({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {batch && readyCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Принять все готовые ({readyCount})</span></Button>}
           {batch && safeCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_safe_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Применить безопасные</span></Button>}
           {batch && readyCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('reject_drafts') }} disabled={isReviewing}><X className="h-4 w-4" /><span className="hidden lg:inline">Отклонить готовые</span></Button>}
           {batch && rejectedCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('requeue_rejected') }} disabled={isReviewing}><RotateCcw className="h-4 w-4" /><span className="hidden lg:inline">Вернуть отклонённые</span></Button>}
@@ -707,6 +844,53 @@ function DraftFolder({
       )}
       {expanded && (
         <div className="grid gap-3 border-t border-slate-700 p-3 sm:p-4">
+          {decisionGroups.length > 0 && (
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3 sm:p-4">
+              <div className="mb-3">
+                <p className="font-semibold text-white">Решения ИИ</p>
+                <p className="mt-1 text-xs text-slate-400">Одинаковые предложения собраны вместе. Их можно принять, не открывая каждый товар.</p>
+              </div>
+              <div className="grid gap-3">
+                {decisionGroups.map((group) => (
+                  <div key={group.key} className="rounded-lg border border-slate-700 bg-slate-950/70 p-3">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="outline">{decisionKindLabel(group.kind)}</Badge>
+                          <p className="font-medium text-white">{group.title}</p>
+                          <span className="text-xs text-slate-400">{group.draftIds.length} товаров</span>
+                        </div>
+                        {group.detail && <p className="mt-1 break-words text-sm text-slate-300">{group.detail}</p>}
+                        {group.confidence > 0 && <p className="mt-1 text-xs text-slate-500">Уверенность: {Math.round(group.confidence * 100)}%</p>}
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => { setSelectedDecision(group.key); setView('all') }}>Показать товары</Button>
+                        <Button type="button" size="sm" onClick={() => applyDecisionGroup(group)} disabled={decisionInFlight !== null}>
+                          {decisionInFlight === group.key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                          Принять для всех
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {group.examples.map((example) => (
+                        <a key={example.draftId} href={example.url || '#'} target={example.url ? '_blank' : undefined} rel={example.url ? 'noreferrer' : undefined} className="flex max-w-full items-center gap-2 rounded-md border border-slate-700 bg-slate-900 p-1.5 pr-3 hover:border-sky-500/60">
+                          {example.imageUrl ? <Image src={example.imageUrl} alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded object-cover" /> : <div className="h-10 w-10 shrink-0 rounded bg-slate-800" />}
+                          <span className="max-w-56 truncate text-xs text-sky-300">{example.label}</span>
+                          {example.url && <ExternalLink className="h-3 w-3 shrink-0 text-slate-500" />}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {selectedDecisionGroup && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm text-sky-200">
+              <span>Показаны товары решения «{selectedDecisionGroup.title}» ({selectedDecisionGroup.draftIds.length})</span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedDecision(null)}>Сбросить</Button>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button type="button" size="sm" variant={view === 'attention' ? 'default' : 'outline'} onClick={() => setView('attention')}>Требуют внимания ({summary.attention_count})</Button>
             <Button type="button" size="sm" variant={view === 'errors' ? 'default' : 'outline'} onClick={() => setView('errors')}>Ошибки ({failedCount})</Button>
