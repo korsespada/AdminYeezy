@@ -40,6 +40,7 @@ export async function updateCatalogAttributeDefinitionAction(input: {
 export async function upsertCatalogAttributeDictionaryValueAction(input: {
   id?: string
   attribute_code: string
+  filter_value: string
   canonical_value: string
   aliases: string[]
   active: boolean
@@ -47,13 +48,16 @@ export async function upsertCatalogAttributeDictionaryValueAction(input: {
   try {
     await requireAdmin()
     const attributeCode = input.attribute_code.trim()
+    const filterValue = input.filter_value.trim()
     const canonicalValue = input.canonical_value.trim()
     if (!attributeCode) return { success: false, error: 'Не указан атрибут' }
+    if (!filterValue) return { success: false, error: 'Введите код для API' }
     if (!canonicalValue) return { success: false, error: 'Введите каноническое значение' }
 
     const value = await upsertCatalogAttributeDictionaryValue({
       id: input.id,
       attribute_code: attributeCode,
+      filter_value: filterValue,
       canonical_value: canonicalValue,
       aliases: Array.isArray(input.aliases) ? input.aliases : [],
       active: Boolean(input.active),

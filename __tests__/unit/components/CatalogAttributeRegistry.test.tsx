@@ -18,6 +18,7 @@ describe('CatalogAttributeRegistry', () => {
           dictionary_values: [{
             id: '1',
             attribute_code: 'colors',
+            filter_value: 'black',
             canonical_value: 'Чёрный',
             aliases: ['черный', 'black', 'noir'],
             sort_order: 10,
@@ -32,8 +33,9 @@ describe('CatalogAttributeRegistry', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Справочники значений' }))
 
+    expect(screen.getByDisplayValue('black')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Чёрный')).toBeInTheDocument()
     expect(screen.getByDisplayValue('черный, black, noir')).toBeInTheDocument()
-    expect(screen.getByText(/Алиасы используются парсером и AI/)).toBeInTheDocument()
+    expect(screen.getByText(/алиасы объединяют старые значения/)).toBeInTheDocument()
   })
 })

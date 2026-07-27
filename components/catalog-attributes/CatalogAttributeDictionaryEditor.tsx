@@ -59,6 +59,7 @@ export default function CatalogAttributeDictionaryEditor({
         {
           id: localId,
           attribute_code: selectedCode,
+          filter_value: '',
           canonical_value: '',
           aliases: [],
           sort_order: (current[selectedCode]?.length || 0) * 10 + 10,
@@ -136,7 +137,7 @@ export default function CatalogAttributeDictionaryEditor({
           <div>
             <h2 className="font-semibold text-white">{selectedDefinition?.label}</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Алиасы используются парсером и AI для приведения исходного текста к каноническому значению.
+              Код используется в URL и API, подпись показывается покупателю, алиасы объединяют старые значения.
             </p>
           </div>
           <Button type="button" onClick={addValue} className="bg-indigo-600 text-white hover:bg-indigo-500">
@@ -185,11 +186,13 @@ function DictionaryValueRow({
   onError: (message: string) => void
 }) {
   const [isPending, startTransition] = useTransition()
+  const [filterValue, setFilterValue] = useState(value.filter_value)
   const [canonicalValue, setCanonicalValue] = useState(value.canonical_value)
   const [aliasesText, setAliasesText] = useState(value.aliases.join(', '))
   const [active, setActive] = useState(value.active)
 
   useEffect(() => {
+    setFilterValue(value.filter_value)
     setCanonicalValue(value.canonical_value)
     setAliasesText(value.aliases.join(', '))
     setActive(value.active)
@@ -200,6 +203,7 @@ function DictionaryValueRow({
       const result = await upsertCatalogAttributeDictionaryValueAction({
         id: value.isNew ? undefined : value.id,
         attribute_code: value.attribute_code,
+        filter_value: filterValue,
         canonical_value: canonicalValue,
         aliases: aliasesText.split(',').map((item) => item.trim()).filter(Boolean),
         active,
@@ -213,9 +217,20 @@ function DictionaryValueRow({
   }
 
   return (
-    <div className={`grid gap-3 rounded-xl border p-3 md:grid-cols-[minmax(150px,0.8fr)_minmax(240px,1.4fr)_auto_auto] md:items-center ${
+    <div className={`grid gap-3 rounded-xl border p-3 md:grid-cols-[minmax(130px,0.65fr)_minmax(150px,0.8fr)_minmax(220px,1.2fr)_auto_auto] md:items-center ${
       active ? 'border-slate-800 bg-slate-950/50' : 'border-slate-800/70 bg-slate-950/20 opacity-70'
     }`}>
+      <label>
+        <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600">
+          Код фильтра (API)
+        </span>
+        <input
+          value={filterValue}
+          onChange={(event) => setFilterValue(event.target.value)}
+          placeholder="Например: black"
+          className="h-9 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
+        />
+      </label>
       <label>
         <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600">
           Каноническое значение
@@ -250,7 +265,7 @@ function DictionaryValueRow({
         type="button"
         size="sm"
         onClick={save}
-        disabled={isPending || !canonicalValue.trim()}
+        disabled={isPending || !filterValue.trim() || !canonicalValue.trim()}
         className="bg-slate-800 text-slate-200 hover:bg-indigo-600 hover:text-white md:mt-4"
       >
         {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

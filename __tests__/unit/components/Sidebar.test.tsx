@@ -107,6 +107,7 @@ function renderSidebar(searchProps: {
             dictionary_values: [{
               id: 'gray',
               attribute_code: 'colors',
+              filter_value: 'gray',
               canonical_value: 'Серый',
               aliases: ['gray', 'grey'],
               sort_order: 10,

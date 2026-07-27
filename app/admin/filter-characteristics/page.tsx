@@ -16,8 +16,8 @@ export default async function FilterCharacteristicsPage() {
             <p className="text-sm font-medium text-indigo-300">Товары · структура каталога</p>
             <h1 className="mt-2 text-3xl font-bold tracking-normal text-white">Схема атрибутов</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-              Единый справочник для товаров, поставщиков, AI и витрины. Категория определяет доступные
-              характеристики, а переключатели — показ в карточке, фильтрах и вариантах товара.
+              Единый справочник Rails для товаров, поставщиков, AI и витрины. Изменения подписей,
+              алиасов и активности сразу применяются к фильтрам сайта без отдельной синхронизации.
             </p>
           </div>
           <Button asChild variant="outline" className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-white">

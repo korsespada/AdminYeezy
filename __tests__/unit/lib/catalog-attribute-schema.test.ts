@@ -86,6 +86,7 @@ describe('catalog attribute schema', () => {
         dictionary_values: [{
           id: '1',
           attribute_code: 'colors',
+          filter_value: 'black',
           canonical_value: 'Чёрный',
           aliases: ['jet black'],
           sort_order: 10,

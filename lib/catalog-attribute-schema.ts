@@ -3,6 +3,7 @@ export type CatalogAttributeValueType = 'text' | 'number' | 'enum' | 'multi_enum
 export interface CatalogAttributeDictionaryValue {
   id: string
   attribute_code: string
+  filter_value: string
   canonical_value: string
   aliases: string[]
   sort_order: number

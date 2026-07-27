@@ -636,7 +636,8 @@ export default Sidebar
 function dictionaryLabel(definition: CatalogAttributeDefinition | undefined, value: string) {
     const normalized = normalizeDictionaryText(value)
     const match = definition?.dictionary_values?.find((item) => (
-        normalizeDictionaryText(item.canonical_value) === normalized
+        normalizeDictionaryText(item.filter_value) === normalized
+        || normalizeDictionaryText(item.canonical_value) === normalized
         || item.aliases.some((alias) => normalizeDictionaryText(alias) === normalized)
     ))
     return match?.canonical_value || value

@@ -1237,6 +1237,42 @@ export async function updateRailsCatalogAttributeSuggestionValue(id: string, val
   return result.catalog_attribute_suggestion
 }
 
+export async function getRailsCatalogAttributeRegistry() {
+  return railsFetch<{ definitions: any[]; values: any[] }>('/admin/catalog_attribute_registry')
+}
+
+export async function syncRailsCatalogAttributeRegistry(input: { definitions: any[]; values: any[] }) {
+  return railsFetch<{ definitions: any[]; values: any[] }>('/admin/catalog_attribute_registry/sync', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+}
+
+export async function updateRailsCatalogAttributeDefinition(code: string, definition: Record<string, boolean>) {
+  const result = await railsFetch<{ definition: any }>(
+    `/admin/catalog_attribute_registry/definitions/${encodeURIComponent(code)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ definition }),
+    },
+  )
+  return result.definition
+}
+
+export async function upsertRailsCatalogAttributeValue(input: Record<string, any> & { id?: string }) {
+  const id = input.id && !input.id.startsWith('default:') ? input.id : ''
+  const result = await railsFetch<{ value: any }>(
+    id
+      ? `/admin/catalog_attribute_registry/values/${encodeURIComponent(id)}`
+      : '/admin/catalog_attribute_registry/values',
+    {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify({ value: { ...input, id: undefined } }),
+    },
+  )
+  return result.value
+}
+
 export async function bulkUpdateRailsCatalogAttributeSuggestionValues(ids: string[], value: string) {
   const suggestions: RailsCatalogAttributeSuggestion[] = []
 
