@@ -12,6 +12,7 @@ import {
   listSeoAiBatchesAction,
   rejectSeoAiDraftAction,
   renameSeoAiBatchAction,
+  reviewSeoAiBatchAction,
   retrySeoAiGenerationAction,
   runSeoAiGenerationAction,
   searchSeoAiProductsAction,
@@ -248,6 +249,21 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     return false
   }
 
+  async function reviewBatch(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+    const result = await reviewSeoAiBatchAction(id, action)
+    if (!result.success) {
+      setStatus('error', result.error || 'Не удалось выполнить массовое действие')
+      return false
+    }
+
+    const batchDrafts: SeoAiGeneration[] = result.data.generations || []
+    setDrafts((prev) => [...batchDrafts, ...prev.filter((draft) => draft.batch_id !== id)])
+    setBatches((prev) => prev.map((batch) => batch.id === id ? result.data.batch : batch))
+    const errors = result.data.errors?.length || 0
+    setStatus(errors > 0 ? 'error' : 'success', `Обработано товаров: ${result.data.processed}${errors > 0 ? ` · ошибок: ${errors}` : ''}`)
+    return errors === 0
+  }
+
   function handleGenerationResult(result: any, successText: string) {
     if (result.success) {
       setDrafts((prev) => [result.data, ...prev])
@@ -427,6 +443,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   drafts={group.drafts}
                   attributeDefinitions={attributeDefinitions}
                   onRename={renameBatch}
+                  onBulkAction={reviewBatch}
                   onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))}
                   onDelete={(id) => setDrafts((prev) => prev.filter((item) => item.id !== id))}
                 />
@@ -503,6 +520,7 @@ function DraftFolder({
   drafts,
   attributeDefinitions,
   onRename,
+  onBulkAction,
   onChange,
   onDelete,
 }: {
@@ -510,6 +528,7 @@ function DraftFolder({
   drafts: SeoAiGeneration[]
   attributeDefinitions: CatalogAttributeDefinition[]
   onRename: (id: string, name: string) => Promise<boolean>
+  onBulkAction: (id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<boolean>
   onChange: (draft: SeoAiGeneration) => void
   onDelete: (id: string) => void
 }) {
@@ -517,13 +536,28 @@ function DraftFolder({
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(batch?.name || '')
   const [isRenaming, startRenaming] = useTransition()
+  const [isReviewing, startReviewing] = useTransition()
   const label = batch?.name || (batch ? `Выгрузка ${new Date(batch.created_at).toLocaleString('ru-RU')}` : 'Отдельные товары')
+  const readyCount = drafts.filter((draft) => draft.status === 'draft').length
+  const rejectedCount = drafts.filter((draft) => draft.status === 'rejected').length
 
   function saveName() {
     if (!batch || !name.trim()) return
     startRenaming(async () => {
       if (await onRename(batch.id, name.trim())) setEditing(false)
     })
+  }
+
+  function runBulkAction(action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+    if (!batch) return
+    const confirmation = action === 'apply_drafts'
+      ? `Применить безопасные поля у ${readyCount} готовых товаров? Модель и новая подкатегория применены не будут.`
+      : action === 'reject_drafts'
+        ? `Отклонить ${readyCount} готовых черновиков? Их можно будет вернуть в очередь отдельной кнопкой.`
+        : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
+    if (!window.confirm(confirmation)) return
+
+    startReviewing(async () => { await onBulkAction(batch.id, action) })
   }
 
   return (
@@ -544,6 +578,9 @@ function DraftFolder({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {batch && readyCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Применить готовые</span></Button>}
+          {batch && readyCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('reject_drafts') }} disabled={isReviewing}><X className="h-4 w-4" /><span className="hidden lg:inline">Отклонить готовые</span></Button>}
+          {batch && rejectedCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('requeue_rejected') }} disabled={isReviewing}><RotateCcw className="h-4 w-4" /><span className="hidden lg:inline">Вернуть отклонённые</span></Button>}
           {batch && <Button type="button" size="icon" variant="ghost" aria-label="Переименовать выгрузку" onClick={(event) => { event.stopPropagation(); setEditing(true) }}><Pencil className="h-4 w-4" /></Button>}
           {expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
         </div>

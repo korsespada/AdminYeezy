@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import SeoAiStudio from '@/components/seo-ai/SeoAiStudio'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
-import type { SeoAiGeneration } from '@/lib/types'
+import type { SeoAiBatch, SeoAiGeneration } from '@/lib/types'
 
 vi.mock('@/actions/seo-ai', () => ({
   applySeoAiDraftAction: vi.fn(),
@@ -15,6 +15,7 @@ vi.mock('@/actions/seo-ai', () => ({
   listSeoAiBatchesAction: vi.fn(),
   rejectSeoAiDraftAction: vi.fn(),
   renameSeoAiBatchAction: vi.fn(),
+  reviewSeoAiBatchAction: vi.fn(),
   retrySeoAiGenerationAction: vi.fn(),
   runSeoAiGenerationAction: vi.fn(),
   searchSeoAiProductsAction: vi.fn(),
@@ -111,5 +112,45 @@ describe('SeoAiStudio queue', () => {
     expect(screen.getByText('Серебро, 925')).toBeInTheDocument()
     expect(screen.getByText('Подкатегория: Серьги')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Оригинальная карточка' })[0]).toHaveAttribute('href', 'https://yeezyunique.ru/product/chanel-earrings')
+  })
+
+  it('groups batch drafts in a renameable folder with bulk review actions', async () => {
+    const user = userEvent.setup()
+    const ready = { ...draft('ready'), batch_id: 'batch-1' }
+    const rejected = { ...draft('rejected'), batch_id: 'batch-1', status: 'rejected' as const }
+    const batch: SeoAiBatch = {
+      id: 'batch-1',
+      name: 'Обувь за июль',
+      target_type: 'Product',
+      status: 'completed',
+      ids: [],
+      missing_seo_only: false,
+      include_images: true,
+      item_limit: 2,
+      total_count: 2,
+      success_count: 1,
+      failure_count: 0,
+      created_at: '2026-07-27T10:00:00Z',
+      updated_at: '2026-07-27T10:02:00Z',
+    }
+
+    render(
+      <SeoAiStudio
+        initialSettings={[]}
+        initialDrafts={[ready, rejected]}
+        initialBatches={[batch]}
+        brands={[]}
+        categories={[]}
+        subcategories={[]}
+        attributeDefinitions={[colorDefinition, metalDefinition]}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Очередь и сравнение' }))
+    expect(screen.getByText('Обувь за июль')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Применить готовые' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Отклонить готовые' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Вернуть отклонённые' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Переименовать выгрузку' })).toBeInTheDocument()
   })
 })

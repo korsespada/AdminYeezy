@@ -14,6 +14,7 @@ import {
   listRailsSeoAiBatches,
   rejectRailsSeoAiDraft,
   renameRailsSeoAiBatch,
+  reviewRailsSeoAiBatch,
   retryRailsSeoAiGeneration,
   runRailsSeoAiGeneration,
   searchRailsAdminProductsExact,
@@ -146,6 +147,18 @@ export async function renameSeoAiBatchAction(id: string, name: string): Promise<
     return { success: true, data: batch }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось переименовать выгрузку' }
+  }
+}
+
+export async function reviewSeoAiBatchAction(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected'): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const result = await reviewRailsSeoAiBatch(id, action)
+    revalidatePath(SEO_AI_PATH)
+    revalidatePath('/admin')
+    return { success: true, data: result }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось выполнить массовое действие' }
   }
 }
 

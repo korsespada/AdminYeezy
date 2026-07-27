@@ -1174,6 +1174,15 @@ export async function renameRailsSeoAiBatch(id: string, name: string) {
   return result.batch
 }
 
+export async function reviewRailsSeoAiBatch(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+  return railsFetch<{
+    batch: SeoAiBatch
+    generations: SeoAiGeneration[]
+    processed: number
+    errors: Array<{ id: string; message: string }>
+  }>(`/admin/seo_ai/batches/${encodeURIComponent(id)}/${action}`, { method: 'POST' })
+}
+
 export async function retryRailsSeoAiGeneration(id: string) {
   const result = await railsFetch<{ generation: SeoAiGeneration }>(`/admin/seo_ai/generations/${encodeURIComponent(id)}/retry`, {
     method: 'POST',
