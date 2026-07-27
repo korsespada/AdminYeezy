@@ -199,6 +199,7 @@ export interface SeoAiBatch {
   include_images: boolean
   auto_apply?: boolean
   item_limit: number
+  concurrency?: number
   total_count: number
   success_count: number
   failure_count: number

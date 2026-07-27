@@ -46,6 +46,7 @@ COCKPIT_API_KEY=agt_codex_...
 COCKPIT_MODEL=gpt-5.6-luna
 AI_CATALOG_WORKER_POLL_MS=5000
 AI_CATALOG_WORKER_MAX_IMAGES=9
+AI_CATALOG_WORKER_CONCURRENCY=10
 AI_CATALOG_MEDIA_HOSTS=static.yeezyunique.ru,xcimg.szwego.com
 ```
 
@@ -62,6 +63,8 @@ npm run ai:catalog-worker -- --once
 ```
 
 Если компьютер выключен, queued-задания остаются в Rails. Если worker оборвался во время обработки, lease истечёт через 10 минут и задание будет выдано повторно. После трёх неудачных попыток оно получает статус `failed` и может быть повторено из админки.
+
+Worker держит до `AI_CATALOG_WORKER_CONCURRENCY` одновременных заданий. Конкретная массовая выгрузка дополнительно ограничивает параллельность выбранным в интерфейсе значением от 1 до 10; меньший из двух лимитов имеет приоритет.
 
 ## SEO и артикул
 

@@ -96,6 +96,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   const [batchImages, setBatchImages] = useState(false)
   const [batchAutoApply, setBatchAutoApply] = useState(false)
   const [batchLimit, setBatchLimit] = useState(100)
+  const [batchConcurrency, setBatchConcurrency] = useState(5)
   const [batchPreview, setBatchPreview] = useState<SeoAiBatchPreview | null>(null)
   const [batchPreviewLoading, setBatchPreviewLoading] = useState(false)
   const [now, setNow] = useState(() => Date.now())
@@ -239,6 +240,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         includeImages: batchImages,
         autoApply: batchAutoApply,
         itemLimit: batchLimit,
+        concurrency: batchConcurrency,
       })
 
       if (result.success) {
@@ -439,6 +441,19 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                     />
                     <p className="text-xs text-slate-500">От 1 до 500 за одну партию</p>
                   </div>
+                  <div className="space-y-1">
+                    <Label>Параллельных товаров</Label>
+                    <Select value={String(batchConcurrency)} onValueChange={(value) => setBatchConcurrency(Number(value))}>
+                      <SelectTrigger className="bg-slate-900"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 — последовательно</SelectItem>
+                        <SelectItem value="3">3</SelectItem>
+                        <SelectItem value="5">5 — рекомендуется</SelectItem>
+                        <SelectItem value="10">10 — максимум</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-slate-500">Одновременно обрабатываемых карточек</p>
+                  </div>
                 </div>
               </div>
               <div className="space-y-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
@@ -467,7 +482,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   <div>
                     <p className="mb-1 text-sm font-semibold text-white">{batch.name || `Выгрузка ${new Date(batch.created_at).toLocaleString('ru-RU')}`}</p>
                     <p className="text-sm font-medium text-white">{batch.total_count} товаров · {batch.success_count} готово · {batch.failure_count} ошибок</p>
-                    <p className="mt-1 text-xs text-slate-500">Запрошено: {batch.item_limit || batch.total_count} · {new Date(batch.created_at).toLocaleString('ru-RU')} · {batchStatusLabel(batch.status)}{batch.auto_apply ? ' · автоприменение' : ''}</p>
+                    <p className="mt-1 text-xs text-slate-500">Запрошено: {batch.item_limit || batch.total_count} · параллельно: {batch.concurrency || 1} · {new Date(batch.created_at).toLocaleString('ru-RU')} · {batchStatusLabel(batch.status)}{batch.auto_apply ? ' · автоприменение' : ''}</p>
                     <p className="mt-1 flex items-center gap-1.5 text-xs text-cyan-300"><Clock3 className="h-3.5 w-3.5" /> {batchTimingLabel(batch, now)}</p>
                   </div>
                   <div className="flex gap-2">

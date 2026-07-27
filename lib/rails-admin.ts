@@ -1146,6 +1146,7 @@ export async function createRailsSeoAiBatch(input: {
   includeImages?: boolean
   autoApply?: boolean
   itemLimit?: number
+  concurrency?: number
 }) {
   const result = await railsFetch<{ batch: SeoAiBatch; generations: SeoAiGeneration[] }>('/admin/seo_ai/batches', {
     method: 'POST',
@@ -1162,6 +1163,7 @@ export async function createRailsSeoAiBatch(input: {
         include_images: Boolean(input.includeImages),
         auto_apply: Boolean(input.autoApply),
         item_limit: Math.min(500, Math.max(1, Math.round(input.itemLimit || 100))),
+        concurrency: Math.min(10, Math.max(1, Math.round(input.concurrency || 5))),
       },
     }),
   })

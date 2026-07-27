@@ -11,6 +11,7 @@ const COCKPIT_API_KEY = requiredEnv('COCKPIT_API_KEY')
 const COCKPIT_MODEL = process.env.COCKPIT_MODEL || 'gpt-5.6-luna'
 const POLL_MS = integerEnv('AI_CATALOG_WORKER_POLL_MS', 5000, 1000, 60000)
 const MAX_IMAGES = integerEnv('AI_CATALOG_WORKER_MAX_IMAGES', 9, 1, 9)
+const CONCURRENCY = integerEnv('AI_CATALOG_WORKER_CONCURRENCY', 10, 1, 10)
 const MEDIA_HOSTS = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
 const ONCE = process.argv.includes('--once')
 const TILE_SIZE = 512
@@ -26,27 +27,47 @@ main().catch((error) => {
 })
 
 async function main() {
-  console.log(`[ai-catalog-worker] ready: ${COCKPIT_MODEL}`)
+  console.log(`[ai-catalog-worker] ready: ${COCKPIT_MODEL}, concurrency cap: ${CONCURRENCY}`)
 
-  do {
-    let claimed
-    try {
-      claimed = await claimJob()
-    } catch (error) {
-      if (ONCE) throw error
-      console.error(`[ai-catalog-worker] queue unavailable, retrying: ${safeError(error)}`)
-      await delay(POLL_MS)
-      continue
-    }
-    if (!claimed) {
-      if (ONCE) return
-      await delay(POLL_MS)
-      continue
+  if (ONCE) {
+    const claimed = await claimJob()
+    if (claimed) await processJob(claimed)
+    return
+  }
+
+  const active = new Set()
+  while (!stopping) {
+    let queueEmpty = false
+    let queueUnavailable = false
+
+    while (!stopping && active.size < CONCURRENCY) {
+      let claimed
+      try {
+        claimed = await claimJob()
+      } catch (error) {
+        console.error(`[ai-catalog-worker] queue unavailable, retrying: ${safeError(error)}`)
+        queueUnavailable = true
+        break
+      }
+      if (!claimed) {
+        queueEmpty = true
+        break
+      }
+
+      let task
+      task = processJob(claimed).finally(() => active.delete(task))
+      active.add(task)
     }
 
-    await processJob(claimed)
-    if (ONCE) return
-  } while (!stopping)
+    if (stopping) break
+    if (active.size >= CONCURRENCY) {
+      await Promise.race(active)
+    } else if (queueEmpty || queueUnavailable) {
+      await Promise.race([delay(POLL_MS), ...active])
+    }
+  }
+
+  await Promise.allSettled([...active])
 }
 
 async function processJob({ generation, lease_token: leaseToken }) {

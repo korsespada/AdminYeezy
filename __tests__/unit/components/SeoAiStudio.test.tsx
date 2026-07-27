@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import SeoAiStudio from '@/components/seo-ai/SeoAiStudio'
-import { previewSeoAiBatchAction } from '@/actions/seo-ai'
+import { createSeoAiBatchAction, previewSeoAiBatchAction } from '@/actions/seo-ai'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import type { SeoAiBatch, SeoAiGeneration } from '@/lib/types'
 
@@ -108,6 +108,7 @@ describe('SeoAiStudio queue', () => {
       success: true,
       data: { total_count: 0, brands: [], categories: [], subcategories: [], genders: [] },
     })
+    vi.mocked(createSeoAiBatchAction).mockReset()
   })
 
   it('keeps a large queue compact and shows human-readable product data on demand', async () => {
@@ -212,6 +213,57 @@ describe('SeoAiStudio queue', () => {
     await user.click(screen.getAllByRole('combobox')[0])
     expect(screen.getByRole('option', { name: 'Cartier (42)' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Miu Miu' })).not.toBeInTheDocument()
+  })
+
+  it('lets the manager choose ten parallel products for a batch', async () => {
+    const user = userEvent.setup()
+    vi.mocked(previewSeoAiBatchAction).mockResolvedValue({
+      success: true,
+      data: { total_count: 1, brands: [], categories: [], subcategories: [], genders: [] },
+    })
+    vi.mocked(createSeoAiBatchAction).mockResolvedValue({
+      success: true,
+      data: {
+        batch: {
+          id: 'batch-10',
+          name: 'Параллельная выгрузка',
+          target_type: 'Product',
+          status: 'running',
+          ids: [],
+          missing_seo_only: false,
+          include_images: false,
+          item_limit: 100,
+          concurrency: 10,
+          total_count: 1,
+          success_count: 0,
+          failure_count: 0,
+          created_at: '2026-07-27T10:00:00Z',
+          updated_at: '2026-07-27T10:00:00Z',
+        },
+        generations: [],
+      },
+    })
+
+    render(
+      <SeoAiStudio
+        initialSettings={[]}
+        initialDrafts={[]}
+        initialBatches={[]}
+        brands={[]}
+        categories={[]}
+        subcategories={[]}
+        attributeDefinitions={[]}
+      />,
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'Массово' }))
+    await waitFor(() => expect(screen.getByText('Под условия подходит: 1')).toBeInTheDocument())
+    const selects = screen.getAllByRole('combobox')
+    await user.click(selects[selects.length - 1])
+    await user.click(screen.getByRole('option', { name: '10 — максимум' }))
+    await user.click(screen.getByRole('button', { name: 'Запустить batch' }))
+
+    await waitFor(() => expect(createSeoAiBatchAction).toHaveBeenCalledWith(expect.objectContaining({ concurrency: 10 })))
   })
 
   it('hides generic watch attributes and treats the longest side as the case size', async () => {

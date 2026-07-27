@@ -101,6 +101,7 @@ export async function createSeoAiBatchAction(input: {
   includeImages?: boolean
   autoApply?: boolean
   itemLimit?: number
+  concurrency?: number
 }): Promise<ActionResponse> {
   try {
     await requireAdmin()
