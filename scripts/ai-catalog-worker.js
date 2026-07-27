@@ -28,7 +28,15 @@ async function main() {
   console.log(`[ai-catalog-worker] ready: ${COCKPIT_MODEL}`)
 
   do {
-    const claimed = await claimJob()
+    let claimed
+    try {
+      claimed = await claimJob()
+    } catch (error) {
+      if (ONCE) throw error
+      console.error(`[ai-catalog-worker] queue unavailable, retrying: ${safeError(error)}`)
+      await delay(POLL_MS)
+      continue
+    }
     if (!claimed) {
       if (ONCE) return
       await delay(POLL_MS)
