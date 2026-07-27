@@ -225,7 +225,7 @@ describe('SeoAiStudio queue', () => {
       },
       output: {
         ...draft('watch').output,
-        catalog_attributes: { dimensions: '29,5 × 22 мм', materials: ['Сталь'] },
+        catalog_attributes: { dimensions: '29,5 × 22 мм', materials: ['Сталь'], season: '2025 Spring/Summer' },
         subcategory_suggestion: { kind: 'new', name: 'Квадратные часы', confidence: 0.99 },
         conflicts: [{
           field: 'catalog_attributes.watch_case_size',
@@ -255,6 +255,8 @@ describe('SeoAiStudio queue', () => {
     expect(screen.getByText('29,5 мм')).toBeInTheDocument()
     expect(screen.queryByText('Габариты')).not.toBeInTheDocument()
     expect(screen.queryByText('Материал / состав')).not.toBeInTheDocument()
+    expect(screen.queryByText('season')).not.toBeInTheDocument()
+    expect(screen.queryByText('2025 Spring/Summer')).not.toBeInTheDocument()
     expect(screen.queryByText(/Подкатегория: Квадратные часы/)).not.toBeInTheDocument()
     expect(screen.queryByText('Обнаружены противоречия')).not.toBeInTheDocument()
   })

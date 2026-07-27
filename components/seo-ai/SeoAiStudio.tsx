@@ -742,6 +742,15 @@ const WATCH_ATTRIBUTE_CODES = new Set([
   'water_resistance',
 ])
 
+const DEPRECATED_AI_ATTRIBUTE_CODES = new Set([
+  'season',
+  'age_group',
+  'country_of_origin',
+  'collection',
+  'pattern',
+  'print',
+])
+
 function summarizeDrafts(drafts: SeoAiGeneration[]): SeoAiBatchSummary {
   const statusCounts: Record<string, number> = {}
   const fieldCounts: Record<string, number> = {}
@@ -752,6 +761,7 @@ function summarizeDrafts(drafts: SeoAiGeneration[]): SeoAiBatchSummary {
   drafts.forEach((draft) => {
     statusCounts[draft.status] = (statusCounts[draft.status] || 0) + 1
     if (draft.status !== 'draft') return
+    const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
     const outputFields: Record<string, unknown> = {
       name: draft.output?.suggested_name,
       description: draft.output?.description,
@@ -759,13 +769,12 @@ function summarizeDrafts(drafts: SeoAiGeneration[]): SeoAiBatchSummary {
       seo_title: draft.output?.seo_title,
       seo_description: draft.output?.seo_description,
       gender: draft.output?.gender,
-      catalog_attributes: draft.output?.catalog_attributes,
+      catalog_attributes: normalizeVisibleAttributes(draft.output?.catalog_attributes || {}, isWatch),
       image_alt_texts: draft.output?.image_alt_texts,
     }
     Object.entries(outputFields).forEach(([field, value]) => {
       if (valuePresent(value)) fieldCounts[field] = (fieldCounts[field] || 0) + 1
     })
-    const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
     const lowConfidence = Object.values(draft.output?.field_confidence || {}).some((value) => Number(value) > 0 && Number(value) < 0.9)
     const conflicts = Array.isArray(draft.output?.conflicts) && draft.output.conflicts.some((conflict: any) => visibleConflict(conflict, isWatch))
     const warnings = Array.isArray(draft.output?.quality_warnings) && draft.output.quality_warnings.length > 0
@@ -823,9 +832,10 @@ function isWatchTaxonomy(taxonomy: any) {
 }
 
 function normalizeVisibleAttributes(attributes: Record<string, any>, isWatch: boolean) {
-  if (!isWatch) return attributes
+  const supported = Object.fromEntries(Object.entries(attributes).filter(([code]) => !DEPRECATED_AI_ATTRIBUTE_CODES.has(code)))
+  if (!isWatch) return supported
 
-  const visible = Object.fromEntries(Object.entries(attributes).filter(([code]) => WATCH_ATTRIBUTE_CODES.has(code)))
+  const visible = Object.fromEntries(Object.entries(supported).filter(([code]) => WATCH_ATTRIBUTE_CODES.has(code)))
   if (!visible.watch_case_size && attributes.dimensions) {
     const dimensions = numericValues(attributes.dimensions).filter((value) => value >= 16 && value <= 60)
     const value = Math.max(...dimensions)
@@ -835,12 +845,14 @@ function normalizeVisibleAttributes(attributes: Record<string, any>, isWatch: bo
 }
 
 function visibleConflict(conflict: any, isWatch: boolean) {
-  if (!isWatch) return true
   const field = String(conflict?.field || '')
   if (field.startsWith('catalog_attributes.')) {
     const code = field.replace('catalog_attributes.', '')
+    if (DEPRECATED_AI_ATTRIBUTE_CODES.has(code)) return false
+    if (!isWatch) return true
     if (!WATCH_ATTRIBUTE_CODES.has(code)) return false
   }
+  if (!isWatch) return true
   if (field !== 'catalog_attributes.watch_case_size') return true
   const current = Math.max(...numericValues(conflict?.current_value).filter((value) => value >= 16 && value <= 60))
   const suggested = Math.max(...numericValues(conflict?.suggested_value).filter((value) => value >= 16 && value <= 60))
