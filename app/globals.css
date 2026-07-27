@@ -63,6 +63,23 @@ body:has(.admin-shell) {
   overflow: hidden;
 }
 
+.admin-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.admin-scroll {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8rem);
+  scroll-padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8rem);
+}
+
+@media (min-width: 640px) {
+  .admin-scroll {
+    padding-bottom: 0;
+    scroll-padding-bottom: 0;
+  }
+}
+
 /* Custom scrollbar for better aesthetics */
 ::-webkit-scrollbar {
   width: 6px;

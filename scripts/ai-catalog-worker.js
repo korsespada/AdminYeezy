@@ -1,6 +1,7 @@
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' })
 
 const sharp = require('sharp')
+const { readSseContent } = require('./lib/cockpit-sse')
 
 const RAILS_API_URL = trimTrailingSlash(requiredEnv('RAILS_API_URL'))
 const WORKER_TOKEN = requiredEnv('AI_CATALOG_WORKER_TOKEN')
@@ -188,11 +189,12 @@ async function cockpitJson({ systemPrompt, content, temperature, maxTokens }) {
       temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.1,
       max_tokens: Number(maxTokens) || 2400,
       response_format: { type: 'json_object' },
+      stream: true,
     }),
     signal: AbortSignal.timeout(180000),
   })
-  const payload = await parseResponse(response, 'Cockpit Tools')
-  const raw = String(payload?.choices?.[0]?.message?.content || '').trim()
+  if (!response.ok) await parseResponse(response, 'Cockpit Tools')
+  const raw = await readSseContent(response)
   if (!raw) throw new Error('Cockpit Tools returned an empty response')
   return parseJsonObject(raw)
 }
