@@ -207,6 +207,29 @@ export interface SeoAiBatch {
   error_message?: string | null
   created_at: string
   updated_at: string
+  summary?: SeoAiBatchSummary
+}
+
+export interface SeoAiBatchSummary {
+  status_counts: Record<string, number>
+  field_counts: Record<string, number>
+  problem_counts: {
+    low_confidence: number
+    conflicts: number
+    quality_warnings: number
+    subcategory: number
+    invalid_attributes: number
+  }
+  safe_count: number
+  attention_count: number
+}
+
+export interface SeoAiBatchPreview {
+  total_count: number
+  brands: Array<{ id: string; name: string; count: number }>
+  categories: Array<{ id: string; name: string; count: number }>
+  subcategories: Array<{ id: string; name: string; category_id: string; count: number }>
+  genders: Array<{ value: string; count: number }>
 }
 
 /**

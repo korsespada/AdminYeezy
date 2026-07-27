@@ -8,10 +8,12 @@ import {
   createRailsSeoAiLandingIdeas,
   deleteRailsSeoAiDraft,
   getRailsAdminProduct,
+  getRailsSeoAiBatch,
   getRailsSeoAiSettings,
   listRailsAdminProducts,
   listRailsSeoAiDrafts,
   listRailsSeoAiBatches,
+  previewRailsSeoAiBatch,
   rejectRailsSeoAiDraft,
   renameRailsSeoAiBatch,
   reviewRailsSeoAiBatch,
@@ -128,6 +130,32 @@ export async function listSeoAiBatchesAction(): Promise<ActionResponse> {
   }
 }
 
+export async function getSeoAiBatchAction(id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    return { success: true, data: await getRailsSeoAiBatch(id) }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось загрузить выгрузку' }
+  }
+}
+
+export async function previewSeoAiBatchAction(input: {
+  ids?: string[]
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: string
+  missingSeoOnly?: boolean
+}): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    return { success: true, data: await previewRailsSeoAiBatch(input) }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось посчитать товары' }
+  }
+}
+
 export async function updateSeoAiBatchStateAction(id: string, action: 'pause' | 'resume' | 'cancel'): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -150,7 +178,7 @@ export async function renameSeoAiBatchAction(id: string, name: string): Promise<
   }
 }
 
-export async function reviewSeoAiBatchAction(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected'): Promise<ActionResponse> {
+export async function reviewSeoAiBatchAction(id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected'): Promise<ActionResponse> {
   try {
     await requireAdmin()
     const result = await reviewRailsSeoAiBatch(id, action)

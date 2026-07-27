@@ -7,6 +7,7 @@ import {
   type ProductFilterFacets,
   type ProductMedia,
   type SeoAiBatch,
+  type SeoAiBatchPreview,
   type SeoAiGeneration,
   type SeoAiSetting,
   type Subcategory,
@@ -372,9 +373,22 @@ async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(payload.message || payload.error || `Rails API failed with ${response.status}`)
+    throw new Error(railsErrorMessage(payload, response.status))
   }
   return payload as T
+}
+
+function railsErrorMessage(payload: any, status: number) {
+  const details = payload?.details && typeof payload.details === 'object'
+    ? Object.entries(payload.details).flatMap(([field, messages]) =>
+      (Array.isArray(messages) ? messages : [messages]).map((message) => `${field}: ${String(message)}`)
+    )
+    : []
+  const base = payload?.message || payload?.error
+  if (base && details.length > 0) return `${base}: ${details.join('; ')}`
+  if (base) return String(base)
+  if (details.length > 0) return details.join('; ')
+  return `Rails API вернул ошибку ${status}`
 }
 
 function openRouterRuntimeKeyPayload() {
@@ -1159,6 +1173,32 @@ export async function listRailsSeoAiBatches(limit = 50) {
   return result.batches
 }
 
+export async function getRailsSeoAiBatch(id: string) {
+  return railsFetch<{ batch: SeoAiBatch; generations: SeoAiGeneration[] }>(
+    `/admin/seo_ai/batches/${encodeURIComponent(id)}`,
+  )
+}
+
+export async function previewRailsSeoAiBatch(input: {
+  ids?: string[]
+  brand?: string
+  category?: string
+  subcategory?: string
+  gender?: string
+  status?: string
+  missingSeoOnly?: boolean
+}) {
+  const params = new URLSearchParams()
+  input.ids?.forEach((id) => params.append('ids[]', id))
+  if (input.brand) params.set('brand', input.brand)
+  if (input.category) params.set('category', input.category)
+  if (input.subcategory) params.set('subcategory', input.subcategory)
+  if (input.gender) params.set('gender', input.gender)
+  if (input.status) params.set('status', input.status)
+  if (input.missingSeoOnly) params.set('missing_seo_only', 'true')
+  return railsFetch<SeoAiBatchPreview>(`/admin/seo_ai/batches/preview?${params}`)
+}
+
 export async function updateRailsSeoAiBatchState(id: string, action: 'pause' | 'resume' | 'cancel') {
   const result = await railsFetch<{ batch: SeoAiBatch }>(`/admin/seo_ai/batches/${encodeURIComponent(id)}/${action}`, {
     method: 'POST',
@@ -1174,7 +1214,7 @@ export async function renameRailsSeoAiBatch(id: string, name: string) {
   return result.batch
 }
 
-export async function reviewRailsSeoAiBatch(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+export async function reviewRailsSeoAiBatch(id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
   return railsFetch<{
     batch: SeoAiBatch
     generations: SeoAiGeneration[]

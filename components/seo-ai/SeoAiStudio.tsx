@@ -8,8 +8,10 @@ import {
   createSeoAiBatchAction,
   createSeoAiSuggestedSubcategoryAction,
   deleteSeoAiDraftAction,
+  getSeoAiBatchAction,
   listSeoAiDraftsAction,
   listSeoAiBatchesAction,
+  previewSeoAiBatchAction,
   rejectSeoAiDraftAction,
   renameSeoAiBatchAction,
   reviewSeoAiBatchAction,
@@ -19,7 +21,7 @@ import {
   updateSeoAiSettingsAction,
   updateSeoAiBatchStateAction,
 } from '@/actions/seo-ai'
-import type { Brand, Category, Product, SeoAiBatch, SeoAiGeneration, SeoAiSetting, Subcategory } from '@/lib/types'
+import type { Brand, Category, Product, SeoAiBatch, SeoAiBatchPreview, SeoAiBatchSummary, SeoAiGeneration, SeoAiSetting, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -91,9 +93,11 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   const [batchGender, setBatchGender] = useState('__none__')
   const [batchStatus, setBatchStatus] = useState('active')
   const [batchMissingOnly, setBatchMissingOnly] = useState(false)
-  const [batchImages, setBatchImages] = useState(true)
+  const [batchImages, setBatchImages] = useState(false)
   const [batchAutoApply, setBatchAutoApply] = useState(false)
   const [batchLimit, setBatchLimit] = useState(100)
+  const [batchPreview, setBatchPreview] = useState<SeoAiBatchPreview | null>(null)
+  const [batchPreviewLoading, setBatchPreviewLoading] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
   const hasActiveBatches = batches.some((batch) => batch.status === 'pending' || batch.status === 'running')
@@ -117,15 +121,56 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     return () => window.clearInterval(timer)
   }, [hasActiveBatches])
 
+  const batchIdsParsed = useMemo(() => batchIds
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean), [batchIds])
+
+  useEffect(() => {
+    let current = true
+    const timer = window.setTimeout(async () => {
+      setBatchPreviewLoading(true)
+      const result = await previewSeoAiBatchAction({
+        ids: batchIdsParsed,
+        brand: batchBrand === '__none__' ? undefined : batchBrand,
+        category: batchCategory === '__none__' ? undefined : batchCategory,
+        subcategory: batchSubcategory === '__none__' ? undefined : batchSubcategory,
+        gender: batchGender === '__none__' ? undefined : batchGender,
+        status: batchStatus,
+        missingSeoOnly: batchMissingOnly,
+      })
+      if (!current) return
+      setBatchPreviewLoading(false)
+      if (!result.success) {
+        setBatchPreview(null)
+        return
+      }
+
+      const preview = result.data as SeoAiBatchPreview
+      setBatchPreview(preview)
+      setBatchBrand((value) => value === '__none__' || preview.brands.some((item) => item.id === value) ? value : '__none__')
+      setBatchCategory((value) => value === '__none__' || preview.categories.some((item) => item.id === value) ? value : '__none__')
+      setBatchSubcategory((value) => value === '__none__' || preview.subcategories.some((item) => item.id === value) ? value : '__none__')
+      setBatchGender((value) => value === '__none__' || preview.genders.some((item) => item.value === value) ? value : '__none__')
+    }, 250)
+    return () => {
+      current = false
+      window.clearTimeout(timer)
+    }
+  }, [batchBrand, batchCategory, batchGender, batchIdsParsed, batchMissingOnly, batchStatus, batchSubcategory])
+
   const subcategoriesForBatch = useMemo(
-    () => subcategories.filter((subcategory) => subcategory.category === batchCategory),
-    [batchCategory, subcategories]
+    () => (batchPreview?.subcategories || subcategories.map((subcategory) => ({
+      id: subcategory.id,
+      name: subcategory.name,
+      category_id: subcategory.category,
+      count: 0,
+    }))).filter((subcategory) => batchCategory === '__none__' || subcategory.category_id === batchCategory),
+    [batchCategory, batchPreview, subcategories]
   )
   const draftGroups = useMemo(() => {
     const knownBatchIds = new Set(batches.map((batch) => batch.id))
-    const batchGroups = batches
-      .map((batch) => ({ batch, drafts: drafts.filter((draft) => draft.batch_id === batch.id) }))
-      .filter((group) => group.drafts.length > 0)
+    const batchGroups = batches.map((batch) => ({ batch, drafts: drafts.filter((draft) => draft.batch_id === batch.id) }))
     const standaloneDrafts = drafts.filter((draft) => !draft.batch_id || !knownBatchIds.has(draft.batch_id))
     return standaloneDrafts.length > 0
       ? [...batchGroups, { batch: null, drafts: standaloneDrafts }]
@@ -183,12 +228,8 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
 
   function createBatch() {
     startTransition(async () => {
-      const ids = batchIds
-        .split(/[\s,]+/)
-        .map((item) => item.trim())
-        .filter(Boolean)
       const result = await createSeoAiBatchAction({
-        ids,
+        ids: batchIdsParsed,
         brand: batchBrand === '__none__' ? undefined : batchBrand,
         category: batchCategory === '__none__' ? undefined : batchCategory,
         subcategory: batchSubcategory === '__none__' ? undefined : batchSubcategory,
@@ -249,7 +290,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     return false
   }
 
-  async function reviewBatch(id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+  async function reviewBatch(id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
     const result = await reviewSeoAiBatchAction(id, action)
     if (!result.success) {
       setStatus('error', result.error || 'Не удалось выполнить массовое действие')
@@ -362,23 +403,28 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                 <div className="grid gap-3 md:grid-cols-2">
                   <Select value={batchBrand} onValueChange={setBatchBrand}>
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Бренд" /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">Все бренды</SelectItem>{brands.map((brand) => <SelectItem key={brand.id} value={brand.id}>{brand.name}</SelectItem>)}</SelectContent>
+                    <SelectContent><SelectItem value="__none__">Все бренды</SelectItem>{(batchPreview?.brands || brands).map((brand) => <SelectItem key={brand.id} value={brand.id}>{brand.name}{'count' in brand ? ` (${brand.count})` : ''}</SelectItem>)}</SelectContent>
                   </Select>
                   <Select value={batchCategory} onValueChange={(value) => { setBatchCategory(value); setBatchSubcategory('__none__') }}>
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Категория" /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">Все категории</SelectItem>{categories.map((category) => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent>
+                    <SelectContent><SelectItem value="__none__">Все категории</SelectItem>{(batchPreview?.categories || categories).map((category) => <SelectItem key={category.id} value={category.id}>{category.name}{'count' in category ? ` (${category.count})` : ''}</SelectItem>)}</SelectContent>
                   </Select>
                   <Select value={batchSubcategory} onValueChange={setBatchSubcategory} disabled={batchCategory === '__none__'}>
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Подкатегория" /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">Все подкатегории</SelectItem>{subcategoriesForBatch.map((subcategory) => <SelectItem key={subcategory.id} value={subcategory.id}>{subcategory.name}</SelectItem>)}</SelectContent>
+                    <SelectContent><SelectItem value="__none__">Все подкатегории</SelectItem>{subcategoriesForBatch.map((subcategory) => <SelectItem key={subcategory.id} value={subcategory.id}>{subcategory.name}{subcategory.count ? ` (${subcategory.count})` : ''}</SelectItem>)}</SelectContent>
                   </Select>
                   <Select value={batchGender} onValueChange={setBatchGender}>
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Гендер" /></SelectTrigger>
-                    <SelectContent><SelectItem value="__none__">Любой гендер</SelectItem><SelectItem value="female">Женский</SelectItem><SelectItem value="male">Мужской</SelectItem><SelectItem value="unisex">Унисекс</SelectItem></SelectContent>
+                    <SelectContent>
+                      <SelectItem value="__none__">Любой гендер</SelectItem>
+                      {(batchPreview?.genders || [{ value: 'female', count: 0 }, { value: 'male', count: 0 }, { value: 'unisex', count: 0 }]).map((item) => (
+                        <SelectItem key={item.value} value={item.value}>{genderLabel(item.value)}{item.count ? ` (${item.count})` : ''}</SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
-                  <Select value={batchStatus} onValueChange={setBatchStatus}>
+                  <Select value={batchStatus} onValueChange={setBatchStatus} disabled>
                     <SelectTrigger className="bg-slate-900"><SelectValue placeholder="Статус" /></SelectTrigger>
-                    <SelectContent><SelectItem value="__all__">Любой статус</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="hidden">Hidden</SelectItem></SelectContent>
+                    <SelectContent><SelectItem value="active">Опубликованные (Active)</SelectItem></SelectContent>
                   </Select>
                   <div className="space-y-1">
                     <Label htmlFor="batch-limit">Сколько товаров проверить</Label>
@@ -396,11 +442,17 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                 </div>
               </div>
               <div className="space-y-4 rounded-lg border border-slate-700 bg-slate-900 p-4">
+                <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 p-3">
+                  <p className="text-sm font-semibold text-indigo-100">
+                    {batchPreviewLoading ? 'Считаем товары…' : `Под условия подходит: ${batchPreview?.total_count ?? '—'}`}
+                  </p>
+                  {batchPreview && batchPreview.total_count > batchLimit && <p className="mt-1 text-xs text-indigo-300">В эту партию попадут первые {batchLimit}. Следующую можно запустить с теми же фильтрами.</p>}
+                </div>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchMissingOnly} onCheckedChange={(value) => setBatchMissingOnly(Boolean(value))} /> Только товары с пустым SEO/описанием</label>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchImages} onCheckedChange={(value) => setBatchImages(Boolean(value))} /> Анализировать до 9 фото сеткой 3×3</label>
                 <label className="flex items-center gap-2 text-sm text-slate-300"><Checkbox checked={batchAutoApply} onCheckedChange={(value) => setBatchAutoApply(Boolean(value))} /> Автоприменение безопасных полей</label>
                 <p className="text-xs leading-5 text-slate-500">Модель и новая подкатегория всегда остаются на ручной проверке. Гендер, характеристики и существующая подкатегория применяются автоматически только при уверенности от 90%.</p>
-                <Button type="button" onClick={createBatch} disabled={isPending} className="w-full">
+                <Button type="button" onClick={createBatch} disabled={isPending || batchPreviewLoading || batchPreview?.total_count === 0} className="w-full">
                   {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                   Запустить batch
                 </Button>
@@ -436,7 +488,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
               <Button type="button" variant="outline" onClick={refreshDrafts} disabled={isPending}><RefreshCw className="h-4 w-4" /> Обновить</Button>
             </div>
             <div className="grid gap-4">
-              {drafts.length === 0 ? <p className="text-sm text-slate-400">Черновиков пока нет.</p> : draftGroups.map((group) => (
+              {draftGroups.length === 0 ? <p className="text-sm text-slate-400">Черновиков пока нет.</p> : draftGroups.map((group) => (
                 <DraftFolder
                   key={group.batch?.id || 'standalone'}
                   batch={group.batch}
@@ -528,18 +580,40 @@ function DraftFolder({
   drafts: SeoAiGeneration[]
   attributeDefinitions: CatalogAttributeDefinition[]
   onRename: (id: string, name: string) => Promise<boolean>
-  onBulkAction: (id: string, action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<boolean>
+  onBulkAction: (id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<boolean>
   onChange: (draft: SeoAiGeneration) => void
   onDelete: (id: string) => void
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(batch?.name || '')
+  const [folderDrafts, setFolderDrafts] = useState(drafts)
+  const [view, setView] = useState<'attention' | 'errors' | 'all'>('attention')
+  const [isLoading, setIsLoading] = useState(false)
   const [isRenaming, startRenaming] = useTransition()
   const [isReviewing, startReviewing] = useTransition()
   const label = batch?.name || (batch ? `Выгрузка ${new Date(batch.created_at).toLocaleString('ru-RU')}` : 'Отдельные товары')
-  const readyCount = drafts.filter((draft) => draft.status === 'draft').length
-  const rejectedCount = drafts.filter((draft) => draft.status === 'rejected').length
+  const summary = batch && folderDrafts.length < batch.total_count
+    ? batch.summary || summarizeDrafts(folderDrafts)
+    : summarizeDrafts(folderDrafts)
+  const readyCount = summary.status_counts.draft || 0
+  const safeCount = summary.safe_count || 0
+  const rejectedCount = summary.status_counts.rejected || 0
+  const failedCount = summary.status_counts.failed || 0
+  const visibleDrafts = folderDrafts.filter((draft) => {
+    if (view === 'errors') return draft.status === 'failed'
+    if (view === 'attention') return draftNeedsAttention(draft)
+    return true
+  })
+
+  useEffect(() => {
+    if (drafts.length === 0) return
+    setFolderDrafts((current) => {
+      const merged = new Map(current.map((draft) => [draft.id, draft]))
+      drafts.forEach((draft) => merged.set(draft.id, draft))
+      return [...merged.values()]
+    })
+  }, [drafts])
 
   function saveName() {
     if (!batch || !name.trim()) return
@@ -548,10 +622,30 @@ function DraftFolder({
     })
   }
 
-  function runBulkAction(action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
+  async function toggleExpanded() {
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+
+    if (batch && folderDrafts.length < batch.total_count) {
+      setIsLoading(true)
+      const result = await getSeoAiBatchAction(batch.id)
+      setIsLoading(false)
+      if (!result.success) {
+        alert(result.error || 'Не удалось загрузить товары выгрузки')
+        return
+      }
+      setFolderDrafts(result.data.generations || [])
+    }
+    setView(summary.attention_count > 0 ? 'attention' : 'all')
+    setExpanded(true)
+  }
+
+  function runBulkAction(action: 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
     if (!batch) return
-    const confirmation = action === 'apply_drafts'
-      ? `Применить безопасные поля у ${readyCount} готовых товаров? Модель и новая подкатегория применены не будут.`
+    const confirmation = action === 'apply_safe_drafts'
+      ? `Применить ${safeCount} безопасных черновиков? Спорные товары останутся на проверке.`
       : action === 'reject_drafts'
         ? `Отклонить ${readyCount} готовых черновиков? Их можно будет вернуть в очередь отдельной кнопкой.`
         : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
@@ -567,22 +661,26 @@ function DraftFolder({
         tabIndex={0}
         aria-expanded={expanded}
         className="flex cursor-pointer items-center justify-between gap-3 p-3 hover:bg-slate-800/70 sm:p-4"
-        onClick={(event) => { if (!isInteractiveElement(event.target)) setExpanded((value) => !value) }}
-        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded((value) => !value) } }}
+        onClick={(event) => { if (!isInteractiveElement(event.target)) void toggleExpanded() }}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void toggleExpanded() } }}
       >
         <div className="flex min-w-0 items-center gap-3">
           <Folder className="h-5 w-5 shrink-0 text-indigo-400" />
           <div className="min-w-0">
             <p className="truncate font-semibold text-white">{label}</p>
-            <p className="text-xs text-slate-400">{drafts.length} товаров{batch ? ` · ${batchStatusLabel(batch.status)}` : ''}</p>
+            <p className="text-xs text-slate-400">
+              {batch?.total_count || folderDrafts.length} товаров{batch ? ` · ${batchStatusLabel(batch.status)}` : ''}
+              {` · готово ${readyCount} · безопасно ${safeCount} · внимание ${summary.attention_count} · ошибки ${failedCount}`}
+            </p>
+            <p className="mt-1 hidden text-xs text-slate-500 md:block">{summaryFieldsLabel(summary)}{summaryProblemsLabel(summary)}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {batch && readyCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Применить готовые</span></Button>}
+          {batch && safeCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_safe_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Применить безопасные</span></Button>}
           {batch && readyCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('reject_drafts') }} disabled={isReviewing}><X className="h-4 w-4" /><span className="hidden lg:inline">Отклонить готовые</span></Button>}
           {batch && rejectedCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('requeue_rejected') }} disabled={isReviewing}><RotateCcw className="h-4 w-4" /><span className="hidden lg:inline">Вернуть отклонённые</span></Button>}
           {batch && <Button type="button" size="icon" variant="ghost" aria-label="Переименовать выгрузку" onClick={(event) => { event.stopPropagation(); setEditing(true) }}><Pencil className="h-4 w-4" /></Button>}
-          {expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
+          {isLoading ? <Loader2 className="h-5 w-5 animate-spin text-slate-400" /> : expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
         </div>
       </div>
       {editing && batch && (
@@ -594,20 +692,173 @@ function DraftFolder({
       )}
       {expanded && (
         <div className="grid gap-3 border-t border-slate-700 p-3 sm:p-4">
-          {drafts.map((draft) => (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant={view === 'attention' ? 'default' : 'outline'} onClick={() => setView('attention')}>Требуют внимания ({summary.attention_count})</Button>
+            <Button type="button" size="sm" variant={view === 'errors' ? 'default' : 'outline'} onClick={() => setView('errors')}>Ошибки ({failedCount})</Button>
+            <Button type="button" size="sm" variant={view === 'all' ? 'default' : 'outline'} onClick={() => setView('all')}>Все ({folderDrafts.length})</Button>
+          </div>
+          {visibleDrafts.length === 0 && <p className="rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-400">В этой группе товаров нет.</p>}
+          {visibleDrafts.map((draft) => (
             <DraftCard
               key={draft.id}
               draft={draft}
-              compact={drafts.length > 3}
+              compact={folderDrafts.length > 3}
               attributeDefinitions={attributeDefinitions}
-              onChange={onChange}
-              onDelete={onDelete}
+              onChange={(next) => {
+                setFolderDrafts((current) => current.map((item) => item.id === next.id ? next : item))
+                onChange(next)
+              }}
+              onDelete={(id) => {
+                setFolderDrafts((current) => current.filter((item) => item.id !== id))
+                onDelete(id)
+              }}
             />
           ))}
         </div>
       )}
     </section>
   )
+}
+
+const SUMMARY_FIELD_LABELS: Record<string, string> = {
+  name: 'название',
+  description: 'описание',
+  h1: 'H1',
+  seo_title: 'SEO title',
+  seo_description: 'SEO description',
+  gender: 'гендер',
+  catalog_attributes: 'характеристики',
+  image_alt_texts: 'alt фото',
+}
+
+const WATCH_ATTRIBUTE_CODES = new Set([
+  'colors',
+  'model_name',
+  'watch_movement',
+  'watch_case_size',
+  'watch_case_material',
+  'strap_material',
+  'dial_color',
+  'water_resistance',
+])
+
+function summarizeDrafts(drafts: SeoAiGeneration[]): SeoAiBatchSummary {
+  const statusCounts: Record<string, number> = {}
+  const fieldCounts: Record<string, number> = {}
+  const problemCounts = { low_confidence: 0, conflicts: 0, quality_warnings: 0, subcategory: 0, invalid_attributes: 0 }
+  let safeCount = 0
+  let attentionCount = 0
+
+  drafts.forEach((draft) => {
+    statusCounts[draft.status] = (statusCounts[draft.status] || 0) + 1
+    if (draft.status !== 'draft') return
+    const outputFields: Record<string, unknown> = {
+      name: draft.output?.suggested_name,
+      description: draft.output?.description,
+      h1: draft.output?.h1,
+      seo_title: draft.output?.seo_title,
+      seo_description: draft.output?.seo_description,
+      gender: draft.output?.gender,
+      catalog_attributes: draft.output?.catalog_attributes,
+      image_alt_texts: draft.output?.image_alt_texts,
+    }
+    Object.entries(outputFields).forEach(([field, value]) => {
+      if (valuePresent(value)) fieldCounts[field] = (fieldCounts[field] || 0) + 1
+    })
+    const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
+    const lowConfidence = Object.values(draft.output?.field_confidence || {}).some((value) => Number(value) > 0 && Number(value) < 0.9)
+    const conflicts = Array.isArray(draft.output?.conflicts) && draft.output.conflicts.some((conflict: any) => visibleConflict(conflict, isWatch))
+    const warnings = Array.isArray(draft.output?.quality_warnings) && draft.output.quality_warnings.length > 0
+    const subcategory = !isWatch && ['existing', 'new'].includes(draft.output?.subcategory_suggestion?.kind)
+    if (lowConfidence) problemCounts.low_confidence += 1
+    if (conflicts) problemCounts.conflicts += 1
+    if (warnings) problemCounts.quality_warnings += 1
+    if (subcategory) problemCounts.subcategory += 1
+    if (lowConfidence || conflicts || warnings || subcategory) attentionCount += 1
+    else safeCount += 1
+  })
+
+  return { status_counts: statusCounts, field_counts: fieldCounts, problem_counts: problemCounts, safe_count: safeCount, attention_count: attentionCount }
+}
+
+function draftNeedsAttention(draft: SeoAiGeneration) {
+  if (draft.status !== 'draft') return false
+  const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
+  const lowConfidence = Object.values(draft.output?.field_confidence || {}).some((value) => Number(value) > 0 && Number(value) < 0.9)
+  const conflicts = Array.isArray(draft.output?.conflicts) && draft.output.conflicts.some((conflict: any) => visibleConflict(conflict, isWatch))
+  const warnings = Array.isArray(draft.output?.quality_warnings) && draft.output.quality_warnings.length > 0
+  const subcategory = !isWatch && ['existing', 'new'].includes(draft.output?.subcategory_suggestion?.kind)
+  return lowConfidence || conflicts || warnings || subcategory
+}
+
+function summaryFieldsLabel(summary: SeoAiBatchSummary) {
+  const fields = Object.entries(summary.field_counts)
+    .filter(([, count]) => count > 0)
+    .map(([field, count]) => `${SUMMARY_FIELD_LABELS[field] || field} ${count}`)
+  return fields.length > 0 ? `Изменения: ${fields.join(' · ')}` : 'Изменений пока нет'
+}
+
+function summaryProblemsLabel(summary: SeoAiBatchSummary) {
+  const labels = [
+    ['низкая уверенность', summary.problem_counts.low_confidence],
+    ['противоречия', summary.problem_counts.conflicts],
+    ['предупреждения', summary.problem_counts.quality_warnings],
+    ['подкатегория', summary.problem_counts.subcategory],
+    ['недопустимые поля', summary.problem_counts.invalid_attributes],
+  ].filter(([, count]) => Number(count) > 0).map(([label, count]) => `${label} ${count}`)
+  return labels.length > 0 ? ` · Проблемы: ${labels.join(' · ')}` : ''
+}
+
+function valuePresent(value: unknown) {
+  if (Array.isArray(value)) return value.length > 0
+  if (value && typeof value === 'object') return Object.keys(value).length > 0
+  return value !== undefined && value !== null && value !== ''
+}
+
+function isWatchTaxonomy(taxonomy: any) {
+  const root = taxonomy?.top_level || taxonomy?.assigned || {}
+  const slug = String(root.slug || '').toLocaleLowerCase('ru-RU')
+  const name = String(root.name || '').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+  return slug === 'chasy' || slug.startsWith('chasy-test-') || name === 'часы'
+}
+
+function normalizeVisibleAttributes(attributes: Record<string, any>, isWatch: boolean) {
+  if (!isWatch) return attributes
+
+  const visible = Object.fromEntries(Object.entries(attributes).filter(([code]) => WATCH_ATTRIBUTE_CODES.has(code)))
+  if (!visible.watch_case_size && attributes.dimensions) {
+    const dimensions = numericValues(attributes.dimensions).filter((value) => value >= 16 && value <= 60)
+    const value = Math.max(...dimensions)
+    if (Number.isFinite(value)) visible.watch_case_size = { value, display_value: `${formatDecimal(value)} мм` }
+  }
+  return visible
+}
+
+function visibleConflict(conflict: any, isWatch: boolean) {
+  if (!isWatch) return true
+  const field = String(conflict?.field || '')
+  if (field.startsWith('catalog_attributes.')) {
+    const code = field.replace('catalog_attributes.', '')
+    if (!WATCH_ATTRIBUTE_CODES.has(code)) return false
+  }
+  if (field !== 'catalog_attributes.watch_case_size') return true
+  const current = Math.max(...numericValues(conflict?.current_value).filter((value) => value >= 16 && value <= 60))
+  const suggested = Math.max(...numericValues(conflict?.suggested_value).filter((value) => value >= 16 && value <= 60))
+  return !Number.isFinite(current) || !Number.isFinite(suggested) || current !== suggested
+}
+
+function numericValues(value: unknown): number[] {
+  if (Array.isArray(value)) return value.flatMap(numericValues)
+  if (value && typeof value === 'object') return Object.values(value).flatMap(numericValues)
+  return String(value ?? '').match(/\d+(?:[.,]\d+)?/g)?.map((number) => Number(number.replace(',', '.'))) || []
+}
+
+function formatDecimal(value: number) {
+  return String(value).replace('.', ',')
+}
+
+function genderLabel(value: string) {
+  return ({ female: 'Женский', male: 'Мужской', unisex: 'Унисекс' } as Record<string, string>)[value] || value
 }
 
 function DraftCard({
@@ -629,11 +880,15 @@ function DraftCard({
   const outputText = JSON.stringify(draft.output, null, 2)
   const productBefore = draft.input_snapshot?.product || {}
   const attributesBefore = productBefore.catalog_attributes || {}
-  const attributesAfter = draft.output?.catalog_attributes || {}
-  const subcategorySuggestion = draft.output?.subcategory_suggestion
   const imageUrl = draftImageUrl(draft)
   const productSlug = productBefore.slug
   const taxonomy = draft.input_snapshot?.catalog?.current_taxonomy
+  const isWatch = isWatchTaxonomy(taxonomy)
+  const attributesAfter = normalizeVisibleAttributes(draft.output?.catalog_attributes || {}, isWatch)
+  const subcategorySuggestion = draft.output?.subcategory_suggestion
+  const visibleConflicts = Array.isArray(draft.output?.conflicts)
+    ? draft.output.conflicts.filter((conflict: any) => visibleConflict(conflict, isWatch))
+    : []
   const categoryPath = [taxonomy?.top_level?.name, taxonomy?.assigned?.name].filter((name, index, values) => name && values.indexOf(name) === index).join(' → ')
   const attributeDefinitionsByCode = new Map(attributeDefinitions.map((definition) => [definition.code, definition]))
 
@@ -755,7 +1010,7 @@ function DraftCard({
             </div>
           </div>
         )}
-        {draft.status === 'draft' && subcategorySuggestion?.kind && subcategorySuggestion.kind !== 'none' && (
+        {draft.status === 'draft' && !isWatch && subcategorySuggestion?.kind && subcategorySuggestion.kind !== 'none' && (
           <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 sm:p-4">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-semibold text-white">Подкатегория: {subcategorySuggestion.name || 'Без названия'}</p>
@@ -766,10 +1021,10 @@ function DraftCard({
             {subcategorySuggestion.kind === 'new' && <Button type="button" size="sm" className="mt-3" onClick={createSubcategory} disabled={isPending}>Создать и назначить товару</Button>}
           </div>
         )}
-        {Array.isArray(draft.output?.conflicts) && draft.output.conflicts.length > 0 && (
+        {visibleConflicts.length > 0 && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
             <p className="font-semibold">Обнаружены противоречия</p>
-            {draft.output.conflicts.map((conflict: any, index: number) => <p key={index} className="mt-1 break-words"><strong>{fieldLabel(conflict.field, attributeDefinitionsByCode)}:</strong> {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
+            {visibleConflicts.map((conflict: any, index: number) => <p key={index} className="mt-1 break-words"><strong>{fieldLabel(conflict.field, attributeDefinitionsByCode)}:</strong> {conflict.evidence} ({Math.round(Number(conflict.confidence || 0) * 100)}%)</p>)}
           </div>
         )}
         {Array.isArray(draft.output?.image_alt_texts) && draft.output.image_alt_texts.length > 0 && (
@@ -782,7 +1037,7 @@ function DraftCard({
         )}
         {draft.draft_type === 'product' && draft.status === 'draft' && (
           <div className="flex flex-wrap gap-3">
-            {PRODUCT_FIELDS.map((field) => (
+            {PRODUCT_FIELDS.filter((field) => !isWatch || field.key !== 'subcategory_suggestion').map((field) => (
               <label key={field.key} className="flex items-center gap-2 text-xs text-slate-300">
                 <Checkbox checked={fields.includes(field.key)} onCheckedChange={() => toggleField(field.key)} />
                 {field.label}
