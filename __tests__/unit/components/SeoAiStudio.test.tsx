@@ -45,6 +45,19 @@ const colorDefinition: CatalogAttributeDefinition = {
   active: true,
 }
 
+const metalDefinition: CatalogAttributeDefinition = {
+  ...colorDefinition,
+  code: 'jewelry_metal',
+  label: 'Ювелирный металл',
+  dictionary_values: [{
+    ...colorDefinition.dictionary_values[0],
+    id: 'silver',
+    attribute_code: 'jewelry_metal',
+    filter_value: 'silver',
+    canonical_value: 'Серебро',
+  }],
+}
+
 function draft(id: string): SeoAiGeneration {
   return {
     id,
@@ -62,7 +75,7 @@ function draft(id: string): SeoAiGeneration {
     vision_result: {},
     output: {
       suggested_name: 'Серьги-пусеты с розовой вставкой',
-      catalog_attributes: { colors: ['pink'] },
+      catalog_attributes: { colors: ['pink'], jewelry_metal: { family: 'silver', purity: '925', filter_value: 'silver', display_value: 'Серебро' } },
       subcategory_suggestion: { kind: 'existing', name: 'Серьги', confidence: 0.99, evidence: 'Форма соответствует серьгам-пусетам.' },
     },
     prompt_snapshot: {},
@@ -83,7 +96,7 @@ describe('SeoAiStudio queue', () => {
         brands={[]}
         categories={[]}
         subcategories={[]}
-        attributeDefinitions={[colorDefinition]}
+        attributeDefinitions={[colorDefinition, metalDefinition]}
       />,
     )
 
@@ -95,6 +108,7 @@ describe('SeoAiStudio queue', () => {
     expect(screen.getByText('Цвет')).toBeInTheDocument()
     expect(screen.getAllByText('Розовый')).toHaveLength(2)
     expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
+    expect(screen.getByText('Серебро, 925')).toBeInTheDocument()
     expect(screen.getByText('Подкатегория: Серьги')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Оригинальная карточка' })[0]).toHaveAttribute('href', 'https://yeezyunique.ru/product/chanel-earrings')
   })

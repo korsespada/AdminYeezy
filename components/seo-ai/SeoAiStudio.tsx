@@ -790,10 +790,11 @@ function formatValue(value: any, field?: string) {
 function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefinition) {
   const values = attributeDisplayValues(value)
   if (values.length === 0) return '—'
-  return values.map((text) => {
+  const displayValues = values.map((text) => {
     const dictionaryValue = definition?.dictionary_values?.find((candidate) => candidate.filter_value === text || candidate.canonical_value === text)
     return dictionaryValue?.canonical_value || text
-  }).join(', ')
+  })
+  return [...new Set(displayValues)].join(', ')
 }
 
 function attributeDisplayValues(value: unknown): string[] {
@@ -802,7 +803,8 @@ function attributeDisplayValues(value: unknown): string[] {
   if (typeof value !== 'object') return [String(value)]
 
   const record = value as Record<string, unknown>
-  const preferredKey = ['canonical_value', 'label', 'value', 'name', 'normalized_value', 'values'].find((key) => attributeDisplayValues(record[key]).length > 0)
+  if (record.display_value) return attributeDisplayValues([record.display_value, record.purity])
+  const preferredKey = ['canonical_value', 'label', 'value', 'name', 'normalized_value', 'values', 'filter_value'].find((key) => attributeDisplayValues(record[key]).length > 0)
   if (preferredKey) return attributeDisplayValues(record[preferredKey])
 
   const ignored = new Set(['confidence', 'evidence', 'code', 'source'])
