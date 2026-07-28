@@ -1,8 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { BookOpen, Loader2, Plus, Save } from 'lucide-react'
-import { upsertCatalogAttributeDictionaryValueAction } from '@/actions/catalog-attribute-registry'
+import {
+  updateCatalogAttributeDefinitionAction,
+  upsertCatalogAttributeDictionaryValueAction,
+} from '@/actions/catalog-attribute-registry'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -18,18 +22,15 @@ export default function CatalogAttributeDictionaryEditor({
 }: {
   definitions: CatalogAttributeDefinition[]
 }) {
-  const dictionaryDefinitions = useMemo(
-    () => definitions.filter((item) => (
-      item.value_type === 'enum'
-      || item.value_type === 'multi_enum'
-      || item.value_type === 'size'
-      || (item.dictionary_values?.length || 0) > 0
-    )),
-    [definitions],
-  )
+  const router = useRouter()
+  const dictionaryDefinitions = useMemo(() => definitions, [definitions])
   const [selectedCode, setSelectedCode] = useState(dictionaryDefinitions[0]?.code || '')
   const [valuesByCode, setValuesByCode] = useState<Record<string, EditableValue[]>>(() => dictionaryState(definitions))
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [labelsByCode, setLabelsByCode] = useState<Record<string, string>>(() => (
+    Object.fromEntries(definitions.map((item) => [item.code, item.label]))
+  ))
+  const [isDefinitionPending, startDefinitionTransition] = useTransition()
 
   useEffect(() => {
     if (!dictionaryDefinitions.some((item) => item.code === selectedCode)) {
@@ -45,10 +46,43 @@ export default function CatalogAttributeDictionaryEditor({
       }
       return next
     })
+    setLabelsByCode((current) => ({
+      ...current,
+      ...Object.fromEntries(definitions.map((item) => [item.code, item.label])),
+    }))
   }, [definitions])
 
   const selectedDefinition = dictionaryDefinitions.find((item) => item.code === selectedCode)
   const selectedValues = valuesByCode[selectedCode] || []
+  const supportsValues = selectedDefinition && (
+    selectedDefinition.value_type === 'enum'
+    || selectedDefinition.value_type === 'multi_enum'
+    || selectedDefinition.value_type === 'size'
+    || selectedValues.length > 0
+  )
+
+  function saveDefinitionLabel() {
+    if (!selectedDefinition) return
+    const label = labelsByCode[selectedDefinition.code]?.trim()
+    if (!label) return
+
+    startDefinitionTransition(async () => {
+      const result = await updateCatalogAttributeDefinitionAction({
+        code: selectedDefinition.code,
+        label,
+        show_as_characteristic: true,
+        use_as_filter: selectedDefinition.use_as_filter,
+        use_as_variant_dimension: selectedDefinition.use_as_variant_dimension,
+        active: selectedDefinition.active,
+      })
+      if (!result.success) {
+        setMessage({ kind: 'error', text: result.error || 'Не удалось переименовать атрибут' })
+        return
+      }
+      setMessage({ kind: 'success', text: `Название атрибута изменено на «${label}»` })
+      router.refresh()
+    })
+  }
 
   function addValue() {
     const localId = `new-${Date.now()}`
@@ -95,10 +129,10 @@ export default function CatalogAttributeDictionaryEditor({
         <div className="px-2 pb-3">
           <div className="flex items-center gap-2 font-semibold text-white">
             <BookOpen className="h-4 w-4 text-indigo-300" />
-            Справочники
+            Атрибуты категории
           </div>
           <p className="mt-1 text-xs leading-5 text-slate-500">
-            Канонические значения, которые сохраняются в товар.
+            Здесь можно переименовать любой атрибут. Типовые значения показываются только там, где они используются.
           </p>
         </div>
         <div className="space-y-1">
@@ -120,12 +154,14 @@ export default function CatalogAttributeDictionaryEditor({
                 }`}
               >
                 <span>
-                  <span className="block text-sm font-medium">{definition.label}</span>
+                  <span className="block text-sm font-medium">{labelsByCode[definition.code] || definition.label}</span>
                   <span className="mt-0.5 block font-mono text-[10px] text-slate-600">{definition.code}</span>
                 </span>
-                <Badge variant="outline" className="border-slate-700 bg-slate-950 text-slate-400">
-                  {activeCount}
-                </Badge>
+                {activeCount > 0 && (
+                  <Badge variant="outline" className="border-slate-700 bg-slate-950 text-slate-400">
+                    {activeCount}
+                  </Badge>
+                )}
               </button>
             )
           })}
@@ -133,17 +169,37 @@ export default function CatalogAttributeDictionaryEditor({
       </aside>
 
       <section className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900">
-        <div className="flex flex-col gap-3 border-b border-slate-800 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-slate-800 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="min-w-0 flex-1">
+              <span className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600">Название атрибута на сайте</span>
+              <input
+                value={selectedDefinition ? labelsByCode[selectedDefinition.code] || '' : ''}
+                onChange={(event) => selectedDefinition && setLabelsByCode((current) => ({
+                  ...current,
+                  [selectedDefinition.code]: event.target.value,
+                }))}
+                className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm font-semibold text-white outline-none focus:border-indigo-500"
+              />
+            </label>
+            <Button type="button" onClick={saveDefinitionLabel} disabled={isDefinitionPending} className="bg-slate-800 text-white hover:bg-indigo-600">
+              {isDefinitionPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Сохранить название
+            </Button>
+          </div>
           <div>
-            <h2 className="font-semibold text-white">{selectedDefinition?.label}</h2>
             <p className="mt-1 text-xs text-slate-500">
               Код используется в URL и API, подпись показывается покупателю, алиасы объединяют старые значения.
             </p>
           </div>
-          <Button type="button" onClick={addValue} className="bg-indigo-600 text-white hover:bg-indigo-500">
-            <Plus className="h-4 w-4" />
-            Добавить значение
-          </Button>
+          {supportsValues && (
+            <div>
+              <Button type="button" onClick={addValue} className="bg-indigo-600 text-white hover:bg-indigo-500">
+                <Plus className="h-4 w-4" />
+                Добавить значение
+              </Button>
+            </div>
+          )}
         </div>
 
         {message && (
@@ -167,7 +223,9 @@ export default function CatalogAttributeDictionaryEditor({
           ))}
           {selectedValues.length === 0 && (
             <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">
-              Значений пока нет. Добавьте первое каноническое значение.
+              {supportsValues
+                ? 'Типовых значений пока нет. При необходимости добавьте первое.'
+                : 'Для этого атрибута типовые значения не используются. Можно изменить его название выше.'}
             </div>
           )}
         </div>

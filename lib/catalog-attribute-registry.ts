@@ -86,7 +86,7 @@ export async function upsertCatalogAttributeDictionaryValue(input: {
 
 export async function updateCatalogAttributeDefinition(
   code: string,
-  patch: Pick<CatalogAttributeDefinition, 'show_as_characteristic' | 'use_as_filter' | 'use_as_variant_dimension' | 'active'>,
+  patch: Partial<Pick<CatalogAttributeDefinition, 'label' | 'category_scope' | 'value_type' | 'unit' | 'sort_order' | 'parser_rules' | 'aliases' | 'show_as_characteristic' | 'use_as_filter' | 'use_as_variant_dimension' | 'active'>>,
 ) {
   return updateRailsCatalogAttributeDefinition(code, patch) as Promise<CatalogAttributeDefinition>
 }

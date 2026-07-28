@@ -12,6 +12,7 @@ const REGISTRY_PATH = '/admin/filter-characteristics'
 
 export async function updateCatalogAttributeDefinitionAction(input: {
   code: string
+  label?: string
   show_as_characteristic: boolean
   use_as_filter: boolean
   use_as_variant_dimension: boolean
@@ -23,7 +24,8 @@ export async function updateCatalogAttributeDefinitionAction(input: {
     if (!code) return { success: false, error: 'Не указан код атрибута' }
 
     const definition = await updateCatalogAttributeDefinition(code, {
-      show_as_characteristic: Boolean(input.show_as_characteristic),
+      ...(input.label?.trim() ? { label: input.label.trim() } : {}),
+      show_as_characteristic: true,
       use_as_filter: Boolean(input.use_as_filter),
       use_as_variant_dimension: Boolean(input.use_as_variant_dimension),
       active: Boolean(input.active),

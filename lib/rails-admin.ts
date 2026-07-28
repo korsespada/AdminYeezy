@@ -1341,7 +1341,7 @@ export async function syncRailsCatalogAttributeRegistry(input: { definitions: an
   })
 }
 
-export async function updateRailsCatalogAttributeDefinition(code: string, definition: Record<string, boolean>) {
+export async function updateRailsCatalogAttributeDefinition(code: string, definition: Record<string, unknown>) {
   const result = await railsFetch<{ definition: any }>(
     `/admin/catalog_attribute_registry/definitions/${encodeURIComponent(code)}`,
     {

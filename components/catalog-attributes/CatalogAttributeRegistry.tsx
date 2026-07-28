@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { BookOpen, CheckCircle2, Loader2, Save, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { updateCatalogAttributeDefinitionAction } from '@/actions/catalog-attribute-registry'
 import CatalogAttributeDictionaryEditor from '@/components/catalog-attributes/CatalogAttributeDictionaryEditor'
@@ -25,6 +25,10 @@ export default function CatalogAttributeRegistry({
   const [selectedCategory, setSelectedCategory] = useState('')
   const [activeView, setActiveView] = useState<'schema' | 'dictionary'>('schema')
   const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    setDefinitions(initialDefinitions)
+  }, [initialDefinitions])
   const categoryCodes = new Set(
     selectedCategory
       ? getCatalogAttributeDefinitionsForCategory(selectedCategory).map((item) => item.code)
@@ -83,7 +87,7 @@ export default function CatalogAttributeRegistry({
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
-        <InfoCard title="Характеристика" text="Показывается в карточке товара как структурированное значение." />
+        <InfoCard title="Характеристика" text="Любой включённый атрибут автоматически показывается в карточке товара." />
         <InfoCard title="Фильтр" text="Используется для фильтрации товаров на сайте и в админке." />
         <InfoCard title="Вариант товара" text="Создаёт выбираемый вариант, например конкретный размер или цвет." />
       </div>
@@ -125,7 +129,6 @@ export default function CatalogAttributeRegistry({
               <tr>
                 <th className="px-5 py-4">Атрибут</th>
                 <th className="px-4 py-4">Категории</th>
-                <th className="px-4 py-4 text-center">Характеристика</th>
                 <th className="px-4 py-4 text-center">Фильтр</th>
                 <th className="px-4 py-4 text-center">Вариант</th>
                 <th className="px-4 py-4 text-center">Включён</th>
@@ -163,11 +166,6 @@ export default function CatalogAttributeRegistry({
                     <div className="mt-1 text-xs text-slate-500">{valueTypeLabel(definition.value_type)}</div>
                   </td>
                   <ToggleCell
-                    checked={definition.show_as_characteristic}
-                    label={`Показывать «${definition.label}» как характеристику`}
-                    onChange={(checked) => update(definition.code, { show_as_characteristic: checked })}
-                  />
-                  <ToggleCell
                     checked={definition.use_as_filter}
                     label={`Использовать «${definition.label}» как фильтр`}
                     onChange={(checked) => update(definition.code, { use_as_filter: checked })}
@@ -177,7 +175,7 @@ export default function CatalogAttributeRegistry({
                     label={`Использовать «${definition.label}» как вариант товара`}
                     onChange={(checked) => update(definition.code, { use_as_variant_dimension: checked })}
                   />
-                  <ToggleCell
+                  <SwitchCell
                     checked={definition.active}
                     label={`Атрибут «${definition.label}» включён`}
                     onChange={(checked) => update(definition.code, { active: checked })}
@@ -284,6 +282,35 @@ function ToggleCell({
         onCheckedChange={(value) => onChange(value === true)}
         className="border-slate-600 data-[state=checked]:border-indigo-500 data-[state=checked]:bg-indigo-600"
       />
+    </td>
+  )
+}
+
+function SwitchCell({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  label: string
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <td className="px-4 py-4 text-center align-top">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative inline-flex h-6 w-11 rounded-full border transition-colors ${
+          checked ? 'border-indigo-500 bg-indigo-600' : 'border-slate-600 bg-slate-800'
+        }`}
+      >
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0.5'
+        }`} />
+      </button>
     </td>
   )
 }
