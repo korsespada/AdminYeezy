@@ -300,7 +300,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     const result = await reviewSeoAiBatchAction(id, action)
     if (!result.success) {
       setStatus('error', result.error || 'Не удалось выполнить массовое действие')
-      return false
+      return null
     }
 
     const batchDrafts: SeoAiGeneration[] = result.data.generations || []
@@ -308,7 +308,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     setBatches((prev) => prev.map((batch) => batch.id === id ? result.data.batch : batch))
     const errors = result.data.errors?.length || 0
     setStatus(errors > 0 ? 'error' : 'success', `Обработано товаров: ${result.data.processed}${errors > 0 ? ` · ошибок: ${errors}` : ''}`)
-    return errors === 0
+    return batchDrafts
   }
 
   function handleGenerationResult(result: any, successText: string) {
@@ -753,7 +753,7 @@ function DraftFolder({
   drafts: SeoAiGeneration[]
   attributeDefinitions: CatalogAttributeDefinition[]
   onRename: (id: string, name: string) => Promise<boolean>
-  onBulkAction: (id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<boolean>
+  onBulkAction: (id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<SeoAiGeneration[] | null>
   onChange: (draft: SeoAiGeneration) => void
   onDelete: (id: string) => void
 }) {
@@ -831,7 +831,10 @@ function DraftFolder({
           : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
     if (!window.confirm(confirmation)) return
 
-    startReviewing(async () => { await onBulkAction(batch.id, action) })
+    startReviewing(async () => {
+      const updatedDrafts = await onBulkAction(batch.id, action)
+      if (updatedDrafts) setFolderDrafts(updatedDrafts)
+    })
   }
 
   function applyDecisionGroup(group: SeoAiDecisionGroup) {
