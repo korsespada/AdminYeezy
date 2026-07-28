@@ -10,6 +10,7 @@ import { LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from '
 import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
+import CategoryBrowser from '@/components/products/CategoryBrowser'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,6 +28,7 @@ interface ProductListProps {
   activeSubcategoryIds?: string[]
   filterFacets?: ProductFilterFacets
   totalItems: number
+  showCategoryBrowser?: boolean
   pagination?: React.ReactNode
 }
 
@@ -40,6 +42,7 @@ export default function ProductList({
   activeSubcategoryIds = [],
   filterFacets,
   totalItems,
+  showCategoryBrowser = false,
   pagination,
 }: ProductListProps) {
   const router = useRouter()
@@ -125,6 +128,23 @@ export default function ProductList({
       router.push(url)
     })
   }, [router])
+
+  const handleCategorySelect = useCallback((categoryId: string) => {
+    const params = new URLSearchParams(routeKey)
+    params.set('category', categoryId)
+    params.delete('page')
+    params.delete('subcategory')
+    params.delete('attributeKey')
+    params.delete('attributeValue')
+    handleNavigation(`/admin?${params.toString()}`)
+  }, [handleNavigation, routeKey])
+
+  const handleBrandSelect = useCallback((brandId: string) => {
+    const params = new URLSearchParams(routeKey)
+    params.set('brand', brandId)
+    params.delete('page')
+    handleNavigation(`/admin?${params.toString()}`)
+  }, [handleNavigation, routeKey])
 
   const hasBulkUpdates = Boolean(
     selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim(),
@@ -235,26 +255,28 @@ export default function ProductList({
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-sm shrink-0">
-                  <Button
-                    type="button"
-                    variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                    size="icon"
-                    onClick={() => handleViewModeChange('grid')}
-                    className={viewMode === 'grid' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={viewMode === 'list' ? 'default' : 'ghost'}
-                    size="icon"
-                    onClick={() => handleViewModeChange('list')}
-                    className={viewMode === 'list' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
-                  >
-                    <List className="w-4 h-4" />
-                  </Button>
-                </div>
+                {!showCategoryBrowser && (
+                  <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-sm shrink-0">
+                    <Button
+                      type="button"
+                      variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                      size="icon"
+                      onClick={() => handleViewModeChange('grid')}
+                      className={viewMode === 'grid' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={viewMode === 'list' ? 'default' : 'ghost'}
+                      size="icon"
+                      onClick={() => handleViewModeChange('list')}
+                      className={viewMode === 'list' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
+                    >
+                      <List className="w-4 h-4" />
+                    </Button>
+                  </div>
+                )}
 
                 <Button
                   type="button"
@@ -270,6 +292,15 @@ export default function ProductList({
             {/* Content Display */}
             {isNavigationPending ? (
               <ProductSearchSkeleton viewMode={viewMode} />
+            ) : showCategoryBrowser ? (
+              <CategoryBrowser
+                categories={categories}
+                subcategories={subcategories}
+                brands={brands}
+                filterFacets={filterFacets}
+                onCategorySelect={handleCategorySelect}
+                onBrandSelect={handleBrandSelect}
+              />
             ) : products.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="w-24 h-24 bg-slate-800 rounded-full flex items-center justify-center mb-4">
@@ -338,7 +369,7 @@ export default function ProductList({
             )}
 
             {/* Pagination injection */}
-            {!isNavigationPending && pagination}
+            {!isNavigationPending && !showCategoryBrowser && pagination}
           </div>
         </div>
       </main>

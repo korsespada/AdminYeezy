@@ -45,6 +45,18 @@ export default async function AdminPage({
   const genderFilter = params.gender || ''
   const attributeKeyFilter = params.attributeKey || ''
   const attributeValueFilter = attributeKeyFilter ? params.attributeValue || '' : ''
+  const hasActiveFilters = Boolean(
+    nameSearch
+    || descriptionSearch
+    || priceMin
+    || priceMax
+    || brandFilter
+    || categoryFilter
+    || subcategoryFilter
+    || genderFilter
+    || attributeKeyFilter
+    || attributeValueFilter
+  )
 
   const buildPaginationUrl = (p: number) => {
     const params = new URLSearchParams()
@@ -94,7 +106,9 @@ export default async function AdminPage({
     }
 
     const [productPage, filterFacets, attributeDefinitions] = await Promise.all([
-      listRailsAdminProducts(productFilters),
+      hasActiveFilters
+        ? listRailsAdminProducts(productFilters)
+        : Promise.resolve({ products: [], totalItems: 0, totalPages: 0 }),
       getRailsProductFilterFacets({
         name: nameSearch,
         description: descriptionSearch,
@@ -113,7 +127,8 @@ export default async function AdminPage({
     ])
 
     const products = productPage.products
-    const totalItems = productPage.totalItems
+    const catalogTotal = filterFacets.categoryFacets.reduce((sum, facet) => sum + Number(facet.count || 0), 0)
+    const totalItems = hasActiveFilters ? productPage.totalItems : catalogTotal
     const totalPages = productPage.totalPages
     const shownFrom = products.length > 0 ? offset + 1 : 0
     const shownTo = products.length > 0 ? offset + products.length : 0
@@ -144,6 +159,7 @@ export default async function AdminPage({
         activeSubcategoryIds={[]}
         filterFacets={filterFacets}
         totalItems={totalItems}
+        showCategoryBrowser={!hasActiveFilters}
         pagination={
           totalItems > 0 && (
             <div className="mt-6 flex flex-col md:flex-row items-center justify-between border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 rounded-xl gap-4">
