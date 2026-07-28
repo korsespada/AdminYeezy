@@ -53,7 +53,6 @@ const PRODUCT_FIELDS = [
   { key: 'seo_description', outputKey: 'seo_description', label: 'SEO description' },
   { key: 'gender', outputKey: 'gender', label: 'Гендер' },
   { key: 'catalog_attributes', outputKey: 'catalog_attributes', label: 'Характеристики' },
-  { key: 'catalog_attributes.model_name', outputKey: 'catalog_attributes.model_name', label: 'Модель (только вручную)' },
   { key: 'subcategory_suggestion', outputKey: 'subcategory_suggestion', label: 'Подкатегория' },
   { key: 'image_alt_texts', outputKey: 'image_alt_texts', label: 'Alt фото' },
 ]
@@ -1145,7 +1144,7 @@ function DraftCard({
   onChange: (draft: SeoAiGeneration) => void
   onDelete: (id: string) => void
 }) {
-  const [fields, setFields] = useState(PRODUCT_FIELDS.filter((field) => field.key !== 'catalog_attributes.model_name' && field.key !== 'subcategory_suggestion').map((field) => field.key))
+  const [fields, setFields] = useState(PRODUCT_FIELDS.filter((field) => field.key !== 'subcategory_suggestion').map((field) => field.key))
   const [expanded, setExpanded] = useState(!compact)
   const [isPending, startTransition] = useTransition()
   const outputText = JSON.stringify(draft.output, null, 2)
@@ -1245,7 +1244,7 @@ function DraftCard({
         {draft.error_message && <div className="rounded border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{draft.error_message}</div>}
         {draft.status === 'draft' && draft.draft_type === 'product' && (
           <div className="grid min-w-0 gap-3 xl:grid-cols-2">
-            {PRODUCT_FIELDS.filter((field) => !['catalog_attributes', 'catalog_attributes.model_name', 'subcategory_suggestion', 'image_alt_texts'].includes(field.key)).map((field) => {
+            {PRODUCT_FIELDS.filter((field) => !['catalog_attributes', 'subcategory_suggestion', 'image_alt_texts'].includes(field.key)).map((field) => {
               const before = productBefore[field.key]
               const after = nestedOutputValue(draft.output, field.outputKey)
               if (after === undefined || after === null || after === '') return null
