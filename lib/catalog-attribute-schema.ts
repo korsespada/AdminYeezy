@@ -135,6 +135,15 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     filter: true,
     aliases: ['водозащита', 'водонепроницаемость', 'water resistance'],
   }),
+  definition('glass_material', 'Стекло', 'Часы', 'enum', 202, {
+    filter: true,
+    values: ['Сапфировое', 'Минеральное', 'Акриловое', 'Hardlex'],
+  }),
+  definition('clasp_type', 'Тип застёжки', 'Часы, ювелирные изделия и бижутерия', 'enum', 204, {
+    filter: true,
+    aliases: ['застёжка', 'тип застёжки', 'clasp'],
+  }),
+  definition('power_reserve', 'Запас хода', 'Часы', 'number', 206, { unit: 'ч' }),
   definition('jewelry_metal', 'Ювелирный металл', 'Ювелирные изделия и бижутерия', 'multi_enum', 210, {
     filter: true,
     aliases: ['metal', 'металл украшения'],
@@ -143,6 +152,14 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   definition('stones', 'Камни', 'Ювелирные изделия и бижутерия', 'multi_enum', 220, {
     filter: true,
     aliases: ['камень', 'камни', 'вставки'],
+  }),
+  definition('metal_purity', 'Проба металла', 'Ювелирные изделия', 'enum', 222, {
+    filter: true,
+    values: ['375 проба', '585 проба', '750 проба', '916 проба', '925 проба', '950 проба', '999 проба'],
+  }),
+  definition('stone_origin', 'Происхождение камней', 'Ювелирные изделия и бижутерия', 'multi_enum', 224, {
+    filter: true,
+    values: ['Натуральные', 'Выращенные'],
   }),
   definition('jewelry_size', 'Размер украшения', 'Кольца и браслеты', 'size', 230, {
     variant: true,
@@ -164,6 +181,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     filter: true,
     values: ['Без замка', 'Кодовый', 'TSA'],
   }),
+  definition('luggage_size', 'Размер багажа', 'Чемоданы', 'enum', 280, {
+    filter: true,
+    values: ['Ручная кладь', 'Средний', 'Большой'],
+  }),
 ]
 
 export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
@@ -181,11 +202,11 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Часы',
-    attributes: ['watch_movement', 'watch_case_size', 'watch_case_material', 'strap_material', 'dial_color', 'water_resistance'],
+    attributes: ['watch_movement', 'watch_case_size', 'watch_case_material', 'strap_material', 'dial_color', 'water_resistance', 'glass_material', 'clasp_type', 'power_reserve'],
   },
   {
     category: 'Ювелирные изделия',
-    attributes: ['jewelry_metal', 'stones', 'weight'],
+    attributes: ['jewelry_metal', 'metal_purity', 'stones', 'stone_origin', 'weight', 'clasp_type'],
     subcategories: {
       Кольца: ['jewelry_size'],
       Браслеты: ['jewelry_size', 'jewelry_length'],
@@ -194,7 +215,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Бижутерия',
-    attributes: ['materials', 'jewelry_metal', 'stones'],
+    attributes: ['materials', 'jewelry_metal', 'stones', 'stone_origin', 'clasp_type'],
     subcategories: {
       Кольцо: ['jewelry_size'],
       Браслет: ['jewelry_size', 'jewelry_length'],
@@ -209,7 +230,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
       'Головные уборы': ['sizes'],
       Перчатки: ['sizes'],
       Ремни: ['sizes'],
-      Чемоданы: ['sizes', 'capacity', 'weight', 'wheel_count', 'lock_type'],
+      Чемоданы: ['sizes', 'capacity', 'weight', 'wheel_count', 'lock_type', 'luggage_size'],
     },
   },
 ]

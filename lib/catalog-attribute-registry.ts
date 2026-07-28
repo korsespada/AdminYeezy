@@ -29,6 +29,7 @@ export async function getCatalogAttributeDefinitions(): Promise<CatalogAttribute
       }
     }
     const overridesByCode = new Map(payload.definitions.map((item) => [item.code, item]))
+    const defaultsByCode = new Map(DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => [item.code, item]))
     const valuesByCode = new Map<string, CatalogAttributeDictionaryValue[]>()
 
     for (const value of payload.values as CatalogAttributeDictionaryValue[]) {
@@ -37,18 +38,35 @@ export async function getCatalogAttributeDefinitions(): Promise<CatalogAttribute
       valuesByCode.set(value.attribute_code, current)
     }
 
-    return DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.map((definition) => {
-      const dictionaryValues = valuesByCode.get(definition.code) || []
+    return [...new Set([...defaultsByCode.keys(), ...overridesByCode.keys()])].map((code, index) => {
+      const definition = defaultsByCode.get(code) || genericDefinition(code, index)
+      const dictionaryValues = valuesByCode.get(code) || []
       return {
         ...definition,
-        ...overridesByCode.get(definition.code),
+        ...overridesByCode.get(code),
         values: dictionaryValues.filter((item) => item.active).map((item) => item.canonical_value),
         dictionary_values: dictionaryValues,
       }
-    })
+    }).sort((left, right) => left.sort_order - right.sort_order)
   } catch (error) {
     console.warn('[catalog-attribute-registry] Rails fallback to local defaults:', error)
     return localFallbackDefinitions()
+  }
+}
+
+function genericDefinition(code: string, index: number): CatalogAttributeDefinition {
+  return {
+    code,
+    label: code.replaceAll('_', ' '),
+    category_scope: 'Все категории',
+    value_type: 'text',
+    show_as_characteristic: true,
+    use_as_filter: false,
+    use_as_variant_dimension: false,
+    parser_rules: [],
+    aliases: [],
+    sort_order: 10_000 + index,
+    active: true,
   }
 }
 
