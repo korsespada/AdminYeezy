@@ -65,6 +65,21 @@ const metalDefinition: CatalogAttributeDefinition = {
   }],
 }
 
+const purityDefinition: CatalogAttributeDefinition = {
+  ...colorDefinition,
+  code: 'metal_purity',
+  label: 'Проба металла',
+  category_scope: 'Ювелирные изделия',
+  value_type: 'enum',
+  dictionary_values: [{
+    ...colorDefinition.dictionary_values![0],
+    id: '925',
+    attribute_code: 'metal_purity',
+    filter_value: '925',
+    canonical_value: '925 проба',
+  }],
+}
+
 const watchCaseDefinition: CatalogAttributeDefinition = {
   ...colorDefinition,
   code: 'watch_case_size',
@@ -92,7 +107,11 @@ function draft(id: string): SeoAiGeneration {
     vision_result: {},
     output: {
       suggested_name: 'Серьги-пусеты с розовой вставкой',
-      catalog_attributes: { colors: ['pink'], jewelry_metal: { family: 'silver', purity: '925', filter_value: 'silver', display_value: 'Серебро' } },
+      catalog_attributes: {
+        colors: ['pink'],
+        jewelry_metal: { family: 'silver', filter_value: 'silver', display_value: 'Серебро' },
+        metal_purity: { filter_value: '925', display_value: '925 проба' },
+      },
       subcategory_suggestion: { kind: 'existing', name: 'Серьги', confidence: 0.99, evidence: 'Форма соответствует серьгам-пусетам.' },
     },
     prompt_snapshot: {},
@@ -121,7 +140,7 @@ describe('SeoAiStudio queue', () => {
         brands={[]}
         categories={[]}
         subcategories={[]}
-        attributeDefinitions={[colorDefinition, metalDefinition]}
+        attributeDefinitions={[colorDefinition, metalDefinition, purityDefinition]}
       />,
     )
 
@@ -134,7 +153,8 @@ describe('SeoAiStudio queue', () => {
     expect(screen.getByText('Цвет')).toBeInTheDocument()
     expect(screen.getAllByText('Розовый')).toHaveLength(2)
     expect(screen.queryByText('[object Object]')).not.toBeInTheDocument()
-    expect(screen.getByText('Серебро, 925')).toBeInTheDocument()
+    expect(screen.getByText('Серебро')).toBeInTheDocument()
+    expect(screen.getByText('925 проба')).toBeInTheDocument()
     expect(screen.getByText('Подкатегория: Серьги')).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: 'Оригинальная карточка' })[0]).toHaveAttribute('href', 'https://yeezyunique.ru/product/chanel-earrings')
   })
