@@ -210,16 +210,61 @@ function formatAttributeValue(definition: CatalogAttributeDefinition, value: unk
     const values = (value as Record<string, unknown>).values
     if (Array.isArray(values)) return values.join(', ')
   }
+  if (Array.isArray(value)) {
+    return value.map((item) => formatAttributePart(definition, item)).filter(Boolean).join(', ')
+  }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const item = value as Record<string, unknown>
     for (const key of ['display_value', 'value', 'filter_value']) {
-      if (typeof item[key] === 'string' || typeof item[key] === 'number') return String(item[key])
+      if (typeof item[key] === 'string' || typeof item[key] === 'number') return formatAttributePart(definition, item[key])
     }
     for (const key of ['names', 'raw_values', 'display_values', 'filter_values', 'families', 'values']) {
-      if (Array.isArray(item[key])) return item[key].map(String).join(', ')
+      if (Array.isArray(item[key])) return item[key].map((entry) => formatAttributePart(definition, entry)).filter(Boolean).join(', ')
     }
+    return formatAttributeObject(definition, item)
   }
-  return formatValue(value)
+  return formatAttributePart(definition, value)
+}
+
+function formatAttributePart(definition: CatalogAttributeDefinition, value: unknown): string {
+  if (value && typeof value === 'object') {
+    return Array.isArray(value)
+      ? value.map((item) => formatAttributePart(definition, item)).filter(Boolean).join(', ')
+      : formatAttributeObject(definition, value as Record<string, unknown>)
+  }
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  const normalized = text.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+  const dictionaryValue = definition.dictionary_values?.find((item) => (
+    [item.filter_value, item.canonical_value, ...item.aliases]
+      .some((candidate) => String(candidate).toLocaleLowerCase('ru-RU').replace(/ё/g, 'е') === normalized)
+  ))
+  if (definition.code === 'stones' && normalized === 'quartz') return 'Кварц'
+  return dictionaryValue?.canonical_value || TECHNICAL_VALUE_LABELS[normalized] || text
+}
+
+function formatAttributeObject(definition: CatalogAttributeDefinition, value: Record<string, unknown>) {
+  const name = value.name || value.type
+  if (name) {
+    const title = String(name).trim()
+    const naturalTitle = value.natural === true && !/^натуральн/i.test(title) ? `Натуральный ${title}` : title
+    return [naturalTitle, value.color, value.shape].map(String).map((item) => item.trim()).filter(Boolean).join(', ')
+  }
+  return Object.values(value)
+    .filter((item) => typeof item === 'string' || typeof item === 'number')
+    .map((item) => formatAttributePart(definition, item))
+    .filter(Boolean)
+    .join(', ')
+}
+
+const TECHNICAL_VALUE_LABELS: Record<string, string> = {
+  rose_gold: 'Розовое золото', white_gold: 'Белое золото', yellow_gold: 'Жёлтое золото', combined_gold: 'Комбинированное золото',
+  gold: 'Золото', silver: 'Серебро', platinum: 'Платина', steel: 'Сталь', metal: 'Металл', titanium: 'Титан', ceramic: 'Керамика', carbon: 'Карбон',
+  leather: 'Кожа', rubber: 'Каучук', textile: 'Текстиль', plastic: 'Пластик',
+  diamond: 'Бриллианты', lab_diamond: 'Выращенные бриллианты', mother_of_pearl: 'Перламутр', pearl: 'Жемчуг',
+  sapphire: 'Сапфиры', emerald: 'Изумруды', ruby: 'Рубины', malachite: 'Малахит', onyx: 'Оникс', agate: 'Агат',
+  moissanite: 'Муазаниты', chalcedony: 'Халцедон', cubic_zirconia: 'Фианиты', pietersite: 'Петерсит', rhinestone: 'Стразы',
+  quartz: 'Кварцевый', mechanical: 'Механический', automatic: 'Автоматический',
 }
 
 function empty(value: unknown) {

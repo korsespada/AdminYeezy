@@ -89,7 +89,14 @@ function localFallbackDefinitions(): CatalogAttributeDefinition[] {
 }
 
 function fallbackFilterValue(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, '_')
+  const transliterated = [...value.trim().toLowerCase()].map((letter) => CYRILLIC_TO_LATIN[letter] ?? letter).join('')
+  return transliterated.replace(/[ -]+/g, '_').replace(/[^a-z0-9_:.]/g, '').replace(/\./g, '_')
+}
+
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+  х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
 }
 
 async function legacyRegistryPayload(currentValues: any[]) {
@@ -123,7 +130,10 @@ function legacyValue(item: any, currentValues: any[]) {
       .map(normalizeDictionaryText)
       .some((candidate) => legacyCandidates.includes(candidate))
   ))
-  const filterValue = match?.filter_value || asciiFilterValue(item.aliases) || `legacy_${item.id.replace(/\D/g, '')}`
+  const filterValue = match?.filter_value
+    || asciiFilterValue(item.aliases)
+    || fallbackFilterValue(item.canonical_value)
+    || `value_${item.id.replace(/\D/g, '')}`
   const aliases = [...new Set([...Array(match?.aliases), ...Array(item.aliases)])].filter((alias) => (
     !sameAttribute.some((value) => (
       value.filter_value !== filterValue

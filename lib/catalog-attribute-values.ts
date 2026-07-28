@@ -140,7 +140,7 @@ export function normalizeAttributeValue(code: string, value: unknown): unknown {
     return /^international$/i.test(system) ? 'International' : system.toUpperCase()
   }
   if (Array.isArray(value)) return normalizeList(value)
-  if (typeof value === 'string') return value.trim().replace(/\s*[xх×]\s*/gi, ' × ')
+  if (typeof value === 'string') return value.trim().replace(/(\d)\s*[xх×]\s*(?=\d)/gi, '$1 × ')
   if (typeof value === 'number' || typeof value === 'boolean') return value
   return undefined
 }
