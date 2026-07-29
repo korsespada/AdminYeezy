@@ -88,6 +88,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [folderFilter, setFolderFilter] = useState<string>('all')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(initialData[0] ? [initialData[0].id] : []))
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  useEffect(() => {
+    setFolderFilter('all')
+  }, [initialData])
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [modalState, setModalState] = useState<ModalState | null>(null)
@@ -135,6 +139,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   const openFile = (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
+    if (!batch.isSynthetic && file.batch_id) {
+      openBatchProducts(batch)
+      return
+    }
     setModalState({
       localPath: file.result_path || '',
       rawPath: batch.raw_path,

@@ -2,7 +2,7 @@
 
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
-import { type Category, type Product, type Subcategory } from '@/lib/types';
+import { type Brand, type Category, type Product, type Subcategory } from '@/lib/types';
 import { Trash2, Copy } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
@@ -26,9 +26,12 @@ interface ProductCardProps {
     onToggleSelect: (id: string) => void;
     categories?: Category[];
     subcategories?: Subcategory[];
+    brands?: Brand[];
+    onInlineUpdate?: (product: Product, patch: Partial<Product>) => Promise<void> | void;
+    allowDuplicate?: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [] }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -40,8 +43,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         const brand = product.expand?.brand
         if (Array.isArray(brand)) return brand.map((item) => item.name).join(', ')
         if (brand && typeof brand === 'object') return brand.name
-        return 'Без бренда'
-    }, [product.expand?.brand])
+        const brandId = Array.isArray(product.brand) ? product.brand[0] : product.brand
+        return brands.find((item) => item.id === brandId)?.name || 'Без бренда'
+    }, [brands, product.brand, product.expand?.brand])
 
     const categoryLabel = useMemo(() => {
         const categoryName = product.expand?.category?.name
@@ -107,6 +111,16 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         }))));
 
         try {
+            if (onInlineUpdate) {
+                const patch = editingField === 'price'
+                    ? { price: nextPrice, price_on_request: priceOnRequest }
+                    : { name: editValue.trim() }
+                await onInlineUpdate(product, patch)
+                onUpdate({ ...product, ...patch })
+                setEditingField(null)
+                setIsSaving(false)
+                return
+            }
             const result = await updateProductAction(product.id, formData);
             if (result.success) {
                 const updatedProduct = {
@@ -227,7 +241,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 </div>
                 {/* Delete button on hover */}
                 <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button
+                    {allowDuplicate && <Button
                         type="button"
                         variant="ghost"
                         size="icon"
@@ -236,7 +250,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         title="Удалить"
                     >
                         <Trash2 className="w-4 h-4" />
-                    </Button>
+                    </Button>}
                     <Button
                         type="button"
                         variant="ghost"

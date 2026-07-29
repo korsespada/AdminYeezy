@@ -51,13 +51,13 @@ import {
   linkBatchToTaskAction,
   pushBatchToCatalogAction,
 } from "@/actions/suppliers";
-import { processAiAction, targetedAiEditAction } from "@/actions/ai-process";
+import { processAiAction } from "@/actions/ai-process";
 import { startBatchAiAction } from "@/actions/batch-ai";
 import Image from "next/image";
-import Link from "next/link";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
 import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
+import AdminProductCard from "@/components/products/ProductCard";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -477,11 +477,6 @@ export default function CsvImportApp({
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
-  const [targetedAiInstruction, setTargetedAiInstruction] = useState("");
-  const [isTargetedAiEditing, setIsTargetedAiEditing] = useState(false);
-  const [targetedAiMsg, setTargetedAiMsg] = useState<string | null>(null);
-  const [targetedAiUsePhoto, setTargetedAiUsePhoto] = useState(false);
-  const [targetedAiProgress, setTargetedAiProgress] = useState<{ current: number; total: number } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -579,27 +574,6 @@ export default function CsvImportApp({
       return true;
     });
   }, [products, filterBrand, filterCategory, filterSubcategory, filterGender]);
-
-  const handleModeChange = (mode: "upload" | "local") => {
-    setImportMode(mode);
-    localStorage.setItem("csv_import_mode", mode);
-    setProducts([]);
-    setColumns([]);
-    setResult(null);
-    setFileName("");
-    setIsDirty(false);
-    setSaveMsg(null);
-    setIsAiProcessed(false);
-    setFilterBrand("");
-    setFilterCategory("");
-    setFilterSubcategory("");
-    setFilterGender("");
-    setBulkBrand("");
-    setBulkCategory("");
-    setBulkSubcategory("");
-    setSelectedForMerge([]);
-    setPreviousProducts(null);
-  };
 
   // ─── Upload Mode ──────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
@@ -1252,141 +1226,19 @@ export default function CsvImportApp({
     }
   };
 
-  const handleTargetedAiEdit = async () => {
-    if (!targetedAiInstruction.trim() || products.length === 0 || !lookups) {
-      console.warn("[targetedAiEdit:client] skipped", {
-        hasInstruction: Boolean(targetedAiInstruction.trim()),
-        products: products.length,
-        hasLookups: Boolean(lookups),
-      });
-      return;
-    }
-
-    const targetIndices = selectedForMerge.length > 0
-      ? selectedForMerge
-      : filteredProducts.map((product) => products.indexOf(product)).filter((index) => index >= 0);
-
-    if (targetIndices.length === 0) {
-      console.warn("[targetedAiEdit:client] skipped: no target indices", {
-        selected: selectedForMerge.length,
-        filtered: filteredProducts.length,
-        products: products.length,
-      });
-      return;
-    }
-
-    if (
-      selectedForMerge.length === 0 &&
-      targetIndices.length === products.length &&
-      !confirm(`Будут обработаны все ${targetIndices.length} товаров. Продолжить?`)
-    ) {
-      return;
-    }
-
-    setIsTargetedAiEditing(true);
-    setTargetedAiMsg(null);
-    setTargetedAiProgress({ current: 0, total: targetIndices.length });
-
-    const CHUNK_SIZE = 10;
-    const errors: string[] = [];
-    let appliedCount = 0;
-    let nextProducts: CsvProduct[] = [...products];
-    setPreviousProducts([...products]);
-    console.log("[targetedAiEdit:client] start", {
-      targetCount: targetIndices.length,
-      selected: selectedForMerge.length,
-      filtered: filteredProducts.length,
-      batchId,
-      localPath,
-      supplierId,
-      includePhotos: targetedAiUsePhoto,
-    });
-
-    for (let offset = 0; offset < targetIndices.length; offset += CHUNK_SIZE) {
-      const chunkIndices = targetIndices.slice(offset, offset + CHUNK_SIZE);
-      const items = chunkIndices.map((index) => ({
-        index,
-        product: nextProducts[index],
-        previousProduct: index > 0 ? nextProducts[index - 1] : null,
-        nextProduct: index + 1 < nextProducts.length ? nextProducts[index + 1] : null,
-      }));
-
-      const res = await targetedAiEditAction({
-        instruction: targetedAiInstruction,
-        items,
-        lookups,
-        supplierId,
-        includePhotos: targetedAiUsePhoto,
-        batchId,
-        currentPath: localPath,
-      });
-
-      console.log("[targetedAiEdit:client] chunk result", {
-        offset,
-        chunkSize: items.length,
-        success: res.success,
-        patches: res.data?.patches?.length || 0,
-        errors: res.data?.errors?.length || (res.error ? 1 : 0),
-        error: res.error || null,
-      });
-
-      const patches = res.data?.patches || [];
-      const chunkErrors = res.data?.errors || (res.error ? [res.error] : []);
-      errors.push(...chunkErrors);
-
-      if (patches.length > 0) {
-        nextProducts = nextProducts.map((product, index) => {
-          const patch = patches.find((item: any) => item.index === index)?.patch;
-          return patch ? { ...product, ...patch } : product;
-        });
-        appliedCount += patches.length;
-        setProducts([...nextProducts]);
-        setIsDirty(true);
-
-        if (batchId) {
-          const saveRes = await saveBatchProductsAction(batchId, nextProducts);
-          if (saveRes.success) {
-            setIsDirty(false);
-          } else {
-            errors.push(`Ошибка сохранения БД: ${saveRes.error || "unknown"}`);
-            break;
-          }
-        } else if (localPath) {
-          const saveRes = await saveLocalCsvAction(localPath, nextProducts, columns, delimiter);
-          if (saveRes.success) {
-            setIsDirty(false);
-          } else {
-            errors.push(`Ошибка сохранения: ${saveRes.error || "unknown"}`);
-            break;
-          }
-        }
-      }
-
-      setTargetedAiProgress({
-        current: Math.min(offset + chunkIndices.length, targetIndices.length),
-        total: targetIndices.length,
-      });
-    }
-
-    setTargetedAiMsg(
-      errors.length
-        ? `✓ Обновлено ${appliedCount}, ошибок ${errors.length}`
-        : `✓ Обновлено ${appliedCount} товаров`
-    );
-    setTimeout(() => setTargetedAiMsg(null), 6000);
-    setTargetedAiProgress(null);
-    setIsTargetedAiEditing(false);
-  };
-
   // ─── Render ───────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans">
-      <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-slate-900 font-sans text-slate-200">
+      <div className="mx-auto max-w-[1600px] p-3 sm:p-4">
         {onClose && (
-          <div className="mb-4 flex justify-end">
+          <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-bold text-white">Товары выгрузки</h2>
+              <p className="truncate text-xs text-slate-500">{initialSupplierName || 'Поставщик не указан'}{batchId ? ` · ${products.length} товаров` : ''}</p>
+            </div>
             <button
               onClick={onClose}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors border border-slate-700"
+              className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700"
             >
               <X size={18} />
               Закрыть
@@ -1394,34 +1246,14 @@ export default function CsvImportApp({
           </div>
         )}
         
-        {/* Compact Mode Switchers */}
-        {!isBatchSource && (
-        <div className="flex items-center gap-4 mb-8 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700/50 w-fit">
-          <button
-            onClick={() => handleModeChange("upload")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${importMode === "upload" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-200"}`}
-          >
-            <Upload className="w-4 h-4" />
-            Загрузка файла
-          </button>
-          <button
-            onClick={() => handleModeChange("local")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${importMode === "local" ? "bg-indigo-600 text-white shadow-lg" : "text-slate-400 hover:text-slate-200"}`}
-          >
-            <HardDrive className="w-4 h-4" />
-            Локальный файл
-          </button>
-        </div>
-        )}
-
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 mb-8 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+          <div className="mb-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
             <div className="flex items-center gap-4">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Выбрано</span>
-                <span className="text-lg font-bold text-white">
-                  {products.length} <span className="text-sm font-normal text-slate-400">товаров</span>
+                <span className="text-base font-bold text-white">
+                  {products.length} <span className="text-xs font-normal text-slate-400">товаров</span>
                 </span>
               </div>
               
@@ -1442,7 +1274,7 @@ export default function CsvImportApp({
                 <>
                   <div className="h-10 w-px bg-slate-700 mx-2 hidden md:block" />
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full overflow-hidden bg-slate-700 border border-slate-600 flex-shrink-0 flex items-center justify-center">
+                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-600 bg-slate-700">
                       {initialSupplierAvatar ? (
                         <img src={initialSupplierAvatar} alt={initialSupplierName} className="w-full h-full object-cover" />
                       ) : (
@@ -1758,7 +1590,7 @@ export default function CsvImportApp({
         )}
 
         {/* File Info Bar */}
-        {products.length > 0 && fileName && (
+        {products.length > 0 && fileName && !isBatchSource && (
           <div className="mb-6 flex items-center justify-between p-3 bg-slate-800 rounded-xl border border-slate-700">
             <div className="flex items-center gap-3">
               <div
@@ -1913,64 +1745,6 @@ export default function CsvImportApp({
             </div>
           )}
 
-        {products.length > 0 && (
-          <div className="mb-6 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="text-sm font-bold text-white">Точечная AI-правка</div>
-                <div className="text-xs text-slate-400">
-                  Цель: {selectedForMerge.length > 0
-                    ? `${selectedForMerge.length} выбранных`
-                    : `${filteredProducts.length} показанных по фильтрам`}
-                </div>
-              </div>
-              {targetedAiMsg && (
-                <div className={`text-xs font-semibold ${targetedAiMsg.startsWith("✓") ? "text-emerald-400" : "text-red-400"}`}>
-                  {targetedAiMsg}
-                </div>
-              )}
-
-            </div>
-
-            <label className="mb-3 inline-flex items-center gap-2 text-xs font-medium text-slate-300">
-              <input
-                type="checkbox"
-                checked={targetedAiUsePhoto}
-                onChange={(event) => setTargetedAiUsePhoto(event.target.checked)}
-                className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-indigo-500"
-              />
-              Анализировать первое фото
-            </label>
-
-            <div className="flex flex-col gap-3 lg:flex-row">
-              <textarea
-                value={targetedAiInstruction}
-                onChange={(event) => setTargetedAiInstruction(event.target.value)}
-                rows={3}
-                placeholder="Например: Поменяй подкатегорию, name и description у товаров с подкатегорией Комплекты. Комплектов там нет, это единичные товары. Проанализируй первое фото и исходный текст из соседних строк."
-                className="min-h-[88px] flex-1 resize-y rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-indigo-500"
-              />
-              <button
-                onClick={handleTargetedAiEdit}
-                disabled={isTargetedAiEditing || !targetedAiInstruction.trim() || filteredProducts.length === 0}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-indigo-600/20 transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 lg:w-56"
-              >
-                {isTargetedAiEditing ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    {targetedAiProgress ? `${targetedAiProgress.current}/${targetedAiProgress.total}` : "Правлю..."}
-                  </>
-                ) : (
-                  <>
-                    <Zap className="h-4 w-4 text-amber-300 fill-amber-300" />
-                    Применить AI
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
         {products.length === 0 && isBatchSource && (
           <div className="mx-auto mb-10 max-w-2xl rounded-2xl border border-slate-700 bg-slate-800 p-10 text-center shadow-xl">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900">
@@ -2024,7 +1798,41 @@ export default function CsvImportApp({
               {filteredProducts.map((product) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
-                return (
+                const adminProduct = {
+                  id: String(product.id || product.external_id || realIndex),
+                  productId: product.external_id || String(product.id || realIndex),
+                  name: product.name,
+                  description: product.description,
+                  price: Number(product.price || 0),
+                  status: product.status,
+                  brand: product.brand ? [product.brand] : [],
+                  category: product.category,
+                  subcategory: product.subcategory,
+                  gender: product.gender || '',
+                  photos: product.photos || [],
+                  attributes: product.attributes || {},
+                  metadata: {},
+                  created: '', updated: '', collectionId: '', collectionName: 'products',
+                } as any;
+                return isBatchSource ? (
+                  <AdminProductCard
+                    key={`${product.external_id}-${realIndex}`}
+                    product={adminProduct}
+                    onEdit={() => setSelectedIdx(realIndex)}
+                    onDelete={() => handleRemove(realIndex)}
+                    onUpdate={() => undefined}
+                    selected={selectionOrder !== -1}
+                    onToggleSelect={() => toggleMergeSelection(realIndex)}
+                    brands={(lookups?.brands || []) as any}
+                    categories={(lookups?.categories || []) as any}
+                    subcategories={(lookups?.subcategories || []) as any}
+                    allowDuplicate={false}
+                    onInlineUpdate={async (_current, patch) => {
+                      if (patch.name !== undefined) updateProduct(realIndex, 'name', String(patch.name));
+                      if (patch.price !== undefined) updateProduct(realIndex, 'price', Number(patch.price));
+                    }}
+                  />
+                ) : (
                   <CsvProductCard
                     key={`${product.external_id}-${realIndex}`}
                     product={product}

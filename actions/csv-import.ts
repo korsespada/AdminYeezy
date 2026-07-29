@@ -13,6 +13,7 @@ import {
   type ProductAttributes,
 } from '@/lib/product-attributes'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { getRailsCatalogLookups } from '@/lib/rails-admin'
 
 export interface CsvProduct {
     id?: string | number
@@ -59,6 +60,17 @@ const BATCH_PRODUCT_COLUMNS = [
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
   { name: 'ai_processed', key: 'ai_processed' },
+  { name: 'variant_group_key', key: 'variant_group_key' },
+]
+
+const SUPPLIER_SCRIPT_BASE_COLUMNS = [
+  { name: 'external_id', key: 'external_id' }, { name: 'name', key: 'name' },
+  { name: 'description', key: 'description' }, { name: 'price', key: 'price' },
+  { name: 'brand', key: 'brand' }, { name: 'category', key: 'category' },
+  { name: 'subcategory', key: 'subcategory' }, { name: 'gender', key: 'gender' },
+  { name: 'photos', key: 'photos' }, { name: 'status', key: 'status' },
+  { name: 'h1', key: 'h1' }, { name: 'seo_title', key: 'seo_title' },
+  { name: 'seo_description', key: 'seo_description' }, { name: 'ai_processed', key: 'ai_processed' },
   { name: 'variant_group_key', key: 'variant_group_key' },
 ]
 
@@ -120,6 +132,7 @@ function serializeProductsToCsv(products: any[], columns = BATCH_PRODUCT_COLUMNS
   const header = effectiveColumns.map((c) => c.name).join(delimiter)
   const rows = products.map((p) => effectiveColumns.map((col) => {
     let val = p[col.key]
+    if ((val === undefined || val === null) && p.attributes && typeof p.attributes === 'object') val = p.attributes[col.key]
     if (val === undefined || val === null) val = ''
     if (Array.isArray(val)) val = JSON.stringify(val)
     if (col.key === 'attributes' && typeof val === 'object' && val !== null) val = JSON.stringify(normalizeProductAttributes(val))
@@ -129,6 +142,20 @@ function serializeProductsToCsv(products: any[], columns = BATCH_PRODUCT_COLUMNS
     return str.includes(delimiter) || str.includes('"') ? `"${str}"` : str
   }).join(delimiter))
   return [header, ...rows].join('\n')
+}
+
+function supplierScriptColumns(products: any[]) {
+  const keys = new Set<string>()
+  for (const product of products) {
+    for (const key of Object.keys(normalizeProductAttributes(product.attributes))) {
+      if (!SUPPLIER_SCRIPT_BASE_COLUMNS.some((column) => column.key === key)) keys.add(key)
+    }
+  }
+  return [
+    ...SUPPLIER_SCRIPT_BASE_COLUMNS,
+    ...[...keys].sort().map((key) => ({ name: key, key })),
+    { name: 'attributes', key: 'attributes' },
+  ]
 }
 
 function getWritableTmpDir() {
@@ -202,17 +229,7 @@ function parseServerCsv(text: string): CsvProduct[] {
  */
 export async function fetchLookupsAction() {
     await requireAdmin()
-
-    const [brands, categories, subcategories] = await Promise.all([
-        query('SELECT * FROM brands ORDER BY name ASC'),
-        query('SELECT * FROM categories ORDER BY name ASC'),
-        query('SELECT * FROM subcategories ORDER BY name ASC'),
-    ])
-    return { 
-        brands: brands.rows, 
-        categories: categories.rows, 
-        subcategories: subcategories.rows 
-    }
+    return getRailsCatalogLookups()
 }
 
 /**
@@ -448,12 +465,31 @@ export async function getBatchProductsAction(batchId: string) {
   try {
     await requireAdmin()
 
-    const res = await scrapingQuery(`
+    let res = await scrapingQuery(`
       SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
       FROM products
       WHERE batch_id = $1
       ORDER BY id ASC
     `, [batchId])
+
+    if (res.rows.length === 0) {
+      const artifact = await scrapingQuery(`
+        SELECT content FROM scraping_files
+        WHERE batch_id=$1 AND content IS NOT NULL
+        ORDER BY CASE WHEN status='Сырой CSV' THEN 0 ELSE 1 END, updated_at ASC
+        LIMIT 1
+      `, [batchId])
+      const recovered = artifact.rows[0]?.content ? parseServerCsv(artifact.rows[0].content) : []
+      if (recovered.length > 0) {
+        const saved = await saveBatchProductsAction(batchId, recovered)
+        if (!saved.success) throw new Error(saved.error || 'Не удалось восстановить товары партии')
+        await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар · восстановлено из артефакта')
+        res = await scrapingQuery(`
+          SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
+          FROM products WHERE batch_id=$1 ORDER BY id ASC
+        `, [batchId])
+      }
+    }
 
     return {
       success: true,
@@ -783,6 +819,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
     if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
     const supplierData = supplierRes.rows[0];
+    supplierData.post_process_script = String(supplierData.post_process_script || '').trim();
 
     if (!supplierData.post_process_script) {
         throw new Error("Скрипт не назначен для этого поставщика");
@@ -810,7 +847,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
         fs.writeFileSync(
             /*turbopackIgnore: true*/ effectiveInputPath,
-            serializeProductsToCsv(batchRes.data.products, BATCH_PRODUCT_COLUMNS, ';'),
+            serializeProductsToCsv(batchRes.data.products, supplierScriptColumns(batchRes.data.products), ';'),
             'utf-8'
         );
     }
@@ -824,7 +861,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     }
     
     return new Promise((resolve) => {
-        const pythonProcess = spawn('python', [pythonScript, effectiveInputPath!, outputPath]);
+        const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', [pythonScript, effectiveInputPath!, outputPath]);
         let stderr = '';
         
         pythonProcess.stderr.on('data', (data: any) => {

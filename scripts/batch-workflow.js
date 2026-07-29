@@ -29,6 +29,17 @@ const PRODUCT_COLUMNS = [
   { name: 'ai_processed', key: 'ai_processed' },
 ];
 
+const SUPPLIER_SCRIPT_BASE_COLUMNS = [
+  { name: 'external_id', key: 'external_id' }, { name: 'name', key: 'name' },
+  { name: 'description', key: 'description' }, { name: 'price', key: 'price' },
+  { name: 'brand', key: 'brand' }, { name: 'category', key: 'category' },
+  { name: 'subcategory', key: 'subcategory' }, { name: 'gender', key: 'gender' },
+  { name: 'photos', key: 'photos' }, { name: 'status', key: 'status' },
+  { name: 'h1', key: 'h1' }, { name: 'seo_title', key: 'seo_title' },
+  { name: 'seo_description', key: 'seo_description' }, { name: 'ai_processed', key: 'ai_processed' },
+  { name: 'variant_group_key', key: 'variant_group_key' },
+];
+
 const RAILS_IMPORT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
   { name: 'name', key: 'name' },
@@ -150,6 +161,7 @@ function serializeProductsToCsv(products, columns = PRODUCT_COLUMNS, delimiter =
   const header = effectiveColumns.map((column) => column.name).join(delimiter);
   const rows = products.map((product) => effectiveColumns.map((column) => {
     let value = product[column.key];
+    if ((value === undefined || value === null) && product.attributes && typeof product.attributes === 'object') value = product.attributes[column.key];
     if (value === undefined || value === null) value = '';
     if (Array.isArray(value)) value = JSON.stringify(value);
     if (column.key === 'attributes' && typeof value === 'object' && value !== null) value = JSON.stringify(normalizeAttributes(value));
@@ -161,6 +173,20 @@ function serializeProductsToCsv(products, columns = PRODUCT_COLUMNS, delimiter =
     return str.includes(delimiter) || str.includes('"') ? `"${str}"` : str;
   }).join(delimiter));
   return [header, ...rows].join('\n');
+}
+
+function supplierScriptColumns(products) {
+  const keys = new Set();
+  for (const product of products) {
+    for (const key of Object.keys(normalizeAttributes(product.attributes))) {
+      if (!SUPPLIER_SCRIPT_BASE_COLUMNS.some((column) => column.key === key)) keys.add(key);
+    }
+  }
+  return [
+    ...SUPPLIER_SCRIPT_BASE_COLUMNS,
+    ...[...keys].sort().map((key) => ({ name: key, key })),
+    { name: 'attributes', key: 'attributes' },
+  ];
 }
 
 function railsApiUrl(pathname) {
@@ -379,6 +405,41 @@ async function getSupplier(supplierId) {
   return res.rows[0] || null;
 }
 
+function parseCsvObjects(text) {
+  const normalized = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const firstLine = normalized.split('\n')[0] || '';
+  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+    if (quoted) {
+      if (char === '"' && next === '"') { field += '"'; index += 1; }
+      else if (char === '"') quoted = false;
+      else field += char;
+    } else if (char === '"' && field.trim().length === 0) {
+      quoted = true;
+      field = '';
+    } else if (char === delimiter) {
+      row.push(field.trim()); field = '';
+    } else if (char === '\n') {
+      row.push(field.trim());
+      if (row.some((value) => value !== '')) rows.push(row);
+      row = []; field = '';
+    } else field += char;
+  }
+  if (field !== '' || row.length) {
+    row.push(field.trim());
+    if (row.some((value) => value !== '')) rows.push(row);
+  }
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((header) => header.toLowerCase().trim());
+  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
+}
+
 async function resolveLegacySupplierDefaults(supplier) {
   const values = [
     supplier.default_brand,
@@ -586,26 +647,28 @@ async function saveBatchProducts(batchId, products) {
   }
 }
 
+async function recordBatchSnapshot(batchId, stage, label) {
+  const products = await getBatchProducts(batchId);
+  await scrapingPool.query(`
+    INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+    VALUES($1,$2,$3,$4,$5::jsonb,'{}'::jsonb)
+  `, [crypto.randomUUID(), batchId, stage, label, JSON.stringify(products)]);
+}
+
 async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount }) {
   const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
-  const lines = fileContent.split('\n').filter((line) => line.trim());
-  if (lines.length <= 1) return null;
+  const items = parseCsvObjects(fileContent);
+  if (items.length === 0) return null;
 
   const batchId = crypto.randomUUID();
   const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`;
   await scrapingPool.query(
     'INSERT INTO scraping_batches (id, name, supplier_id, items_count, stage) VALUES ($1, $2, $3, $4, $5)',
-    [batchId, batchName, supplier.id, itemsCount, 'SCRAPED'],
+    [batchId, batchName, supplier.id, items.length || itemsCount, 'SCRAPED'],
   );
   await scrapingPool.query('UPDATE scraping_tasks SET batch_id=$1 WHERE id=$2', [batchId, taskId]);
 
-  const headers = parseDelimitedLine(lines[0], ';');
-  const products = lines.slice(1).map((line) => {
-    const row = parseDelimitedLine(line, ';');
-    const item = {};
-    headers.forEach((header, index) => {
-      item[header.trim()] = row[index] || '';
-    });
+  const products = items.map((item) => {
     let photos = [];
     try {
       photos = item.photos ? JSON.parse(item.photos) : [];
@@ -613,6 +676,7 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
       photos = normalizePhotos(item.photos);
     }
     return normalizeProduct({
+      ...item,
       external_id: item.external_id,
       name: item.name || 'Без названия',
       description: item.description || '',
@@ -628,6 +692,7 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
   }).filter((product) => product.external_id || product.name);
 
   await saveBatchProducts(batchId, products);
+  await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар');
   return batchId;
 }
 
@@ -801,6 +866,7 @@ async function runBatchPostProcessScript(batchId) {
   if (!batch?.supplier_id) throw new Error('У партии не найден поставщик');
   const supplier = await getSupplier(batch.supplier_id);
   if (!supplier?.post_process_script) throw new Error('Для поставщика не назначен скрипт постобработки');
+  supplier.post_process_script = String(supplier.post_process_script).trim();
 
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров');
@@ -810,7 +876,7 @@ async function runBatchPostProcessScript(batchId) {
   const taskId = Math.floor(Math.random() * 1000000);
   const inputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
   const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
-  fs.writeFileSync(/*turbopackIgnore: true*/ inputPath, serializeProductsToCsv(products), 'utf-8');
+  fs.writeFileSync(/*turbopackIgnore: true*/ inputPath, serializeProductsToCsv(products, supplierScriptColumns(products)), 'utf-8');
 
   const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplier.post_process_script);
   await new Promise((resolve, reject) => {
@@ -838,6 +904,8 @@ async function runBatchPostProcessScript(batchId) {
   }
 
   await saveBatchProducts(batchId, processedProducts);
+  await scrapingPool.query("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
+  await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
   await scrapingPool.query(`
     INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
     VALUES ($1, $2, 'Обработано скриптом', $3, $4, NOW())
@@ -972,7 +1040,7 @@ async function pushBatchToCatalog(batchId, onProgress) {
 }
 
 async function closePools() {
-  await Promise.allSettled([scrapingPool.end(), mainPool.end()]);
+  await Promise.allSettled([scrapingPool.end(), legacyCatalogPool.end()]);
 }
 
 module.exports = {
@@ -982,10 +1050,14 @@ module.exports = {
   getBatchProducts,
   getLatestBatches,
   getSupplier,
+  parseCsvObjects,
   listAllSuppliers,
   listFavoriteSuppliers,
   processBatchWithAi,
   pushBatchToCatalog,
   runBatchPostProcessScript,
+  saveBatchProducts,
+  serializeProductsToCsv,
+  supplierScriptColumns,
   startScraping,
 };

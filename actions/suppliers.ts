@@ -9,7 +9,7 @@ import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
 import { extractProductAttributes } from '@/lib/product-attributes'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
-import { deleteRailsAdminProductsByExternalIds } from '@/lib/rails-admin'
+import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -110,17 +110,13 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
 export async function getSupplierCatalogLookupsAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const result = await scrapingQuery(`
-      SELECT entity_type, canonical_id AS id, name, canonical_parent_id AS parent_id
-      FROM catalog_id_mappings
-      ORDER BY entity_type, name
-    `)
+    const result = await getRailsCatalogLookups()
     return {
       success: true,
       data: {
-        brands: result.rows.filter((row) => row.entity_type === 'brand'),
-        categories: result.rows.filter((row) => row.entity_type === 'category'),
-        subcategories: result.rows.filter((row) => row.entity_type === 'subcategory'),
+        brands: result.brands,
+        categories: result.categories,
+        subcategories: result.subcategories.map((item: any) => ({ ...item, parent_id: item.category || item.parent_id || null })),
       },
     }
   } catch (err: any) {
@@ -536,10 +532,6 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         WHERE batch_id=b.id ORDER BY created_at DESC LIMIT 1
       ) ai ON TRUE
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
-        AND (
-          t.result_path IS NOT NULL
-          OR t.batch_id IS NOT NULL
-        )
       ORDER BY COALESCE(b.created_at, t.created_at) DESC, t.created_at DESC
       LIMIT 500
     `)
@@ -605,7 +597,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         supplier_id: batch.supplier_id,
         supplier_name: batch.supplier_name,
         supplier_avatar: batch.supplier_avatar,
-        items_count: latestItemsCount,
+        items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
         status: normalizeBatchStatus(batch.stage, sortedFiles),
         end_date: latestEndDate,
         created_at: batch.created_at,
@@ -821,9 +813,10 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
             // 3. Импортируем товары
             // Простой парсер CSV (учитывая кавычки в описании и разделитель ;)
-            const headers = parseDelimitedLine(lines[0], ';')
+            const delimiter = lines[0].includes(';') ? ';' : ','
+            const headers = parseDelimitedLine(lines[0], delimiter)
             for (let i = 1; i < lines.length; i++) {
-               const row = parseDelimitedLine(lines[i], ';')
+               const row = parseDelimitedLine(lines[i], delimiter)
                if (row.length === 0) continue
 
                const item: any = {}
