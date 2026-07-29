@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import Image from 'next/image'
-import { Bot, Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Folder, Layers, Loader2, Pause, Pencil, Play, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, Clock3, ExternalLink, Folder, Layers, Loader2, Pause, Pencil, Play, RefreshCw, RotateCcw, Save, Sparkles, Trash2, X } from 'lucide-react'
 import {
   applySeoAiDraftAction,
   applySeoAiDecisionGroupAction,
@@ -18,12 +18,10 @@ import {
   renameSeoAiBatchAction,
   reviewSeoAiBatchAction,
   retrySeoAiGenerationAction,
-  runSeoAiGenerationAction,
-  searchSeoAiProductsAction,
   updateSeoAiSettingsAction,
   updateSeoAiBatchStateAction,
 } from '@/actions/seo-ai'
-import type { Brand, Category, Product, SeoAiBatch, SeoAiBatchPreview, SeoAiBatchSummary, SeoAiGeneration, SeoAiSetting, Subcategory } from '@/lib/types'
+import type { Brand, Category, SeoAiBatch, SeoAiBatchPreview, SeoAiBatchSummary, SeoAiGeneration, SeoAiSetting, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -82,11 +80,6 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
   const [batches, setBatches] = useState(initialBatches)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [isPending, startTransition] = useTransition()
-
-  const [productQuery, setProductQuery] = useState('')
-  const [productResults, setProductResults] = useState<Product[]>([])
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [includeImages, setIncludeImages] = useState(true)
 
   const [batchIds, setBatchIds] = useState('')
   const [batchBrand, setBatchBrand] = useState('__none__')
@@ -202,35 +195,6 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     })
   }
 
-  function searchProducts() {
-    startTransition(async () => {
-      const result = await searchSeoAiProductsAction(productQuery)
-      if (result.success) {
-        setProductResults(result.data || [])
-        setStatus('success', `Найдено товаров: ${(result.data || []).length}`)
-      } else {
-        setStatus('error', result.error || 'Поиск не удался')
-      }
-    })
-  }
-
-  function runProductGeneration() {
-    if (!selectedProduct) {
-      setStatus('error', 'Сначала выберите тестовый товар')
-      return
-    }
-
-    startTransition(async () => {
-      const result = await runSeoAiGenerationAction({
-        targetType: 'Product',
-        targetId: selectedProduct.id,
-        includeImages,
-        imageLimit: includeImages ? 9 : 0,
-      })
-      handleGenerationResult(result, 'Задание поставлено в очередь Cockpit Tools')
-    })
-  }
-
   function createBatch() {
     startTransition(async () => {
       const result = await createSeoAiBatchAction({
@@ -325,15 +289,6 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     return batchDrafts
   }
 
-  function handleGenerationResult(result: any, successText: string) {
-    if (result.success) {
-      setDrafts((prev) => [result.data, ...prev])
-      setStatus('success', successText)
-    } else {
-      setStatus('error', result.error || 'Генерация не удалась')
-    }
-  }
-
   return (
     <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden">
       {message && (
@@ -342,73 +297,12 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
         </div>
       )}
 
-      <Tabs defaultValue="test" className="space-y-6">
+      <Tabs defaultValue="batch" className="space-y-6">
         <TabsList className="flex h-auto w-full max-w-full flex-nowrap justify-start gap-1 overflow-x-auto bg-slate-800 p-1">
-          <TabsTrigger value="test" className="shrink-0">Один товар</TabsTrigger>
           <TabsTrigger value="batch" className="shrink-0">Массово</TabsTrigger>
           <TabsTrigger value="drafts" className="shrink-0">Очередь и сравнение</TabsTrigger>
           <TabsTrigger value="settings" className="shrink-0">Настройки</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="test">
-          <Card className="border-slate-700 bg-slate-800">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-white"><Sparkles className="h-5 w-5 text-fuchsia-400" /> Проверить один товар</CardTitle>
-              <CardDescription>Создаёт задание для локального Cockpit Tools. Опубликованный товар не меняется до применения черновика.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <div className="flex flex-col gap-3 md:flex-row">
-                <Input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder="URL, slug, id или название товара" className="bg-slate-900" />
-                <Button type="button" onClick={searchProducts} disabled={isPending}>
-                  <Search className="h-4 w-4" />
-                  Найти
-                </Button>
-              </div>
-
-              {productResults.length > 0 && (
-                <div className="grid gap-2 md:grid-cols-2">
-                  {productResults.map((product) => (
-                    <button
-                      type="button"
-                      key={product.id}
-                      onClick={() => setSelectedProduct(product)}
-                      className={`flex min-w-0 items-center gap-3 rounded-lg border p-3 text-left text-sm transition ${selectedProduct?.id === product.id ? 'border-fuchsia-400 bg-fuchsia-500/10' : 'border-slate-700 bg-slate-900 hover:border-slate-500'}`}
-                    >
-                      {productImageUrl(product) ? <Image src={productImageUrl(product)} alt="" width={56} height={56} className="h-14 w-14 shrink-0 rounded-md bg-slate-800 object-cover" /> : <div className="h-14 w-14 shrink-0 rounded-md bg-slate-800" />}
-                      <span className="min-w-0">
-                        <span className="block truncate font-semibold text-slate-100">{product.name}</span>
-                        <span className="mt-1 block truncate text-xs text-slate-400">{product.slug || product.id}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {selectedProduct && (
-                <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-                  <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {productImageUrl(selectedProduct) ? <Image src={productImageUrl(selectedProduct)} alt="" width={64} height={64} className="h-16 w-16 shrink-0 rounded-lg bg-slate-800 object-cover" /> : null}
-                      <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white">{selectedProduct.name}</p>
-                      <p className="text-xs text-slate-400">{productBrandLabel(selectedProduct) || 'Без бренда'} · {selectedProduct.gender || 'Без гендера'}</p>
-                      {selectedProduct.slug && <a href={storefrontProductUrl(selectedProduct.slug)} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-sky-400 hover:text-sky-300"><ExternalLink className="h-3 w-3" /> Открыть карточку</a>}
-                      </div>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-slate-300">
-                      <Checkbox checked={includeImages} onCheckedChange={(value) => setIncludeImages(Boolean(value))} />
-                      Анализировать до 9 фото сеткой 3×3
-                    </label>
-                    <Button type="button" onClick={runProductGeneration} disabled={isPending}>
-                      {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                      Сгенерировать
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="batch">
           <Card className="border-slate-700 bg-slate-800">
@@ -527,6 +421,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   key={group.batch?.id || 'standalone'}
                   batch={group.batch}
                   drafts={group.drafts}
+                  now={now}
                   attributeDefinitions={attributeDefinitions}
                   onRename={renameBatch}
                   onDeleteBatch={deleteBatch}
@@ -580,17 +475,6 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
       </Tabs>
     </div>
   )
-}
-
-function productBrandLabel(product: Product) {
-  const brand = product.expand?.brand
-  if (Array.isArray(brand)) return brand.map((item) => item.name).filter(Boolean).join(', ')
-  return brand?.name || ''
-}
-
-function productImageUrl(product: Product) {
-  const medium = product.media?.[0]
-  return medium?.thumb_url || medium?.preview_url || medium?.original_url || product.thumb || product.photos?.[0] || ''
 }
 
 function draftImageUrl(draft: SeoAiGeneration) {
@@ -758,6 +642,7 @@ function decisionKindLabel(kind: SeoAiDecisionKind) {
 function DraftFolder({
   batch,
   drafts,
+  now,
   attributeDefinitions,
   onRename,
   onDeleteBatch,
@@ -767,6 +652,7 @@ function DraftFolder({
 }: {
   batch: SeoAiBatch | null
   drafts: SeoAiGeneration[]
+  now: number
   attributeDefinitions: CatalogAttributeDefinition[]
   onRename: (id: string, name: string) => Promise<boolean>
   onDeleteBatch: (id: string) => Promise<boolean>
@@ -778,7 +664,7 @@ function DraftFolder({
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(batch?.name || '')
   const [folderDrafts, setFolderDrafts] = useState(drafts)
-  const [view, setView] = useState<'attention' | 'errors' | 'all'>('attention')
+  const [view, setView] = useState<'errors' | 'all'>('all')
   const [selectedDecision, setSelectedDecision] = useState<string | null>(null)
   const [decisionInFlight, setDecisionInFlight] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -789,15 +675,19 @@ function DraftFolder({
     ? batch.summary || summarizeDrafts(folderDrafts)
     : summarizeDrafts(folderDrafts)
   const readyCount = summary.status_counts.draft || 0
-  const safeCount = summary.safe_count || 0
   const rejectedCount = summary.status_counts.rejected || 0
   const failedCount = summary.status_counts.failed || 0
+  const totalCount = batch?.total_count || folderDrafts.length
+  const completedCount = (summary.status_counts.draft || 0) + (summary.status_counts.applied || 0)
+  const remainingCount = batch && ['completed', 'failed', 'canceled'].includes(batch.status)
+    ? 0
+    : Math.max(0, (summary.status_counts.queued || 0) + (summary.status_counts.processing || 0) || totalCount - completedCount - failedCount)
+  const eta = batch ? batchEtaLabel(batch, completedCount + failedCount, remainingCount, now) : null
   const decisionGroups = buildDecisionGroups(folderDrafts, attributeDefinitions)
   const selectedDecisionGroup = decisionGroups.find((group) => group.key === selectedDecision)
   const visibleDrafts = folderDrafts.filter((draft) => {
     if (selectedDecisionGroup && !selectedDecisionGroup.draftIds.includes(draft.id)) return false
     if (view === 'errors') return draft.status === 'failed'
-    if (view === 'attention') return draftNeedsAttention(draft)
     return true
   })
 
@@ -833,17 +723,15 @@ function DraftFolder({
       }
       setFolderDrafts(result.data.generations || [])
     }
-    setView(summary.attention_count > 0 ? 'attention' : 'all')
+    setView('all')
     setExpanded(true)
   }
 
-  function runBulkAction(action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
+  function runBulkAction(action: 'apply_drafts' | 'reject_drafts' | 'requeue_rejected') {
     if (!batch) return
     const confirmation = action === 'apply_drafts'
-      ? `Применить все ${readyCount} готовых черновиков? ${summary.attention_count > 0 ? `${summary.attention_count} из них требуют внимания.` : ''}`
-      : action === 'apply_safe_drafts'
-        ? `Применить ${safeCount} безопасных черновиков? Спорные товары останутся на проверке.`
-        : action === 'reject_drafts'
+      ? `Применить все ${readyCount} готовых черновиков?`
+      : action === 'reject_drafts'
           ? `Отклонить ${readyCount} готовых черновиков? Их можно будет вернуть в очередь отдельной кнопкой.`
           : `Вернуть ${rejectedCount} отклонённых товаров в очередь на новую генерацию?`
     if (!window.confirm(confirmation)) return
@@ -896,16 +784,18 @@ function DraftFolder({
           <Folder className="h-5 w-5 shrink-0 text-indigo-400" />
           <div className="min-w-0">
             <p className="truncate font-semibold text-white">{label}</p>
-            <p className="text-xs text-slate-400">
-              {batch?.total_count || folderDrafts.length} товаров{batch ? ` · ${batchStatusLabel(batch.status)}` : ''}
-              {` · готово ${readyCount} · безопасно ${safeCount} · внимание ${summary.attention_count} · ошибки ${failedCount}`}
+            {batch && <p className="mt-0.5 text-xs font-medium text-cyan-300">{batchQueueStatusLabel(batch.status, remainingCount)}</p>}
+            <p className="mt-1 flex flex-wrap gap-x-2 text-xs text-slate-400">
+              <span>Всего {totalCount}</span>
+              <span>· Готово {completedCount}</span>
+              {failedCount > 0 && <span className="font-semibold text-red-400">· Ошибки {failedCount}</span>}
+              <span>· Осталось {remainingCount}</span>
+              {eta && <span className="text-cyan-300">· {eta}</span>}
             </p>
-            <p className="mt-1 hidden text-xs text-slate-500 md:block">{summaryFieldsLabel(summary)}{summaryProblemsLabel(summary)}</p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {batch && readyCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Принять все готовые ({readyCount})</span></Button>}
-          {batch && safeCount > 0 && <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); runBulkAction('apply_safe_drafts') }} disabled={isReviewing}><Check className="h-4 w-4" /><span className="hidden lg:inline">Применить безопасные</span></Button>}
           {batch && readyCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('reject_drafts') }} disabled={isReviewing}><X className="h-4 w-4" /><span className="hidden lg:inline">Отклонить готовые</span></Button>}
           {batch && rejectedCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('requeue_rejected') }} disabled={isReviewing}><RotateCcw className="h-4 w-4" /><span className="hidden lg:inline">Вернуть отклонённые</span></Button>}
           {batch && <Button type="button" size="icon" variant="ghost" aria-label="Переименовать выгрузку" onClick={(event) => { event.stopPropagation(); setEditing(true) }}><Pencil className="h-4 w-4" /></Button>}
@@ -981,8 +871,7 @@ function DraftFolder({
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant={view === 'attention' ? 'default' : 'outline'} onClick={() => setView('attention')}>Требуют внимания ({summary.attention_count})</Button>
-            <Button type="button" size="sm" variant={view === 'errors' ? 'default' : 'outline'} onClick={() => setView('errors')}>Ошибки ({failedCount})</Button>
+            {failedCount > 0 && <Button type="button" size="sm" variant={view === 'errors' ? 'default' : 'outline'} onClick={() => setView('errors')} className="text-red-300">Ошибки ({failedCount})</Button>}
             <Button type="button" size="sm" variant={view === 'all' ? 'default' : 'outline'} onClick={() => setView('all')}>Все ({folderDrafts.length})</Button>
           </div>
           {visibleDrafts.length === 0 && <p className="rounded-lg border border-slate-700 bg-slate-950/50 p-4 text-sm text-slate-400">В этой группе товаров нет.</p>}
@@ -1006,17 +895,6 @@ function DraftFolder({
       )}
     </section>
   )
-}
-
-const SUMMARY_FIELD_LABELS: Record<string, string> = {
-  name: 'название',
-  description: 'описание',
-  h1: 'H1',
-  seo_title: 'SEO title',
-  seo_description: 'SEO description',
-  gender: 'гендер',
-  catalog_attributes: 'характеристики',
-  image_alt_texts: 'alt фото',
 }
 
 const WATCH_ATTRIBUTE_CODES = new Set([
@@ -1076,34 +954,6 @@ function summarizeDrafts(drafts: SeoAiGeneration[]): SeoAiBatchSummary {
   })
 
   return { status_counts: statusCounts, field_counts: fieldCounts, problem_counts: problemCounts, safe_count: safeCount, attention_count: attentionCount }
-}
-
-function draftNeedsAttention(draft: SeoAiGeneration) {
-  if (draft.status !== 'draft') return false
-  const isWatch = isWatchTaxonomy(draft.input_snapshot?.catalog?.current_taxonomy)
-  const lowConfidence = Object.values(draft.output?.field_confidence || {}).some((value) => Number(value) > 0 && Number(value) < 0.9)
-  const conflicts = Array.isArray(draft.output?.conflicts) && draft.output.conflicts.some((conflict: any) => visibleConflict(conflict, isWatch))
-  const warnings = Array.isArray(draft.output?.quality_warnings) && draft.output.quality_warnings.length > 0
-  const subcategory = !isWatch && ['existing', 'new'].includes(draft.output?.subcategory_suggestion?.kind)
-  return lowConfidence || conflicts || warnings || subcategory
-}
-
-function summaryFieldsLabel(summary: SeoAiBatchSummary) {
-  const fields = Object.entries(summary.field_counts)
-    .filter(([, count]) => count > 0)
-    .map(([field, count]) => `${SUMMARY_FIELD_LABELS[field] || field} ${count}`)
-  return fields.length > 0 ? `Изменения: ${fields.join(' · ')}` : 'Изменений пока нет'
-}
-
-function summaryProblemsLabel(summary: SeoAiBatchSummary) {
-  const labels = [
-    ['низкая уверенность', summary.problem_counts.low_confidence],
-    ['противоречия', summary.problem_counts.conflicts],
-    ['предупреждения', summary.problem_counts.quality_warnings],
-    ['подкатегория', summary.problem_counts.subcategory],
-    ['недопустимые поля', summary.problem_counts.invalid_attributes],
-  ].filter(([, count]) => Number(count) > 0).map(([label, count]) => `${label} ${count}`)
-  return labels.length > 0 ? ` · Проблемы: ${labels.join(' · ')}` : ''
 }
 
 function valuePresent(value: unknown) {
@@ -1457,6 +1307,30 @@ function batchTimingLabel(batch: SeoAiBatch, now: number) {
   return `Всего ${formatDuration(elapsed)} · в среднем ${processed > 0 ? formatDuration(average) : '—'} на товар`
 }
 
+function batchQueueStatusLabel(status: SeoAiBatch['status'], remaining: number) {
+  if (status === 'running') return remaining > 0 ? 'Выгружается' : 'Завершается'
+  return batchStatusLabel(status)
+}
+
+function batchEtaLabel(batch: SeoAiBatch, processed: number, remaining: number, now: number) {
+  if (batch.status !== 'running' || remaining <= 0) return null
+  const minimumSample = Math.max(3, batch.concurrency || 1)
+  if (processed < minimumSample) return 'Расчёт оставшегося времени…'
+
+  const startedAt = new Date(batch.started_at || batch.created_at).getTime()
+  const elapsed = Math.max(1, now - startedAt)
+  const estimate = elapsed / processed * remaining
+  return `Примерно осталось ${formatApproximateDuration(estimate)}`
+}
+
+function formatApproximateDuration(milliseconds: number) {
+  const minutes = Math.max(1, Math.round(milliseconds / 60000))
+  if (minutes < 60) return `${minutes} мин`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours} ч ${rest} мин` : `${hours} ч`
+}
+
 function formatDuration(milliseconds: number) {
   const totalSeconds = Math.max(0, Math.round(milliseconds / 1000))
   const hours = Math.floor(totalSeconds / 3600)
@@ -1470,7 +1344,7 @@ function formatDuration(milliseconds: number) {
 function batchStatusLabel(status: SeoAiBatch['status']) {
   return ({
     pending: 'Ожидает',
-    running: 'В работе',
+    running: 'Выгружается',
     paused: 'На паузе',
     completed: 'Готово',
     failed: 'Ошибка',
