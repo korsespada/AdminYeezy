@@ -3,7 +3,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const sharp = require('sharp');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -999,26 +1000,76 @@ function getS3PublicUrl(key) {
   return `${endpoint.replace(/\/+$/, '')}/${bucketName}/${key}`;
 }
 
+function ownedS3Hosts() {
+  const hosts = new Set();
+  for (const value of [process.env.S3_PUBLIC_DOMAIN, process.env.S3_ENDPOINT]) {
+    try {
+      if (value) hosts.add(new URL(value).hostname.toLowerCase());
+    } catch {}
+  }
+  try {
+    hosts.add(new URL(getS3PublicUrl('__host_check__')).hostname.toLowerCase());
+  } catch {}
+  return hosts;
+}
+
 function isAlreadyHosted(url) {
-  return /beget\.app|selcloud\.ru|beget\.cloud|yeezyunique\.ru/i.test(url);
+  try {
+    const parsed = new URL(String(url || ''));
+    return ['http:', 'https:'].includes(parsed.protocol) && ownedS3Hosts().has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function ownedS3Key(url) {
+  if (!isAlreadyHosted(url)) return null;
+  try {
+    let key = decodeURIComponent(new URL(String(url)).pathname).replace(/^\/+/, '');
+    const bucketPrefix = `${process.env.S3_BUCKET || ''}/`;
+    if (bucketPrefix !== '/' && key.startsWith(bucketPrefix)) key = key.slice(bucketPrefix.length);
+    return key || null;
+  } catch {
+    return null;
+  }
 }
 
 async function uploadPhotoIfNeeded(url, key) {
-  if (!url || isAlreadyHosted(url) || !process.env.S3_BUCKET) return url;
+  if (!url) throw new Error('пустая ссылка на фото');
+  if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен');
+  if (isAlreadyHosted(url)) {
+    const existingKey = ownedS3Key(url);
+    if (!existingKey) throw new Error(`не удалось определить S3 key для ${url}`);
+    try {
+      await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: existingKey }));
+      return url;
+    } catch (error) {
+      throw new Error(`фото отсутствует в вашем S3: ${url} (${error.message})`);
+    }
+  }
   try {
-    const response = await fetch(url);
-    if (!response.ok) return url;
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const parsed = new URL(String(url));
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('разрешены только HTTP(S) ссылки');
+    const response = await fetch(parsed, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new Error(`источник вернул HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get('content-length') || 0);
+    if (declaredSize > 30 * 1024 * 1024) throw new Error('файл больше 30 МБ');
+    const source = Buffer.from(await response.arrayBuffer());
+    if (!source.length) throw new Error('источник вернул пустой файл');
+    if (source.length > 30 * 1024 * 1024) throw new Error('файл больше 30 МБ');
+    const buffer = await sharp(source).rotate().jpeg({ quality: 90 }).toBuffer();
     await s3Client.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key,
       Body: buffer,
       ContentType: 'image/jpeg',
     }));
-    return getS3PublicUrl(key);
+    await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
+    const hostedUrl = getS3PublicUrl(key);
+    if (!isAlreadyHosted(hostedUrl)) throw new Error('полученная ссылка не относится к настроенному S3');
+    return hostedUrl;
   } catch (error) {
-    console.warn(`S3 upload failed for ${url}:`, error.message);
-    return url;
+    throw new Error(`не удалось перенести ${url} в S3: ${error.message}`);
   }
 }
 
@@ -1053,24 +1104,31 @@ async function pushBatchToCatalog(batchId, onProgress) {
 
   for (let i = 0; i < products.length; i += 1) {
     const product = { ...products[i], batchId };
-    try {
-      const photos = [];
-      for (let photoIndex = 0; photoIndex < product.photos.length; photoIndex += 1) {
-        const key = `batches/${batchId}/${product.external_id}_${photoIndex}.jpg`;
-        photos.push(await uploadPhotoIfNeeded(product.photos[photoIndex], key));
+    const photos = [];
+    let productFailed = false;
+    for (let photoIndex = 0; photoIndex < product.photos.length; photoIndex += 1) {
+      const sourceUrl = product.photos[photoIndex];
+      const safeExternalId = String(product.external_id || product.id || `row-${i + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
+      const key = `batches/${batchId}/${safeExternalId}_${photoIndex}.jpg`;
+      try {
+        photos.push(await uploadPhotoIfNeeded(sourceUrl, key));
+      } catch (error) {
+        productFailed = true;
+        photos.push(sourceUrl);
+        errors.push(`${product.external_id || product.name}, фото ${photoIndex + 1}: ${error.message}`);
       }
-      product.photos = photos.filter(Boolean);
-      updatedProducts.push(product);
-      prepared += 1;
-    } catch (error) {
-      errors.push(`${product.external_id || product.name}: ${error.message}`);
-      updatedProducts.push(product);
     }
+    product.photos = photos.filter(Boolean);
+    updatedProducts.push(product);
+    if (!productFailed) prepared += 1;
 
     if (onProgress) await onProgress({ current: i + 1, total: products.length, success: prepared, failed: errors.length });
   }
 
   await saveBatchProducts(batchId, updatedProducts);
+  if (errors.length > 0) {
+    throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
+  }
 
   const railsRows = updatedProducts
     .filter((product) => product.external_id || product.name)
@@ -1112,6 +1170,7 @@ module.exports = {
   getBatchProducts,
   getLatestBatches,
   getSupplier,
+  isAlreadyHosted,
   parseCsvObjects,
   listAllSuppliers,
   listFavoriteSuppliers,
@@ -1123,4 +1182,5 @@ module.exports = {
   serializeProductsToCsv,
   supplierScriptColumns,
   startScraping,
+  uploadPhotoIfNeeded,
 };

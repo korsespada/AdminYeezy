@@ -46,4 +46,16 @@ describe('batch workflow CSV compatibility adapter', () => {
       gender: 'female',
     })
   })
+
+  it('recognizes only the configured S3 host as already stored', () => {
+    const previous = process.env.S3_PUBLIC_DOMAIN
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    try {
+      expect(workflow.isAlreadyHosted('https://static.yeezyunique.ru/batches/a/1.jpg')).toBe(true)
+      expect(workflow.isAlreadyHosted('https://api.yeezyunique.ru/media/1.jpg')).toBe(false)
+      expect(workflow.isAlreadyHosted('https://xcimg.szwego.com/1.jpg')).toBe(false)
+    } finally {
+      process.env.S3_PUBLIC_DOMAIN = previous
+    }
+  })
 })
