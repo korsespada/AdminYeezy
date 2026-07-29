@@ -22,6 +22,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     openrouterModel: initialSettings.openrouterModel,
     temperature: initialSettings.temperature,
     maxTokens: initialSettings.maxTokens,
+    concurrency: initialSettings.concurrency,
     systemPrompt: initialSettings.systemPrompt,
   })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -43,8 +44,8 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   return (
     <div className="space-y-6 pb-24 animate-in fade-in duration-300">
       <div className="grid gap-4 md:grid-cols-3">
-        <InfoCard icon={Image} title="Фото + исходный текст">
-          AI получает все фотографии листами 3×3 и сопоставляет их с китайским описанием.
+        <InfoCard icon={Image} title="Опциональные фото 3×3">
+          Для каждого поставщика можно включить фото. Без галочки AI работает только с китайским текстом.
         </InfoCard>
         <InfoCard icon={Bot} title="Один общий промпт">
           Инструкции поставщика только дополняют этот системный промпт особенностями его выгрузки.
@@ -132,6 +133,19 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
             />
           </label>
+          <label className="space-y-2 text-sm text-slate-300 lg:col-span-2">
+            <span>Одновременных AI-запросов</span>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              step="1"
+              value={settings.concurrency}
+              onChange={(event) => update('concurrency', Number(event.target.value))}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
+            />
+            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter и Cockpit. Поставщик может запретить параллельную обработку.</span>
+          </label>
         </div>
       </section>
 
@@ -162,7 +176,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
       </section>
 
       {message && (
-        <div className={`fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-xl border px-5 py-3 text-sm font-medium shadow-2xl ${
+        <div className={`rounded-xl border px-5 py-3 text-sm font-medium shadow-xl ${
           message.type === 'success'
             ? 'border-emerald-500/30 bg-emerald-950 text-emerald-300'
             : 'border-red-500/30 bg-red-950 text-red-200'
@@ -171,7 +185,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         </div>
       )}
 
-      <div className="fixed bottom-8 left-1/2 z-40 -translate-x-1/2">
+      <div className="sticky bottom-4 z-40 flex justify-end">
         <button
           type="button"
           onClick={save}

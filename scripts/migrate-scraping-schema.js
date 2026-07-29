@@ -25,6 +25,9 @@ async function migrate() {
         default_category TEXT,
         default_subcategory TEXT,
         default_brand TEXT,
+        allowed_category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        allowed_subcategory_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        allowed_brand_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         min_photos INTEGER DEFAULT 0,
         max_on_model_media INTEGER NOT NULL DEFAULT 5,
@@ -64,6 +67,9 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS default_category TEXT,
         ADD COLUMN IF NOT EXISTS default_subcategory TEXT,
         ADD COLUMN IF NOT EXISTS default_brand TEXT,
+        ADD COLUMN IF NOT EXISTS allowed_category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS allowed_subcategory_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS allowed_brand_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS default_attributes JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS min_photos INTEGER DEFAULT 0,
         ADD COLUMN IF NOT EXISTS max_on_model_media INTEGER NOT NULL DEFAULT 5,
@@ -92,6 +98,15 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+    `);
+
+    await pool.query(`
+      UPDATE suppliers SET allowed_category_ids=jsonb_build_array(default_category)
+      WHERE default_category IS NOT NULL AND jsonb_array_length(allowed_category_ids)=0;
+      UPDATE suppliers SET allowed_subcategory_ids=jsonb_build_array(default_subcategory)
+      WHERE default_subcategory IS NOT NULL AND jsonb_array_length(allowed_subcategory_ids)=0;
+      UPDATE suppliers SET allowed_brand_ids=jsonb_build_array(default_brand)
+      WHERE default_brand IS NOT NULL AND jsonb_array_length(allowed_brand_ids)=0;
     `);
 
     await pool.query(`

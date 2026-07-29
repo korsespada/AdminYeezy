@@ -3,14 +3,14 @@ require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' })
 const sharp = require('sharp')
 const { readSseContent } = require('./lib/cockpit-sse')
 
-const ADMIN_URL = required('ADMINYEEZY_URL').replace(/\/+$/, '')
+const ADMIN_URL = (process.env.ADMINYEEZY_URL || process.env.ADMIN_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '')
 const WORKER_TOKEN = process.env.BATCH_AI_WORKER_TOKEN || required('AI_CATALOG_WORKER_TOKEN')
 const COCKPIT_API_URL = required('COCKPIT_API_URL')
 const COCKPIT_API_KEY = required('COCKPIT_API_KEY')
 const COCKPIT_MODEL = process.env.COCKPIT_MODEL || 'gpt-5.6-luna'
 const WORKER_ID = process.env.BATCH_AI_WORKER_ID || `batch-ai-${process.pid}`
 const POLL_MS = Math.max(1000, Number(process.env.BATCH_AI_WORKER_POLL_MS || 5000))
-const CONCURRENCY = Math.max(1, Math.min(10, Number(process.env.BATCH_AI_WORKER_CONCURRENCY || 5)))
+let concurrency = Math.max(1, Math.min(10, Number(process.env.BATCH_AI_WORKER_CONCURRENCY || 5)))
 const TILE = 384
 const MEDIA_HOSTS = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
 
@@ -24,13 +24,15 @@ main().catch((error) => {
 })
 
 async function main() {
-  console.log(`[batch-ai-worker] ready: ${COCKPIT_MODEL}, concurrency: ${CONCURRENCY}`)
+  console.log(`[batch-ai-worker] ready: ${COCKPIT_MODEL}, concurrency: ${concurrency}`)
   const active = new Set()
   while (!stopping) {
-    await api({ action: 'heartbeat', worker_id: WORKER_ID, model: COCKPIT_MODEL, metadata: { concurrency: CONCURRENCY } }).catch((error) => {
+    const heartbeat = await api({ action: 'heartbeat', worker_id: WORKER_ID, model: COCKPIT_MODEL, metadata: { concurrency } }).catch((error) => {
       console.error(`[batch-ai-worker] heartbeat: ${error.message}`)
+      return null
     })
-    while (!stopping && active.size < CONCURRENCY) {
+    if (heartbeat?.concurrency) concurrency = Math.max(1, Math.min(10, Number(heartbeat.concurrency)))
+    while (!stopping && active.size < concurrency) {
       const claimed = await api({ action: 'claim', worker_id: WORKER_ID }).catch(() => null)
       if (!claimed?.item) break
       const promise = processItem(claimed.item).finally(() => active.delete(promise))
@@ -51,18 +53,49 @@ async function processItem(item) {
       content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
       content.push({ type: 'image_url', image_url: { url } })
     })
-    const output = await cockpitJson({
+    let output = await cockpitJson({
       systemPrompt: input.systemPrompt,
       content,
       temperature: item.settings_snapshot?.temperature,
       maxTokens: item.settings_snapshot?.maxTokens,
     })
+    if (input.fullSizeRefinementEnabled && Number(output?.product?.confidence || 0) < 0.75 && Array.isArray(output?.inspect_full_size_indexes)) {
+      const originals = originalPhotos(input.photoUrls || [], output.inspect_full_size_indexes)
+      if (originals.length) {
+        const refinementContent = [{
+          type: 'text',
+          text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(output)}\n\nНиже только запрошенные оригиналы. Уточни плохо читаемый бренд/модель и верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
+        }]
+        originals.forEach(({ index, url }) => {
+          refinementContent.push({ type: 'text', text: `Оригинал фото ${index}` })
+          refinementContent.push({ type: 'image_url', image_url: { url } })
+        })
+        output = await cockpitJson({
+          systemPrompt: input.systemPrompt,
+          content: refinementContent,
+          temperature: item.settings_snapshot?.temperature,
+          maxTokens: item.settings_snapshot?.maxTokens,
+        })
+      }
+    }
     await api({ action: 'complete', item_id: item.id, lease_token: item.lease_token, output })
     console.log(`[batch-ai-worker] completed ${item.external_id || item.id}`)
   } catch (error) {
     console.error(`[batch-ai-worker] failed ${item.external_id || item.id}: ${error.message}`)
     await api({ action: 'fail', item_id: item.id, lease_token: item.lease_token, error: error.message }).catch(() => undefined)
   }
+}
+
+function originalPhotos(urls, indexes) {
+  return [...new Set(indexes.map(Number).filter((value) => Number.isInteger(value) && value > 0 && value <= urls.length))]
+    .slice(0, 3)
+    .flatMap((index) => {
+      try {
+        const url = String(urls[index - 1] || '')
+        const parsed = new URL(url)
+        return ['http:', 'https:'].includes(parsed.protocol) && MEDIA_HOSTS.has(parsed.hostname.toLowerCase()) ? [{ index, url }] : []
+      } catch { return [] }
+    })
 }
 
 async function buildContactSheets(urls) {

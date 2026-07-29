@@ -82,6 +82,25 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
         row.default_subcategory_name ||= subcategoryNames.get(String(row.default_subcategory || '')) || null
       }
     }
+    const mappings = await scrapingQuery(`
+      SELECT entity_type, canonical_id AS id, name FROM catalog_id_mappings
+      WHERE entity_type IN ('brand','category','subcategory')
+    `)
+    const names = new Map(mappings.rows.map((row) => [`${row.entity_type}:${row.id}`, row.name]))
+    for (const row of res.rows) {
+      row.allowed_brand_ids = Array.isArray(row.allowed_brand_ids) && row.allowed_brand_ids.length
+        ? row.allowed_brand_ids.map(String)
+        : row.default_brand ? [String(row.default_brand)] : []
+      row.allowed_category_ids = Array.isArray(row.allowed_category_ids) && row.allowed_category_ids.length
+        ? row.allowed_category_ids.map(String)
+        : row.default_category ? [String(row.default_category)] : []
+      row.allowed_subcategory_ids = Array.isArray(row.allowed_subcategory_ids) && row.allowed_subcategory_ids.length
+        ? row.allowed_subcategory_ids.map(String)
+        : row.default_subcategory ? [String(row.default_subcategory)] : []
+      row.allowed_brand_names = row.allowed_brand_ids.map((id: string) => names.get(`brand:${id}`) || id)
+      row.allowed_category_names = row.allowed_category_ids.map((id: string) => names.get(`category:${id}`) || id)
+      row.allowed_subcategory_names = row.allowed_subcategory_ids.map((id: string) => names.get(`subcategory:${id}`) || id)
+    }
     return { success: true, data: res.rows }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -155,6 +174,15 @@ function normalizeMaxOnModelMedia(value: FormDataEntryValue | null) {
   return Math.min(20, Math.max(0, parsed))
 }
 
+function normalizeSupplierIdList(value: FormDataEntryValue | null, fallback?: FormDataEntryValue | null) {
+  try {
+    const parsed = JSON.parse(String(value || '[]'))
+    if (Array.isArray(parsed)) return [...new Set(parsed.map(String).map((item) => item.trim()).filter(Boolean))]
+  } catch { /* use scalar fallback */ }
+  const scalar = String(fallback || '').trim()
+  return scalar ? [scalar] : []
+}
+
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -162,9 +190,12 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
-    const default_category = formData.get('default_category') as string || null
-    const default_subcategory = formData.get('default_subcategory') as string || null
-    const default_brand = formData.get('default_brand') as string || null
+    const allowed_category_ids = normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category'))
+    const allowed_subcategory_ids = normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory'))
+    const allowed_brand_ids = normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand'))
+    const default_category = allowed_category_ids[0] || null
+    const default_subcategory = allowed_subcategory_ids[0] || null
+    const default_brand = allowed_brand_ids[0] || null
     
     const min_photos_raw = formData.get('min_photos') as string
     const min_photos = (min_photos_raw && min_photos_raw.trim() !== '') ? parseInt(min_photos_raw) : 0
@@ -193,9 +224,9 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
 
     const res = await scrapingQuery(
-      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28::jsonb) RETURNING id`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes)]
+      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb) RETURNING id`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes)]
     )
 
     revalidatePath('/admin/suppliers')
@@ -212,9 +243,12 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
-    const default_category = formData.get('default_category') as string || null
-    const default_subcategory = formData.get('default_subcategory') as string || null
-    const default_brand = formData.get('default_brand') as string || null
+    const allowed_category_ids = normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category'))
+    const allowed_subcategory_ids = normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory'))
+    const allowed_brand_ids = normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand'))
+    const default_category = allowed_category_ids[0] || null
+    const default_subcategory = allowed_subcategory_ids[0] || null
+    const default_brand = allowed_brand_ids[0] || null
     
     const min_photos_raw = formData.get('min_photos') as string
     const min_photos = (min_photos_raw && min_photos_raw.trim() !== '') ? parseInt(min_photos_raw) : 0
@@ -244,12 +278,13 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
 
     await scrapingQuery(
       `UPDATE suppliers SET name=$1, album_id=$2, group_id=$3, tag_id=$4, 
-       default_category=$5, default_subcategory=$6, default_brand=$7, 
-       min_photos=$8, max_on_model_media=$9, min_desc_len=$10, brand_tags=$11,
-       default_price=$12, default_gender=$13,
-       ai_photo_enabled=$14, ai_cache_enabled=$15, ai_deep_search_enabled=$16, ai_resize_enabled=$17, ai_instructions=$18, avatar_url=$19, cookie=$20, post_process_script=$21, post_process_enabled=$22, ai_photo_models=$23, ai_photo_instructions=$24, ai_parallel_enabled=$25, ai_parallel_count=$26, parse_tags_enabled=$27, default_attributes=$28::jsonb, updated_at=NOW()
-       WHERE id=$29`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), id]
+       default_category=$5,default_subcategory=$6,default_brand=$7,
+       allowed_category_ids=$8::jsonb,allowed_subcategory_ids=$9::jsonb,allowed_brand_ids=$10::jsonb,
+       min_photos=$11,max_on_model_media=$12,min_desc_len=$13,brand_tags=$14,
+       default_price=$15,default_gender=$16,
+       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,updated_at=NOW()
+       WHERE id=$32`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), id]
     )
 
     revalidatePath('/admin/suppliers')

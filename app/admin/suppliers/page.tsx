@@ -17,7 +17,7 @@ export default async function SuppliersPage() {
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="mx-auto max-w-[1800px] space-y-8">
         <ImportTabs />
         <SupplierList
           initialData={res.data}

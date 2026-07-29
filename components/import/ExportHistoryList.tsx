@@ -76,7 +76,7 @@ function fileName(filePath?: string | null) {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex min-w-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
+    <span className={`inline-flex min-w-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
       {status === 'failed' ? 'Ошибка' : status}
     </span>
   )
@@ -315,16 +315,20 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left">
+          <table className="w-full min-w-[1180px] table-fixed text-left">
+            <colgroup>
+              <col className="w-[29%]" /><col className="w-[12%]" /><col className="w-[10%]" />
+              <col className="w-[8%]" /><col className="w-[13%]" /><col className="w-[10%]" /><col className="w-[18%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-700 bg-slate-950/60">
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Поставщик</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Папка</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Дата начала</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Товаров</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Период до</th>
-                <th className="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Поставщик</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Папка</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Дата начала</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Товаров</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Период до</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
               </tr>
             </thead>
             <tbody>
@@ -338,7 +342,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       className="cursor-pointer border-b border-slate-800 bg-slate-800/70 transition-colors hover:bg-slate-800"
                       onClick={() => toggleBatch(batch.id)}
                     >
-                      <td className="px-6 py-5">
+                      <td className="px-4 py-3">
                         <div className="flex min-w-0 items-center gap-3">
                           <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-full border border-slate-600 bg-slate-700">
                             {batch.supplier_avatar ? (
@@ -355,23 +359,23 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-5" onClick={(event) => event.stopPropagation()}>
+                      <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
                         <select value={batch.folder_id || ''} onChange={(event) => moveBatch(batch, event.target.value)} disabled={batch.isSynthetic} className="max-w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 disabled:opacity-40">
                           <option value="">Без папки</option>
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                         </select>
                       </td>
-                      <td className="px-6 py-5 text-sm text-slate-300">{formatDate(batch.created_at)}</td>
-                      <td className="px-6 py-5 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
-                      <td className="px-6 py-5"><StatusBadge status={batch.status} /></td>
-                      <td className="px-6 py-5 text-sm text-slate-300">
-                        <span className="inline-flex items-center gap-1.5">
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{formatDate(batch.created_at)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
+                      <td className="px-4 py-3"><StatusBadge status={batch.status} /></td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
+                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           {batch.end_date && <Calendar className="h-3.5 w-3.5 text-slate-500" />}
                           {batch.end_date || '—'}
                         </span>
                       </td>
-                      <td className="relative px-6 py-5 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="relative px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                           {!batch.isSynthetic && (
                             <button
                               onClick={(event) => {

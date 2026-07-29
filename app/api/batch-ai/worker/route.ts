@@ -35,7 +35,9 @@ async function heartbeat(body: any) {
     ON CONFLICT(worker_id) DO UPDATE SET provider='cockpit',model=EXCLUDED.model,
       heartbeat_at=NOW(),metadata=EXCLUDED.metadata
   `, [workerId, String(body.model || ''), JSON.stringify(body.metadata || {})])
-  return NextResponse.json({ ok: true })
+  const setting = await scrapingQuery("SELECT value FROM app_settings WHERE key='batch_ai_concurrency'")
+  const concurrency = Math.max(1, Math.min(10, Math.round(Number(setting.rows[0]?.value || 5))))
+  return NextResponse.json({ ok: true, concurrency })
 }
 
 async function claim() {

@@ -13,6 +13,7 @@ import {
   matchingPriceRule,
   normalizeBatchAiOutput,
   runBatchAiOpenRouter,
+  runBatchAiOpenRouterRefinement,
   type BatchAiProvider,
   type BatchAiSettings,
 } from '@/lib/batch-ai'
@@ -29,6 +30,7 @@ const SETTINGS_KEYS = [
   'batch_ai_openrouter_model',
   'batch_ai_temperature',
   'batch_ai_max_tokens',
+  'batch_ai_concurrency',
   'batch_ai_system_prompt',
 ]
 
@@ -56,6 +58,7 @@ export async function getBatchAiSettingsAction() {
       openrouterModel: values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
       temperature: finiteNumber(values.batch_ai_temperature, 0.1),
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
+      concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
       systemPrompt: values.batch_ai_system_prompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       cockpitWorker: worker.rows[0] || null,
     },
@@ -70,6 +73,7 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
     batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
+    batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
     batch_ai_system_prompt: String(settings.systemPrompt || '').trim() || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   }
   const client = await getScrapingClient()
@@ -191,7 +195,8 @@ async function snapshotBatch(batchId: string, stage: string, label: string, sett
 
 async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', productId?: number) {
   const batch = await scrapingQuery(`
-    SELECT b.*, s.ai_instructions, s.default_price
+    SELECT b.*, s.ai_instructions, s.ai_photo_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
+           s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
   `, [batchId])
   if (!batch.rows[0]) throw new Error('Выгрузка не найдена')
@@ -213,11 +218,18 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
     [batch.rows[0].supplier_id],
   )
+  const allowedIds = (value: unknown) => Array.isArray(value) ? new Set(value.map(String)) : new Set<string>()
+  const allowedBrands = allowedIds(batch.rows[0].allowed_brand_ids)
+  const allowedCategories = allowedIds(batch.rows[0].allowed_category_ids)
+  const allowedSubcategories = allowedIds(batch.rows[0].allowed_subcategory_ids)
+  const brands = mappings.rows.filter((row) => row.entity_type === 'brand')
+  const categories = mappings.rows.filter((row) => row.entity_type === 'category')
+  const subcategories = mappings.rows.filter((row) => row.entity_type === 'subcategory')
   return {
     batch: batch.rows[0], products: products.rows, definitions,
-    brands: mappings.rows.filter((row) => row.entity_type === 'brand'),
-    categories: mappings.rows.filter((row) => row.entity_type === 'category'),
-    subcategories: mappings.rows.filter((row) => row.entity_type === 'subcategory'),
+    brands: allowedBrands.size ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
+    categories: allowedCategories.size ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
+    subcategories: allowedSubcategories.size ? subcategories.filter((row) => allowedSubcategories.has(String(row.id))) : subcategories,
     priceRules: priceRules.rows,
   }
 }
@@ -248,7 +260,11 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
     }
 
     const runId = crypto.randomUUID()
-    const supplierInstructions = (settings as any).supplierInstructions ?? context.batch.ai_instructions ?? ''
+    const supplierInstructions = (settings as any).supplierInstructions ?? [
+      context.batch.ai_instructions,
+      context.batch.ai_photo_enabled && context.batch.ai_photo_instructions ? `Особенности фото: ${context.batch.ai_photo_instructions}` : '',
+      context.batch.ai_photo_enabled && context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
+    ].filter(Boolean).join('\n')
     const snapshot = {
       ...settings,
       systemPrompt: settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
@@ -274,7 +290,9 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
         VALUES($1,$2,$3,$4,$5::jsonb)
       `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
         product, userPrompt, systemPrompt: snapshot.systemPrompt,
-        photoUrls: product.photos || [],
+        photoUrls: context.batch.ai_photo_enabled ? product.photos || [] : [],
+        photoEnabled: context.batch.ai_photo_enabled === true,
+        fullSizeRefinementEnabled: context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
         brands: context.brands,
         categories: context.categories,
         subcategories: context.subcategories,
@@ -298,7 +316,10 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
   const items = await scrapingQuery('SELECT * FROM batch_ai_items WHERE run_id=$1 ORDER BY created_at', [runId])
   let cursor = 0
-  const workers = Array.from({ length: Math.min(3, items.rows.length) }, async () => {
+  const concurrency = context.batch.ai_parallel_enabled === false
+    ? 1
+    : Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))
+  const workers = Array.from({ length: Math.min(concurrency, items.rows.length) }, async () => {
     while (cursor < items.rows.length) {
       const item = items.rows[cursor++]
       await processOpenRouterItem(item, context, settings)
@@ -313,12 +334,22 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     await scrapingQuery("UPDATE batch_ai_items SET status='running',attempts=attempts+1,updated_at=NOW() WHERE id=$1", [item.id])
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
-    const raw = await runBatchAiOpenRouter({
+    let raw = await runBatchAiOpenRouter({
       settings,
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,
       contactSheets: sheets,
     })
+    if (input.fullSizeRefinementEnabled && Number(raw?.product?.confidence || 0) < 0.75 && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
+      raw = await runBatchAiOpenRouterRefinement({
+        settings,
+        systemPrompt: input.systemPrompt,
+        userPrompt: input.userPrompt,
+        previousOutput: raw,
+        photoUrls: input.photoUrls || [],
+        indexes: raw.inspect_full_size_indexes,
+      })
+    }
     const normalized = normalizeBatchAiOutput(raw, {
       product: input.product,
       brandIds: new Set(context.brands.map((row: any) => String(row.id))),

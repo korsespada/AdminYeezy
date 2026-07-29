@@ -9,6 +9,7 @@ export type BatchAiSettings = {
   openrouterModel: string
   temperature: number
   maxTokens: number
+  concurrency: number
   systemPrompt: string
 }
 
@@ -24,13 +25,18 @@ export type BatchAiAttributeDefinition = {
 
 export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор каталога премиальных товаров. Обрабатывай сырой китайский товар только по предоставленному тексту и фотографиям.
 
-Главный источник фактов — фотографии, затем исходный текст. Соотноси сведения между всеми contact sheet одного товара. Не выдумывай модель, материал, размеры или характеристики.
+Если фотографии предоставлены, главный источник фактов — фотографии, затем исходный текст; соотноси сведения между всеми contact sheet одного товара. Если фотографий нет, работай только по тексту и не делай визуальных выводов. Не выдумывай модель, материал, размеры или характеристики.
 
 Требования:
 - Пиши по-русски, без китайских иероглифов, эмодзи, рекламных обещаний и упоминаний реплики.
 - name: кратко «Бренд + тип/модель товара», без артикула.
-- description: 2–4 содержательных предложения о модели, материале, конструкции и деталях.
-- h1, seo_title и seo_description должны быть естественными и полезными для поиска.
+- description: содержательное описание обычно 350–700 знаков. Сохраняй подтверждённые детали дизайна, формы, цвета, отделки, застёжек, материалов и размеров; разделяй смысловые части не более чем двумя одиночными переносами.
+- h1, seo_title и seo_description должны быть естественными, полезными для поиска и без keyword stuffing.
+- Не сообщай покупателю, что факт неизвестен или не удалось определить: просто не упоминай его.
+- Не начинай текст словами «на фото видно», «на фотографиях представлено», «исходный текст» и подобными служебными фразами.
+- Не используй слова «оригинал», «официальный», «лучший», «премиальный» или «трендовый» и не делай заявлений о подлинности.
+- Внутренние артикулы не являются моделью и не должны попадать в публичные тексты.
+- Каждый подтверждённый материал перенеси и в description, и в подходящий атрибут.
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
 - model_name — свободное каноничное название конкретной линейки/модели. При низкой уверенности оставь пустым.
 - Используй существующие коды атрибутов. Новый атрибут вынеси только в attribute_suggestions.
@@ -62,11 +68,13 @@ export function buildBatchAiUserPrompt(input: {
         gender: 'male|female|unisex|null', catalog_attributes: {}, confidence: 0,
       },
       media: { discard_indexes: [], size_chart_indexes: [] },
+      inspect_full_size_indexes: [],
       subcategory_suggestion: null,
       attribute_suggestions: [],
       color_family: null,
     }),
     'Индексы фотографий начинаются с 1 и подписаны на contact sheet.',
+    'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере только для уточнения плохо читаемого бренда, модели или логотипа при низкой уверенности.',
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
     `Товар: ${JSON.stringify(product)}`,
     `Бренды: ${JSON.stringify(brands)}`,
@@ -147,6 +155,50 @@ export async function runBatchAiOpenRouter(input: {
   })
   const text = payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ')
+  return parseBatchAiJson(String(text))
+}
+
+function allowedOriginalPhotoUrls(photoUrls: unknown[], indexes: unknown[]) {
+  const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
+  const selected = [...new Set(indexes.map(Number).filter((value) => Number.isInteger(value) && value > 0 && value <= photoUrls.length))].slice(0, 3)
+  return selected.flatMap((index) => {
+    try {
+      const url = String(photoUrls[index - 1] || '')
+      const parsed = new URL(url)
+      return ['http:', 'https:'].includes(parsed.protocol) && allowedHosts.has(parsed.hostname.toLowerCase())
+        ? [{ index, url }]
+        : []
+    } catch { return [] }
+  })
+}
+
+export async function runBatchAiOpenRouterRefinement(input: {
+  settings: BatchAiSettings
+  systemPrompt: string
+  userPrompt: string
+  previousOutput: unknown
+  photoUrls: unknown[]
+  indexes: unknown[]
+}) {
+  const originals = allowedOriginalPhotoUrls(input.photoUrls, input.indexes)
+  if (!originals.length) return input.previousOutput
+  const content: any[] = [{
+    type: 'text',
+    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни плохо читаемый бренд/модель по ним и верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
+  }]
+  originals.forEach(({ index, url }) => {
+    content.push({ type: 'text', text: `Оригинал фото ${index}` })
+    content.push({ type: 'image_url', image_url: { url } })
+  })
+  const payload = await openRouterChatCompletion({
+    model: input.settings.openrouterModel,
+    messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
+    temperature: input.settings.temperature,
+    max_tokens: input.settings.maxTokens,
+    response_format: { type: 'json_object' },
+  })
+  const text = payload?.choices?.[0]?.message?.content
+  if (!text) throw new Error('ИИ вернул пустой ответ при уточнении оригинала')
   return parseBatchAiJson(String(text))
 }
 

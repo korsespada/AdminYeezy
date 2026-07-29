@@ -30,6 +30,21 @@ async function migrate() {
     await client.query('CREATE INDEX IF NOT EXISTS scraping_batches_folder_id_idx ON scraping_batches(folder_id)')
 
     await client.query(`
+      ALTER TABLE suppliers
+        ADD COLUMN IF NOT EXISTS allowed_category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS allowed_subcategory_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS allowed_brand_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+    await client.query(`
+      UPDATE suppliers SET allowed_category_ids=jsonb_build_array(default_category)
+      WHERE default_category IS NOT NULL AND jsonb_array_length(allowed_category_ids)=0;
+      UPDATE suppliers SET allowed_subcategory_ids=jsonb_build_array(default_subcategory)
+      WHERE default_subcategory IS NOT NULL AND jsonb_array_length(allowed_subcategory_ids)=0;
+      UPDATE suppliers SET allowed_brand_ids=jsonb_build_array(default_brand)
+      WHERE default_brand IS NOT NULL AND jsonb_array_length(allowed_brand_ids)=0
+    `)
+
+    await client.query(`
       ALTER TABLE products
         ADD COLUMN IF NOT EXISTS h1 TEXT,
         ADD COLUMN IF NOT EXISTS seo_title TEXT,
@@ -143,6 +158,7 @@ async function migrate() {
         ('batch_ai_openrouter_model', 'google/gemini-2.5-flash'),
         ('batch_ai_temperature', '0.1'),
         ('batch_ai_max_tokens', '5000'),
+        ('batch_ai_concurrency', '5'),
         ('batch_ai_system_prompt', '')
       ON CONFLICT (key) DO NOTHING
     `)
