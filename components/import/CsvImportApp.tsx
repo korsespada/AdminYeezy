@@ -1401,7 +1401,9 @@ export default function CsvImportApp({
                       className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
                   >
                       <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                      Тест ИИ · 10 товаров
+                      {products.some((product) => product.ai_processed === true || product.ai_processed === "true")
+                        ? "Продолжить ИИ"
+                        : "Тест ИИ · 10 товаров"}
                   </button>
                 )
               ) : (
