@@ -323,10 +323,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] table-fixed text-left">
+          <table className="w-full min-w-[1320px] table-fixed text-left">
             <colgroup>
-              <col className="w-[29%]" /><col className="w-[12%]" /><col className="w-[10%]" />
-              <col className="w-[8%]" /><col className="w-[13%]" /><col className="w-[10%]" /><col className="w-[18%]" />
+              <col className="w-[28%]" /><col className="w-[11%]" /><col className="w-[10%]" />
+              <col className="w-[7%]" /><col className="w-[14%]" /><col className="w-[10%]" /><col className="w-[20%]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-700 bg-slate-950/60">
@@ -382,31 +382,32 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           {batch.end_date || '—'}
                         </span>
                       </td>
-                      <td className="relative px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                      <td className="relative px-3 py-3 text-right">
+                        <div className="ml-auto flex w-fit flex-nowrap items-center justify-end gap-0.5 whitespace-nowrap rounded-lg bg-slate-900/35 p-0.5">
                           {!batch.isSynthetic && (
                             <button
                               onClick={(event) => {
                                 event.stopPropagation()
                                 openBatchProducts(batch)
                               }}
-                              className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
                               title="Открыть текущие товары партии из БД"
+                              aria-label="Открыть товары из БД"
                             >
-                              БД
+                              <Database className="h-4 w-4" />
                             </button>
                           )}
                           {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
-                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на 10 случайных товарах'}>
+                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на 10 случайных товарах'} aria-label={batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
                               {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                              {batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ · 10'}
+                              {!batch.ai_completed_count && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
                             </button>
                           )}
                           {!batch.isSynthetic && batch.supplier_id && (
-                            <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="rounded-lg p-2 text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика"><BadgeRussianRuble className="h-4 w-4" /></button>
+                            <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика" aria-label="Правила цен"><BadgeRussianRuble className="h-4 w-4" /></button>
                           )}
                           {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
-                            <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="rounded-lg p-2 text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
+                            <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ" aria-label="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
                           )}
                           {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
                             <button
@@ -415,11 +416,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                                 handlePushBatch(batch)
                               }}
                               disabled={pendingAction === `push-${batch.id}`}
-                              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-60"
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-60"
                               title="Запушить товары в каталог"
+                              aria-label="Пуш в каталог"
                             >
                               {pendingAction === `push-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                              Пуш
                             </button>
                           )}
                           <button
@@ -427,7 +428,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               event.stopPropagation()
                               setOpenMenuId(openMenuId === batch.id ? null : batch.id)
                             }}
-                            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
                             title="Действия"
                           >
                             {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <MoreHorizontal className="h-5 w-5" />}
@@ -437,7 +438,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               event.stopPropagation()
                               toggleBatch(batch.id)
                             }}
-                            className="rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
                             title={isExpanded ? 'Свернуть' : 'Раскрыть'}
                           >
                             {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
