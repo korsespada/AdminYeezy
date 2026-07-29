@@ -52,7 +52,7 @@ import {
   pushBatchToCatalogAction,
 } from "@/actions/suppliers";
 import { processAiAction } from "@/actions/ai-process";
-import { startBatchAiAction } from "@/actions/batch-ai";
+import { getBatchAiRunAction, startBatchAiAction } from "@/actions/batch-ai";
 import Image from "next/image";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
 import { extractProductAttributes } from "@/lib/product-attributes";
@@ -883,22 +883,40 @@ export default function CsvImportApp({
 
     if (batchId) {
       setIsProcessing(true);
-      const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
-      const mode = alreadyProcessed ? "full" : "sample";
-      const result = await startBatchAiAction(batchId, mode);
-      if (result.success) {
-        const data: any = result.data;
-        if (data?.provider === "cockpit") {
-          setSaveMsg(`В очередь Cockpit отправлено: ${data.queued}`);
+      try {
+        const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
+        const mode = alreadyProcessed ? "full" : "sample";
+        const result = await startBatchAiAction(batchId, mode);
+        if (result.success) {
+          const data: any = result.data;
+          if (data?.provider === "cockpit") {
+            setSaveMsg(`Cockpit: в очереди ${data.queued}, ожидаем обработку…`);
+            let finalRun: any = null;
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 3000));
+              const run = await getBatchAiRunAction(data.runId);
+              if (!run.success) break;
+              finalRun = run.data;
+              setSaveMsg(`Cockpit: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
+              if (["completed", "failed"].includes(finalRun.status)) break;
+            }
+            await handleLoadBatch(batchId);
+            setSaveMsg(finalRun?.status === "completed"
+              ? `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
+              : "Cockpit не завершил обработку вовремя. Статус сохранён в истории.");
+          } else {
+            await handleLoadBatch(batchId);
+            setSaveMsg(mode === "sample" ? "✓ Обработаны 10 случайных товаров" : "✓ AI-обработка завершена");
+          }
         } else {
-          await handleLoadBatch(batchId);
-          setSaveMsg(mode === "sample" ? "✓ Обработаны 10 случайных товаров" : "✓ AI-обработка завершена");
+          setSaveMsg(`Ошибка ИИ: ${result.error}`);
         }
-      } else {
-        alert(`Ошибка ИИ: ${result.error}`);
+      } catch (error: any) {
+        setSaveMsg(`Ошибка ИИ: ${error?.message || "не удалось запустить обработку"}`);
+      } finally {
+        setIsProcessing(false);
+        setTimeout(() => setSaveMsg(null), 5000);
       }
-      setIsProcessing(false);
-      setTimeout(() => setSaveMsg(null), 5000);
       return;
     }
     
@@ -1383,7 +1401,7 @@ export default function CsvImportApp({
                       className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
                   >
                       <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                      Обработать с ИИ
+                      Тест ИИ · 10 товаров
                   </button>
                 )
               ) : (

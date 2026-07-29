@@ -32,6 +32,7 @@ import CsvModal from './CsvModal'
 import {
   createExportFolderAction,
   deleteExportFolderAction,
+  getBatchAiRunAction,
   getBatchSnapshotsAction,
   moveBatchToFolderAction,
   renameExportFolderAction,
@@ -273,13 +274,36 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
   const startAi = async (batch: ExportHistoryBatch, mode: 'sample' | 'full') => {
     setPendingAction(`ai-${batch.id}`)
-    const result = await startBatchAiAction(batch.id, mode)
-    if (result.success) {
-      const data: any = result.data
-      alert(data?.provider === 'cockpit' ? `В очередь отправлено: ${data.queued}` : `ИИ завершён. Успешно: ${data?.completed_count || 0}, ошибок: ${data?.failed_count || 0}`)
-      await refresh()
-    } else alert(`Ошибка ИИ: ${result.error}`)
-    setPendingAction(null)
+    try {
+      const result = await startBatchAiAction(batch.id, mode)
+      if (result.success) {
+        const data: any = result.data
+        if (data?.provider === 'cockpit') {
+          let finalRun: any = null
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 3000))
+            const run = await getBatchAiRunAction(data.runId)
+            if (!run.success) break
+            finalRun = run.data
+            setBatches((items) => items.map((item) => item.id === batch.id ? {
+              ...item,
+              ai_run_status: finalRun.status,
+              ai_completed_count: Number(finalRun.completed_count || 0),
+              ai_failed_count: Number(finalRun.failed_count || 0),
+            } : item))
+            if (['completed', 'failed'].includes(finalRun.status)) break
+          }
+          alert(finalRun?.status === 'completed'
+            ? `${mode === 'sample' ? 'Тест' : 'Обработка'} ИИ завершён. Успешно: ${finalRun.completed_count || 0}, ошибок: ${finalRun.failed_count || 0}`
+            : 'Cockpit не завершил обработку вовремя. Текущий статус сохранён в истории.')
+        } else alert(`ИИ завершён. Успешно: ${data?.completed_count || 0}, ошибок: ${data?.failed_count || 0}`)
+        await refresh()
+      } else alert(`Ошибка ИИ: ${result.error}`)
+    } catch (error: any) {
+      alert(`Ошибка ИИ: ${error?.message || 'не удалось запустить обработку'}`)
+    } finally {
+      setPendingAction(null)
+    }
   }
 
   const rollback = async (batch: ExportHistoryBatch) => {
