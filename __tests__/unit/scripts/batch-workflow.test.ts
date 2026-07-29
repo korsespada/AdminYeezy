@@ -25,4 +25,25 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(csv.split('\n')[0]).toContain('hardware')
     expect(csv).toContain('кожа')
   })
+
+  it('converts legacy script catalog IDs to current Rails IDs', () => {
+    const mappings = [
+      { entity_type: 'brand', legacy_id: 'old-brand', canonical_id: 'new-brand', name: 'Chanel' },
+      { entity_type: 'category', legacy_id: 'old-bags', canonical_id: 'new-bags', name: 'Сумки' },
+      {
+        entity_type: 'subcategory', legacy_id: 'old-wallets', canonical_id: 'new-wallets',
+        canonical_parent_id: 'new-accessories', name: 'Кошельки и картхолдеры',
+      },
+    ]
+    const product = workflow.normalizeProductCatalogReferences({
+      brand: 'old-brand', category: 'old-bags', subcategory: 'old-wallets', gender: 'Для женщин',
+    }, mappings)
+
+    expect(product).toMatchObject({
+      brand: 'new-brand',
+      category: 'new-accessories',
+      subcategory: 'new-wallets',
+      gender: 'female',
+    })
+  })
 })

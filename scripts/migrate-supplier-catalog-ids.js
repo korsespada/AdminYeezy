@@ -12,11 +12,6 @@ const lookupBase = (process.env.RAILS_LOOKUPS_URL || 'https://api.yeezyunique.ru
 const CATEGORY_NAME_ALIASES = new Map([
   ['кошельки', 'кошельки и картхолдеры'],
 ])
-const IGNORED_LEGACY_MAPPINGS = new Set([
-  // Generic legacy "Сумки" subcategory was retired. New bag subcategories
-  // must be selected by a classifier/reviewer, not guessed here.
-  'subcategory:dnckd3yiv2q0r5f',
-])
 
 function key(value) {
   return String(value || '')
@@ -124,7 +119,6 @@ async function migrate() {
       else mappings.push({ type: 'category', legacyId: String(item.id), canonicalId: match.id, name: match.name })
     }
     for (const item of legacySubcategories) {
-      if (IGNORED_LEGACY_MAPPINGS.has(`subcategory:${item.id}`)) continue
       const parentName = legacyCategoryNames.get(String(item.parent_id))
       const match = uniqueCandidate(canonicalByType.subcategory, item.name, parentName)
       if (!match) missing.push({ type: 'subcategory', id: item.id, name: item.name, parent: parentName || null })
@@ -138,31 +132,6 @@ async function migrate() {
           canonicalParentId: match.parentId,
         })
       }
-    }
-
-    for (const ignoredKey of IGNORED_LEGACY_MAPPINGS) {
-      const [type, legacyId] = ignoredKey.split(':')
-      const existing = await scrapingPool.query(
-        'SELECT canonical_id FROM catalog_id_mappings WHERE entity_type=$1 AND legacy_id=$2',
-        [type, legacyId],
-      )
-      const canonicalId = existing.rows[0]?.canonical_id || null
-      if (type === 'subcategory') {
-        await scrapingPool.query(`
-          UPDATE suppliers
-          SET
-            legacy_default_subcategory = COALESCE(legacy_default_subcategory, $1),
-            default_subcategory = NULL,
-            updated_at = NOW()
-          WHERE legacy_default_subcategory = $1
-             OR default_subcategory = $1
-             OR ($2::text IS NOT NULL AND default_subcategory = $2)
-        `, [legacyId, canonicalId])
-      }
-      await scrapingPool.query(
-        'DELETE FROM catalog_id_mappings WHERE entity_type=$1 AND legacy_id=$2',
-        [type, legacyId],
-      )
     }
 
     for (const mapping of mappings) {
@@ -225,10 +194,59 @@ async function migrate() {
       updatedSuppliers += 1
     }
 
+    const brandBackfill = await scrapingPool.query(`
+      UPDATE products p SET brand=m.canonical_id, updated_at=NOW()
+      FROM catalog_id_mappings m
+      WHERE m.entity_type='brand' AND p.brand=m.legacy_id
+    `)
+    const categoryBackfill = await scrapingPool.query(`
+      UPDATE products p SET category=m.canonical_id, updated_at=NOW()
+      FROM catalog_id_mappings m
+      WHERE m.entity_type='category' AND p.category=m.legacy_id
+    `)
+    const subcategoryBackfill = await scrapingPool.query(`
+      UPDATE products p
+      SET subcategory=m.canonical_id,
+          category=COALESCE(m.canonical_parent_id,p.category),
+          updated_at=NOW()
+      FROM catalog_id_mappings m
+      WHERE m.entity_type='subcategory' AND p.subcategory=m.legacy_id
+    `)
+    const genderBackfill = await scrapingPool.query(`
+      UPDATE products SET gender=CASE LOWER(TRIM(gender))
+        WHEN 'для женщин' THEN 'female'
+        WHEN 'женский' THEN 'female'
+        WHEN 'women' THEN 'female'
+        WHEN 'woman' THEN 'female'
+        WHEN 'для мужчин' THEN 'male'
+        WHEN 'мужской' THEN 'male'
+        WHEN 'men' THEN 'male'
+        WHEN 'man' THEN 'male'
+        WHEN 'унисекс' THEN 'unisex'
+        ELSE gender END,
+        updated_at=NOW()
+      WHERE LOWER(TRIM(gender)) IN ('для женщин','женский','women','woman','для мужчин','мужской','men','man','унисекс')
+    `)
+    const missingBrandIds = missing.filter((item) => item.type === 'brand').map((item) => String(item.id))
+    const missingCategoryIds = missing.filter((item) => item.type === 'category').map((item) => String(item.id))
+    const missingSubcategoryIds = missing.filter((item) => item.type === 'subcategory').map((item) => String(item.id))
+    const clearedBrands = missingBrandIds.length
+      ? await scrapingPool.query("UPDATE products SET brand='',updated_at=NOW() WHERE brand=ANY($1::text[])", [missingBrandIds])
+      : { rowCount: 0 }
+    const clearedCategories = missingCategoryIds.length
+      ? await scrapingPool.query("UPDATE products SET category='',updated_at=NOW() WHERE category=ANY($1::text[])", [missingCategoryIds])
+      : { rowCount: 0 }
+    const clearedSubcategories = missingSubcategoryIds.length
+      ? await scrapingPool.query('UPDATE products SET subcategory=NULL,updated_at=NOW() WHERE subcategory=ANY($1::text[])', [missingSubcategoryIds])
+      : { rowCount: 0 }
+    const updatedProducts = brandBackfill.rowCount + categoryBackfill.rowCount + subcategoryBackfill.rowCount + genderBackfill.rowCount
+      + clearedBrands.rowCount + clearedCategories.rowCount + clearedSubcategories.rowCount
+
     await scrapingPool.query('COMMIT')
     console.log(JSON.stringify({
       mapped: mappings.length,
       updatedSuppliers,
+      updatedProducts,
       missing: missing.slice(0, 100),
       missingCount: missing.length,
     }, null, 2))

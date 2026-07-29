@@ -13,6 +13,7 @@ const POLL_MS = Math.max(1000, Number(process.env.BATCH_AI_WORKER_POLL_MS || 500
 let concurrency = Math.max(1, Math.min(10, Number(process.env.BATCH_AI_WORKER_CONCURRENCY || 5)))
 const TILE = 384
 const MEDIA_HOSTS = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
+const referenceSheetCache = new Map()
 
 let stopping = false
 process.on('SIGINT', () => { stopping = true })
@@ -48,9 +49,14 @@ async function processItem(item) {
   try {
     const input = item.input_snapshot || {}
     const sheets = await buildContactSheets(input.photoUrls || [])
+    const referenceSheets = await cachedReferenceSheets(input.priceReferenceUrls || [])
     const content = [{ type: 'text', text: input.userPrompt }]
     sheets.forEach((url, index) => {
       content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
+      content.push({ type: 'image_url', image_url: { url } })
+    })
+    referenceSheets.forEach((url, index) => {
+      content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
       content.push({ type: 'image_url', image_url: { url } })
     })
     let output = await cockpitJson({
@@ -127,6 +133,15 @@ async function buildContactSheets(urls) {
     sheets.push(`data:image/jpeg;base64,${sheet.toString('base64')}`)
   }
   return sheets
+}
+
+async function cachedReferenceSheets(urls) {
+  const key = JSON.stringify(urls || [])
+  if (!referenceSheetCache.has(key)) {
+    if (referenceSheetCache.size >= 20) referenceSheetCache.delete(referenceSheetCache.keys().next().value)
+    referenceSheetCache.set(key, buildContactSheets(urls))
+  }
+  return referenceSheetCache.get(key)
 }
 
 async function cockpitJson({ systemPrompt, content, temperature, maxTokens }) {

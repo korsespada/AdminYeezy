@@ -136,6 +136,21 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     filter: true,
     aliases: ['водозащита', 'водонепроницаемость', 'water resistance'],
   }),
+  definition('bag_width_cm', 'Ширина сумки', 'Сумки', 'number', 121, {
+    aliases: ['bag_width', 'ширина сумки'],
+    unit: 'см',
+    show: false,
+  }),
+  definition('bag_height_cm', 'Высота сумки', 'Сумки', 'number', 122, {
+    aliases: ['bag_height', 'высота сумки'],
+    unit: 'см',
+    show: false,
+  }),
+  definition('size_class', 'Размерный класс', 'Сумки', 'enum', 123, {
+    aliases: ['bag_size_class', 'размерный класс'],
+    values: ['small', 'medium', 'large'],
+    show: false,
+  }),
   definition('glass_material', 'Стекло', 'Часы', 'enum', 202, {
     filter: true,
     values: ['Сапфировое', 'Минеральное', 'Акриловое', 'Hardlex'],
@@ -204,7 +219,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Сумки',
-    attributes: ['materials', 'dimensions', 'strap_length', 'capacity', 'hardware_color'],
+    attributes: ['materials', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'size_class', 'strap_length', 'capacity', 'hardware_color'],
   },
   {
     category: 'Часы',
@@ -331,6 +346,7 @@ function definition(
     values?: string[]
     rules?: string[]
     unit?: string
+    show?: boolean
   } = {},
 ): CatalogAttributeDefinition {
   return {
@@ -338,7 +354,7 @@ function definition(
     label,
     category_scope: categoryScope,
     value_type: valueType,
-    show_as_characteristic: true,
+    show_as_characteristic: options.show !== false,
     use_as_filter: Boolean(options.filter),
     use_as_variant_dimension: Boolean(options.variant),
     parser_rules: options.rules || [],

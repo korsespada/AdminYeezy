@@ -1,6 +1,7 @@
 'use server'
 
 import crypto from 'crypto'
+import sharp from 'sharp'
 import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-session'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
@@ -24,6 +25,8 @@ import {
   upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
+import { uploadToS3 } from '@/lib/s3'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -162,9 +165,13 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
     for (const [index, rule] of rules.entries()) {
       const price = finiteNumber(rule.price, 0)
       if (price < 0) throw new Error(`Правило ${index + 1}: цена не может быть отрицательной`)
+      const ruleKey = String(rule.rule_key || `rule_${crypto.randomUUID()}`).trim().slice(0, 100)
+      const referenceImages = Array.isArray(rule.reference_images)
+        ? [...new Set(rule.reference_images.map(String).filter((url: string) => /^https:\/\//i.test(url)))].slice(0, 9)
+        : []
       await client.query(`
-        INSERT INTO supplier_price_rules(supplier_id,name,priority,conditions,price,enabled)
-        VALUES($1,$2,$3,$4::jsonb,$5,$6)
+        INSERT INTO supplier_price_rules(supplier_id,name,priority,conditions,price,enabled,rule_key,visual_hint,reference_images)
+        VALUES($1,$2,$3,$4::jsonb,$5,$6,$7,$8,$9::jsonb)
       `, [
         supplierId,
         String(rule.name || `Правило ${index + 1}`).slice(0, 160),
@@ -172,6 +179,9 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         JSON.stringify(rule.conditions || {}),
         price,
         rule.enabled !== false,
+        ruleKey,
+        String(rule.visual_hint || '').trim().slice(0, 2000) || null,
+        JSON.stringify(referenceImages),
       ])
     }
     await client.query('COMMIT')
@@ -184,6 +194,29 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
   }
 }
 
+export async function uploadPriceRuleReferenceAction(supplierId: number, formData: FormData) {
+  await requireAdmin()
+  const file = formData.get('file')
+  if (!(file instanceof File)) return { success: false, error: 'Файл не выбран' }
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    return { success: false, error: 'Поддерживаются JPG, PNG и WebP' }
+  }
+  if (file.size <= 0 || file.size > 12 * 1024 * 1024) {
+    return { success: false, error: 'Размер фотографии должен быть не больше 12 МБ' }
+  }
+  try {
+    const normalized = await sharp(Buffer.from(await file.arrayBuffer()))
+      .rotate()
+      .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 88 })
+      .toBuffer()
+    const url = await uploadToS3(`supplier-price-rules/${supplierId}/${crypto.randomUUID()}.jpg`, normalized, 'image/jpeg')
+    return { success: true, data: { url } }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
+
 async function loadSettings(): Promise<BatchAiSettings> {
   const result = await getBatchAiSettingsAction()
   return result.data as BatchAiSettings
@@ -191,6 +224,18 @@ async function loadSettings(): Promise<BatchAiSettings> {
 
 async function snapshotBatch(batchId: string, stage: string, label: string, settings: any = {}) {
   return recordBatchSnapshot(batchId, stage, label, settings)
+}
+
+function priceRuleHints(rules: any[]) {
+  return rules.map((rule) => ({
+    rule_key: String(rule.rule_key || `rule_${rule.id}`),
+    name: String(rule.name || ''),
+    conditions: rule.conditions || {},
+    visual_hint: String(rule.visual_hint || ''),
+    reference_images: Array.isArray(rule.reference_images) ? rule.reference_images.map(String).slice(0, 9) : [],
+    price: Number(rule.price || 0),
+    priority: Number(rule.priority || 0),
+  }))
 }
 
 async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', productId?: number) {
@@ -276,6 +321,8 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
       VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,NOW())
     `, [runId, batchId, settings.provider, mode, settings.provider === 'cockpit' ? 'queued' : 'running', JSON.stringify(snapshot), context.products.length])
 
+    const priceRules = priceRuleHints(context.priceRules)
+    const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
     for (const product of context.products) {
       const userPrompt = buildBatchAiUserPrompt({
         product,
@@ -284,6 +331,7 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
         categories: context.categories,
         subcategories: context.subcategories,
         attributes: context.definitions,
+        priceRules,
       })
       await scrapingQuery(`
         INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
@@ -297,6 +345,8 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
         categories: context.categories,
         subcategories: context.subcategories,
         attributeCodes: context.definitions.map((item: any) => item.code),
+        priceRules,
+        priceReferenceUrls,
       })])
     }
 
@@ -334,11 +384,14 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     await scrapingQuery("UPDATE batch_ai_items SET status='running',attempts=attempts+1,updated_at=NOW() WHERE id=$1", [item.id])
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
+    context.priceReferenceSheetsPromise ||= buildBatchAiContactSheets(input.priceReferenceUrls || [])
+    const referenceSheets = await context.priceReferenceSheetsPromise
     let raw = await runBatchAiOpenRouter({
       settings,
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,
       contactSheets: sheets,
+      referenceSheets,
     })
     if (input.fullSizeRefinementEnabled && Number(raw?.product?.confidence || 0) < 0.75 && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
       raw = await runBatchAiOpenRouterRefinement({
@@ -356,6 +409,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       categoryIds: new Set(context.categories.map((row: any) => String(row.id))),
       subcategoryIds: new Set(context.subcategories.map((row: any) => String(row.id))),
       attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
+      priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })
     await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
@@ -486,8 +540,16 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
+    const mappingResult = await client.query(`
+      SELECT entity_type, legacy_id, canonical_id, name, canonical_parent_id
+      FROM catalog_id_mappings
+    `)
+    const products = normalizeProductsCatalogReferences(
+      snapshot.rows[0].products,
+      mappingResult.rows as CatalogIdMapping[],
+    )
     await client.query('DELETE FROM products WHERE batch_id=$1', [batchId])
-    for (const row of snapshot.rows[0].products) {
+    for (const row of products) {
       await client.query(`
         INSERT INTO products(external_id,name,description,price,status,brand,category,subcategory,gender,photos,attributes,
           ai_processed,batch_id,h1,seo_title,seo_description,price_source,variant_group_key,ai_error,ai_confidence,created_at,updated_at)
@@ -500,7 +562,7 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
         row.created_at || new Date(), new Date(),
       ])
     }
-    await client.query('UPDATE scraping_batches SET stage=$2,items_count=$3,updated_at=NOW() WHERE id=$1', [batchId, snapshot.rows[0].stage, snapshot.rows[0].products.length])
+    await client.query('UPDATE scraping_batches SET stage=$2,items_count=$3,updated_at=NOW() WHERE id=$1', [batchId, snapshot.rows[0].stage, products.length])
     await client.query('DELETE FROM batch_snapshots WHERE batch_id=$1 AND created_at>$2', [batchId, snapshot.rows[0].created_at])
     await client.query('DELETE FROM batch_ai_runs WHERE batch_id=$1 AND created_at>$2', [batchId, snapshot.rows[0].created_at])
     await client.query('COMMIT')

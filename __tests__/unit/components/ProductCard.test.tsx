@@ -53,4 +53,21 @@ describe('ProductCard grid presentation', () => {
     expect(screen.getByText('Компактная карточка')).toBeInTheDocument()
     expect(screen.queryByText('external-id-hidden-in-grid')).not.toBeInTheDocument()
   })
+
+  it('keeps delete available when duplication is disabled for batch products', () => {
+    render(
+      <ProductCard
+        product={product}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+        allowDuplicate={false}
+      />,
+    )
+
+    expect(screen.getByTitle('Удалить')).toBeInTheDocument()
+    expect(screen.queryByTitle('Дублировать')).not.toBeInTheDocument()
+  })
 })

@@ -89,17 +89,21 @@ async function complete(body: any) {
     categoryIds: new Set((input.categories || []).map((row: any) => String(row.id))),
     subcategoryIds: new Set((input.subcategories || []).map((row: any) => String(row.id))),
     attributeCodes: new Set((input.attributeCodes || []).map(String)),
+    priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
   })
   const context = await scrapingQuery(`
     SELECT b.supplier_id,s.default_price FROM scraping_batches b
     JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
   `, [item.batch_id])
-  const rules = await scrapingQuery(
+  const storedRules = await scrapingQuery(
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
     [context.rows[0]?.supplier_id],
   )
+  const priceRules = Array.isArray(input.priceRules) && input.priceRules.length
+    ? input.priceRules.map((rule: any) => ({ ...rule, enabled: true }))
+    : storedRules.rows
   const product = normalized.product
-  const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, rules.rows)
+  const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
   if (rule) {
     product.price = Number(rule.price)
     product.price_source = 'rule'

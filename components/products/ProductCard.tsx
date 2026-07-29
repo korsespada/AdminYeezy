@@ -241,7 +241,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 </div>
                 {/* Delete button on hover */}
                 <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    {allowDuplicate && <Button
+                    <Button
                         type="button"
                         variant="ghost"
                         size="icon"
@@ -250,8 +250,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         title="Удалить"
                     >
                         <Trash2 className="w-4 h-4" />
-                    </Button>}
-                    <Button
+                    </Button>
+                    {allowDuplicate && <Button
                         type="button"
                         variant="ghost"
                         size="icon"
@@ -261,7 +261,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         title="Дублировать"
                     >
                         <Copy className="w-4 h-4" />
-                    </Button>
+                    </Button>}
                 </div>
 
                 {/* Photo Count Tag */}

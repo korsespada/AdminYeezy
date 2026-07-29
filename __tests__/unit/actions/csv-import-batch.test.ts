@@ -90,6 +90,7 @@ describe('batch product server actions', () => {
     const { saveBatchProductsAction } = await import('@/actions/csv-import')
     mocks.client.query
       .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rowCount: 1, rows: [{ id: 10 }] })
       .mockResolvedValueOnce({ rowCount: 1 })
       .mockResolvedValueOnce({ rowCount: 1 })

@@ -291,6 +291,60 @@ function productToRailsCsvRow(product, lookups) {
   };
 }
 
+function catalogLookupKey(value) {
+  return String(value || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
+}
+
+function catalogCandidates(value, type, mappings) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const direct = mappings.filter((mapping) => mapping.entity_type === type &&
+    (String(mapping.legacy_id) === raw || String(mapping.canonical_id) === raw));
+  if (direct.length) return direct;
+  const name = catalogLookupKey(raw);
+  return mappings.filter((mapping) => mapping.entity_type === type && catalogLookupKey(mapping.name) === name);
+}
+
+function resolveCatalogMapping(value, type, mappings, parentId) {
+  const candidates = catalogCandidates(value, type, mappings);
+  if (candidates.length === 1) return candidates[0];
+  if (type === 'subcategory' && parentId) {
+    const underParent = candidates.filter((mapping) => String(mapping.canonical_parent_id || '') === parentId);
+    if (underParent.length === 1) return underParent[0];
+  }
+  return null;
+}
+
+function unresolvedCatalogValue(value) {
+  const raw = String(value || '').trim();
+  if (/^[a-z0-9]{15}$/i.test(raw)) return '';
+  if (['unknown', 'unknown brand', 'неизвестно'].includes(catalogLookupKey(raw))) return '';
+  return raw;
+}
+
+function normalizeCatalogGender(value) {
+  const normalized = catalogLookupKey(value);
+  if (!normalized) return '';
+  if (['female', 'woman', 'women', 'женский', 'для женщин'].includes(normalized)) return 'female';
+  if (['male', 'man', 'men', 'мужской', 'для мужчин'].includes(normalized)) return 'male';
+  if (['unisex', 'унисекс'].includes(normalized)) return 'unisex';
+  return String(value).trim();
+}
+
+function normalizeProductCatalogReferences(product, mappings) {
+  const brand = resolveCatalogMapping(product.brand, 'brand', mappings);
+  const category = resolveCatalogMapping(product.category, 'category', mappings);
+  const canonicalCategory = category?.canonical_id || String(product.category || '');
+  const subcategory = resolveCatalogMapping(product.subcategory, 'subcategory', mappings, canonicalCategory);
+  return {
+    ...product,
+    brand: brand?.canonical_id || unresolvedCatalogValue(product.brand),
+    category: subcategory?.canonical_parent_id || category?.canonical_id || unresolvedCatalogValue(product.category),
+    subcategory: subcategory?.canonical_id || unresolvedCatalogValue(product.subcategory),
+    gender: normalizeCatalogGender(product.gender),
+  };
+}
+
 async function postRailsImportBatch({ name, products }) {
   const response = await fetch(railsApiUrl('/admin/import_batches'), {
     method: 'POST',
@@ -534,9 +588,14 @@ async function saveBatchProducts(batchId, products) {
   const client = await scrapingPool.connect();
   try {
     await client.query('BEGIN');
+    const mappingResult = await client.query(`
+      SELECT entity_type, legacy_id, canonical_id, name, canonical_parent_id
+      FROM catalog_id_mappings
+    `);
+    const normalizedProducts = products.map((product) => normalizeProductCatalogReferences(product, mappingResult.rows));
     const keptIds = [];
 
-    for (const product of products) {
+    for (const product of normalizedProducts) {
       const normalized = normalizeProduct({ ...product, batch_id: batchId });
       const numericId = normalized.id !== undefined && normalized.id !== null && String(normalized.id).match(/^\d+$/)
         ? Number(normalized.id)
@@ -636,9 +695,9 @@ async function saveBatchProducts(batchId, products) {
       await client.query('DELETE FROM products WHERE batch_id=$1', [batchId]);
     }
 
-    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [products.length, batchId]);
+    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId]);
     await client.query('COMMIT');
-    return { count: products.length };
+    return { count: normalizedProducts.length };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -897,10 +956,13 @@ async function runBatchPostProcessScript(batchId) {
 
   const originalByExternalId = new Map(products.map((product) => [String(product.external_id), product]));
   for (const processedProduct of processedProducts) {
+    const original = originalByExternalId.get(String(processedProduct.external_id));
     if (Object.keys(processedProduct.attributes || {}).length === 0) {
-      const original = originalByExternalId.get(String(processedProduct.external_id));
       if (original?.attributes) processedProduct.attributes = original.attributes;
     }
+    processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
+      ? 'script'
+      : (original?.price_source || 'default');
   }
 
   await saveBatchProducts(batchId, processedProducts);
@@ -1053,6 +1115,7 @@ module.exports = {
   parseCsvObjects,
   listAllSuppliers,
   listFavoriteSuppliers,
+  normalizeProductCatalogReferences,
   processBatchWithAi,
   pushBatchToCatalog,
   runBatchPostProcessScript,

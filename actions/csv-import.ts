@@ -14,6 +14,7 @@ import {
 } from '@/lib/product-attributes'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
+import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 
 export interface CsvProduct {
     id?: string | number
@@ -602,9 +603,17 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
+    const mappingResult = await client.query(`
+      SELECT entity_type, legacy_id, canonical_id, name, canonical_parent_id
+      FROM catalog_id_mappings
+    `)
+    const normalizedProducts = normalizeProductsCatalogReferences(
+      products,
+      mappingResult.rows as CatalogIdMapping[],
+    )
     const keptIds: number[] = []
 
-    for (const product of products) {
+    for (const product of normalizedProducts) {
       const savedId = await upsertBatchProduct(client, batchId, product)
       if (savedId) keptIds.push(Number(savedId))
     }
@@ -615,11 +624,11 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
       await client.query('DELETE FROM products WHERE batch_id=$1', [batchId])
     }
 
-    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [products.length, batchId])
+    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId])
     await client.query('COMMIT')
     revalidatePath('/admin/batches')
     revalidatePath('/admin/scraping')
-    return { success: true, data: { count: products.length } }
+    return { success: true, data: { count: normalizedProducts.length } }
   } catch (err: any) {
     await client.query('ROLLBACK')
     return { success: false, error: err.message }

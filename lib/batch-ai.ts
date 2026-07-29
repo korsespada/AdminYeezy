@@ -23,6 +23,16 @@ export type BatchAiAttributeDefinition = {
   aliases?: string[]
 }
 
+export type BatchAiPriceRuleHint = {
+  rule_key: string
+  name: string
+  conditions: Record<string, unknown>
+  visual_hint?: string | null
+  reference_images?: string[]
+  price: number
+  priority?: number
+}
+
 export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор каталога премиальных товаров. Обрабатывай сырой китайский товар только по предоставленному тексту и фотографиям.
 
 Если фотографии предоставлены, главный источник фактов — фотографии, затем исходный текст; соотноси сведения между всеми contact sheet одного товара. Если фотографий нет, работай только по тексту и не делай визуальных выводов. Не выдумывай модель, материал, размеры или характеристики.
@@ -42,6 +52,8 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Используй существующие коды атрибутов. Новый атрибут вынеси только в attribute_suggestions.
 - Новую подкатегорию вынеси только в subcategory_suggestion; не подменяй ею исходную подкатегорию.
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
+- Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
+- Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
 - Отметь рекламные, нерелевантные и дублирующиеся изображения для исключения. Таблицы размеров исключи из публичной галереи, но распознай данные в sizes.
 - Для цветового семейства предложи один group_signature только когда это один и тот же товар, отличающийся цветом.
 - Для сумок должны совпадать бренд, model_name, размер самой сумки, материалы и фурнитура; разные размеры сумки не объединяй.
@@ -57,15 +69,28 @@ export function buildBatchAiUserPrompt(input: {
   categories: BatchAiLookup[]
   subcategories: BatchAiLookup[]
   attributes: BatchAiAttributeDefinition[]
+  priceRules?: BatchAiPriceRuleHint[]
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [] } = input
+  let referenceOffset = 0
+  const priceRulePrompt = priceRules.map((rule) => {
+    const references = (rule.reference_images || []).map((_, index) => referenceOffset + index + 1)
+    referenceOffset += references.length
+    return {
+      rule_key: rule.rule_key,
+      name: rule.name,
+      conditions: rule.conditions,
+      visual_hint: rule.visual_hint || '',
+      reference_photo_numbers: references,
+    }
+  })
   return [
     'Верни объект следующей формы:',
     JSON.stringify({
       product: {
         name: '', description: '', h1: '', seo_title: '', seo_description: '',
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
-        gender: 'male|female|unisex|null', catalog_attributes: {}, confidence: 0,
+        gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
       },
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
@@ -81,6 +106,8 @@ export function buildBatchAiUserPrompt(input: {
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
+    `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
+    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
     'attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].',
     'subcategory_suggestion: {name,parent_category_id,reason,confidence} или null.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
@@ -137,10 +164,15 @@ export async function runBatchAiOpenRouter(input: {
   systemPrompt: string
   userPrompt: string
   contactSheets: string[]
+  referenceSheets?: string[]
 }) {
   const content: any[] = [{ type: 'text', text: input.userPrompt }]
   input.contactSheets.forEach((url, index) => {
     content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
+    content.push({ type: 'image_url', image_url: { url } })
+  })
+  ;(input.referenceSheets || []).forEach((url, index) => {
+    content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
   const payload = await openRouterChatCompletion({
@@ -219,6 +251,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   categoryIds: Set<string>
   subcategoryIds: Set<string>
   attributeCodes: Set<string>
+  priceRuleKeys?: Set<string>
 }) {
   const proposed = raw?.product || {}
   const original = input.product
@@ -255,6 +288,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
       ai_processed: true,
       ai_error: null,
       ai_confidence: Math.max(0, Math.min(1, Number(proposed.confidence || 0))),
+      price_rule_key: input.priceRuleKeys?.has(String(proposed.price_rule_key || ''))
+        ? String(proposed.price_rule_key)
+        : '',
       variant_group_key: raw?.color_family?.confidence >= 0.75 && raw.color_family.group_signature
         ? crypto.createHash('sha256').update(String(raw.color_family.group_signature).trim().toLowerCase()).digest('hex').slice(0, 32)
         : original.variant_group_key || null,
@@ -282,13 +318,26 @@ export function matchingPriceRule(product: any, rules: any[]) {
       const actual = key.startsWith('attributes.')
         ? product.attributes?.[key.slice('attributes.'.length)]
         : product[key]
+      if (expected && typeof expected === 'object' && !Array.isArray(expected) && ('min' in expected || 'max' in expected)) {
+        const numericValues = scalarAttribute(actual)
+          .map((value) => Number(String(value).replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]))
+          .filter(Number.isFinite)
+        if (!numericValues.length) return false
+        const min = Number((expected as any).min)
+        const max = Number((expected as any).max)
+        return numericValues.some((value) =>
+          (!Number.isFinite(min) || value >= min) && (!Number.isFinite(max) || value <= max)
+        )
+      }
       const expectedValues = scalarAttribute(expected)
       const actualValues = scalarAttribute(actual)
       return expectedValues.some((value) => actualValues.includes(value))
     })
   })
   return candidates.sort((left, right) => {
-    const specificity = Object.keys(right.conditions || {}).length - Object.keys(left.conditions || {}).length
+    const score = (rule: any) => Object.keys(rule.conditions || {}).length
+      + (rule.conditions?.price_rule_key ? 1000 : 0)
+    const specificity = score(right) - score(left)
     return specificity || Number(right.priority || 0) - Number(left.priority || 0)
   })[0] || null
 }

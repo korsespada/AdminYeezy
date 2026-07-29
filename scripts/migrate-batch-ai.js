@@ -135,10 +135,21 @@ async function migrate() {
         conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
         price NUMERIC(10,2) NOT NULL CHECK (price >= 0),
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        rule_key TEXT,
+        visual_hint TEXT,
+        reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `)
+    await client.query(`
+      ALTER TABLE supplier_price_rules
+        ADD COLUMN IF NOT EXISTS rule_key TEXT,
+        ADD COLUMN IF NOT EXISTS visual_hint TEXT,
+        ADD COLUMN IF NOT EXISTS reference_images JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+    await client.query("UPDATE supplier_price_rules SET rule_key='rule_' || id::text WHERE rule_key IS NULL OR BTRIM(rule_key)=''")
+    await client.query('CREATE UNIQUE INDEX IF NOT EXISTS supplier_price_rules_key_idx ON supplier_price_rules(supplier_id, rule_key)')
     await client.query('CREATE INDEX IF NOT EXISTS supplier_price_rules_supplier_idx ON supplier_price_rules(supplier_id, enabled, priority DESC)')
 
     await client.query(`

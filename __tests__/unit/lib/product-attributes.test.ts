@@ -23,6 +23,16 @@ describe('product attributes', () => {
     })
   })
 
+  it('does not expose batch system fields as product attributes', () => {
+    expect(extractProductAttributes({
+      price_source: 'legacy',
+      h1: 'Заголовок',
+      seo_title: 'SEO',
+      variant_group_key: 'group-1',
+      material: 'кожа',
+    })).toEqual({ material: 'кожа' })
+  })
+
   it('extracts only explicit shoe fields and expands a safe size range', () => {
     expect(extractExplicitShoeAttributes(`
       Кроссовки

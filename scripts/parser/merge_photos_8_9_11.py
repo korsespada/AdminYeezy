@@ -68,7 +68,6 @@ def process_csv(input_path, output_path=None):
                     continue
 
                 # Логика заполнения полей
-                result_row[1] = "Chanel"
                 result_row[2] = new_desc
                 result_row[8] = json.dumps(new_photos, ensure_ascii=False)
                 
@@ -91,16 +90,12 @@ def process_csv(input_path, output_path=None):
                     is_wallet = any(kw in new_desc for kw in wallet_keywords)
                 
                 if is_passport:
-                    result_row[3] = "21000"
                     result_row[6] = "zugzfh1wu2tswfs"
                 elif is_cardholder:
-                    result_row[3] = "17000"
                     result_row[6] = "zugzfh1wu2tswfs"
                 elif is_wallet:
-                    result_row[3] = "19000"
                     result_row[6] = "zugzfh1wu2tswfs"
                 else:
-                    result_row[3] = "48000"
                     result_row[6] = "dnckd3yiv2q0r5f"
 
                 new_rows.append(result_row)
@@ -135,13 +130,6 @@ def process_csv(input_path, output_path=None):
                 
                 if is_cardholder or is_wallet or is_passport:
                     result_row = row1.copy()
-                    result_row[1] = "Chanel"
-                    if is_passport:
-                        result_row[3] = "21000"
-                    elif is_cardholder:
-                        result_row[3] = "17000"
-                    else:
-                        result_row[3] = "19000"
                     result_row[6] = "zugzfh1wu2tswfs"
                     new_rows.append(result_row)
                 
