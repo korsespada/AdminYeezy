@@ -332,7 +332,11 @@ async function parseResponse(response, label) {
   let payload = {}
   try { payload = raw ? JSON.parse(raw) : {} } catch { payload = { message: raw.slice(0, 500) } }
   if (!response.ok) {
-    throw new Error(`${label}: ${payload.message || payload.error || `HTTP ${response.status}`}`)
+    const detail = payload.message
+      || (typeof payload.error === 'string' ? payload.error : payload.error?.message)
+      || (payload.error ? JSON.stringify(payload.error) : '')
+      || `HTTP ${response.status}`
+    throw new Error(`${label}: ${detail}`)
   }
   return payload
 }

@@ -7,6 +7,7 @@ import {
   createRailsSeoAiSuggestedSubcategory,
   createRailsSeoAiLandingIdeas,
   deleteRailsSeoAiDraft,
+  deleteRailsSeoAiBatch,
   getRailsAdminProduct,
   getRailsSeoAiBatch,
   getRailsSeoAiSettings,
@@ -179,6 +180,17 @@ export async function renameSeoAiBatchAction(id: string, name: string): Promise<
     return { success: true, data: batch }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось переименовать выгрузку' }
+  }
+}
+
+export async function deleteSeoAiBatchAction(id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    await deleteRailsSeoAiBatch(id)
+    revalidatePath(SEO_AI_PATH)
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось удалить выгрузку' }
   }
 }
 

@@ -9,6 +9,7 @@ import {
   createSeoAiBatchAction,
   createSeoAiSuggestedSubcategoryAction,
   deleteSeoAiDraftAction,
+  deleteSeoAiBatchAction,
   getSeoAiBatchAction,
   listSeoAiDraftsAction,
   listSeoAiBatchesAction,
@@ -295,6 +296,19 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
     return false
   }
 
+  async function deleteBatch(id: string) {
+    if (!window.confirm('Удалить отменённую выгрузку и все её непринятые результаты?')) return false
+    const result = await deleteSeoAiBatchAction(id)
+    if (!result.success) {
+      setStatus('error', result.error || 'Не удалось удалить выгрузку')
+      return false
+    }
+    setBatches((prev) => prev.filter((batch) => batch.id !== id))
+    setDrafts((prev) => prev.filter((draft) => draft.batch_id !== id))
+    setStatus('success', 'Выгрузка удалена')
+    return true
+  }
+
   async function reviewBatch(id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
     const result = await reviewSeoAiBatchAction(id, action)
     if (!result.success) {
@@ -514,6 +528,7 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   drafts={group.drafts}
                   attributeDefinitions={attributeDefinitions}
                   onRename={renameBatch}
+                  onDeleteBatch={deleteBatch}
                   onBulkAction={reviewBatch}
                   onChange={(next) => setDrafts((prev) => prev.map((item) => item.id === next.id ? next : item))}
                   onDelete={(id) => setDrafts((prev) => prev.filter((item) => item.id !== id))}
@@ -744,6 +759,7 @@ function DraftFolder({
   drafts,
   attributeDefinitions,
   onRename,
+  onDeleteBatch,
   onBulkAction,
   onChange,
   onDelete,
@@ -752,6 +768,7 @@ function DraftFolder({
   drafts: SeoAiGeneration[]
   attributeDefinitions: CatalogAttributeDefinition[]
   onRename: (id: string, name: string) => Promise<boolean>
+  onDeleteBatch: (id: string) => Promise<boolean>
   onBulkAction: (id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') => Promise<SeoAiGeneration[] | null>
   onChange: (draft: SeoAiGeneration) => void
   onDelete: (id: string) => void
@@ -891,6 +908,18 @@ function DraftFolder({
           {batch && readyCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('reject_drafts') }} disabled={isReviewing}><X className="h-4 w-4" /><span className="hidden lg:inline">Отклонить готовые</span></Button>}
           {batch && rejectedCount > 0 && <Button type="button" size="sm" variant="outline" onClick={(event) => { event.stopPropagation(); runBulkAction('requeue_rejected') }} disabled={isReviewing}><RotateCcw className="h-4 w-4" /><span className="hidden lg:inline">Вернуть отклонённые</span></Button>}
           {batch && <Button type="button" size="icon" variant="ghost" aria-label="Переименовать выгрузку" onClick={(event) => { event.stopPropagation(); setEditing(true) }}><Pencil className="h-4 w-4" /></Button>}
+          {batch && ['canceled', 'failed'].includes(batch.status) && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="Удалить выгрузку"
+              onClick={(event) => { event.stopPropagation(); void onDeleteBatch(batch.id) }}
+              className="text-red-300 hover:bg-red-500/10 hover:text-red-200"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
           {isLoading ? <Loader2 className="h-5 w-5 animate-spin text-slate-400" /> : expanded ? <ChevronUp className="h-5 w-5 text-slate-400" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
         </div>
       </div>

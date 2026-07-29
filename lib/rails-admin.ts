@@ -1220,6 +1220,10 @@ export async function renameRailsSeoAiBatch(id: string, name: string) {
   return result.batch
 }
 
+export async function deleteRailsSeoAiBatch(id: string) {
+  await railsFetch(`/admin/seo_ai/batches/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export async function reviewRailsSeoAiBatch(id: string, action: 'apply_drafts' | 'apply_safe_drafts' | 'reject_drafts' | 'requeue_rejected') {
   return railsFetch<{
     batch: SeoAiBatch
