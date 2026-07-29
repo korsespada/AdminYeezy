@@ -2278,10 +2278,14 @@ function CsvProductDrawer({
     if (oldKey !== nextKey) delete next[oldKey];
     if (nextKey.trim()) {
       let parsed: unknown = nextValue;
-      try {
-        parsed = JSON.parse(nextValue);
-      } catch {
-        parsed = nextValue;
+      if (Array.isArray(attributes[oldKey])) {
+        parsed = nextValue.split(/[,;\n]+/).map((item) => item.trim()).filter(Boolean);
+      } else {
+        try {
+          parsed = JSON.parse(nextValue);
+        } catch {
+          parsed = nextValue;
+        }
       }
       next[nextKey.trim()] = parsed as any;
     }
@@ -2519,7 +2523,7 @@ function CsvProductDrawer({
                           className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
                         />
                         <input
-                          value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? "")}
+                          value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
                           onChange={(event) => updateAttribute(key, key, event.target.value)}
                           placeholder="Значение"
                           className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"

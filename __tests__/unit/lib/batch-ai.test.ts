@@ -60,6 +60,22 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('')
   })
 
+  it('keeps a selected subcategory and its parent category consistent', () => {
+    const result = normalizeBatchAiOutput({
+      product: { brand: 'chanel', category: 'bags', subcategory: 'passport-holders' },
+    }, {
+      product: { brand: 'chanel', category: 'bags', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(['chanel']),
+      categoryIds: new Set(['bags', 'accessories']),
+      subcategoryIds: new Set(['passport-holders']),
+      subcategoryParents: new Map([['passport-holders', 'accessories']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.category).toBe('accessories')
+    expect(result.product.subcategory).toBe('passport-holders')
+  })
+
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {
     const product = {
       category: 'bags', price_rule_key: 'visual-1',

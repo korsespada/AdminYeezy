@@ -408,6 +408,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       brandIds: new Set(context.brands.map((row: any) => String(row.id))),
       categoryIds: new Set(context.categories.map((row: any) => String(row.id))),
       subcategoryIds: new Set(context.subcategories.map((row: any) => String(row.id))),
+      subcategoryParents: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
       attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })

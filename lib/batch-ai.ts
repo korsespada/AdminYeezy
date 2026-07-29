@@ -250,6 +250,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   brandIds: Set<string>
   categoryIds: Set<string>
   subcategoryIds: Set<string>
+  subcategoryParents?: Map<string, string>
   attributeCodes: Set<string>
   priceRuleKeys?: Set<string>
 }) {
@@ -272,6 +273,10 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const photos = Array.isArray(original.photos)
     ? original.photos.filter((_: string, index: number) => !discard.has(index + 1) && !sizeCharts.has(index + 1))
     : []
+  const subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
+  const proposedCategory = choose(proposed.category, input.categoryIds, original.category)
+  const parentCategory = subcategory ? input.subcategoryParents?.get(subcategory) : undefined
+  const category = parentCategory && input.categoryIds.has(parentCategory) ? parentCategory : proposedCategory
 
   return {
     product: {
@@ -282,8 +287,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
       seo_title: String(proposed.seo_title || '').trim().slice(0, 250),
       seo_description: String(proposed.seo_description || '').trim().slice(0, 500),
       brand: choose(proposed.brand, input.brandIds, original.brand),
-      category: choose(proposed.category, input.categoryIds, original.category),
-      subcategory: choose(proposed.subcategory, input.subcategoryIds, original.subcategory),
+      category,
+      subcategory,
       gender: ['male', 'female', 'unisex'].includes(String(proposed.gender)) ? proposed.gender : original.gender,
       photos: photos.length > 0 ? photos : original.photos,
       attributes,
