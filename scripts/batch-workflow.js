@@ -1037,15 +1037,24 @@ function ownedS3Key(url) {
 async function uploadPhotoIfNeeded(url, key) {
   if (!url) throw new Error('пустая ссылка на фото');
   if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен');
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await uploadPhotoAttempt(url, key);
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+    }
+  }
+  throw new Error(`не удалось перенести фото в S3 после 3 попыток: ${lastError?.message || 'неизвестная ошибка'}`);
+}
+
+async function uploadPhotoAttempt(url, key) {
   if (isAlreadyHosted(url)) {
     const existingKey = ownedS3Key(url);
     if (!existingKey) throw new Error(`не удалось определить S3 key для ${url}`);
-    try {
-      await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: existingKey }));
-      return url;
-    } catch (error) {
-      throw new Error(`фото отсутствует в вашем S3: ${url} (${error.message})`);
-    }
+    await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: existingKey }));
+    return url;
   }
   try {
     const parsed = new URL(String(url));
@@ -1073,6 +1082,31 @@ async function uploadPhotoIfNeeded(url, key) {
   }
 }
 
+async function existingRailsExternalIds(externalIds) {
+  const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
+  const existing = new Set();
+  if (!ids.length) return existing;
+  const token = await railsAdminToken();
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
+    while (cursor < ids.length) {
+      const externalId = ids[cursor++];
+      const params = new URLSearchParams({ page: '1', per_page: '10', external_id: externalId });
+      const response = await fetch(railsApiUrl(`/admin/products?${params}`), {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.message || payload.error || `Rails external_id check failed with ${response.status}`);
+      if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
+        existing.add(externalId);
+      }
+    }
+  });
+  await Promise.all(workers);
+  return existing;
+}
+
 async function pushBatchToCatalog(batchId, onProgress) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
@@ -1097,18 +1131,23 @@ async function pushBatchToCatalog(batchId, onProgress) {
 
   const batch = await getBatch(batchId);
   const lookups = await loadLegacyLookupMaps();
-  const updatedProducts = [];
+  const existingExternalIds = await existingRailsExternalIds(products.map((product) => product.external_id));
+  const candidates = products
+    .map((product, index) => ({ product, index }))
+    .filter(({ product }) => !existingExternalIds.has(String(product.external_id || '').trim()));
+  const updatedProducts = products.map((product) => ({ ...product }));
   const errors = [];
   let prepared = 0;
   let imported = 0;
 
-  for (let i = 0; i < products.length; i += 1) {
-    const product = { ...products[i], batchId };
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+    const { product: sourceProduct, index: productIndex } = candidates[candidateIndex];
+    const product = { ...sourceProduct, batchId };
     const photos = [];
     let productFailed = false;
     for (let photoIndex = 0; photoIndex < product.photos.length; photoIndex += 1) {
       const sourceUrl = product.photos[photoIndex];
-      const safeExternalId = String(product.external_id || product.id || `row-${i + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
+      const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
       const key = `batches/${batchId}/${safeExternalId}_${photoIndex}.jpg`;
       try {
         photos.push(await uploadPhotoIfNeeded(sourceUrl, key));
@@ -1119,10 +1158,10 @@ async function pushBatchToCatalog(batchId, onProgress) {
       }
     }
     product.photos = photos.filter(Boolean);
-    updatedProducts.push(product);
+    updatedProducts[productIndex] = product;
     if (!productFailed) prepared += 1;
 
-    if (onProgress) await onProgress({ current: i + 1, total: products.length, success: prepared, failed: errors.length });
+    if (onProgress) await onProgress({ current: candidateIndex + 1, total: candidates.length, success: prepared, failed: errors.length });
   }
 
   await saveBatchProducts(batchId, updatedProducts);
@@ -1130,7 +1169,8 @@ async function pushBatchToCatalog(batchId, onProgress) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
 
-  const railsRows = updatedProducts
+  const railsRows = candidates
+    .map(({ index }) => updatedProducts[index])
     .filter((product) => product.external_id || product.name)
     .map((product) => productToRailsCsvRow(product, lookups));
   const importBatches = [];
@@ -1146,7 +1186,7 @@ async function pushBatchToCatalog(batchId, onProgress) {
     }
   }
 
-  if (importBatches.length > 0) {
+  if (importBatches.length > 0 || candidates.length === 0) {
     await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
   }
 
@@ -1155,6 +1195,7 @@ async function pushBatchToCatalog(batchId, onProgress) {
     failed: errors.length,
     errors,
     total: products.length,
+    skippedExisting: existingExternalIds.size,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
 }
@@ -1166,6 +1207,7 @@ async function closePools() {
 module.exports = {
   PRODUCT_COLUMNS,
   closePools,
+  existingRailsExternalIds,
   getBatch,
   getBatchProducts,
   getLatestBatches,

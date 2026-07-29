@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 
 const workflow = require('../../../scripts/batch-workflow')
 
@@ -56,6 +56,30 @@ describe('batch workflow CSV compatibility adapter', () => {
       expect(workflow.isAlreadyHosted('https://xcimg.szwego.com/1.jpg')).toBe(false)
     } finally {
       process.env.S3_PUBLIC_DOMAIN = previous
+    }
+  })
+
+  it('finds exact existing external IDs before a batch push', async () => {
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
+      const externalId = new URL(String(input)).searchParams.get('external_id')
+      return new Response(JSON.stringify({
+        products: externalId === 'exists' ? [{ external_id: 'exists' }] : [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      const existing = await workflow.existingRailsExternalIds(['exists', 'new', 'exists'])
+      expect([...existing]).toEqual(['exists'])
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      fetchMock.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
     }
   })
 })

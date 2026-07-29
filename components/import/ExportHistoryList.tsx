@@ -226,8 +226,9 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     if (res.success) {
       const pushed = res.data?.success || 0
       const failed = res.data?.failed || 0
+      const skipped = res.data?.skippedExisting || 0
       setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено в БД' } : item))
-      alert(`Пуш завершен. Успешно: ${pushed}, ошибок: ${failed}`)
+      alert(`Пуш завершен. Новых: ${pushed}, уже были в БД: ${skipped}, ошибок: ${failed}`)
     } else {
       alert(`Ошибка пуша: ${res.error}`)
     }
