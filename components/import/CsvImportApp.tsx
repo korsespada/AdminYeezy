@@ -52,6 +52,7 @@ import {
   pushBatchToCatalogAction,
 } from "@/actions/suppliers";
 import { processAiAction, targetedAiEditAction } from "@/actions/ai-process";
+import { startBatchAiAction } from "@/actions/batch-ai";
 import Image from "next/image";
 import Link from "next/link";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
@@ -62,6 +63,9 @@ const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
   { name: "name", key: "name" },
   { name: "description", key: "description" },
+  { name: "h1", key: "h1" },
+  { name: "seo_title", key: "seo_title" },
+  { name: "seo_description", key: "seo_description" },
   { name: "price", key: "price" },
   { name: "status", key: "status" },
   { name: "brand", key: "brand" },
@@ -70,6 +74,7 @@ const DEFAULT_PRODUCT_COLUMNS = [
   { name: "gender", key: "gender" },
   { name: "photos", key: "photos" },
   { name: "ai_processed", key: "ai_processed" },
+  { name: "variant_group_key", key: "variant_group_key" },
 ];
 
 const CSV_CORE_KEYS = new Set(DEFAULT_PRODUCT_COLUMNS.map((column) => column.key));
@@ -770,7 +775,7 @@ export default function CsvImportApp({
       setSaveMsg(`⚠ Предупреждений: ${validationWarnings.length}`);
     }
 
-    if (batchId && products.some((product) => Object.keys(product.attributes || {}).length > 0)) {
+    if (batchId) {
       setIsPushing(true);
       await persistBatchProducts(products);
       const pushResult = await pushBatchToCatalogAction(batchId);
@@ -901,6 +906,27 @@ export default function CsvImportApp({
         alert("ID поставщика не найден. Пожалуйста, запустите обработку из истории выгрузок.");
         return;
     }
+
+    if (batchId) {
+      setIsProcessing(true);
+      const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
+      const mode = alreadyProcessed ? "full" : "sample";
+      const result = await startBatchAiAction(batchId, mode);
+      if (result.success) {
+        const data: any = result.data;
+        if (data?.provider === "cockpit") {
+          setSaveMsg(`В очередь Cockpit отправлено: ${data.queued}`);
+        } else {
+          await handleLoadBatch(batchId);
+          setSaveMsg(mode === "sample" ? "✓ Обработаны 10 случайных товаров" : "✓ AI-обработка завершена");
+        }
+      } else {
+        alert(`Ошибка ИИ: ${result.error}`);
+      }
+      setIsProcessing(false);
+      setTimeout(() => setSaveMsg(null), 5000);
+      return;
+    }
     
     setIsProcessing(true);
     isAiStoppedRef.current = false;
@@ -1021,6 +1047,19 @@ export default function CsvImportApp({
       isAiStoppedRef.current = true;
   };
 
+  const handleRetryProductAi = async (product: CsvProduct) => {
+    if (!batchId || !product.id) return;
+    setSaveMsg(`Повторная обработка ${product.external_id || product.id}...`);
+    const result = await startBatchAiAction(batchId, "retry", Number(product.id));
+    if (result.success) {
+      await handleLoadBatch(batchId);
+      setSaveMsg("✓ Товар обработан повторно");
+    } else {
+      setSaveMsg(result.error || "Ошибка повторной обработки");
+    }
+    setTimeout(() => setSaveMsg(null), 5000);
+  };
+
   const handleCustomScriptProcess = async () => {
     if (!supplierId || (!localPath && !batchId)) return;
     setIsRunningCustomScript(true);
@@ -1050,7 +1089,7 @@ export default function CsvImportApp({
     (index: number, field: keyof CsvProduct, value: any) => {
       const currentProduct = products[index];
       setProducts((prev) =>
-        prev.map((p, i) => (i === index ? { ...p, [field]: value } : p)),
+        prev.map((p, i) => (i === index ? { ...p, [field]: value, ...(field === 'price' ? { price_source: 'manual' } : {}) } : p)),
       );
       setIsDirty(true);
       if (batchId && currentProduct) {
@@ -1998,6 +2037,7 @@ export default function CsvImportApp({
                     onUpdate={updateProduct}
                     onClick={() => setSelectedIdx(realIndex)}
                     localPath={localPath}
+                    onRetryAi={batchId ? () => handleRetryProductAi(product) : undefined}
                   />
                 );
               })}
@@ -2114,6 +2154,7 @@ interface CsvProductCardProps {
   onUpdate: (i: number, f: keyof CsvProduct, v: any) => void;
   onClick: () => void;
   localPath?: string;
+  onRetryAi?: () => void;
 }
 
 function CsvProductCard({
@@ -2127,6 +2168,7 @@ function CsvProductCard({
   onUpdate,
   onClick,
   localPath,
+  onRetryAi,
 }: CsvProductCardProps) {
   const [editField, setEditField] = useState<"name" | "price" | null>(null);
   const [editVal, setEditVal] = useState("");
@@ -2250,6 +2292,16 @@ function CsvProductCard({
       </div>
 
       <div className="p-5 flex-1 flex flex-col">
+        {product.ai_error && (
+          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300" title={product.ai_error}>
+            {product.ai_error}
+          </div>
+        )}
+        {onRetryAi && (product.ai_processed || product.ai_error) && (
+          <button onClick={(event) => { event.stopPropagation(); onRetryAi(); }} className="mb-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
+            Повторить ИИ
+          </button>
+        )}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1 min-w-0 group/id">
             <div className="text-[10px] text-slate-500 font-mono truncate" title={product.external_id}>
@@ -2511,6 +2563,18 @@ function CsvProductDrawer({
                   onChange={(e) => change("description", e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm"
                 />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">H1</label>
+                <input value={local.h1 || ""} onChange={(e) => change("h1", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">SEO title</label>
+                <input value={local.seo_title || ""} onChange={(e) => change("seo_title", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-slate-500">SEO description</label>
+                <textarea rows={3} value={local.seo_description || ""} onChange={(e) => change("seo_description", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-800">
                 <div className="space-y-1">

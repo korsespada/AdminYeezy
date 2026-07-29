@@ -16,6 +16,9 @@ const PRODUCT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
   { name: 'name', key: 'name' },
   { name: 'description', key: 'description' },
+  { name: 'h1', key: 'h1' },
+  { name: 'seo_title', key: 'seo_title' },
+  { name: 'seo_description', key: 'seo_description' },
   { name: 'price', key: 'price' },
   { name: 'status', key: 'status' },
   { name: 'brand', key: 'brand' },
@@ -30,6 +33,9 @@ const RAILS_IMPORT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
   { name: 'name', key: 'name' },
   { name: 'description', key: 'description' },
+  { name: 'h1', key: 'h1' },
+  { name: 'seo_title', key: 'seo_title' },
+  { name: 'seo_description', key: 'seo_description' },
   { name: 'price', key: 'price' },
   { name: 'status', key: 'status' },
   { name: 'brand', key: 'brand' },
@@ -38,12 +44,13 @@ const RAILS_IMPORT_COLUMNS = [
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
   { name: 'attributes', key: 'attributes' },
+  { name: 'variant_group_key', key: 'variant_group_key' },
 ];
 
 const CORE_PRODUCT_FIELDS = new Set([
-  'id', 'external_id', 'name', 'description', 'price', 'status', 'brand',
+  'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
-  'ai_processed', 'attributes', 'created_at', 'updated_at',
+  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'created_at', 'updated_at',
 ]);
 
 function ensureDir(dir) {
@@ -116,7 +123,11 @@ function normalizeProduct(row) {
     external_id: row.external_id || '',
     name: row.name || '',
     description: row.description || '',
+    h1: row.h1 || '',
+    seo_title: row.seo_title || '',
+    seo_description: row.seo_description || '',
     price: Number(row.price || 0),
+    price_source: row.price_source || 'legacy',
     status: row.status === 'inactive' ? 'inactive' : 'active',
     brand: normalizeBrand(row.brand),
     category: row.category || '',
@@ -126,6 +137,9 @@ function normalizeProduct(row) {
     attributes: extractAttributes(row),
     batchId: row.batch_id || row.batchId,
     ai_processed: row.ai_processed === true || row.ai_processed === 'true' || row.ai_processed === 'True',
+    variant_group_key: row.variant_group_key || null,
+    ai_error: row.ai_error || null,
+    ai_confidence: row.ai_confidence == null ? null : Number(row.ai_confidence),
   };
 }
 
@@ -236,6 +250,9 @@ function productToRailsCsvRow(product, lookups) {
     external_id: product.external_id || '',
     name: product.name || '',
     description: product.description || '',
+    h1: product.h1 || '',
+    seo_title: product.seo_title || '',
+    seo_description: product.seo_description || '',
     price: product.price || 0,
     status: product.status === 'inactive' ? 'hidden' : 'active',
     brand: lookupName(lookups.brands, product.brand),
@@ -244,6 +261,7 @@ function productToRailsCsvRow(product, lookups) {
     gender: product.gender || '',
     photos: normalizePhotos(product.photos).join('|'),
     attributes: normalizeAttributes(product.attributes),
+    variant_group_key: product.variant_group_key || '',
   };
 }
 
@@ -441,7 +459,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY id ASC
@@ -466,14 +484,21 @@ async function saveBatchProducts(batchId, products) {
       if (numericId) {
         const updateRes = await client.query(`
           UPDATE products
-          SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, attributes=$11::jsonb, ai_processed=$12, batch_id=$13, updated_at=NOW()
-          WHERE id=$14
+          SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
+              price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
+              photos=$14::jsonb,attributes=$15::jsonb,ai_processed=$16,batch_id=$17,
+              variant_group_key=$18,ai_error=$19,ai_confidence=$20,updated_at=NOW()
+          WHERE id=$21
           RETURNING id
         `, [
           normalized.external_id,
           normalized.name,
           normalized.description,
+          normalized.h1,
+          normalized.seo_title,
+          normalized.seo_description,
           normalized.price,
+          normalized.price_source,
           normalized.status,
           normalized.brand,
           normalized.category,
@@ -483,6 +508,9 @@ async function saveBatchProducts(batchId, products) {
           JSON.stringify(normalized.attributes || {}),
           normalized.ai_processed,
           batchId,
+          normalized.variant_group_key,
+          normalized.ai_error,
+          normalized.ai_confidence,
           numericId,
         ]);
         if (updateRes.rowCount > 0) {
@@ -492,12 +520,16 @@ async function saveBatchProducts(batchId, products) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
         ON CONFLICT (external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
+          h1 = EXCLUDED.h1,
+          seo_title = EXCLUDED.seo_title,
+          seo_description = EXCLUDED.seo_description,
           price = EXCLUDED.price,
+          price_source = EXCLUDED.price_source,
           status = EXCLUDED.status,
           brand = EXCLUDED.brand,
           category = EXCLUDED.category,
@@ -507,13 +539,20 @@ async function saveBatchProducts(batchId, products) {
           attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
           batch_id = EXCLUDED.batch_id,
+          variant_group_key = EXCLUDED.variant_group_key,
+          ai_error = EXCLUDED.ai_error,
+          ai_confidence = EXCLUDED.ai_confidence,
           updated_at = NOW()
         RETURNING id
       `, [
         normalized.external_id || null,
         normalized.name,
         normalized.description,
+        normalized.h1,
+        normalized.seo_title,
+        normalized.seo_description,
         normalized.price,
+        normalized.price_source,
         normalized.status,
         normalized.brand,
         normalized.category,
@@ -523,6 +562,9 @@ async function saveBatchProducts(batchId, products) {
         JSON.stringify(normalized.attributes || {}),
         normalized.ai_processed,
         batchId,
+        normalized.variant_group_key,
+        normalized.ai_error,
+        normalized.ai_confidence,
       ]);
       if (insertRes.rows[0]?.id) keptIds.push(Number(insertRes.rows[0].id));
     }

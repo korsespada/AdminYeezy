@@ -2,14 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, ArrowLeft, Package, Settings2, FlaskConical } from 'lucide-react'
+import { Users, ArrowLeft, Package, Settings2 } from 'lucide-react'
 
 export default function ImportTabs() {
   const pathname = usePathname()
 
   const tabs = [
     { label: 'История выгрузок', href: '/admin/batches', icon: Package },
-    { label: 'Выгрузка 2.0', href: '/admin/exports-v2', icon: FlaskConical },
     { label: 'Поставщики', href: '/admin/suppliers', icon: Users },
   ]
 

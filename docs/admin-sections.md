@@ -87,7 +87,7 @@ POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
 | URL | Назначение | Источник |
 |---|---|---|
 | `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + local Cockpit Tools worker |
-| `/admin/ai-rules` | AI processing rules | local/scraping settings |
+| `/admin/ai-rules` | Глобальные настройки batch AI: OpenRouter/Cockpit, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` + Cockpit heartbeat |
 | `/admin/analytics` | Операционные метрики | AdminYeezy analytics |
 
 SEO landings, redirects, audits и AI-каталог относятся к Rails CRM/API. Production создаёт задания и хранит черновики, а локальный worker забирает их через защищённые `/api/v1/admin/seo_ai/worker/*` endpoints. Прямые записи в CRM-БД запрещены.

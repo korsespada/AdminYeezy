@@ -8,6 +8,10 @@ vi.mock('@/actions/catalog-attribute-registry', () => ({
   upsertCatalogAttributeDictionaryValueAction: vi.fn(),
 }))
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+}))
+
 describe('CatalogAttributeRegistry', () => {
   it('separates parser examples from editable dictionary values', () => {
     const colors = CATALOG_ATTRIBUTE_DEFINITIONS.find((item) => item.code === 'colors')!

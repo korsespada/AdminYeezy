@@ -120,7 +120,7 @@ describe('batch product server actions', () => {
     expect(mocks.client.query).toHaveBeenLastCalledWith('COMMIT')
     expect(mocks.client.release).toHaveBeenCalled()
     expect(mocks.client.query).toHaveBeenCalledWith(
-      expect.stringContaining('attributes=$11::jsonb'),
+      expect.stringContaining('attributes=$15::jsonb'),
       expect.arrayContaining([JSON.stringify({ color: 'black', sizes: ['M', 'L'] })]),
     )
   })

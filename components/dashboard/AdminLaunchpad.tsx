@@ -5,7 +5,6 @@ import {
   ClipboardList,
   Database,
   FileSearch,
-  FlaskConical,
   FolderTree,
   ListChecks,
   PackageSearch,
@@ -62,13 +61,6 @@ const sections = [
     description: 'Запуск и контроль задач сбора данных перед формированием партий.',
     href: '/admin/scraping',
     icon: FileSearch,
-    tone: 'text-cyan-300',
-  },
-  {
-    title: 'Выгрузка 2.0',
-    description: 'DB-native сборка товаров, группировка альбомов, AI-карточки и публикация.',
-    href: '/admin/exports-v2',
-    icon: FlaskConical,
     tone: 'text-cyan-300',
   },
   {

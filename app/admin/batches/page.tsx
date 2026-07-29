@@ -2,6 +2,7 @@ import { getExportHistoryAction } from '@/actions/suppliers'
 import ExportHistoryList from '@/components/import/ExportHistoryList'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import ImportTabs from '@/components/ui/ImportTabs'
+import { getExportFoldersAction } from '@/actions/batch-ai'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,11 +43,13 @@ export default async function BatchesPage() {
     )
   }
 
+  const foldersResult = await getExportFoldersAction()
+
   return (
     <div className="p-8">
       <div className="max-w-7xl mx-auto space-y-8">
         <ImportTabs />
-        <ExportHistoryList initialData={res.data} />
+        <ExportHistoryList initialData={res.data} initialFolders={foldersResult.data || []} />
       </div>
     </div>
   )

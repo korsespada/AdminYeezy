@@ -21,6 +21,7 @@ import {
   deleteScrapingFileArtifactsForBatch,
   saveScrapingFileArtifact,
 } from '@/lib/scraping-files'
+import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 
 // --- Suppliers CRUD ---
 
@@ -368,24 +369,30 @@ export interface ExportHistoryBatch {
   raw_path: string | null
   ai_path: string | null
   files: ExportHistoryFile[]
+  folder_id: string | null
+  folder_name: string | null
+  ai_run_status?: string | null
+  ai_completed_count?: number
+  ai_failed_count?: number
 }
 
 function normalizeTaskStatus(status: string | null, resultPath: string | null) {
   if (resultPath?.includes('task_ai_')) return 'Обработано ИИ'
   if (status === 'running' || status === 'pending') return 'Запущено'
-  if (status === 'completed') return 'Сырой CSV'
+  if (status === 'completed' || status === 'Сырой CSV') return 'Сырой товар'
+  if (status === 'Обработано скриптом') return 'Обработан скриптом'
   return status || 'Запущено'
 }
 
 function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[]) {
   if (stage === 'DELETED_FROM_DB') return 'Удалено из БД'
-  if (stage === 'PUSHED') return 'Запушено'
+  if (stage === 'PUSHED') return 'Запушено в БД'
   if (stage === 'AI_PROCESSED') return 'Обработано ИИ'
   if (files.some((file) => file.status === 'Запущено')) return 'Запущено'
   if (files[0]?.status === 'failed') return 'failed'
   if (files.some((file) => file.status === 'Обработано ИИ')) return 'Обработано ИИ'
-  if (files.some((file) => file.status === 'Обработано скриптом')) return 'Обработано скриптом'
-  return 'Сырой CSV'
+  if (files.some((file) => file.status === 'Обработан скриптом')) return 'Обработан скриптом'
+  return 'Сырой товар'
 }
 
 function parseDelimitedLine(line: string, delimiter = ';') {
@@ -479,10 +486,20 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         b.name as batch_name,
         b.items_count as batch_items_count,
         b.stage as batch_stage,
-        b.created_at as batch_created_at
+        b.created_at as batch_created_at,
+        b.folder_id,
+        f.name as folder_name,
+        ai.status as ai_run_status,
+        ai.completed_count as ai_completed_count,
+        ai.failed_count as ai_failed_count
       FROM scraping_tasks t
       LEFT JOIN suppliers s ON t.supplier_id = s.id
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
+      LEFT JOIN export_folders f ON f.id = b.folder_id
+      LEFT JOIN LATERAL (
+        SELECT status, completed_count, failed_count FROM batch_ai_runs
+        WHERE batch_id=b.id ORDER BY created_at DESC LIMIT 1
+      ) ai ON TRUE
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
         AND (
           t.result_path IS NOT NULL
@@ -525,6 +542,11 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             stage: row.batch_stage,
             created_at: row.batch_created_at || row.created_at,
             updated_at: row.updated_at,
+            folder_id: row.folder_id || null,
+            folder_name: row.folder_name || null,
+            ai_run_status: row.ai_run_status || null,
+            ai_completed_count: Number(row.ai_completed_count || 0),
+            ai_failed_count: Number(row.ai_failed_count || 0),
           },
           files: [],
         })
@@ -535,7 +557,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
 
     const data: ExportHistoryBatch[] = Array.from(grouped.values()).map(({ batch, files }) => {
       const sortedFiles = files.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      const rawFile = sortedFiles.find((file) => file.status === 'Сырой CSV')
+      const rawFile = sortedFiles.find((file) => file.status === 'Сырой товар')
       const aiFile = sortedFiles.find((file) => file.status === 'Обработано ИИ')
       const latestFile = sortedFiles[0]
       const latestEndDate = sortedFiles.find((file) => file.end_date)?.end_date || null
@@ -556,6 +578,11 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         raw_path: rawFile?.result_path || null,
         ai_path: aiFile?.result_path || null,
         files: sortedFiles,
+        folder_id: batch.folder_id,
+        folder_name: batch.folder_name,
+        ai_run_status: batch.ai_run_status,
+        ai_completed_count: batch.ai_completed_count,
+        ai_failed_count: batch.ai_failed_count,
       }
     })
 
@@ -817,6 +844,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                ])
             }
             console.log(`[Scraper ${taskId}] Imported ${itemsCount} items to batch ${batchId}`)
+            await scrapingQuery("UPDATE products SET price_source='default' WHERE batch_id=$1", [batchId])
+            await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар')
 
             if (supplier.post_process_enabled && supplier.post_process_script && batchId) {
               console.log(`[Scraper ${taskId}] Auto post-process enabled: ${supplier.post_process_script}`)

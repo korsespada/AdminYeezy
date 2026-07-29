@@ -12,12 +12,16 @@ import {
   normalizeProductAttributes,
   type ProductAttributes,
 } from '@/lib/product-attributes'
+import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 
 export interface CsvProduct {
     id?: string | number
     external_id: string
     name: string
     description: string
+    h1?: string
+    seo_title?: string
+    seo_description?: string
     price: number
     status: 'active' | 'inactive'
     brand: string
@@ -28,6 +32,10 @@ export interface CsvProduct {
     attributes?: ProductAttributes
     batchId?: string
     ai_processed?: boolean | string
+    price_source?: string
+    variant_group_key?: string | null
+    ai_error?: string | null
+    ai_confidence?: number | null
 }
 
 export interface Lookups {
@@ -40,6 +48,9 @@ const BATCH_PRODUCT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
   { name: 'name', key: 'name' },
   { name: 'description', key: 'description' },
+  { name: 'h1', key: 'h1' },
+  { name: 'seo_title', key: 'seo_title' },
+  { name: 'seo_description', key: 'seo_description' },
   { name: 'price', key: 'price' },
   { name: 'status', key: 'status' },
   { name: 'brand', key: 'brand' },
@@ -48,6 +59,7 @@ const BATCH_PRODUCT_COLUMNS = [
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
   { name: 'ai_processed', key: 'ai_processed' },
+  { name: 'variant_group_key', key: 'variant_group_key' },
 ]
 
 function normalizePhotos(value: any): string[] {
@@ -81,6 +93,9 @@ function normalizeBatchProduct(row: any): CsvProduct {
     external_id: row.external_id || '',
     name: row.name || '',
     description: row.description || '',
+    h1: row.h1 || '',
+    seo_title: row.seo_title || '',
+    seo_description: row.seo_description || '',
     price: Number(row.price || 0),
     status: row.status === 'inactive' ? 'inactive' : 'active',
     brand: normalizeBrand(row.brand),
@@ -91,6 +106,10 @@ function normalizeBatchProduct(row: any): CsvProduct {
     batchId: row.batch_id || row.batchId,
     attributes: extractProductAttributes(row),
     ai_processed: row.ai_processed === true || row.ai_processed === 'true',
+    price_source: row.price_source || 'legacy',
+    variant_group_key: row.variant_group_key || null,
+    ai_error: row.ai_error || null,
+    ai_confidence: row.ai_confidence === null || row.ai_confidence === undefined ? null : Number(row.ai_confidence),
   }
 }
 
@@ -430,7 +449,7 @@ export async function getBatchProductsAction(batchId: string) {
     await requireAdmin()
 
     const res = await scrapingQuery(`
-      SELECT id, external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, created_at, updated_at
+      SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
       FROM products
       WHERE batch_id = $1
       ORDER BY id ASC
@@ -458,14 +477,21 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
   if (numericId) {
     const updateRes = await client.query(`
       UPDATE products
-      SET external_id=$1, name=$2, description=$3, price=$4, status=$5, brand=$6, category=$7, subcategory=$8, gender=$9, photos=$10::jsonb, attributes=$11::jsonb, ai_processed=$12, batch_id=$13, updated_at=NOW()
-      WHERE id=$14
+      SET external_id=$1, name=$2, description=$3, h1=$4, seo_title=$5, seo_description=$6,
+          price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
+          photos=$14::jsonb, attributes=$15::jsonb, ai_processed=$16, batch_id=$17,
+          variant_group_key=$18, ai_error=$19, ai_confidence=$20, updated_at=NOW()
+      WHERE id=$21
       RETURNING id
     `, [
       normalized.external_id,
       normalized.name,
       normalized.description,
+      normalized.h1 || null,
+      normalized.seo_title || null,
+      normalized.seo_description || null,
       normalized.price,
+      normalized.price_source || 'legacy',
       normalized.status,
       normalized.brand,
       normalized.category,
@@ -475,18 +501,25 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       JSON.stringify(normalized.attributes || {}),
       normalized.ai_processed === true || normalized.ai_processed === 'true',
       batchId,
+      normalized.variant_group_key || null,
+      normalized.ai_error || null,
+      normalized.ai_confidence ?? null,
       numericId,
     ])
     if (updateRes.rowCount > 0) return updateRes.rows[0].id
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
+    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
     ON CONFLICT (external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
+      h1 = EXCLUDED.h1,
+      seo_title = EXCLUDED.seo_title,
+      seo_description = EXCLUDED.seo_description,
       price = EXCLUDED.price,
+      price_source = EXCLUDED.price_source,
       status = EXCLUDED.status,
       brand = EXCLUDED.brand,
       category = EXCLUDED.category,
@@ -496,13 +529,20 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       attributes = EXCLUDED.attributes,
       ai_processed = EXCLUDED.ai_processed,
       batch_id = EXCLUDED.batch_id,
+      variant_group_key = EXCLUDED.variant_group_key,
+      ai_error = EXCLUDED.ai_error,
+      ai_confidence = EXCLUDED.ai_confidence,
       updated_at = NOW()
     RETURNING id
   `, [
     normalized.external_id || null,
     normalized.name,
     normalized.description,
+    normalized.h1 || null,
+    normalized.seo_title || null,
+    normalized.seo_description || null,
     normalized.price,
+    normalized.price_source || 'legacy',
     normalized.status,
     normalized.brand,
     normalized.category,
@@ -512,6 +552,9 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
     JSON.stringify(normalized.attributes || {}),
     normalized.ai_processed === true || normalized.ai_processed === 'true',
     batchId,
+    normalized.variant_group_key || null,
+    normalized.ai_error || null,
+    normalized.ai_confidence ?? null,
   ])
 
   return insertRes.rows[0]?.id
@@ -557,6 +600,9 @@ export async function updateBatchProductAction(identifier: string | number, patc
       'external_id',
       'name',
       'description',
+      'h1',
+      'seo_title',
+      'seo_description',
       'price',
       'status',
       'brand',
@@ -566,6 +612,9 @@ export async function updateBatchProductAction(identifier: string | number, patc
       'photos',
       'attributes',
       'ai_processed',
+      'variant_group_key',
+      'ai_error',
+      'ai_confidence',
     ].includes(key))
 
     if (keys.length === 0) return { success: true }
@@ -582,6 +631,7 @@ export async function updateBatchProductAction(identifier: string | number, patc
         ? `${key}=$${index + 1}::jsonb`
         : `${key}=$${index + 1}`
     })
+    if (keys.includes('price')) setClauses.push("price_source='manual'")
 
     const isNumericId = String(identifier).match(/^\d+$/)
     values.push(identifier)
@@ -818,13 +868,18 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
                         const processedProducts = parseServerCsv(processedText);
                         const originalByExternalId = new Map(originalProducts.map((product: any) => [String(product.external_id), product]));
                         for (const processedProduct of processedProducts) {
+                          const original = originalByExternalId.get(String(processedProduct.external_id));
                           if (Object.keys(processedProduct.attributes || {}).length === 0) {
-                            const original = originalByExternalId.get(String(processedProduct.external_id));
                             if (original?.attributes) processedProduct.attributes = original.attributes;
                           }
+                          processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
+                            ? 'script'
+                            : (original?.price_source || 'default');
                         }
                         const saveRes = await saveBatchProductsAction(batchId, processedProducts);
                         if (!saveRes.success) throw new Error(saveRes.error);
+                        await scrapingQuery("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
+                        await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
                         itemsCount = processedProducts.length;
                         await scrapingQuery(
                             'UPDATE scraping_tasks SET items_count=$1 WHERE result_path=$2',

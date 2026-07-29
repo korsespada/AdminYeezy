@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import {
   ArchiveX,
+  Bot,
   Calendar,
   ChevronDown,
   ChevronUp,
@@ -13,6 +14,10 @@ import {
   RefreshCw,
   Send,
   Trash2,
+  FolderPlus,
+  RotateCcw,
+  BadgeRussianRuble,
+  Sparkles,
 } from 'lucide-react'
 import {
   deleteBatchAction,
@@ -24,6 +29,17 @@ import {
   type ExportHistoryFile,
 } from '@/actions/suppliers'
 import CsvModal from './CsvModal'
+import {
+  createExportFolderAction,
+  deleteExportFolderAction,
+  getBatchSnapshotsAction,
+  moveBatchToFolderAction,
+  renameExportFolderAction,
+  rollbackBatchAction,
+  startBatchAiAction,
+} from '@/actions/batch-ai'
+import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
+import BatchAiReviewDialog from './BatchAiReviewDialog'
 
 type ModalState = {
   localPath: string
@@ -37,10 +53,10 @@ type ModalState = {
 }
 
 const statusStyles: Record<string, string> = {
-  'Сырой CSV': 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
-  'Обработано скриптом': 'bg-amber-500/10 text-amber-300 border-amber-500/20',
+  'Сырой товар': 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+  'Обработан скриптом': 'bg-amber-500/10 text-amber-300 border-amber-500/20',
   'Обработано ИИ': 'bg-violet-500/10 text-violet-300 border-violet-500/20',
-  'Запушено': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+  'Запушено в БД': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
   'Запущено': 'bg-sky-500/10 text-sky-300 border-sky-500/20',
   'Удалено из БД': 'bg-rose-500/10 text-rose-300 border-rose-500/20',
   failed: 'bg-red-500/10 text-red-300 border-red-500/20',
@@ -66,13 +82,17 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export default function ExportHistoryList({ initialData }: { initialData: ExportHistoryBatch[] }) {
+export default function ExportHistoryList({ initialData, initialFolders }: { initialData: ExportHistoryBatch[]; initialFolders: any[] }) {
   const [batches, setBatches] = useState<ExportHistoryBatch[]>(initialData)
+  const [folders, setFolders] = useState<any[]>(initialFolders)
+  const [folderFilter, setFolderFilter] = useState<string>('all')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(initialData[0] ? [initialData[0].id] : []))
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [modalState, setModalState] = useState<ModalState | null>(null)
+  const [priceSupplier, setPriceSupplier] = useState<{ id: number; name: string } | null>(null)
+  const [reviewBatch, setReviewBatch] = useState<ExportHistoryBatch | null>(null)
 
   const refresh = async () => {
     setIsRefreshing(true)
@@ -82,7 +102,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
   }
 
   useEffect(() => {
-    const hasRunning = batches.some((batch) => batch.status === 'Запущено' || batch.files.some((file) => file.status === 'Запущено'))
+    const hasRunning = batches.some((batch) => batch.status === 'Запущено' || ['queued', 'running'].includes(batch.ai_run_status || '') || batch.files.some((file) => file.status === 'Запущено'))
     if (!hasRunning) return
     const interval = setInterval(refresh, 3000)
     return () => clearInterval(interval)
@@ -198,13 +218,78 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
     if (res.success) {
       const pushed = res.data?.success || 0
       const failed = res.data?.failed || 0
-      setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено' } : item))
+      setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено в БД' } : item))
       alert(`Пуш завершен. Успешно: ${pushed}, ошибок: ${failed}`)
     } else {
       alert(`Ошибка пуша: ${res.error}`)
     }
     setPendingAction(null)
   }
+
+  const createFolder = async () => {
+    const name = prompt('Название новой папки')?.trim()
+    if (!name) return
+    const result = await createExportFolderAction(name)
+    if (result.success) setFolders((current) => [result.data, ...current])
+    else alert(result.error)
+  }
+
+  const renameFolder = async () => {
+    const folder = folders.find((item) => item.id === folderFilter)
+    if (!folder) return
+    const name = prompt('Новое название папки', folder.name)?.trim()
+    if (!name) return
+    const result = await renameExportFolderAction(folder.id, name)
+    if (result.success) setFolders((items) => items.map((item) => item.id === folder.id ? { ...item, name } : item))
+    else alert(result.error)
+  }
+
+  const deleteFolder = async () => {
+    const folder = folders.find((item) => item.id === folderFilter)
+    if (!folder || !confirm(`Удалить папку «${folder.name}»? Выгрузки останутся без папки.`)) return
+    const result = await deleteExportFolderAction(folder.id)
+    if (result.success) {
+      setFolders((items) => items.filter((item) => item.id !== folder.id))
+      setBatches((items) => items.map((item) => item.folder_id === folder.id ? { ...item, folder_id: null, folder_name: null } : item))
+      setFolderFilter('all')
+    } else alert((result as any).error)
+  }
+
+  const moveBatch = async (batch: ExportHistoryBatch, folderId: string) => {
+    const target = folders.find((item) => item.id === folderId)
+    const result = await moveBatchToFolderAction(batch.id, folderId || null)
+    if (result.success) setBatches((items) => items.map((item) => item.id === batch.id ? { ...item, folder_id: folderId || null, folder_name: target?.name || null } : item))
+    else alert((result as any).error)
+  }
+
+  const startAi = async (batch: ExportHistoryBatch, mode: 'sample' | 'full') => {
+    setPendingAction(`ai-${batch.id}`)
+    const result = await startBatchAiAction(batch.id, mode)
+    if (result.success) {
+      const data: any = result.data
+      alert(data?.provider === 'cockpit' ? `В очередь отправлено: ${data.queued}` : `ИИ завершён. Успешно: ${data?.completed_count || 0}, ошибок: ${data?.failed_count || 0}`)
+      await refresh()
+    } else alert(`Ошибка ИИ: ${result.error}`)
+    setPendingAction(null)
+  }
+
+  const rollback = async (batch: ExportHistoryBatch) => {
+    const result = await getBatchSnapshotsAction(batch.id)
+    if (!result.success || !result.data?.length) return alert('Снимков для отката нет')
+    const list = result.data.map((snapshot: any, index: number) => `${index + 1}. ${snapshot.label} · ${formatDate(snapshot.created_at)} · ${snapshot.items_count} шт.`).join('\n')
+    const selected = Number(prompt(`Выберите снимок для полного отката:\n${list}`))
+    const snapshot = result.data[selected - 1]
+    if (!snapshot || !confirm('Поздние снимки и AI-версии будут удалены. Продолжить?')) return
+    const rollbackResult = await rollbackBatchAction(batch.id, snapshot.id)
+    if (rollbackResult.success) await refresh()
+    else alert(rollbackResult.error)
+  }
+
+  const visibleBatches = batches.filter((batch) => {
+    if (folderFilter === 'all') return true
+    if (folderFilter === 'ungrouped') return !batch.folder_id
+    return batch.folder_id === folderFilter
+  })
 
   return (
     <div className="space-y-6">
@@ -220,12 +305,21 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setFolderFilter('all')} className={`rounded-lg border px-3 py-2 text-sm ${folderFilter === 'all' ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>Все</button>
+        <button onClick={() => setFolderFilter('ungrouped')} className={`rounded-lg border px-3 py-2 text-sm ${folderFilter === 'ungrouped' ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>Без папки</button>
+        {folders.map((folder) => <button key={folder.id} onClick={() => setFolderFilter(folder.id)} className={`rounded-lg border px-3 py-2 text-sm ${folderFilter === folder.id ? 'border-indigo-500 bg-indigo-500/15 text-indigo-200' : 'border-slate-700 bg-slate-900 text-slate-300'}`}>{folder.name}</button>)}
+        <button onClick={createFolder} className="inline-flex items-center gap-2 rounded-lg border border-dashed border-slate-600 px-3 py-2 text-sm text-slate-300 hover:border-indigo-500"><FolderPlus className="h-4 w-4" /> Новая папка</button>
+        {!['all', 'ungrouped'].includes(folderFilter) && <><button onClick={renameFolder} className="text-xs text-slate-400 hover:text-white">Переименовать</button><button onClick={deleteFolder} className="text-xs text-red-400 hover:text-red-300">Удалить папку</button></>}
+      </div>
+
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] text-left">
             <thead>
               <tr className="border-b border-slate-700 bg-slate-950/60">
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Поставщик</th>
+                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Папка</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Дата начала</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Товаров</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
@@ -234,7 +328,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
               </tr>
             </thead>
             <tbody>
-              {batches.map((batch) => {
+              {visibleBatches.map((batch) => {
                 const isExpanded = expandedIds.has(batch.id)
                 const isBusy = pendingAction?.endsWith(batch.id)
 
@@ -261,6 +355,12 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                           </div>
                         </div>
                       </td>
+                      <td className="px-6 py-5" onClick={(event) => event.stopPropagation()}>
+                        <select value={batch.folder_id || ''} onChange={(event) => moveBatch(batch, event.target.value)} disabled={batch.isSynthetic} className="max-w-40 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-300 disabled:opacity-40">
+                          <option value="">Без папки</option>
+                          {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                        </select>
+                      </td>
                       <td className="px-6 py-5 text-sm text-slate-300">{formatDate(batch.created_at)}</td>
                       <td className="px-6 py-5 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
                       <td className="px-6 py-5"><StatusBadge status={batch.status} /></td>
@@ -284,7 +384,19 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                               БД
                             </button>
                           )}
-                          {!batch.isSynthetic && batch.status !== 'Запушено' && batch.status !== 'Удалено из БД' && (
+                          {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
+                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на 10 случайных товарах'}>
+                              {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                              {batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ · 10'}
+                            </button>
+                          )}
+                          {!batch.isSynthetic && batch.supplier_id && (
+                            <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="rounded-lg p-2 text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика"><BadgeRussianRuble className="h-4 w-4" /></button>
+                          )}
+                          {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
+                            <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="rounded-lg p-2 text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
+                          )}
+                          {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
                             <button
                               onClick={(event) => {
                                 event.stopPropagation()
@@ -326,6 +438,13 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                             onClick={(event) => event.stopPropagation()}
                           >
                             <button
+                              onClick={() => rollback(batch)}
+                              disabled={batch.isSynthetic}
+                              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-500/10 disabled:text-slate-600"
+                            >
+                              <RotateCcw className="h-4 w-4" /> Полный откат
+                            </button>
+                            <button
                               onClick={() => handleDeleteFromDb(batch)}
                               disabled={batch.isSynthetic || batch.status === 'Удалено из БД'}
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600"
@@ -351,7 +470,7 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                         className="cursor-pointer border-b border-slate-800 bg-slate-900 transition-colors hover:bg-slate-800/60"
                         onClick={() => openFile(batch, file)}
                       >
-                        <td className="px-6 py-4">
+                        <td className="px-6 py-4" colSpan={2}>
                           <div className="flex min-w-0 items-center gap-3 pl-4">
                             <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />
                             <div className="min-w-0">
@@ -382,9 +501,9 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
                 )
               })}
 
-              {batches.length === 0 && (
+              {visibleBatches.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-20 text-center text-slate-500">
+                  <td colSpan={7} className="px-6 py-20 text-center text-slate-500">
                     Истории выгрузок пока нет
                   </td>
                 </tr>
@@ -406,6 +525,8 @@ export default function ExportHistoryList({ initialData }: { initialData: Export
         supplierAvatar={modalState?.supplierAvatar}
         forceFileMode={modalState?.forceFileMode}
       />
+      {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
+      {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={() => setReviewBatch(null)} />}
     </div>
   )
 }

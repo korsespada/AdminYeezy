@@ -197,7 +197,7 @@ describe('SeoAiStudio queue', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Очередь и сравнение' }))
     expect(screen.getByText('Обувь за июль')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Применить безопасные' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Принять все готовые (1)' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Отклонить готовые' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Вернуть отклонённые' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Переименовать выгрузку' })).toBeInTheDocument()
