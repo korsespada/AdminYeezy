@@ -83,7 +83,7 @@ describe('batch product server actions', () => {
       ai_processed: true,
       attributes: { color: 'black', sizes: ['M', 'L'] },
     })
-    expect(mocks.scrapingQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE batch_id = $1'), ['batch-1'])
+    expect(mocks.scrapingQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE p.batch_id = $1'), ['batch-1'])
   })
 
   it('saves a full batch inside a transaction and prunes removed rows', async () => {

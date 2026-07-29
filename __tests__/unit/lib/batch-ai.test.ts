@@ -46,6 +46,20 @@ describe('batch AI normalization', () => {
     expect(canonicalBatchSuggestionKey('model_names')).toBe('model_name')
   })
 
+  it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
+    const result = normalizeBatchAiOutput({
+      product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },
+    }, {
+      product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags', photos: [], attributes: {} },
+      brandIds: new Set(['chanel']),
+      categoryIds: new Set(['bags']),
+      subcategoryIds: new Set(['backpacks']),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('')
+  })
+
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {
     const product = {
       category: 'bags', price_rule_key: 'visual-1',

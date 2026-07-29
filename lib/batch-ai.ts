@@ -257,7 +257,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const original = input.product
   const choose = (value: unknown, allowed: Set<string>, fallback: unknown) => {
     const candidate = String(value || '')
-    return allowed.has(candidate) ? candidate : String(fallback || '')
+    if (allowed.has(candidate)) return candidate
+    const previous = String(fallback || '')
+    return allowed.has(previous) ? previous : ''
   }
   const attributes: Record<string, unknown> = { ...(original.attributes || {}) }
   const suggestions = Array.isArray(raw?.attribute_suggestions) ? raw.attribute_suggestions : []

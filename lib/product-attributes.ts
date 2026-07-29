@@ -21,6 +21,7 @@ export const CORE_PRODUCT_FIELDS = new Set([
   'batch_id',
   'batchid',
   'ai_processed',
+  'ai_sampled',
   'variant_group_key',
   'ai_error',
   'ai_confidence',

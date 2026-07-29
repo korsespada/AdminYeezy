@@ -575,6 +575,17 @@ export default function CsvImportApp({
     });
   }, [products, filterBrand, filterCategory, filterSubcategory, filterGender]);
 
+  const sampleProducts = useMemo(
+    () => filteredProducts.filter((product) => product.ai_sampled === true),
+    [filteredProducts],
+  );
+  const displayedProducts = useMemo(
+    () => sampleProducts.length > 0
+      ? [...sampleProducts, ...filteredProducts.filter((product) => product.ai_sampled !== true)]
+      : filteredProducts,
+    [filteredProducts, sampleProducts],
+  );
+
   // ─── Upload Mode ──────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
     if (!file.name.endsWith(".csv")) {
@@ -1044,6 +1055,14 @@ export default function CsvImportApp({
     setSaveMsg(`Повторная обработка ${product.external_id || product.id}...`);
     const result = await startBatchAiAction(batchId, "retry", Number(product.id));
     if (result.success) {
+      const data: any = result.data;
+      if (data?.provider === "cockpit") {
+        for (let attempt = 0; attempt < 200; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          const run = await getBatchAiRunAction(data.runId);
+          if (!run.success || ["completed", "failed"].includes(run.data?.status)) break;
+        }
+      }
       await handleLoadBatch(batchId);
       setSaveMsg("✓ Товар обработан повторно");
     } else {
@@ -1402,7 +1421,7 @@ export default function CsvImportApp({
                   >
                       <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
                       {products.some((product) => product.ai_processed === true || product.ai_processed === "true")
-                        ? "Продолжить ИИ"
+                        ? "Обработать с ИИ остальные"
                         : "Тест ИИ · 10 товаров"}
                   </button>
                 )
@@ -1815,7 +1834,7 @@ export default function CsvImportApp({
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 pb-48">
-              {filteredProducts.map((product) => {
+              {displayedProducts.map((product, displayedIndex) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
@@ -1834,9 +1853,17 @@ export default function CsvImportApp({
                   metadata: {},
                   created: '', updated: '', collectionId: '', collectionName: 'products',
                 } as any;
-                return isBatchSource ? (
+                return <React.Fragment key={`${product.external_id}-${realIndex}`}>
+                  {sampleProducts.length > 0 && displayedIndex === 0 && (
+                    <div className="col-span-full flex items-center justify-between rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3">
+                      <div><div className="font-semibold text-indigo-200">Тест ИИ</div><div className="text-xs text-slate-400">Первые для проверки · {sampleProducts.length} товаров</div></div>
+                    </div>
+                  )}
+                  {sampleProducts.length > 0 && displayedIndex === sampleProducts.length && (
+                    <div className="col-span-full mt-2 border-t border-slate-700 pt-4 text-sm font-semibold text-slate-300">Остальные товары · {filteredProducts.length - sampleProducts.length}</div>
+                  )}
+                {isBatchSource ? (
                   <AdminProductCard
-                    key={`${product.external_id}-${realIndex}`}
                     product={adminProduct}
                     onEdit={() => setSelectedIdx(realIndex)}
                     onDelete={() => handleRemove(realIndex)}
@@ -1854,7 +1881,6 @@ export default function CsvImportApp({
                   />
                 ) : (
                   <CsvProductCard
-                    key={`${product.external_id}-${realIndex}`}
                     product={product}
                     index={realIndex}
                     lookups={lookups}
@@ -1867,7 +1893,8 @@ export default function CsvImportApp({
                     localPath={localPath}
                     onRetryAi={batchId ? () => handleRetryProductAi(product) : undefined}
                   />
-                );
+                )}
+                </React.Fragment>;
               })}
             </div>
           </>
@@ -1964,6 +1991,7 @@ export default function CsvImportApp({
         isOpen={selectedIdx !== null}
         onClose={() => setSelectedIdx(null)}
         onUpdate={updateProduct}
+        onRetryAi={batchId && selectedIdx !== null ? () => handleRetryProductAi(products[selectedIdx]) : undefined}
       />
     </div>
   );
@@ -2218,6 +2246,7 @@ interface CsvProductDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdate: (i: number, f: keyof CsvProduct, v: any) => void;
+  onRetryAi?: () => void;
 }
 
 function CsvProductDrawer({
@@ -2227,6 +2256,7 @@ function CsvProductDrawer({
   isOpen,
   onClose,
   onUpdate,
+  onRetryAi,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -2298,12 +2328,19 @@ function CsvProductDrawer({
                 Редактирование #{index + 1}
               </h2>
             </div>
-            <button
-              onClick={onClose}
-              className="p-2 text-slate-400 hover:text-white rounded-lg"
-            >
-              <X size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+              {onRetryAi && (local.ai_processed || local.ai_error) && (
+                <button onClick={onRetryAi} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
+                  Повторить ИИ
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 text-slate-400 hover:text-white rounded-lg"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 p-6 space-y-8 pb-32">

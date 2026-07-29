@@ -34,6 +34,7 @@ export interface CsvProduct {
     attributes?: ProductAttributes
     batchId?: string
     ai_processed?: boolean | string
+    ai_sampled?: boolean
     price_source?: string
     variant_group_key?: string | null
     ai_error?: string | null
@@ -117,8 +118,12 @@ function normalizeBatchProduct(row: any): CsvProduct {
     gender: row.gender || '',
     photos: normalizePhotos(row.photos),
     batchId: row.batch_id || row.batchId,
-    attributes: extractProductAttributes(row),
+    // Batch rows already contain the canonical JSONB payload. Re-parsing the
+    // description here could turn a bag model size (for example 25) into a
+    // clothing/shoe variant size every time the page is opened.
+    attributes: normalizeProductAttributes(row.attributes),
     ai_processed: row.ai_processed === true || row.ai_processed === 'true',
+    ai_sampled: row.ai_sampled === true || row.ai_sampled === 'true',
     price_source: row.price_source || 'legacy',
     variant_group_key: row.variant_group_key || null,
     ai_error: row.ai_error || null,
@@ -467,10 +472,18 @@ export async function getBatchProductsAction(batchId: string) {
     await requireAdmin()
 
     let res = await scrapingQuery(`
-      SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
-      FROM products
-      WHERE batch_id = $1
-      ORDER BY id ASC
+      SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
+        p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
+        p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
+        p.ai_confidence, p.created_at, p.updated_at,
+        EXISTS (
+          SELECT 1 FROM batch_ai_items i
+          JOIN batch_ai_runs r ON r.id=i.run_id
+          WHERE i.product_id=p.id AND r.batch_id=p.batch_id AND r.mode='sample'
+        ) AS ai_sampled
+      FROM products p
+      WHERE p.batch_id = $1
+      ORDER BY p.id ASC
     `, [batchId])
 
     if (res.rows.length === 0) {
@@ -486,8 +499,16 @@ export async function getBatchProductsAction(batchId: string) {
         if (!saved.success) throw new Error(saved.error || 'Не удалось восстановить товары партии')
         await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар · восстановлено из артефакта')
         res = await scrapingQuery(`
-          SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
-          FROM products WHERE batch_id=$1 ORDER BY id ASC
+          SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
+            p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
+            p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
+            p.ai_confidence, p.created_at, p.updated_at,
+            EXISTS (
+              SELECT 1 FROM batch_ai_items i
+              JOIN batch_ai_runs r ON r.id=i.run_id
+              WHERE i.product_id=p.id AND r.batch_id=p.batch_id AND r.mode='sample'
+            ) AS ai_sampled
+          FROM products p WHERE p.batch_id=$1 ORDER BY p.id ASC
         `, [batchId])
       }
     }
