@@ -1,6 +1,6 @@
 const PHOTO_META_PREFIX = /^(?:на\s+(?:фотографиях|фото|снимках)|по\s+(?:фотографиям|фото))\s+(?:(?:хорошо\s+)?(?:видны|видно|видна|виден|заметны|заметно|заметна|заметен|представлены|представлено|показаны|показано)\s+|[-—:]\s*)/iu
 const MISSING_FACT = /(?:не\s+(?:указан(?:а|о|ы)?|известен|известна|известно|известны|представлен(?:а|о|ы)?|удалось\s+(?:определить|подтвердить)|можно\s+(?:определить|подтвердить))|нет\s+(?:данных|информации))/iu
-const MATERIAL_FIELD = /^(?:materials|upper_material|sole_material|jewelry_metal|lining_material)$/u
+const MATERIAL_FIELD = /^(?:materials|upper_material|sole_material|jewelry_metal|lining_material|luggage_case_material)$/u
 const PUBLIC_TEXT_FIELDS = ['suggested_name', 'description', 'h1', 'seo_title', 'seo_description']
 
 function sanitizeCatalogOutput(output, { internalIdentifiers = [] } = {}) {

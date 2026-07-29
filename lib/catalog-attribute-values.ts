@@ -43,6 +43,13 @@ const MATERIAL_VALUES: Record<string, string> = {
   gold: 'Золото', 'золото': 'Золото',
   titanium: 'Титан', 'титан': 'Титан',
   ceramic: 'Керамика', 'керамика': 'Керамика',
+  aluminum: 'Алюминий', aluminium: 'Алюминий', 'алюминий': 'Алюминий',
+  polycarbonate: 'Поликарбонат', 'поликарбонат': 'Поликарбонат',
+  polypropylene: 'Полипропилен', 'полипропилен': 'Полипропилен',
+  abs: 'ABS-пластик', 'abs-пластик': 'ABS-пластик', 'абс-пластик': 'ABS-пластик',
+  composite: 'Композит', 'композит': 'Композит',
+  carbon: 'Карбон', 'карбон': 'Карбон',
+  coated_canvas: 'Канвас с покрытием', 'канвас с покрытием': 'Канвас с покрытием',
 }
 
 const MATERIAL_CODES = new Set([
@@ -52,6 +59,7 @@ const MATERIAL_CODES = new Set([
   'sole_material',
   'watch_case_material',
   'strap_material',
+  'luggage_case_material',
 ])
 
 const DEPRECATED_CODES = new Set([

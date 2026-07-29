@@ -63,6 +63,7 @@ const AI_FIELD_LABELS: Record<string, string> = {
   stones: 'Камни и декоративные вставки',
   jewelry_metal: 'Металл украшения',
   center_material: 'Материал центральной части',
+  luggage_case_material: 'Материал корпуса',
 }
 
 interface SeoAiStudioProps {
@@ -714,7 +715,7 @@ function registryCandidateValues(code: string, value: unknown): string[] {
   const record = value as Record<string, unknown>
   const field = code === 'materials'
     ? 'families'
-    : ['colors', 'watch_case_material'].includes(code)
+    : ['colors', 'watch_case_material', 'luggage_case_material'].includes(code)
       ? 'filter_values'
       : 'filter_value'
   return registryCandidateValues(code, record[field])
@@ -1379,6 +1380,8 @@ function formatValue(value: any, field?: string) {
 }
 
 function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefinition) {
+  if (definition?.code === 'dimensions') return formatDimensions(value)
+  if (definition?.code === 'capacity') return formatCapacity(value)
   const values = attributeDisplayValues(value)
   if (values.length === 0) return '—'
   const displayValues = values.map((text) => {
@@ -1386,6 +1389,24 @@ function formatAttributeValue(value: unknown, definition?: CatalogAttributeDefin
     return dictionaryValue?.canonical_value || text
   })
   return [...new Set(displayValues)].join(', ')
+}
+
+function formatDimensions(value: unknown) {
+  const record = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+  const ordered = record
+    ? ['width', 'height', 'depth'].map((key) => Number(record[key])).filter(Number.isFinite)
+    : []
+  const numbers = ordered.length > 0 ? ordered : numericValues(value).slice(0, 3)
+  if (numbers.length === 0) return '—'
+  const rawUnit = String(record?.unit || record?.display_value || value || '')
+  const unit = /(?:мм|\bmm\b)/i.test(rawUnit) ? 'мм' : 'см'
+  return `${numbers.map(formatDecimal).join(' × ')} ${unit}`
+}
+
+function formatCapacity(value: unknown) {
+  const numbers = numericValues(value)
+  if (numbers.length === 0) return '—'
+  return `${formatDecimal(numbers[0])} л`
 }
 
 function attributeDisplayValues(value: unknown): string[] {

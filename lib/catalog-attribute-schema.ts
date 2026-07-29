@@ -98,8 +98,9 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     aliases: ['длина ремня', 'длина ручки'],
     unit: 'см',
   }),
-  definition('capacity', 'Вместимость', 'Сумки и багаж', 'text', 140, {
+  definition('capacity', 'Вместимость', 'Сумки и багаж', 'number', 140, {
     aliases: ['bag_capacity', 'luggage_capacity', 'объём', 'вместимость'],
+    unit: 'л',
   }),
   definition('hardware_color', 'Цвет фурнитуры', 'Сумки', 'enum', 145, {
     filter: true,
@@ -185,6 +186,11 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     filter: true,
     values: ['Ручная кладь', 'Средний', 'Большой'],
   }),
+  definition('luggage_case_material', 'Материал корпуса', 'Чемоданы', 'multi_enum', 290, {
+    aliases: ['luggage material', 'shell material', 'материал чемодана', 'материал корпуса чемодана'],
+    values: ['Алюминий', 'Поликарбонат', 'Полипропилен', 'ABS-пластик', 'Композит', 'Карбон', 'Канвас с покрытием', 'Кожа', 'Текстиль'],
+    rules: ['Указывать только материал основной оболочки/корпуса, не материал ручки, отделки, подкладки или фурнитуры.'],
+  }),
 ]
 
 export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
@@ -230,7 +236,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
       'Головные уборы': ['sizes'],
       Перчатки: ['sizes'],
       Ремни: ['sizes'],
-      Чемоданы: ['sizes', 'capacity', 'weight', 'wheel_count', 'lock_type', 'luggage_size'],
+      Чемоданы: ['sizes', 'capacity', 'weight', 'wheel_count', 'lock_type', 'luggage_size', 'luggage_case_material'],
     },
   },
 ]
@@ -261,6 +267,7 @@ export function getCatalogAttributeDefinitionsForCategory(categoryName?: string 
     for (const [name, attributes] of Object.entries(category.subcategories)) {
       if (normalizeName(name) === normalizedSubcategory) attributes.forEach((code) => codes.add(code))
     }
+    if (normalizedSubcategory === normalizeName('Чемоданы')) codes.delete('materials')
   }
 
   return CATALOG_ATTRIBUTE_DEFINITIONS.filter((item) => codes.has(item.code) && item.active)
