@@ -403,6 +403,7 @@ export interface ExportHistoryBatch {
   folder_id: string | null
   folder_name: string | null
   ai_run_status?: string | null
+  ai_run_id?: string | null
   ai_completed_count?: number
   ai_failed_count?: number
 }
@@ -520,6 +521,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         b.created_at as batch_created_at,
         b.folder_id,
         f.name as folder_name,
+        ai.id as ai_run_id,
         ai.status as ai_run_status,
         ai.completed_count as ai_completed_count,
         ai.failed_count as ai_failed_count
@@ -528,7 +530,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
       LEFT JOIN export_folders f ON f.id = b.folder_id
       LEFT JOIN LATERAL (
-        SELECT status, completed_count, failed_count FROM batch_ai_runs
+        SELECT id, status, completed_count, failed_count FROM batch_ai_runs
         WHERE batch_id=b.id ORDER BY created_at DESC LIMIT 1
       ) ai ON TRUE
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
@@ -572,6 +574,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             folder_id: row.folder_id || null,
             folder_name: row.folder_name || null,
             ai_run_status: row.ai_run_status || null,
+            ai_run_id: row.ai_run_id || null,
             ai_completed_count: Number(row.ai_completed_count || 0),
             ai_failed_count: Number(row.ai_failed_count || 0),
           },
@@ -608,6 +611,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         folder_id: batch.folder_id,
         folder_name: batch.folder_name,
         ai_run_status: batch.ai_run_status,
+        ai_run_id: batch.ai_run_id,
         ai_completed_count: batch.ai_completed_count,
         ai_failed_count: batch.ai_failed_count,
       }

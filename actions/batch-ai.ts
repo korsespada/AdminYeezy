@@ -3,6 +3,7 @@
 import crypto from 'crypto'
 import sharp from 'sharp'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { requireAdmin } from '@/lib/admin-session'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
@@ -10,7 +11,6 @@ import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   buildBatchAiContactSheets,
   buildBatchAiUserPrompt,
-  canonicalBatchSuggestionKey,
   matchingPriceRule,
   normalizeBatchAiOutput,
   runBatchAiOpenRouter,
@@ -21,12 +21,14 @@ import {
 import {
   createRailsCatalogSubcategory,
   getRailsCatalogAttributeRegistry,
+  getRailsCatalogLookups,
   syncRailsCatalogAttributeRegistry,
   upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { uploadToS3 } from '@/lib/s3'
+import { reconcileBatchSubcategorySuggestions, saveBatchAiSuggestions } from '@/lib/batch-ai-suggestions'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -238,7 +240,37 @@ function priceRuleHints(rules: any[]) {
   }))
 }
 
+async function syncCurrentRailsCatalogMappings() {
+  try {
+    const catalog = await getRailsCatalogLookups()
+    const rows = [
+      ...catalog.brands.map((item: any) => ({ entity_type: 'brand', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
+      ...catalog.categories.map((item: any) => ({ entity_type: 'category', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
+      ...catalog.subcategories.map((item: any) => ({
+        entity_type: 'subcategory',
+        id: String(item.id),
+        name: String(item.name || ''),
+        parent_id: String(item.category || item.parent_id || ''),
+      })),
+    ]
+    if (!rows.length) return
+    await scrapingQuery(`
+      INSERT INTO catalog_id_mappings(entity_type,legacy_id,canonical_id,name,canonical_parent_id,updated_at)
+      SELECT entity_type,id,id,name,NULLIF(parent_id,''),NOW()
+      FROM jsonb_to_recordset($1::jsonb)
+        AS x(entity_type text,id text,name text,parent_id text)
+      ON CONFLICT(entity_type,canonical_id) DO UPDATE SET
+        name=EXCLUDED.name,
+        canonical_parent_id=EXCLUDED.canonical_parent_id,
+        updated_at=NOW()
+    `, [JSON.stringify(rows)])
+  } catch (error) {
+    console.warn('Не удалось обновить справочник Rails перед AI-обработкой', error)
+  }
+}
+
 async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', productId?: number) {
+  await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
     SELECT b.*, s.ai_instructions, s.ai_photo_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
            s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids
@@ -266,7 +298,6 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
   const allowedIds = (value: unknown) => Array.isArray(value) ? new Set(value.map(String)) : new Set<string>()
   const allowedBrands = allowedIds(batch.rows[0].allowed_brand_ids)
   const allowedCategories = allowedIds(batch.rows[0].allowed_category_ids)
-  const allowedSubcategories = allowedIds(batch.rows[0].allowed_subcategory_ids)
   const brands = mappings.rows.filter((row) => row.entity_type === 'brand')
   const categories = mappings.rows.filter((row) => row.entity_type === 'category')
   const subcategories = mappings.rows.filter((row) => row.entity_type === 'subcategory')
@@ -274,7 +305,9 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
     batch: batch.rows[0], products: products.rows, definitions,
     brands: allowedBrands.size ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
     categories: allowedCategories.size ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
-    subcategories: allowedSubcategories.size ? subcategories.filter((row) => allowedSubcategories.has(String(row.id))) : subcategories,
+    // Всегда передаём полный справочник подкатегорий: ограничения поставщика помогают
+    // классификации, но не должны заставлять AI повторно предлагать уже существующее.
+    subcategories,
     priceRules: priceRules.rows,
   }
 }
@@ -350,14 +383,13 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
       })])
     }
 
-    if (settings.provider === 'cockpit') {
-      revalidatePath('/admin/batches')
-      return { success: true, data: { runId, queued: context.products.length, provider: 'cockpit' } }
-    }
-
-    await processOpenRouterRun(runId, context, settings)
     revalidatePath('/admin/batches')
-    return { success: true, data: await getBatchAiRun(runId) }
+    if (settings.provider === 'openrouter') {
+      after(async () => {
+        await processOpenRouterRun(runId, context, settings)
+      })
+    }
+    return { success: true, data: { runId, queued: context.products.length, provider: settings.provider } }
   } catch (error: any) {
     return { success: false, error: error.message }
   }
@@ -381,7 +413,13 @@ async function processOpenRouterRun(runId: string, context: any, settings: Batch
 
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
   try {
-    await scrapingQuery("UPDATE batch_ai_items SET status='running',attempts=attempts+1,updated_at=NOW() WHERE id=$1", [item.id])
+    const claimed = await scrapingQuery(`
+      UPDATE batch_ai_items i SET status='running',attempts=attempts+1,updated_at=NOW()
+      FROM batch_ai_runs r
+      WHERE i.id=$1 AND i.run_id=r.id AND i.status='queued' AND r.status IN ('queued','running')
+      RETURNING i.id
+    `, [item.id])
+    if (!claimed.rows[0]) return
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
     context.priceReferenceSheetsPromise ||= buildBatchAiContactSheets(input.priceReferenceUrls || [])
@@ -414,10 +452,15 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     })
     await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
-    await scrapingQuery(`
-      UPDATE batch_ai_items SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW() WHERE id=$1
+    const failed = await scrapingQuery(`
+      UPDATE batch_ai_items i SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
+      FROM batch_ai_runs r
+      WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
+      RETURNING i.product_id
     `, [item.id, String(error.message || error).slice(0, 4000)])
-    await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
+    if (failed.rows[0]) {
+      await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
+    }
   }
 }
 
@@ -434,6 +477,11 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
     await client.query(`
       UPDATE products SET
         name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
@@ -451,7 +499,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
       UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
       WHERE id=$1
     `, [item.id, JSON.stringify(normalized)])
-    await saveSuggestions(client, item.run_id, item.product_id, normalized)
+    await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -461,32 +509,9 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   }
 }
 
-async function saveSuggestions(client: any, runId: string, productId: number, normalized: any) {
-  const suggestions = normalized.suggestions || []
-  if (normalized.subcategorySuggestion?.name) {
-    suggestions.push({ ...normalized.subcategorySuggestion, kind: 'subcategory', code: normalized.subcategorySuggestion.name })
-  }
-  if (normalized.colorFamily?.group_signature && normalized.colorFamily.confidence >= 0.75) {
-    suggestions.push({ ...normalized.colorFamily, kind: 'color_family', code: normalized.colorFamily.group_signature })
-  }
-  for (const suggestion of suggestions) {
-    const kind = suggestion.kind || 'attribute'
-    const key = canonicalBatchSuggestionKey(suggestion.code || suggestion.name, kind)
-    if (!key) continue
-    await client.query(`
-      INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)
-      VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)
-      ON CONFLICT(run_id,kind,canonical_key) DO UPDATE SET
-        payload=EXCLUDED.payload,
-        affected_product_ids=(
-          SELECT jsonb_agg(DISTINCT value)
-          FROM jsonb_array_elements(batch_ai_suggestions.affected_product_ids || EXCLUDED.affected_product_ids)
-        )
-    `, [crypto.randomUUID(), runId, kind, key, JSON.stringify(suggestion), JSON.stringify([productId])])
-  }
-}
-
 async function finalizeRun(runId: string) {
+  const runState = await scrapingQuery('SELECT status FROM batch_ai_runs WHERE id=$1', [runId])
+  if (!runState.rows[0] || runState.rows[0].status === 'cancelled') return
   const counts = await scrapingQuery(`
     SELECT COUNT(*)::int AS total,
            COUNT(*) FILTER(WHERE status='completed')::int AS completed,
@@ -499,7 +524,7 @@ async function finalizeRun(runId: string) {
   await scrapingQuery(`
     UPDATE batch_ai_runs SET status=$2,completed_count=$3,failed_count=$4,
       completed_at=CASE WHEN $5=0 THEN NOW() ELSE completed_at END,updated_at=NOW()
-    WHERE id=$1
+    WHERE id=$1 AND status <> 'cancelled'
   `, [runId, status, row.completed, row.failed, row.pending])
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
@@ -523,6 +548,38 @@ export async function getBatchAiRunAction(runId: string) {
   await requireAdmin()
   await finalizeRun(runId)
   return { success: true, data: await getBatchAiRun(runId) }
+}
+
+export async function stopBatchAiRunAction(runId: string) {
+  await requireAdmin()
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT id,status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [runId])
+    if (!run.rows[0]) {
+      await client.query('ROLLBACK')
+      return { success: false, error: 'Запуск ИИ не найден' }
+    }
+    if (['queued', 'running'].includes(run.rows[0].status)) {
+      await client.query(`
+        UPDATE batch_ai_items SET status='cancelled',lease_token=NULL,leased_at=NULL,
+          completed_at=NOW(),updated_at=NOW()
+        WHERE run_id=$1 AND status IN ('queued','running')
+      `, [runId])
+      await client.query(`
+        UPDATE batch_ai_runs SET status='cancelled',completed_at=NOW(),updated_at=NOW()
+        WHERE id=$1
+      `, [runId])
+    }
+    await client.query('COMMIT')
+    revalidatePath('/admin/batches')
+    return { success: true }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
 }
 
 export async function getBatchSnapshotsAction(batchId: string) {
@@ -604,6 +661,25 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
     )
   }
   if (decision === 'approved' && row.kind === 'subcategory') {
+    const reconcileClient = await getScrapingClient()
+    try {
+      await reconcileClient.query('BEGIN')
+      const run = await reconcileClient.query('SELECT batch_id FROM batch_ai_runs WHERE id=$1', [row.run_id])
+      if (run.rows[0]?.batch_id) {
+        await reconcileBatchSubcategorySuggestions(reconcileClient, String(run.rows[0].batch_id))
+      }
+      const current = await reconcileClient.query('SELECT status FROM batch_ai_suggestions WHERE id=$1', [id])
+      await reconcileClient.query('COMMIT')
+      if (current.rows[0]?.status === 'approved') {
+        revalidatePath('/admin/batches')
+        return { success: true }
+      }
+    } catch (error) {
+      await reconcileClient.query('ROLLBACK')
+      throw error
+    } finally {
+      reconcileClient.release()
+    }
     const parentId = String(row.payload.parent_category_id || '')
     if (!parentId) return { success: false, error: 'AI не указал родительскую категорию' }
     const category = await createRailsCatalogSubcategory({ name: String(row.payload.name), parent_category_id: parentId })
@@ -688,10 +764,22 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
 
 export async function getBatchAiSuggestionsAction(batchId: string) {
   await requireAdmin()
-  const result = await scrapingQuery(`
-    SELECT s.* FROM batch_ai_suggestions s
-    JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1
-    ORDER BY s.created_at DESC
-  `, [batchId])
-  return { success: true, data: result.rows }
+  await syncCurrentRailsCatalogMappings()
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    await reconcileBatchSubcategorySuggestions(client, batchId)
+    const result = await client.query(`
+      SELECT s.* FROM batch_ai_suggestions s
+      JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1
+      ORDER BY CASE WHEN s.status='pending' THEN 0 ELSE 1 END,s.created_at DESC
+    `, [batchId])
+    await client.query('COMMIT')
+    return { success: true, data: result.rows }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message, data: [] }
+  } finally {
+    client.release()
+  }
 }

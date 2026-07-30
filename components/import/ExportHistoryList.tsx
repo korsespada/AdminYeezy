@@ -18,6 +18,7 @@ import {
   RotateCcw,
   BadgeRussianRuble,
   Sparkles,
+  Square,
 } from 'lucide-react'
 import {
   deleteBatchAction,
@@ -38,6 +39,7 @@ import {
   renameExportFolderAction,
   rollbackBatchAction,
   startBatchAiAction,
+  stopBatchAiRunAction,
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
@@ -279,7 +281,12 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       const result = await startBatchAiAction(batch.id, mode)
       if (result.success) {
         const data: any = result.data
-        if (data?.provider === 'cockpit') {
+        if (data?.runId) {
+          setBatches((items) => items.map((item) => item.id === batch.id ? {
+            ...item,
+            ai_run_id: data.runId,
+            ai_run_status: data.provider === 'cockpit' ? 'queued' : 'running',
+          } : item))
           let finalRun: any = null
           for (let attempt = 0; attempt < 200; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 3000))
@@ -288,20 +295,35 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
             finalRun = run.data
             setBatches((items) => items.map((item) => item.id === batch.id ? {
               ...item,
+              ai_run_id: data.runId,
               ai_run_status: finalRun.status,
               ai_completed_count: Number(finalRun.completed_count || 0),
               ai_failed_count: Number(finalRun.failed_count || 0),
             } : item))
-            if (['completed', 'failed'].includes(finalRun.status)) break
+            if (['completed', 'failed', 'cancelled'].includes(finalRun.status)) break
           }
-          alert(finalRun?.status === 'completed'
+          alert(finalRun?.status === 'cancelled'
+            ? 'Обработка ИИ остановлена. Уже завершённые товары сохранены.'
+            : finalRun?.status === 'completed'
             ? `${mode === 'sample' ? 'Тест' : 'Обработка'} ИИ завершён. Успешно: ${finalRun.completed_count || 0}, ошибок: ${finalRun.failed_count || 0}`
-            : 'Cockpit не завершил обработку вовремя. Текущий статус сохранён в истории.')
-        } else alert(`ИИ завершён. Успешно: ${data?.completed_count || 0}, ошибок: ${data?.failed_count || 0}`)
+            : 'ИИ не завершил обработку вовремя. Текущий статус сохранён в истории.')
+        }
         await refresh()
       } else alert(`Ошибка ИИ: ${result.error}`)
     } catch (error: any) {
       alert(`Ошибка ИИ: ${error?.message || 'не удалось запустить обработку'}`)
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const stopAi = async (batch: ExportHistoryBatch) => {
+    if (!batch.ai_run_id || !confirm('Остановить AI-обработку? Уже завершённые товары останутся сохранены.')) return
+    setPendingAction(`stop-ai-${batch.id}`)
+    try {
+      const result = await stopBatchAiRunAction(batch.ai_run_id)
+      if (!result.success) alert(`Не удалось остановить ИИ: ${result.error}`)
+      await refresh()
     } finally {
       setPendingAction(null)
     }
@@ -427,6 +449,17 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на 10 случайных товарах'} aria-label={batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
                               {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                               {!batch.ai_completed_count && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
+                            </button>
+                          )}
+                          {!batch.isSynthetic && ['queued', 'running'].includes(batch.ai_run_status || '') && (
+                            <button
+                              onClick={(event) => { event.stopPropagation(); stopAi(batch) }}
+                              disabled={pendingAction === `stop-ai-${batch.id}`}
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                              title="Остановить AI-обработку"
+                              aria-label="Остановить AI-обработку"
+                            >
+                              {pendingAction === `stop-ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4 fill-current" />}
                             </button>
                           )}
                           {!batch.isSynthetic && batch.supplier_id && (

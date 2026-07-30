@@ -1,8 +1,9 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { saveBatchAiSuggestions } from '@/lib/batch-ai-suggestions'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,6 +115,11 @@ async function complete(body: any) {
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: 'run_cancelled' }, { status: 409 })
+    }
     await client.query(`
       UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
         brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,attributes=$12::jsonb,
@@ -127,7 +133,7 @@ async function complete(body: any) {
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    await saveSuggestions(client, item.run_id, item.product_id, normalized)
+    await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
     await updateRunCounts(client, item.run_id)
     await client.query('COMMIT')
     await finalizeCockpitRun(item.run_id)
@@ -175,24 +181,6 @@ async function finalizeCockpitRun(runId: string) {
   if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, 'AI_PROCESSED', label, run.settings_snapshot)
 }
 
-async function saveSuggestions(client: any, runId: string, productId: number, normalized: any) {
-  const suggestions = [...(normalized.suggestions || [])]
-  if (normalized.subcategorySuggestion?.name) suggestions.push({ ...normalized.subcategorySuggestion, kind: 'subcategory', code: normalized.subcategorySuggestion.name })
-  if (normalized.colorFamily?.group_signature && normalized.colorFamily.confidence >= 0.75) suggestions.push({ ...normalized.colorFamily, kind: 'color_family', code: normalized.colorFamily.group_signature })
-  for (const suggestion of suggestions) {
-    const kind = suggestion.kind || 'attribute'
-    const key = canonicalBatchSuggestionKey(suggestion.code || suggestion.name, kind)
-    if (!key) continue
-    await client.query(`
-      INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)
-      VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)
-      ON CONFLICT(run_id,kind,canonical_key) DO UPDATE SET
-        payload=EXCLUDED.payload,
-        affected_product_ids=(SELECT jsonb_agg(DISTINCT value) FROM jsonb_array_elements(batch_ai_suggestions.affected_product_ids || EXCLUDED.affected_product_ids))
-    `, [crypto.randomUUID(), runId, kind, key, JSON.stringify(suggestion), JSON.stringify([productId])])
-  }
-}
-
 async function updateRunCounts(client: any, runId: string) {
   await client.query(`
     UPDATE batch_ai_runs r SET
@@ -204,6 +192,6 @@ async function updateRunCounts(client: any, runId: string) {
              COUNT(*) FILTER(WHERE status='failed')::int failed,
              COUNT(*) FILTER(WHERE status IN ('queued','running'))::int pending
       FROM batch_ai_items WHERE run_id=$1
-    ) c WHERE r.id=$1
+    ) c WHERE r.id=$1 AND r.status <> 'cancelled'
   `, [runId])
 }
