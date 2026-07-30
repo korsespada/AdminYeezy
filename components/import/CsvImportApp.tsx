@@ -28,6 +28,8 @@ import {
   Check,
   Zap,
   Database,
+  LayoutGrid,
+  Rows3,
 } from "lucide-react";
 import {
   pushCsvProductsAction,
@@ -464,6 +466,7 @@ export default function CsvImportApp({
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterGender, setFilterGender] = useState("");
+  const [viewMode, setViewMode] = useState<"cards" | "rows">("rows");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
@@ -1816,6 +1819,28 @@ export default function CsvImportApp({
                 из {filteredProducts.length} показанных
               </div>
               <div className="flex items-center gap-2">
+                <div className="flex items-center rounded-lg border border-slate-700 bg-slate-800 p-0.5">
+                  <button
+                    onClick={() => setViewMode("rows")}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      viewMode === "rows" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                    title="Компактные строки"
+                  >
+                    <Rows3 className="h-3.5 w-3.5" />
+                    Строки
+                  </button>
+                  <button
+                    onClick={() => setViewMode("cards")}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      viewMode === "cards" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                    title="Карточки товаров"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                    Карточки
+                  </button>
+                </div>
                 <button
                   onClick={handleSelectFiltered}
                   disabled={filteredProducts.length === 0}
@@ -1833,7 +1858,22 @@ export default function CsvImportApp({
                 )}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 pb-48">
+            <div className={viewMode === "cards"
+              ? "grid grid-cols-1 gap-5 pb-48 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
+            }>
+              {viewMode === "rows" && (
+                <div className="grid min-w-[1120px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_96px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  <div>Китайский исходный текст</div>
+                  <div>№</div>
+                  <div>Фото</div>
+                  <div>Кол-во</div>
+                  <div>External ID</div>
+                  <div>Классификация</div>
+                  <div>Статус</div>
+                  <div />
+                </div>
+              )}
               {displayedProducts.map((product, displayedIndex) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
@@ -1855,14 +1895,25 @@ export default function CsvImportApp({
                 } as any;
                 return <React.Fragment key={`${product.external_id}-${realIndex}`}>
                   {sampleProducts.length > 0 && displayedIndex === 0 && (
-                    <div className="col-span-full flex items-center justify-between rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3">
+                    <div className={`${viewMode === "rows" ? "min-w-[1120px] rounded-none border-x-0" : "col-span-full rounded-xl"} flex items-center justify-between border border-indigo-500/30 bg-indigo-500/10 px-4 py-3`}>
                       <div><div className="font-semibold text-indigo-200">Тест ИИ</div><div className="text-xs text-slate-400">Первые для проверки · {sampleProducts.length} товаров</div></div>
                     </div>
                   )}
                   {sampleProducts.length > 0 && displayedIndex === sampleProducts.length && (
-                    <div className="col-span-full mt-2 border-t border-slate-700 pt-4 text-sm font-semibold text-slate-300">Остальные товары · {filteredProducts.length - sampleProducts.length}</div>
+                    <div className={`${viewMode === "rows" ? "min-w-[1120px] px-4 py-3" : "col-span-full mt-2 pt-4"} border-t border-slate-700 text-sm font-semibold text-slate-300`}>Остальные товары · {filteredProducts.length - sampleProducts.length}</div>
                   )}
-                {isBatchSource ? (
+                {viewMode === "rows" ? (
+                  <CsvProductRow
+                    product={product}
+                    index={realIndex}
+                    lookups={lookups}
+                    isSelected={selectionOrder !== -1}
+                    selectionOrder={selectionOrder + 1}
+                    onToggleSelection={() => toggleMergeSelection(realIndex)}
+                    onRemove={handleRemove}
+                    onClick={() => setSelectedIdx(realIndex)}
+                  />
+                ) : isBatchSource ? (
                   <AdminProductCard
                     product={adminProduct}
                     onEdit={() => setSelectedIdx(realIndex)}
@@ -1993,6 +2044,132 @@ export default function CsvImportApp({
         onUpdate={updateProduct}
         onRetryAi={batchId && selectedIdx !== null ? () => handleRetryProductAi(products[selectedIdx]) : undefined}
       />
+    </div>
+  );
+}
+
+// ─── Compact source row ────────────────────────────────────────────────
+
+function photoCountStyle(count: number) {
+  if (count === 4) return "border-cyan-500/30 bg-cyan-500/10 text-cyan-300";
+  if ([8, 9, 11].includes(count)) return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+  return "border-slate-600 bg-slate-800 text-slate-300";
+}
+
+function CsvProductRow({
+  product,
+  index,
+  lookups,
+  isSelected,
+  selectionOrder,
+  onToggleSelection,
+  onRemove,
+  onClick,
+}: {
+  product: CsvProduct;
+  index: number;
+  lookups: Lookups | null;
+  isSelected: boolean;
+  selectionOrder: number;
+  onToggleSelection: () => void;
+  onRemove: (index: number) => void;
+  onClick: () => void;
+}) {
+  const photoCount = product.photos?.length || 0;
+  const sourceNumber = (product.source_position ?? index) + 1;
+  const description = String(product.description || "").replace(/\\n/g, " · ");
+  const brandName = lookups ? resolveName(product.brand, lookups.brands) : product.brand;
+  const categoryName = lookups ? resolveName(product.category, lookups.categories) : product.category;
+  const subcategoryName = lookups ? resolveName(product.subcategory, lookups.subcategories) : product.subcategory;
+
+  return (
+    <div
+      className={`grid min-h-[68px] min-w-[1120px] cursor-pointer grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_96px_42px] items-center gap-3 border-b border-slate-800 px-3 py-2 transition-colors last:border-b-0 ${
+        isSelected ? "bg-indigo-500/10 hover:bg-indigo-500/15" : "hover:bg-slate-800/70"
+      }`}
+      onClick={onClick}
+    >
+      <div className="min-w-0">
+        <p
+          className="line-clamp-2 font-mono text-[12px] leading-5 text-slate-200"
+          title={description}
+        >
+          {description || "Без исходного текста"}
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleSelection();
+          }}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold ${
+            isSelected
+              ? "border-indigo-400 bg-indigo-500 text-white"
+              : "border-slate-600 bg-slate-800 text-slate-500 hover:border-slate-400"
+          }`}
+          title={isSelected ? `Выбран ${selectionOrder}-м` : "Выбрать товар"}
+        >
+          {isSelected ? selectionOrder : ""}
+        </button>
+        <span className="font-mono text-[11px] text-slate-500">#{sourceNumber}</span>
+      </div>
+
+      <div className="relative h-12 w-12 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+        {product.photos?.[0] ? (
+          <Image
+            src={resizeImageUrl(product.photos[0], imagePresets.productTable)}
+            alt=""
+            fill
+            sizes="48px"
+            className="object-cover"
+            unoptimized
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[9px] uppercase text-slate-600">Нет</div>
+        )}
+      </div>
+
+      <div>
+        <span className={`inline-flex min-w-9 justify-center rounded-md border px-2 py-1 text-xs font-bold ${photoCountStyle(photoCount)}`}>
+          {photoCount}
+        </span>
+      </div>
+
+      <div className="min-w-0">
+        <p className="truncate font-mono text-[11px] text-slate-400" title={product.external_id}>
+          {product.external_id || "Без ID"}
+        </p>
+      </div>
+
+      <div className="min-w-0">
+        <p className="truncate text-xs font-medium text-slate-200" title={[brandName, categoryName, subcategoryName].filter(Boolean).join(" · ")}>
+          {[brandName, categoryName].filter(Boolean).join(" · ") || "Не определено"}
+        </p>
+        <p className="truncate text-[10px] text-slate-500">{subcategoryName || "Без подкатегории"}</p>
+      </div>
+
+      <div>
+        <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold ${
+          product.ai_processed === true || product.ai_processed === "true"
+            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+            : "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
+        }`}>
+          {product.ai_processed === true || product.ai_processed === "true" ? "ИИ готово" : "Сырой"}
+        </span>
+      </div>
+
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          if (confirm(`Удалить товар #${sourceNumber}?`)) onRemove(index);
+        }}
+        className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-red-500/10 hover:text-red-300"
+        title="Удалить товар"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
     </div>
   );
 }
