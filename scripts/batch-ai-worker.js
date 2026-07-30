@@ -65,12 +65,12 @@ async function processItem(item) {
       temperature: item.settings_snapshot?.temperature,
       maxTokens: item.settings_snapshot?.maxTokens,
     })
-    if (input.fullSizeRefinementEnabled && Number(output?.product?.confidence || 0) < 0.75 && Array.isArray(output?.inspect_full_size_indexes)) {
+    if (input.fullSizeRefinementEnabled && Array.isArray(output?.inspect_full_size_indexes) && output.inspect_full_size_indexes.length) {
       const originals = originalPhotos(input.photoUrls || [], output.inspect_full_size_indexes)
       if (originals.length) {
         const refinementContent = [{
           type: 'text',
-          text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(output)}\n\nНиже только запрошенные оригиналы. Уточни плохо читаемый бренд/модель и верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
+          text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(output)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями. Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
         }]
         originals.forEach(({ index, url }) => {
           refinementContent.push({ type: 'text', text: `Оригинал фото ${index}` })

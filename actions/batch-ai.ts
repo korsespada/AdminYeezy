@@ -460,7 +460,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       contactSheets: sheets,
       referenceSheets,
     })
-    if (input.fullSizeRefinementEnabled && Number(raw?.product?.confidence || 0) < 0.75 && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
+    if (input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
       raw = await runBatchAiOpenRouterRefinement({
         settings,
         systemPrompt: input.systemPrompt,
