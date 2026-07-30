@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, ArrowLeft, Package, Settings2 } from 'lucide-react'
+import { Users, Package, Settings2 } from 'lucide-react'
 
 export default function ImportTabs() {
   const pathname = usePathname()
@@ -13,19 +13,7 @@ export default function ImportTabs() {
   ]
 
   return (
-    <div className="mb-8 space-y-4">
-      <div className="flex items-center justify-between">
-        <Link 
-          href="/admin" 
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors text-sm font-medium group"
-        >
-          <div className="p-1.5 bg-slate-800 rounded group-hover:bg-slate-700 transition-colors">
-            <ArrowLeft size={16} />
-          </div>
-          Назад к товарам
-        </Link>
-      </div>
-
+    <div className="mb-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex bg-slate-800/50 p-1 rounded-xl w-fit border border-slate-700 overflow-x-auto">
           {tabs.map((tab) => {

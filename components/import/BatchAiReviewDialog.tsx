@@ -4,7 +4,17 @@ import { useEffect, useState, useTransition } from 'react'
 import { Check, X } from 'lucide-react'
 import { getBatchAiSuggestionsAction, reviewBatchAiSuggestionAction } from '@/actions/batch-ai'
 
-export default function BatchAiReviewDialog({ batchId, batchName, onClose }: { batchId: string; batchName: string; onClose: () => void }) {
+export default function BatchAiReviewDialog({
+  batchId,
+  batchName,
+  onClose,
+  onReviewed,
+}: {
+  batchId: string
+  batchName: string
+  onClose: () => void
+  onReviewed?: () => void | Promise<void>
+}) {
   const [items, setItems] = useState<any[]>([])
   const [payloads, setPayloads] = useState<Record<string, string>>({})
   const [pending, startTransition] = useTransition()
@@ -21,7 +31,10 @@ export default function BatchAiReviewDialog({ batchId, batchName, onClose }: { b
     let payload = item.payload
     try { payload = JSON.parse(payloads[item.id]) } catch { return alert('Исправьте JSON предложения') }
     const result = await reviewBatchAiSuggestionAction(item.id, decision, payload)
-    if (result.success) setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: decision, payload } : entry))
+    if (result.success) {
+      setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: decision, payload } : entry))
+      await onReviewed?.()
+    }
     else alert(result.error)
   })
 

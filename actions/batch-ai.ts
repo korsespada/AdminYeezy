@@ -579,6 +579,15 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
 }
 
 export async function reviewBatchAiSuggestionAction(id: string, decision: 'approved' | 'rejected', editedPayload?: any) {
+  try {
+    return await reviewBatchAiSuggestion(id, decision, editedPayload)
+  } catch (error: any) {
+    console.error('Failed to review batch AI suggestion', { id, decision, error })
+    return { success: false, error: error?.message || 'Не удалось применить предложение ИИ' }
+  }
+}
+
+async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejected', editedPayload?: any) {
   await requireAdmin()
   const suggestion = await scrapingQuery('SELECT * FROM batch_ai_suggestions WHERE id=$1', [id])
   const row = suggestion.rows[0]

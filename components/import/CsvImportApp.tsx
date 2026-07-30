@@ -30,6 +30,7 @@ import {
   Database,
   LayoutGrid,
   Rows3,
+  Sparkles,
 } from "lucide-react";
 import {
   pushCsvProductsAction,
@@ -54,12 +55,17 @@ import {
   pushBatchToCatalogAction,
 } from "@/actions/suppliers";
 import { processAiAction } from "@/actions/ai-process";
-import { getBatchAiRunAction, startBatchAiAction } from "@/actions/batch-ai";
+import {
+  getBatchAiRunAction,
+  getBatchAiSuggestionsAction,
+  startBatchAiAction,
+} from "@/actions/batch-ai";
 import Image from "next/image";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
 import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
+import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -466,6 +472,7 @@ export default function CsvImportApp({
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterGender, setFilterGender] = useState("");
+  const [filterPrice, setFilterPrice] = useState("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("rows");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
@@ -476,6 +483,8 @@ export default function CsvImportApp({
 
   const [isAiProcessed, setIsAiProcessed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
+  const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
+  const [showAiSuggestions, setShowAiSuggestions] = useState(false)
   const isAiStoppedRef = useRef(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
@@ -543,6 +552,16 @@ export default function CsvImportApp({
     return genders;
   }, [products]);
 
+  const uniquePrices = useMemo(
+    () => [...new Set([0, ...products.map((product) => Number(product.price) || 0)])].sort((a, b) => a - b),
+    [products],
+  );
+
+  const loadAiSuggestions = useCallback(async (nextBatchId: string) => {
+    const result = await getBatchAiSuggestionsAction(nextBatchId);
+    setAiSuggestions(result.success ? result.data || [] : []);
+  }, []);
+
   // Filtered products for display
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
@@ -574,9 +593,12 @@ export default function CsvImportApp({
           return false;
         }
       }
+      if (filterPrice !== "" && (Number(p.price) || 0) !== Number(filterPrice)) {
+        return false;
+      }
       return true;
     });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender]);
+  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice]);
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -664,6 +686,7 @@ export default function CsvImportApp({
     setSaveMsg(null);
     setIsDirty(false);
     const res = await getBatchProductsAction(nextBatchId);
+    await loadAiSuggestions(nextBatchId);
     if (res.success && res.data) {
       setProducts(res.data.products);
       setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
@@ -1451,6 +1474,36 @@ export default function CsvImportApp({
           </div>
         )}
         {/* Input Area */}
+        {isBatchSource && aiSuggestions.length > 0 && (
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="rounded-lg bg-violet-500/15 p-2 text-violet-300">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-bold text-white">Предложения ИИ</h3>
+                  <span className="rounded-full border border-violet-400/30 bg-violet-500/15 px-2 py-0.5 text-xs font-bold text-violet-200">
+                    {aiSuggestions.filter((item) => item.status === "pending").length} ожидают решения
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-slate-400">
+                  {aiSuggestions.slice(0, 5).map((item) => item.payload?.name || item.payload?.label || item.canonical_key).join(" · ")}
+                  {aiSuggestions.length > 5 ? ` · ещё ${aiSuggestions.length - 5}` : ""}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowAiSuggestions(true)}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-500"
+            >
+              <Sparkles className="h-4 w-4" />
+              Открыть предложения
+            </button>
+          </div>
+        )}
+
+        {/* Input Area */}
         {products.length === 0 && !isBatchSource && (
           <div className="max-w-2xl mx-auto mb-10">
             {importMode === "upload" ? (
@@ -1680,7 +1733,8 @@ export default function CsvImportApp({
           (uniqueBrands.length > 1 ||
             uniqueCategories.length > 1 ||
             uniqueSubcategories.length > 1 ||
-            uniqueGenders.length > 1) && (
+            uniqueGenders.length > 1 ||
+            uniquePrices.length > 0) && (
             <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
               <div className="flex items-center gap-2 text-slate-500 mr-1">
                 <Filter className="w-4 h-4" />
@@ -1755,16 +1809,31 @@ export default function CsvImportApp({
                 </select>
               )}
 
+              <select
+                value={filterPrice}
+                onChange={(e) => setFilterPrice(e.target.value)}
+                className="min-w-[140px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все цены</option>
+                {uniquePrices.map((price) => (
+                  <option key={price} value={String(price)}>
+                    {price.toLocaleString("ru-RU")} ₽
+                  </option>
+                ))}
+              </select>
+
               {(filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
-                filterGender) && (
+                filterGender ||
+                filterPrice !== "") && (
                   <button
                     onClick={() => {
                       setFilterBrand("");
                       setFilterCategory("");
                       setFilterSubcategory("");
                       setFilterGender("");
+                      setFilterPrice("");
                     }}
                     className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
                   >
@@ -1775,7 +1844,8 @@ export default function CsvImportApp({
               {(filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
-                filterGender) && (
+                filterGender ||
+                filterPrice !== "") && (
                   <span className="text-xs text-slate-500 ml-auto">
                     Показано{" "}
                     <span className="text-white font-semibold">
@@ -2044,6 +2114,17 @@ export default function CsvImportApp({
         onUpdate={updateProduct}
         onRetryAi={batchId && selectedIdx !== null ? () => handleRetryProductAi(products[selectedIdx]) : undefined}
       />
+      {showAiSuggestions && batchId && (
+        <BatchAiReviewDialog
+          batchId={batchId}
+          batchName={initialSupplierName || fileName}
+          onReviewed={() => loadAiSuggestions(batchId)}
+          onClose={() => {
+            setShowAiSuggestions(false);
+            loadAiSuggestions(batchId);
+          }}
+        />
+      )}
     </div>
   );
 }

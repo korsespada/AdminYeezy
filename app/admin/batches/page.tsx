@@ -14,7 +14,7 @@ export default async function BatchesPage() {
 
     return (
       <div className="p-8">
-        <div className="mx-auto max-w-7xl space-y-8">
+        <div className="mx-auto max-w-[1800px] space-y-8">
           <ImportTabs />
           <Alert className="border-red-500/30 bg-red-950/30 text-red-100">
             <AlertTitle className="text-base text-red-200">Выгрузка временно недоступна</AlertTitle>
@@ -47,7 +47,7 @@ export default async function BatchesPage() {
 
   return (
     <div className="p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="mx-auto max-w-[1800px] space-y-8">
         <ImportTabs />
         <ExportHistoryList initialData={res.data} initialFolders={foldersResult.data || []} />
       </div>
