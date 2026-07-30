@@ -8,10 +8,11 @@ CSV artifact is exposed to the application or stored in history.
 import contextlib
 import csv
 import importlib.util
+import io
 import json
 import os
 import sys
-import tempfile
+from unittest.mock import patch
 
 
 CORE_FIELDS = [
@@ -74,29 +75,56 @@ def csv_value(product, key):
     return "" if value is None else value
 
 
+class CapturedTextOutput(io.StringIO):
+    def __init__(self, capture):
+        super().__init__()
+        self.capture = capture
+
+    def close(self):
+        if not self.closed:
+            self.capture["value"] = self.getvalue()
+        super().close()
+
+
 def run_legacy(module, products):
     columns = legacy_columns(products)
-    with tempfile.TemporaryDirectory(prefix="supplier-json-") as temp_dir:
-        input_path = os.path.join(temp_dir, "input.csv")
-        output_path = os.path.join(temp_dir, "output.csv")
-        with open(input_path, "w", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns, delimiter=";", extrasaction="ignore")
-            writer.writeheader()
-            for product in products:
-                writer.writerow({key: csv_value(product, key) for key in columns})
+    source = io.StringIO()
+    writer = csv.DictWriter(source, fieldnames=columns, delimiter=";", extrasaction="ignore")
+    writer.writeheader()
+    for product in products:
+        writer.writerow({key: csv_value(product, key) for key in columns})
+    source_text = source.getvalue()
 
-        processor = (
-            getattr(module, "process_csv", None)
-            or getattr(module, "fix_csv_descriptions", None)
-            or getattr(module, "filter_csv_by_keyword", None)
-        )
-        if not callable(processor):
-            raise ValueError("Legacy post-process функция не найдена")
+    input_path = "__json_products_input__.csv"
+    output_path = "__json_products_output__.csv"
+    output_capture = {"value": ""}
+    real_open = open
+    real_exists = os.path.exists
+
+    def virtual_open(file, mode="r", *args, **kwargs):
+        normalized = os.fspath(file)
+        if normalized == input_path and "r" in mode:
+            return io.StringIO(source_text)
+        if normalized == output_path and any(flag in mode for flag in ("w", "a", "x")):
+            return CapturedTextOutput(output_capture)
+        return real_open(file, mode, *args, **kwargs)
+
+    def virtual_exists(file):
+        return os.fspath(file) in (input_path, output_path) or real_exists(file)
+
+    processor = (
+        getattr(module, "process_csv", None)
+        or getattr(module, "fix_csv_descriptions", None)
+        or getattr(module, "filter_csv_by_keyword", None)
+    )
+    if not callable(processor):
+        raise ValueError("Legacy post-process функция не найдена")
+
+    with patch("builtins.open", virtual_open), patch("os.path.exists", virtual_exists):
         with contextlib.redirect_stdout(sys.stderr):
             processor(input_path, output_path)
 
-        with open(output_path, "r", encoding="utf-8-sig", errors="replace", newline="") as handle:
-            rows = list(csv.DictReader(handle, delimiter=";"))
+    rows = list(csv.DictReader(io.StringIO(output_capture["value"]), delimiter=";"))
 
     originals = {str(product.get("external_id")): product for product in products}
     result = []
