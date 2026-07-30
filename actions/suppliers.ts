@@ -828,7 +828,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                const sql = `
                   INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, created_at, updated_at)
                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, NOW(), NOW())
-                  ON CONFLICT (external_id) DO UPDATE SET
+                  ON CONFLICT (batch_id, external_id) DO UPDATE SET
                       name = EXCLUDED.name,
                       description = EXCLUDED.description,
                       price = EXCLUDED.price,
@@ -839,7 +839,6 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                       gender = EXCLUDED.gender,
                       photos = EXCLUDED.photos,
                       attributes = EXCLUDED.attributes,
-                      batch_id = EXCLUDED.batch_id,
                       created_at = COALESCE(products.created_at, NOW()),
                       updated_at = NOW()
                `
@@ -877,7 +876,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
             if (supplier.post_process_enabled && supplier.post_process_script && batchId) {
               console.log(`[Scraper ${taskId}] Auto post-process enabled: ${supplier.post_process_script}`)
-              const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
+              // Some supplier scripts pair neighbouring source albums. Use
+              // the raw parser file so DB upserts cannot reorder those rows.
+              const postProcessResult = await runCustomSupplierScriptAction(outputPath, supplier.id, batchId)
               if (!postProcessResult?.success) {
                 console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error || 'unknown error'}`)
               }

@@ -28,7 +28,9 @@ def process_csv(input_path, output_path=None):
     new_rows = []
     
     i = 0
-    while i < len(rows) - 1:
+    # The final row must also be evaluated. A following row is only required
+    # for the merge branch and is already guarded below.
+    while i < len(rows):
         row1 = rows[i]
         
         try:

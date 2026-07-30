@@ -275,7 +275,7 @@ async function migrate() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
-        external_id TEXT UNIQUE,
+        external_id TEXT,
         name TEXT,
         description TEXT,
         price DECIMAL(10,2),
@@ -313,9 +313,8 @@ async function migrate() {
     `);
 
     await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS products_external_id_idx
-      ON products (external_id)
-      WHERE external_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS products_batch_external_id_idx
+      ON products (batch_id, external_id);
     `);
 
     await pool.query(`

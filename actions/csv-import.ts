@@ -539,7 +539,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
           price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
           photos=$14::jsonb, attributes=$15::jsonb, ai_processed=$16, batch_id=$17,
           variant_group_key=$18, ai_error=$19, ai_confidence=$20, updated_at=NOW()
-      WHERE id=$21
+      WHERE id=$21 AND batch_id=$17
       RETURNING id
     `, [
       normalized.external_id,
@@ -570,7 +570,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
   const insertRes = await client.query(`
     INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, created_at, updated_at)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
-    ON CONFLICT (external_id) DO UPDATE SET
+    ON CONFLICT (batch_id, external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
       h1 = EXCLUDED.h1,
@@ -586,7 +586,6 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       photos = EXCLUDED.photos,
       attributes = EXCLUDED.attributes,
       ai_processed = EXCLUDED.ai_processed,
-      batch_id = EXCLUDED.batch_id,
       variant_group_key = EXCLUDED.variant_group_key,
       ai_error = EXCLUDED.ai_error,
       ai_confidence = EXCLUDED.ai_confidence,
@@ -874,12 +873,19 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
             throw new Error(batchRes.error || "Не удалось загрузить товары партии");
         }
         originalProducts = batchRes.data.products || [];
-        effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
-        fs.writeFileSync(
-            /*turbopackIgnore: true*/ effectiveInputPath,
-            serializeProductsToCsv(batchRes.data.products, supplierScriptColumns(batchRes.data.products), ';'),
-            'utf-8'
-        );
+        if (!effectiveInputPath) {
+          const rawArtifact = await scrapingQuery(`
+            SELECT content FROM scraping_files
+            WHERE batch_id=$1 AND status='Сырой CSV' AND content IS NOT NULL
+            ORDER BY created_at DESC LIMIT 1
+          `, [batchId]);
+          effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
+          fs.writeFileSync(
+              /*turbopackIgnore: true*/ effectiveInputPath,
+              rawArtifact.rows[0]?.content || serializeProductsToCsv(batchRes.data.products, supplierScriptColumns(batchRes.data.products), ';'),
+              'utf-8'
+          );
+        }
     }
 
     if (!effectiveInputPath) throw new Error("Не указан CSV-файл или batchId");

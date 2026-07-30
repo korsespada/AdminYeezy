@@ -10,7 +10,7 @@
     "db:tunnel": "powershell -ExecutionPolicy Bypass -File scripts/db-tunnel.ps1",
     "build": "next build",
     "start": "next start",
-    "db:migrate:scraping": "node scripts/migrate-scraping-schema.js && node scripts/migrate-batch-ai.js",
+    "db:migrate:scraping": "node scripts/migrate-scraping-schema.js && node scripts/migrate-batch-product-identity.js && node scripts/migrate-batch-ai.js",
     "db:migrate:batch-ai": "node scripts/migrate-batch-ai.js",
     "db:migrate:supplier-catalog-ids": "node scripts/migrate-supplier-catalog-ids.js",
     "db:backfill:batch-products": "node scripts/backfill-batch-products.js",

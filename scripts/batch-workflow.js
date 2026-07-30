@@ -609,7 +609,7 @@ async function saveBatchProducts(batchId, products) {
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
               photos=$14::jsonb,attributes=$15::jsonb,ai_processed=$16,batch_id=$17,
               variant_group_key=$18,ai_error=$19,ai_confidence=$20,updated_at=NOW()
-          WHERE id=$21
+          WHERE id=$21 AND batch_id=$17
           RETURNING id
         `, [
           normalized.external_id,
@@ -643,7 +643,7 @@ async function saveBatchProducts(batchId, products) {
       const insertRes = await client.query(`
         INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,created_at,updated_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
-        ON CONFLICT (external_id) DO UPDATE SET
+        ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
           h1 = EXCLUDED.h1,
@@ -659,7 +659,6 @@ async function saveBatchProducts(batchId, products) {
           photos = EXCLUDED.photos,
           attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
-          batch_id = EXCLUDED.batch_id,
           variant_group_key = EXCLUDED.variant_group_key,
           ai_error = EXCLUDED.ai_error,
           ai_confidence = EXCLUDED.ai_confidence,
@@ -831,7 +830,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
         batchId = await importScrapedFileToBatch({ supplier: parserSupplier, taskId, outputPath, itemsCount });
         if (batchId && supplier.post_process_enabled && supplier.post_process_script) {
           try {
-            await runBatchPostProcessScript(batchId);
+            await runBatchPostProcessScript(batchId, outputPath);
           } catch (postProcessError) {
             console.error(`[Scraper ${taskId}] Auto post-process failed:`, postProcessError);
           }
@@ -921,7 +920,7 @@ async function processBatchWithAi(batchId) {
   return { processed: unprocessed.length, total: products.length, path: outputPath };
 }
 
-async function runBatchPostProcessScript(batchId) {
+async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   const batch = await getBatch(batchId);
   if (!batch?.supplier_id) throw new Error('У партии не найден поставщик');
   const supplier = await getSupplier(batch.supplier_id);
@@ -934,9 +933,20 @@ async function runBatchPostProcessScript(batchId) {
   const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
   ensureDir(tmpDir);
   const taskId = Math.floor(Math.random() * 1000000);
-  const inputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
+  const inputPath = sourceInputPath || path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
   const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
-  fs.writeFileSync(/*turbopackIgnore: true*/ inputPath, serializeProductsToCsv(products, supplierScriptColumns(products)), 'utf-8');
+  if (!sourceInputPath) {
+    const rawArtifact = await scrapingPool.query(`
+      SELECT content FROM scraping_files
+      WHERE batch_id=$1 AND status='Сырой CSV' AND content IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1
+    `, [batchId]);
+    fs.writeFileSync(
+      /*turbopackIgnore: true*/ inputPath,
+      rawArtifact.rows[0]?.content || serializeProductsToCsv(products, supplierScriptColumns(products)),
+      'utf-8',
+    );
+  }
 
   const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplier.post_process_script);
   await new Promise((resolve, reject) => {

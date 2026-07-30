@@ -144,6 +144,8 @@ async function init() {
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+      CREATE UNIQUE INDEX IF NOT EXISTS products_batch_external_id_idx
+      ON products (batch_id, external_id);
     `);
 
     console.log('✅ Scraping database PERFECTLY re-initialized!');

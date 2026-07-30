@@ -166,7 +166,7 @@ async function main() {
         await client.query(`
           INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, ai_processed, batch_id, created_at, updated_at)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,NOW(),NOW())
-          ON CONFLICT (external_id) DO UPDATE SET
+          ON CONFLICT (batch_id, external_id) DO UPDATE SET
             name = EXCLUDED.name,
             description = EXCLUDED.description,
             price = EXCLUDED.price,
@@ -177,7 +177,6 @@ async function main() {
             gender = EXCLUDED.gender,
             photos = EXCLUDED.photos,
             ai_processed = EXCLUDED.ai_processed,
-            batch_id = EXCLUDED.batch_id,
             updated_at = NOW()
         `, [
           product.external_id || null,
