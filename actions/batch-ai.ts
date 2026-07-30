@@ -11,6 +11,7 @@ import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   buildBatchAiContactSheets,
   buildBatchAiUserPrompt,
+  buildBatchAiVariantPrompt,
   matchingPriceRule,
   normalizeBatchAiOutput,
   runBatchAiOpenRouter,
@@ -275,7 +276,9 @@ async function syncCurrentRailsCatalogMappings() {
   }
 }
 
-async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', productId?: number) {
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants'
+
+async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number) {
   await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
     SELECT b.*, s.ai_instructions, s.ai_photo_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
@@ -287,6 +290,7 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
   const params: any[] = [batchId]
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY random() LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true AND variant_group_key IS NULL ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'retry') {
     params.push(productId)
     predicate = `AND id=$${params.length} ORDER BY id`
@@ -318,12 +322,19 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
   }
 }
 
-export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full' | 'retry' = 'full', productId?: number) {
+export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number) {
   await requireAdmin()
   try {
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
-    if (context.products.length === 0) return { success: false, error: 'Нет товаров для обработки' }
+    if (context.products.length === 0) {
+      return {
+        success: false,
+        error: mode === 'variants'
+          ? 'Нет обработанных ИИ товаров без созданных вариантов'
+          : 'Нет товаров для обработки',
+      }
+    }
 
     if (mode === 'full') {
       const sample = await scrapingQuery(`
@@ -344,48 +355,55 @@ export async function startBatchAiAction(batchId: string, mode: 'sample' | 'full
     }
 
     const runId = crypto.randomUUID()
-    const supplierInstructions = (settings as any).supplierInstructions ?? [
+    const supplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
       context.batch.ai_instructions,
       context.batch.ai_photo_enabled && context.batch.ai_photo_instructions ? `Особенности фото: ${context.batch.ai_photo_instructions}` : '',
       context.batch.ai_photo_enabled && context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
     ].filter(Boolean).join('\n')
     const snapshot = {
       ...settings,
-      systemPrompt: settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
+      systemPrompt: mode === 'variants'
+        ? 'Ты проверяешь товары каталога на принадлежность к одному цветовому семейству. Работаешь только с текстом, не изменяешь товар и возвращаешь строго запрошенный JSON.'
+        : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
     }
-    await snapshotBatch(batchId, context.batch.stage || 'SCRAPED', `До AI · ${mode}`, snapshot)
+    if (mode !== 'variants') {
+      await snapshotBatch(batchId, context.batch.stage || 'SCRAPED', `До AI · ${mode}`, snapshot)
+    }
     await scrapingQuery(`
       INSERT INTO batch_ai_runs(id,batch_id,provider,mode,status,settings_snapshot,total_count,started_at)
       VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,NOW())
     `, [runId, batchId, settings.provider, mode, settings.provider === 'cockpit' ? 'queued' : 'running', JSON.stringify(snapshot), context.products.length])
 
-    const priceRules = priceRuleHints(context.priceRules)
+    const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
     const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
     for (const product of context.products) {
-      const userPrompt = buildBatchAiUserPrompt({
-        product,
-        supplierInstructions,
-        brands: context.brands,
-        categories: context.categories,
-        subcategories: context.subcategories,
-        attributes: context.definitions,
-        priceRules,
-      })
+      const userPrompt = mode === 'variants'
+        ? buildBatchAiVariantPrompt(product)
+        : buildBatchAiUserPrompt({
+            product,
+            supplierInstructions,
+            brands: context.brands,
+            categories: context.categories,
+            subcategories: context.subcategories,
+            attributes: context.definitions,
+            priceRules,
+          })
       await scrapingQuery(`
         INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
         VALUES($1,$2,$3,$4,$5::jsonb)
       `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
         product, userPrompt, systemPrompt: snapshot.systemPrompt,
-        photoUrls: context.batch.ai_photo_enabled ? product.photos || [] : [],
-        photoEnabled: context.batch.ai_photo_enabled === true,
-        fullSizeRefinementEnabled: context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
+        variantScanOnly: mode === 'variants',
+        photoUrls: mode === 'variants' ? [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
+        photoEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true,
+        fullSizeRefinementEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
         brands: context.brands,
         categories: context.categories,
         subcategories: context.subcategories,
         attributeCodes: context.definitions.map((item: any) => item.code),
         priceRules,
-        priceReferenceUrls,
+        priceReferenceUrls: mode === 'variants' ? [] : priceReferenceUrls,
       })])
     }
 
@@ -447,7 +465,9 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         indexes: raw.inspect_full_size_indexes,
       })
     }
-    const normalized = normalizeBatchAiOutput(raw, {
+    const normalized = input.variantScanOnly
+      ? variantScanResult(raw, input.product)
+      : normalizeBatchAiOutput(raw, {
       product: input.product,
       brandIds: new Set(context.brands.map((row: any) => String(row.id))),
       categoryIds: new Set(context.categories.map((row: any) => String(row.id))),
@@ -456,7 +476,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })
-    await applyCompletedItem(item, normalized, context)
+    if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
+    else await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
     const failed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
@@ -464,9 +485,43 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
       RETURNING i.product_id
     `, [item.id, String(error.message || error).slice(0, 4000)])
-    if (failed.rows[0]) {
+    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
+  }
+}
+
+function variantScanResult(raw: any, product: any) {
+  return {
+    product,
+    suggestions: [],
+    subcategorySuggestion: null,
+    colorFamily: raw?.color_family || null,
+    mediaDecision: { discard: [], sizeCharts: [] },
+  }
+}
+
+async function applyCompletedVariantScan(item: any, normalized: any) {
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
+    await client.query(`
+      UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,
+        completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1
+    `, [item.id, JSON.stringify(normalized)])
+    await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
   }
 }
 
@@ -534,10 +589,12 @@ async function finalizeRun(runId: string) {
   `, [runId, status, row.completed, row.failed, row.pending])
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
-    if (run.rows[0]?.mode !== 'sample') {
+    if (!['sample', 'variants'].includes(run.rows[0]?.mode)) {
       await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.rows[0].batch_id])
     }
-    await snapshotBatch(run.rows[0].batch_id, 'AI_PROCESSED', 'Обработано ИИ', run.rows[0].settings_snapshot)
+    if (run.rows[0]?.mode !== 'variants') {
+      await snapshotBatch(run.rows[0].batch_id, 'AI_PROCESSED', 'Обработано ИИ', run.rows[0].settings_snapshot)
+    }
   }
 }
 

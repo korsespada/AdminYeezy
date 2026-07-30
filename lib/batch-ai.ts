@@ -116,6 +116,29 @@ export function buildBatchAiUserPrompt(input: {
   ].join('\n\n')
 }
 
+export function buildBatchAiVariantPrompt(product: any) {
+  const textOnlyProduct = {
+    external_id: product.external_id,
+    name: product.name,
+    description: product.description,
+    brand: product.brand,
+    category: product.category,
+    subcategory: product.subcategory,
+    gender: product.gender,
+    attributes: product.attributes || {},
+  }
+  return [
+    'Проверь только возможность объединить этот товар с такими же товарами других цветов.',
+    'Используй исключительно переданные текстовые поля и атрибуты. Фотографии отсутствуют и не нужны.',
+    'Ничего не переписывай, не классифицируй и не предлагай: SEO, цену, категорию, подкатегорию или атрибуты.',
+    'Верни строго JSON вида {"color_family": null} либо {"color_family": {"group_signature":"","category_kind":"","model_name":"","bag_size":"","materials":[],"hardware":"","color":"","matching_evidence":"","confidence":0}}.',
+    'color_family верни только если из текста достоверно известны конкретная модель/конструкция и цвет.',
+    'group_signature — стабильная основа товара без цвета. Для сумок в ней должны совпасть бренд, точная модель, габариты, материал и фурнитура. Для обуви — бренд, модель, конструкция и материал; размер обуви не включай. Для одежды — бренд, модель/фасон и материал; размер одежды не включай.',
+    'Не объединяй разные модели, конструкции, материалы, фурнитуру или размеры самого изделия. При сомнении верни null.',
+    `Товар: ${JSON.stringify(textOnlyProduct)}`,
+  ].join('\n\n')
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[]) {
   const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {

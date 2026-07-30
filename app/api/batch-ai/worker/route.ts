@@ -84,7 +84,13 @@ async function complete(body: any) {
   const item = itemResult.rows[0]
   if (!item) return NextResponse.json({ error: 'lease_not_found' }, { status: 409 })
   const input = item.input_snapshot
-  const normalized = normalizeBatchAiOutput(body.output, {
+  const normalized = input.variantScanOnly ? {
+    product: input.product,
+    suggestions: [],
+    subcategorySuggestion: null,
+    colorFamily: body.output?.color_family || null,
+    mediaDecision: { discard: [], sizeCharts: [] },
+  } : normalizeBatchAiOutput(body.output, {
     product: input.product,
     brandIds: new Set((input.brands || []).map((row: any) => String(row.id))),
     categoryIds: new Set((input.categories || []).map((row: any) => String(row.id))),
@@ -104,11 +110,11 @@ async function complete(body: any) {
     ? input.priceRules.map((rule: any) => ({ ...rule, enabled: true }))
     : storedRules.rows
   const product = normalized.product
-  const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
-  if (rule) {
+  const rule = input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
+  if (!input.variantScanOnly && rule) {
     product.price = Number(rule.price)
     product.price_source = 'rule'
-  } else if (!Number(product.price) && Number(context.rows[0]?.default_price)) {
+  } else if (!input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
     product.price = Number(context.rows[0].default_price)
     product.price_source = 'default'
   }
@@ -120,15 +126,17 @@ async function complete(body: any) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'run_cancelled' }, { status: 409 })
     }
-    await client.query(`
-      UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
-        brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,attributes=$12::jsonb,
-        price=$13,price_source=$14,ai_processed=true,ai_error=NULL,ai_confidence=$15,updated_at=NOW()
-      WHERE id=$1
-    `, [item.product_id, product.name, product.description, product.h1, product.seo_title,
-      product.seo_description, product.brand, product.category, product.subcategory || null,
-      product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.attributes || {}),
-      Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence])
+    if (!input.variantScanOnly) {
+      await client.query(`
+        UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
+          brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,attributes=$12::jsonb,
+          price=$13,price_source=$14,ai_processed=true,ai_error=NULL,ai_confidence=$15,updated_at=NOW()
+        WHERE id=$1
+      `, [item.product_id, product.name, product.description, product.h1, product.seo_title,
+        product.seo_description, product.brand, product.category, product.subcategory || null,
+        product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.attributes || {}),
+        Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence])
+    }
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
@@ -152,10 +160,12 @@ async function fail(body: any) {
     await client.query('BEGIN')
     const result = await client.query(`
       UPDATE batch_ai_items SET status='failed',error_message=$3,lease_token=NULL,completed_at=NOW(),updated_at=NOW()
-      WHERE id=$1 AND lease_token=$2 RETURNING run_id,product_id
+      WHERE id=$1 AND lease_token=$2 RETURNING run_id,product_id,input_snapshot
     `, [body.item_id, body.lease_token, String(body.error || 'Cockpit error').slice(0, 4000)])
-    if (result.rows[0]) {
+    if (result.rows[0] && !result.rows[0].input_snapshot?.variantScanOnly) {
       await client.query('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [result.rows[0].product_id, String(body.error || '').slice(0, 4000)])
+    }
+    if (result.rows[0]) {
       await updateRunCounts(client, result.rows[0].run_id)
     }
     await client.query('COMMIT')
@@ -173,9 +183,10 @@ async function finalizeCockpitRun(runId: string) {
   const result = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const run = result.rows[0]
   if (!run || run.status !== 'completed') return
-  if (run.mode !== 'sample') {
+  if (!['sample', 'variants'].includes(run.mode)) {
     await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
   }
+  if (run.mode === 'variants') return
   const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `Обработано ИИ · ${run.id.slice(0, 8)}`
   const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
   if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, 'AI_PROCESSED', label, run.settings_snapshot)

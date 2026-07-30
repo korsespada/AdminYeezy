@@ -966,7 +966,7 @@ export default function CsvImportApp({
     setIsPushing(false);
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full") => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants") => {
     if (!supplierId && products.length > 0) {
         alert("ID поставщика не найден. Пожалуйста, запустите обработку из истории выгрузок.");
         return;
@@ -982,7 +982,9 @@ export default function CsvImportApp({
           const data: any = result.data;
           if (data?.runId) {
             setActiveAiRunId(String(data.runId));
-            setSaveMsg(`ИИ: в очереди ${data.queued}, ожидаем обработку…`);
+            setSaveMsg(mode === "variants"
+              ? `Поиск вариантов: в очереди ${data.queued} товаров…`
+              : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
               await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -993,15 +995,20 @@ export default function CsvImportApp({
                 current: Number(finalRun.completed_count || 0),
                 total: Number(finalRun.total_count || data.queued),
               });
-              setSaveMsg(`ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
+              setSaveMsg(mode === "variants"
+                ? `Поиск вариантов: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
+                : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
             await handleLoadBatch(batchId);
+            if (mode === "variants" && finalRun?.status === "completed") setShowAiSuggestions(true);
             setActiveAiRunId(null);
             setSaveMsg(finalRun?.status === "cancelled"
               ? "AI-обработка остановлена. Готовые товары сохранены."
               : finalRun?.status === "completed"
-              ? `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
+              ? mode === "variants"
+                ? `✓ Проверено на варианты: ${finalRun.completed_count || 0}`
+                : `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
               : "ИИ не завершил обработку вовремя. Статус сохранён в истории.");
           }
         } else {
@@ -1509,7 +1516,7 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {!isAiProcessed ? (
+              {!isAiProcessed || isProcessing ? (
                 isProcessing ? (
                   <button
                       onClick={handleStopAi}
@@ -1542,7 +1549,18 @@ export default function CsvImportApp({
                   </div>
                 )
               ) : (
-                <button
+                <div className="flex items-center gap-2">
+                  {isBatchSource && aiReadyCount >= 2 && (
+                    <button
+                      onClick={() => handleAiProcess("variants")}
+                      className="flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-bold text-violet-200 transition-all hover:bg-violet-500/20"
+                      title="Повторно проверить обработанные товары на цветовые варианты только по тексту"
+                    >
+                      <Merge className="h-4 w-4" />
+                      Найти варианты
+                    </button>
+                  )}
+                  <button
                     onClick={handlePush}
                     disabled={isPushing}
                     className="px-6 py-2.5 text-sm font-bold bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 disabled:opacity-50"
@@ -1558,7 +1576,8 @@ export default function CsvImportApp({
                         Запушить в основную базу
                     </>
                     )}
-                </button>
+                  </button>
+                </div>
               )}
             </div>
           </div>
