@@ -511,7 +511,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
 
 async function finalizeRun(runId: string) {
   const runState = await scrapingQuery('SELECT status FROM batch_ai_runs WHERE id=$1', [runId])
-  if (!runState.rows[0] || runState.rows[0].status === 'cancelled') return
+  if (!runState.rows[0] || ['completed', 'failed', 'cancelled'].includes(runState.rows[0].status)) return
   const counts = await scrapingQuery(`
     SELECT COUNT(*)::int AS total,
            COUNT(*) FILTER(WHERE status='completed')::int AS completed,
@@ -548,6 +548,18 @@ export async function getBatchAiRunAction(runId: string) {
   await requireAdmin()
   await finalizeRun(runId)
   return { success: true, data: await getBatchAiRun(runId) }
+}
+
+export async function getLatestBatchAiRunAction(batchId: string) {
+  await requireAdmin()
+  const latest = await scrapingQuery(`
+    SELECT id FROM batch_ai_runs
+    WHERE batch_id=$1
+    ORDER BY created_at DESC LIMIT 1
+  `, [batchId])
+  if (!latest.rows[0]) return { success: true, data: null }
+  await finalizeRun(String(latest.rows[0].id))
+  return { success: true, data: await getBatchAiRun(String(latest.rows[0].id)) }
 }
 
 export async function stopBatchAiRunAction(runId: string) {
@@ -762,9 +774,9 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
   return { success: true }
 }
 
-export async function getBatchAiSuggestionsAction(batchId: string) {
+export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog = true) {
   await requireAdmin()
-  await syncCurrentRailsCatalogMappings()
+  if (syncCatalog) await syncCurrentRailsCatalogMappings()
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')

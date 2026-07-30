@@ -37,7 +37,10 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     setMessage(null)
     const result = await updateBatchAiSettingsAction(settings)
     setMessage(result.success
-      ? { type: 'success', text: 'Настройки AI-обработки сохранены' }
+      ? {
+          type: 'success',
+          text: `Настройки сохранены. Новые тесты используют ${settings.openrouterModel}; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
+        }
       : { type: 'error', text: result.error || 'Не удалось сохранить настройки' })
   })
 

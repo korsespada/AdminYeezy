@@ -58,7 +58,9 @@ import { processAiAction } from "@/actions/ai-process";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
+  getLatestBatchAiRunAction,
   startBatchAiAction,
+  stopBatchAiRunAction,
 } from "@/actions/batch-ai";
 import Image from "next/image";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
@@ -473,6 +475,7 @@ export default function CsvImportApp({
   const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterGender, setFilterGender] = useState("");
   const [filterPrice, setFilterPrice] = useState("");
+  const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready">("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("rows");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
@@ -487,6 +490,7 @@ export default function CsvImportApp({
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
   const isAiStoppedRef = useRef(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
+  const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
 
@@ -557,6 +561,16 @@ export default function CsvImportApp({
     [products],
   );
 
+  const aiReadyCount = useMemo(
+    () => products.filter((product) => product.ai_processed === true || product.ai_processed === "true").length,
+    [products],
+  );
+  const aiRemainingCount = products.length - aiReadyCount;
+  const pendingAiSuggestions = useMemo(
+    () => aiSuggestions.filter((item) => item.status === "pending"),
+    [aiSuggestions],
+  );
+
   const loadAiSuggestions = useCallback(async (nextBatchId: string) => {
     const result = await getBatchAiSuggestionsAction(nextBatchId);
     setAiSuggestions(result.success ? result.data || [] : []);
@@ -596,9 +610,12 @@ export default function CsvImportApp({
       if (filterPrice !== "" && (Number(p.price) || 0) !== Number(filterPrice)) {
         return false;
       }
+      const aiReady = p.ai_processed === true || p.ai_processed === "true";
+      if (filterAiStatus === "raw" && aiReady) return false;
+      if (filterAiStatus === "ready" && !aiReady) return false;
       return true;
     });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice]);
+  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterAiStatus]);
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -703,6 +720,43 @@ export default function CsvImportApp({
     }
     setIsLoadingPath(false);
   };
+
+  useEffect(() => {
+    if (!batchId) return;
+    let requestInFlight = false;
+    const refreshDynamicState = async () => {
+      if (requestInFlight || document.hidden) return;
+      requestInFlight = true;
+      try {
+        const [productsResult, suggestionsResult, runResult] = await Promise.all([
+          getBatchProductsAction(batchId),
+          getBatchAiSuggestionsAction(batchId, false),
+          getLatestBatchAiRunAction(batchId),
+        ]);
+        if (!isDirty && selectedIdx === null && productsResult.success && productsResult.data) {
+          const nextProducts = productsResult.data.products;
+          setProducts(nextProducts);
+          setColumns(productsResult.data.columns?.length ? productsResult.data.columns : DEFAULT_PRODUCT_COLUMNS);
+          const completed = nextProducts.filter((product: CsvProduct) => product.ai_processed === true || product.ai_processed === "true").length;
+          setIsAiProcessed(nextProducts.length > 0 && completed === nextProducts.length);
+        }
+        setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
+        const run: any = runResult.success ? runResult.data : null;
+        const running = Boolean(run && ["queued", "running"].includes(run.status));
+        setActiveAiRunId(running ? String(run.id) : null);
+        setIsProcessing(running);
+        setAiProgress(running ? {
+          current: Number(run.completed_count || 0),
+          total: Number(run.total_count || products.length),
+        } : null);
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    refreshDynamicState();
+    const interval = window.setInterval(refreshDynamicState, 3000);
+    return () => window.clearInterval(interval);
+  }, [batchId, isDirty, selectedIdx, products.length]);
 
   const persistBatchProducts = async (nextProducts: CsvProduct[]) => {
     if (!batchId) return true;
@@ -912,7 +966,7 @@ export default function CsvImportApp({
     setIsPushing(false);
   };
 
-  const handleAiProcess = async () => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full") => {
     if (!supplierId && products.length > 0) {
         alert("ID поставщика не найден. Пожалуйста, запустите обработку из истории выгрузок.");
         return;
@@ -922,28 +976,33 @@ export default function CsvImportApp({
       setIsProcessing(true);
       try {
         const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
-        const mode = alreadyProcessed ? "full" : "sample";
+        const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
         const result = await startBatchAiAction(batchId, mode);
         if (result.success) {
           const data: any = result.data;
-          if (data?.provider === "cockpit") {
-            setSaveMsg(`Cockpit: в очереди ${data.queued}, ожидаем обработку…`);
+          if (data?.runId) {
+            setActiveAiRunId(String(data.runId));
+            setSaveMsg(`ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
               await new Promise((resolve) => setTimeout(resolve, 3000));
               const run = await getBatchAiRunAction(data.runId);
               if (!run.success) break;
               finalRun = run.data;
-              setSaveMsg(`Cockpit: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
-              if (["completed", "failed"].includes(finalRun.status)) break;
+              setAiProgress({
+                current: Number(finalRun.completed_count || 0),
+                total: Number(finalRun.total_count || data.queued),
+              });
+              setSaveMsg(`ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
+              if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
             await handleLoadBatch(batchId);
-            setSaveMsg(finalRun?.status === "completed"
+            setActiveAiRunId(null);
+            setSaveMsg(finalRun?.status === "cancelled"
+              ? "AI-обработка остановлена. Готовые товары сохранены."
+              : finalRun?.status === "completed"
               ? `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
-              : "Cockpit не завершил обработку вовремя. Статус сохранён в истории.");
-          } else {
-            await handleLoadBatch(batchId);
-            setSaveMsg(mode === "sample" ? "✓ Обработаны 10 случайных товаров" : "✓ AI-обработка завершена");
+              : "ИИ не завершил обработку вовремя. Статус сохранён в истории.");
           }
         } else {
           setSaveMsg(`Ошибка ИИ: ${result.error}`);
@@ -952,6 +1011,7 @@ export default function CsvImportApp({
         setSaveMsg(`Ошибка ИИ: ${error?.message || "не удалось запустить обработку"}`);
       } finally {
         setIsProcessing(false);
+        setAiProgress(null);
         setTimeout(() => setSaveMsg(null), 5000);
       }
       return;
@@ -1072,7 +1132,20 @@ export default function CsvImportApp({
     setAiProgress(null);
   };
 
-  const handleStopAi = () => {
+  const handleStopAi = async () => {
+      if (batchId && activeAiRunId) {
+        const result = await stopBatchAiRunAction(activeAiRunId);
+        if (!result.success) {
+          setSaveMsg(`Ошибка остановки ИИ: ${result.error}`);
+          return;
+        }
+        setActiveAiRunId(null);
+        setIsProcessing(false);
+        setAiProgress(null);
+        setSaveMsg("AI-обработка остановлена. Готовые товары сохранены.");
+        await handleLoadBatch(batchId);
+        return;
+      }
       isAiStoppedRef.current = true;
   };
 
@@ -1082,12 +1155,14 @@ export default function CsvImportApp({
     const result = await startBatchAiAction(batchId, "retry", Number(product.id));
     if (result.success) {
       const data: any = result.data;
-      if (data?.provider === "cockpit") {
+      if (data?.runId) {
+        setActiveAiRunId(String(data.runId));
         for (let attempt = 0; attempt < 200; attempt += 1) {
           await new Promise((resolve) => setTimeout(resolve, 3000));
           const run = await getBatchAiRunAction(data.runId);
-          if (!run.success || ["completed", "failed"].includes(run.data?.status)) break;
+          if (!run.success || ["completed", "failed", "cancelled"].includes(run.data?.status)) break;
         }
+        setActiveAiRunId(null);
       }
       await handleLoadBatch(batchId);
       setSaveMsg("✓ Товар обработан повторно");
@@ -1324,12 +1399,10 @@ export default function CsvImportApp({
 
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Обработка</span>
-                <span className={`text-sm font-bold flex items-center gap-1.5 ${isAiProcessed ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {isAiProcessed ? (
-                    <><CheckCircle size={14} /> Обработано ИИ</>
-                  ) : (
-                    <><AlertTriangle size={14} /> Сырая выгрузка</>
-                  )}
+                <span className="flex items-center gap-2 text-sm font-bold">
+                  <span className="inline-flex items-center gap-1 text-emerald-400"><CheckCircle size={14} /> {aiReadyCount} готово</span>
+                  <span className="text-slate-600">/</span>
+                  <span className="inline-flex items-center gap-1 text-amber-400"><AlertTriangle size={14} /> {aiRemainingCount} сырых</span>
                 </span>
               </div>
               
@@ -1399,12 +1472,17 @@ export default function CsvImportApp({
 
               {isBatchSource ? (
                 <button
-                  onClick={() => batchId && handleLoadBatch(batchId)}
+                  onClick={() => {
+                    if (!batchId) return;
+                    if (isDirty && !confirm("Загрузить сохранённую версию из БД? Несохранённые изменения на экране будут потеряны.")) return;
+                    handleLoadBatch(batchId);
+                  }}
                   disabled={isLoadingPath}
                   className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+                  title="Перезагрузить товары и предложения этой партии из технической БД. Сырой источник не перепарсивается."
                 >
                   <RefreshCw className={`w-4 h-4 ${isLoadingPath ? "animate-spin" : ""}`} />
-                  Обновить из БД
+                  Перезагрузить
                 </button>
               ) : (
                 <button
@@ -1441,15 +1519,27 @@ export default function CsvImportApp({
                       Стоп ИИ ({aiProgress ? `${aiProgress.current}/${aiProgress.total}` : "..."})
                   </button>
                 ) : (
-                  <button
-                      onClick={handleAiProcess}
-                      className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
-                  >
-                      <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                      {products.some((product) => product.ai_processed === true || product.ai_processed === "true")
-                        ? "Обработать с ИИ остальные"
-                        : "Тест ИИ · 10 товаров"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {isBatchSource && aiReadyCount > 0 && aiRemainingCount > 0 && (
+                      <button
+                        onClick={() => handleAiProcess("sample")}
+                        className="flex items-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-500/20"
+                        title="Обработать 10 ещё сырых товаров с текущими глобальными настройками"
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        Новый тест · 10
+                      </button>
+                    )}
+                    <button
+                        onClick={() => handleAiProcess(aiReadyCount > 0 ? "full" : "sample")}
+                        className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
+                    >
+                        <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                        {aiReadyCount > 0
+                          ? "Обработать с ИИ остальные"
+                          : "Тест ИИ · 10 товаров"}
+                    </button>
+                  </div>
                 )
               ) : (
                 <button
@@ -1474,7 +1564,7 @@ export default function CsvImportApp({
           </div>
         )}
         {/* Input Area */}
-        {isBatchSource && aiSuggestions.length > 0 && (
+        {isBatchSource && pendingAiSuggestions.length > 0 && (
           <div className="mb-4 flex flex-col gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
               <div className="rounded-lg bg-violet-500/15 p-2 text-violet-300">
@@ -1484,12 +1574,12 @@ export default function CsvImportApp({
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="font-bold text-white">Предложения ИИ</h3>
                   <span className="rounded-full border border-violet-400/30 bg-violet-500/15 px-2 py-0.5 text-xs font-bold text-violet-200">
-                    {aiSuggestions.filter((item) => item.status === "pending").length} ожидают решения
+                    {pendingAiSuggestions.length} ожидают решения
                   </span>
                 </div>
                 <p className="mt-1 truncate text-xs text-slate-400">
-                  {aiSuggestions.slice(0, 5).map((item) => item.payload?.name || item.payload?.label || item.canonical_key).join(" · ")}
-                  {aiSuggestions.length > 5 ? ` · ещё ${aiSuggestions.length - 5}` : ""}
+                  {pendingAiSuggestions.slice(0, 5).map((item) => item.payload?.name || item.payload?.label || item.canonical_key).join(" · ")}
+                  {pendingAiSuggestions.length > 5 ? ` · ещё ${pendingAiSuggestions.length - 5}` : ""}
                 </p>
               </div>
             </div>
@@ -1810,6 +1900,16 @@ export default function CsvImportApp({
               )}
 
               <select
+                value={filterAiStatus}
+                onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready")}
+                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все по ИИ</option>
+                <option value="raw">Сырой</option>
+                <option value="ready">ИИ готово</option>
+              </select>
+
+              <select
                 value={filterPrice}
                 onChange={(e) => setFilterPrice(e.target.value)}
                 className="min-w-[140px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
@@ -1826,6 +1926,7 @@ export default function CsvImportApp({
                 filterCategory ||
                 filterSubcategory ||
                 filterGender ||
+                filterAiStatus ||
                 filterPrice !== "") && (
                   <button
                     onClick={() => {
@@ -1833,6 +1934,7 @@ export default function CsvImportApp({
                       setFilterCategory("");
                       setFilterSubcategory("");
                       setFilterGender("");
+                      setFilterAiStatus("");
                       setFilterPrice("");
                     }}
                     className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
@@ -1845,6 +1947,7 @@ export default function CsvImportApp({
                 filterCategory ||
                 filterSubcategory ||
                 filterGender ||
+                filterAiStatus ||
                 filterPrice !== "") && (
                   <span className="text-xs text-slate-500 ml-auto">
                     Показано{" "}
@@ -1870,9 +1973,10 @@ export default function CsvImportApp({
               onClick={() => batchId && handleLoadBatch(batchId)}
               disabled={isLoadingPath}
               className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+              title="Перезагрузить товары этой партии из технической БД"
             >
               <RefreshCw className={`h-4 w-4 ${isLoadingPath ? "animate-spin" : ""}`} />
-              Обновить из БД
+              Перезагрузить товары
             </button>
           </div>
         )}
