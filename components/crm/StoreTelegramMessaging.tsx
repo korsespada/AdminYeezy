@@ -66,9 +66,13 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
                 <h3 className="font-medium">Кнопки</h3>
               </div>
               {[1, 2, 3].map((index) => (
-                <div key={index} className="mb-3 grid gap-3 sm:grid-cols-2">
+                <div key={index} className="mb-3 grid gap-3 rounded-md border border-slate-800 p-3 sm:grid-cols-2">
                   <input name={`buttonText${index}`} placeholder={`Текст кнопки ${index}`} className={inputClassName} />
                   <input name={`buttonUrl${index}`} type="url" placeholder="https://..." className={inputClassName} />
+                  <label className="flex items-center gap-2 text-xs text-slate-400 sm:col-span-2">
+                    <input name={`buttonWebApp${index}`} type="checkbox" className="accent-sky-500" />
+                    Открывать как Telegram Mini App
+                  </label>
                 </div>
               ))}
             </div>

@@ -45,7 +45,8 @@ export async function createStoreTelegramCampaignAction(formData: FormData) {
   const buttons = [1, 2, 3].flatMap((index) => {
     const text = String(formData.get(`buttonText${index}`) || '').trim()
     const url = String(formData.get(`buttonUrl${index}`) || '').trim()
-    return text && url ? [{ text, url }] : []
+    const webApp = formData.get(`buttonWebApp${index}`) === 'on'
+    return text && url ? [{ text, url, web_app: webApp }] : []
   })
 
   await createRailsStoreTelegramCampaign({

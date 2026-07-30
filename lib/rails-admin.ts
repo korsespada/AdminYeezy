@@ -153,7 +153,7 @@ export interface RailsStoreTelegramCampaign {
   body: string
   media_type: 'none' | 'photo' | 'video'
   media_url?: string | null
-  buttons: Array<{ text: string; url: string }>
+  buttons: Array<{ text: string; url: string; web_app?: boolean }>
   audience: 'all' | 'selected' | 'direct'
   status: 'draft' | 'sending' | 'completed'
   created_at: string
@@ -1103,7 +1103,7 @@ export async function createRailsStoreTelegramCampaign(input: {
   audience: 'all' | 'selected' | 'direct'
   contactIds: string[]
   telegramIds: string[]
-  buttons: Array<{ text: string; url: string }>
+  buttons: Array<{ text: string; url: string; web_app?: boolean }>
 }) {
   const result = await railsFetch<{ campaign: RailsStoreTelegramCampaign }>(
     '/admin/store_telegram_campaigns',
