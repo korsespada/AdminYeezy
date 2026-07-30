@@ -85,6 +85,16 @@ function stableField(value: unknown) {
   return [...new Set(normalizedTokens(value))].sort().join('_')
 }
 
+function stableDimensions(value: unknown) {
+  const text = Array.isArray(value) ? value.join(' × ') : String(value || '')
+  const numbers = text
+    .replace(/,/g, '.')
+    .match(/\d+(?:\.\d+)?/g)
+    ?.map((number) => String(Number(number)))
+    .filter(Boolean)
+  return numbers?.length ? numbers.join('x') : stableField(value)
+}
+
 export function canonicalProductColorFamilyKey(product: any, suggestion: any = {}) {
   const attributes = product?.attributes || {}
   const colorTokens = new Set([
@@ -103,7 +113,7 @@ export function canonicalProductColorFamilyKey(product: any, suggestion: any = {
     stableField(product?.subcategory),
     name,
     stableField(attributes.model_name || suggestion?.model_name),
-    stableField(dimensions),
+    stableDimensions(dimensions),
     stableField(attributes.materials || suggestion?.materials),
     stableField(attributes.hardware_color || suggestion?.hardware),
   ].join('|')
@@ -273,18 +283,45 @@ export async function reconcileBatchColorFamilySuggestions(client: QueryClient, 
   `, [batchId])
   const firstByFamily = new Map<string, any>()
   for (const row of result.rows) {
-    const familyKey = row.payload?.product_identity_key || canonicalProductColorFamilyKey(row, row.payload)
+    const affectedIds = Array.isArray(row.affected_product_ids) ? row.affected_product_ids.map(Number) : []
+    const affectedProducts = affectedIds.length
+      ? await client.query(`
+          SELECT id,name,brand,category,subcategory,attributes
+          FROM products WHERE id=ANY($1::int[])
+          ORDER BY array_position($1::int[],id)
+        `, [affectedIds])
+      : { rows: [] }
+    const firstProduct = affectedProducts.rows[0]
+    if (!firstProduct) {
+      await client.query("UPDATE batch_ai_suggestions SET status='rejected',reviewed_at=NOW() WHERE id=$1", [row.id])
+      continue
+    }
+    const familyKey = canonicalProductColorFamilyKey(firstProduct, row.payload)
     if (!familyKey) continue
+    const matchingProducts = affectedProducts.rows.filter((product) => (
+      canonicalProductColorFamilyKey(product, row.payload) === familyKey
+    ))
+    const productColors = matchingProducts.flatMap((product) => normalizedColorTokens(product.attributes?.colors))
+    const cleanedPayload = {
+      ...row.payload,
+      product_identity_key: familyKey,
+      observed_colors: [...new Set(productColors)].sort(),
+    }
+    await client.query(`
+      UPDATE batch_ai_suggestions
+      SET payload=$2::jsonb,affected_product_ids=$3::jsonb
+      WHERE id=$1
+    `, [row.id, JSON.stringify(cleanedPayload), JSON.stringify(matchingProducts.map((product) => product.id))])
+    row.payload = cleanedPayload
+    row.affected_product_ids = matchingProducts.map((product) => product.id)
+    row.name = firstProduct.name
+    row.brand = firstProduct.brand
+    row.category = firstProduct.category
+    row.subcategory = firstProduct.subcategory
+    row.attributes = firstProduct.attributes
     const duplicate = firstByFamily.get(familyKey)
     if (!duplicate) {
-      const productColors = row.attributes?.colors
-      const payload = {
-        ...row.payload,
-        product_identity_key: familyKey,
-        observed_colors: observedColors(row.payload, productColors),
-      }
-      await client.query('UPDATE batch_ai_suggestions SET payload=$2::jsonb WHERE id=$1', [row.id, JSON.stringify(payload)])
-      firstByFamily.set(familyKey, { ...row, payload })
+      firstByFamily.set(familyKey, row)
       continue
     }
     const payload = {
