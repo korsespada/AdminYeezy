@@ -17,6 +17,8 @@ const SUBCATEGORY_TOKEN_ALIASES: Record<string, string> = {
   косметички: 'косметичка',
   кейсы: 'кейс',
   клапаном: 'клапан',
+  мини: 'мини',
+  багет: 'багет',
 }
 
 export function subcategoryFamilyKey(value: unknown) {
@@ -46,7 +48,13 @@ export function sameSubcategoryFamily(left: unknown, right: unknown) {
 }
 
 function redirectsToShoulderBags(value: unknown) {
-  return ['косметичка_сумка', 'кейс_сумка', 'клапан_сумка'].includes(subcategoryFamilyKey(value))
+  return [
+    'косметичка_сумка',
+    'кейс_сумка',
+    'клапан_сумка',
+    'багет_сумка',
+    'мини_сумка',
+  ].includes(subcategoryFamilyKey(value))
 }
 
 function isGenericBagsSubcategory(value: unknown) {

@@ -901,6 +901,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
       WHERE (entity_type='category' AND lower(name)='сумки')
          OR (entity_type='subcategory' AND lower(name) IN (
            'сумки','сумки-косметички','сумки-кейсы','сумки с клапаном','сумки на плечо'
+           ,'сумки-багет','мини-сумки'
          ))
     `)
     const bagCategoryId = bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id
@@ -911,6 +912,8 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
         'сумки-косметички',
         'сумки-кейсы',
         'сумки с клапаном',
+        'сумки-багет',
+        'мини-сумки',
       ].includes(String(row.name).toLowerCase()))
       .map((row) => String(row.canonical_id))
     if (bagCategoryId && shoulderBagId && redirectedIds.length) {
