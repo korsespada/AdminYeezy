@@ -820,8 +820,29 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
         )
       ORDER BY CASE WHEN s.status='pending' THEN 0 ELSE 1 END,s.created_at DESC
     `, [batchId])
+    const affectedProductIds = [...new Set(
+      result.rows.flatMap((suggestion: any) =>
+        Array.isArray(suggestion.affected_product_ids) ? suggestion.affected_product_ids : []
+      )
+    )]
+    const affectedProducts = affectedProductIds.length
+      ? await client.query(`
+          SELECT id,name,external_id,photos,attributes
+          FROM products
+          WHERE id=ANY($1::int[])
+        `, [affectedProductIds])
+      : { rows: [] }
+    const productsById = new Map(
+      affectedProducts.rows.map((product: any) => [Number(product.id), product])
+    )
+    const suggestions = result.rows.map((suggestion: any) => ({
+      ...suggestion,
+      affected_products: (suggestion.affected_product_ids || [])
+        .map((id: number) => productsById.get(Number(id)))
+        .filter(Boolean),
+    }))
     await client.query('COMMIT')
-    return { success: true, data: result.rows }
+    return { success: true, data: suggestions }
   } catch (error: any) {
     await client.query('ROLLBACK')
     return { success: false, error: error.message, data: [] }
