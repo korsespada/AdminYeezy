@@ -81,6 +81,34 @@ export function canonicalColorFamilyKey(suggestion: any) {
   return [...new Set(withoutColor)].join('_')
 }
 
+function stableField(value: unknown) {
+  return [...new Set(normalizedTokens(value))].sort().join('_')
+}
+
+export function canonicalProductColorFamilyKey(product: any, suggestion: any = {}) {
+  const attributes = product?.attributes || {}
+  const colorTokens = new Set([
+    ...normalizedColorTokens(attributes.colors),
+    ...normalizedColorTokens(suggestion?.color),
+  ])
+  const name = normalizedTokens(product?.name)
+    .filter((token) => !colorTokens.has(COLOR_TOKEN_ALIASES[token] || token))
+    .join('_')
+  const dimensions = attributes.dimensions
+    || ([attributes.bag_width_cm, attributes.bag_height_cm].filter(Boolean).join('x'))
+    || suggestion?.bag_size
+  return [
+    stableField(product?.brand),
+    stableField(product?.category),
+    stableField(product?.subcategory),
+    name,
+    stableField(attributes.model_name || suggestion?.model_name),
+    stableField(dimensions),
+    stableField(attributes.materials || suggestion?.materials),
+    stableField(attributes.hardware_color || suggestion?.hardware),
+  ].join('|')
+}
+
 function observedColors(payload: any, nextColor?: unknown) {
   return [...new Set([
     ...(Array.isArray(payload?.observed_colors) ? payload.observed_colors : []),
@@ -116,9 +144,20 @@ export async function saveBatchAiSuggestions(
   productId: number,
   normalized: any,
 ) {
-  const run = await client.query('SELECT batch_id FROM batch_ai_runs WHERE id=$1', [runId])
+  const run = await client.query(`
+    SELECT r.batch_id,b.supplier_id
+    FROM batch_ai_runs r JOIN scraping_batches b ON b.id=r.batch_id
+    WHERE r.id=$1
+  `, [runId])
   const batchId = String(run.rows[0]?.batch_id || '')
+  const supplierId = Number(run.rows[0]?.supplier_id || 0)
   if (batchId) await client.query("SELECT pg_advisory_xact_lock(hashtext('batch-ai-suggestions:' || $1))", [batchId])
+  const rejected = supplierId ? await client.query(`
+    SELECT s.kind,s.canonical_key,s.payload FROM batch_ai_suggestions s
+    JOIN batch_ai_runs r ON r.id=s.run_id
+    JOIN scraping_batches b ON b.id=r.batch_id
+    WHERE b.supplier_id=$1 AND s.status='rejected'
+  `, [supplierId]) : { rows: [] }
 
   for (const suggestion of suggestionsFromOutput(normalized)) {
     const kind = suggestion.kind || 'attribute'
@@ -128,6 +167,10 @@ export async function saveBatchAiSuggestions(
     if (kind === 'subcategory') {
       const familyKey = subcategoryFamilyKey(suggestion.name || suggestion.code)
       if (!familyKey) continue
+      if (rejected.rows.some((row) => (
+        row.kind === 'subcategory'
+        && sameSubcategoryFamily(row.payload?.name || row.payload?.code || row.canonical_key, suggestion.name || suggestion.code)
+      ))) continue
       key = familyKey
       const parentId = String(suggestion.parent_category_id || '')
       const mappings = await catalogSubcategories(client, parentId)
@@ -162,15 +205,25 @@ export async function saveBatchAiSuggestions(
     }
 
     if (kind === 'color_family') {
-      key = canonicalColorFamilyKey(suggestion)
-      if (!key) continue
+      const identityKey = canonicalProductColorFamilyKey(normalized.product, suggestion)
+      if (!identityKey) continue
+      suggestion.product_identity_key = identityKey
+      key = crypto.createHash('sha256').update(identityKey).digest('hex')
+      if (rejected.rows.some((row) => (
+        row.kind === 'color_family'
+        && row.payload?.product_identity_key === identityKey
+      ))) continue
       const pending = await client.query(`
-        SELECT s.id,s.payload FROM batch_ai_suggestions s
+        SELECT s.id,s.payload,p.name,p.brand,p.category,p.subcategory,p.attributes
+        FROM batch_ai_suggestions s
         JOIN batch_ai_runs r ON r.id=s.run_id
+        LEFT JOIN products p ON p.id=(s.affected_product_ids->>0)::int
         WHERE r.batch_id=$1 AND s.kind='color_family' AND s.status='pending'
         ORDER BY s.created_at
       `, [batchId])
-      const sameFamily = pending.rows.find((row) => canonicalColorFamilyKey(row.payload) === key)
+      const sameFamily = pending.rows.find((row) => (
+        (row.payload?.product_identity_key || canonicalProductColorFamilyKey(row, row.payload)) === identityKey
+      ))
       if (sameFamily) {
         const payload = {
           ...sameFamily.payload,
@@ -190,6 +243,11 @@ export async function saveBatchAiSuggestions(
       suggestion.observed_colors = observedColors(suggestion)
     }
 
+    if (kind === 'attribute' && rejected.rows.some((row) => (
+      row.kind === 'attribute'
+      && canonicalBatchSuggestionKey(row.payload?.code || row.canonical_key, 'attribute') === key
+    ))) continue
+
     await client.query(`
       INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)
       VALUES($1,$2,$3,$4,$5::jsonb,$6::jsonb)
@@ -206,25 +264,32 @@ export async function saveBatchAiSuggestions(
 export async function reconcileBatchColorFamilySuggestions(client: QueryClient, batchId: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('batch-ai-suggestions:' || $1))", [batchId])
   const result = await client.query(`
-    SELECT s.* FROM batch_ai_suggestions s
+    SELECT s.*,p.name,p.brand,p.category,p.subcategory,p.attributes
+    FROM batch_ai_suggestions s
     JOIN batch_ai_runs r ON r.id=s.run_id
+    LEFT JOIN products p ON p.id=(s.affected_product_ids->>0)::int
     WHERE r.batch_id=$1 AND s.kind='color_family' AND s.status='pending'
     ORDER BY s.created_at
   `, [batchId])
   const firstByFamily = new Map<string, any>()
   for (const row of result.rows) {
-    const familyKey = canonicalColorFamilyKey(row.payload)
+    const familyKey = row.payload?.product_identity_key || canonicalProductColorFamilyKey(row, row.payload)
     if (!familyKey) continue
     const duplicate = firstByFamily.get(familyKey)
     if (!duplicate) {
-      const payload = { ...row.payload, observed_colors: observedColors(row.payload) }
+      const productColors = row.attributes?.colors
+      const payload = {
+        ...row.payload,
+        product_identity_key: familyKey,
+        observed_colors: observedColors(row.payload, productColors),
+      }
       await client.query('UPDATE batch_ai_suggestions SET payload=$2::jsonb WHERE id=$1', [row.id, JSON.stringify(payload)])
       firstByFamily.set(familyKey, { ...row, payload })
       continue
     }
     const payload = {
       ...duplicate.payload,
-      observed_colors: observedColors(duplicate.payload, row.payload?.color),
+      observed_colors: observedColors(duplicate.payload, row.attributes?.colors || row.payload?.color),
     }
     await client.query(`
       UPDATE batch_ai_suggestions SET

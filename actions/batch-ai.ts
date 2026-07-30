@@ -676,7 +676,7 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
     if (row.affected_product_ids.length < 2 || colors.length < 2) {
       return { success: false, error: 'Для цветового семейства нужны минимум два товара разных цветов' }
     }
-    const familyKey = canonicalColorFamilyKey(row.payload)
+    const familyKey = String(row.payload?.product_identity_key || canonicalColorFamilyKey(row.payload))
     const key = crypto.createHash('sha256').update(familyKey || row.canonical_key).digest('hex').slice(0, 32)
     await scrapingQuery(
       'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE id=ANY($2::int[])',
@@ -800,8 +800,16 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
       await reconcileKnownAttributeSuggestions(client, batchId, knownAttributeCodes)
     }
     const result = await client.query(`
-      SELECT s.* FROM batch_ai_suggestions s
-      JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1
+      SELECT * FROM (
+        SELECT s.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY s.kind,s.canonical_key,s.status
+            ORDER BY s.created_at DESC
+          ) AS duplicate_rank
+        FROM batch_ai_suggestions s
+        JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1
+      ) s
+      WHERE s.duplicate_rank=1
         AND (
           s.kind <> 'color_family'
           OR s.status <> 'pending'

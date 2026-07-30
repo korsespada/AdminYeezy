@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canonicalColorFamilyKey,
+  canonicalProductColorFamilyKey,
   sameSubcategoryFamily,
   subcategoryFamilyKey,
 } from '@/lib/batch-ai-suggestions'
@@ -33,5 +34,31 @@ describe('canonicalColorFamilyKey', () => {
     const small = canonicalColorFamilyKey({ group_signature: 'Chanel Classic Flap TopHandle small gold pink', color: 'pink' })
     const medium = canonicalColorFamilyKey({ group_signature: 'Chanel Classic Flap medium gold white', color: 'white' })
     expect(small).not.toBe(medium)
+  })
+})
+
+describe('canonicalProductColorFamilyKey', () => {
+  it('matches the same product in different colors', () => {
+    const beige = {
+      name: 'Chanel Hobo Mini',
+      brand: 'chanel',
+      category: 'bags',
+      subcategory: 'hobo',
+      attributes: {
+        colors: ['Бежевый'], dimensions: '20 × 22 × 12.5 см',
+        model_name: 'Hobo', materials: ['Кожа'], hardware_color: 'Золотистая',
+      },
+    }
+    const gold = {
+      ...beige,
+      attributes: { ...beige.attributes, colors: ['Золотой'] },
+    }
+    expect(canonicalProductColorFamilyKey(beige)).toBe(canonicalProductColorFamilyKey(gold))
+  })
+
+  it('keeps different physical bag sizes separate', () => {
+    const small = { name: 'Chanel Hobo', attributes: { model_name: 'Hobo', dimensions: '20 × 22 × 12 см' } }
+    const large = { name: 'Chanel Hobo', attributes: { model_name: 'Hobo', dimensions: '30 × 26 × 14 см' } }
+    expect(canonicalProductColorFamilyKey(small)).not.toBe(canonicalProductColorFamilyKey(large))
   })
 })
