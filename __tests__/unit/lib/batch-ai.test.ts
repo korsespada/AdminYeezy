@@ -46,6 +46,28 @@ describe('batch AI normalization', () => {
     expect(canonicalBatchSuggestionKey('model_names')).toBe('model_name')
   })
 
+  it('applies suggestions for already registered attributes instead of asking for approval', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'bags' },
+      attribute_suggestions: [
+        { code: 'dimensions', value: '17 × 19.5 × 5', label: 'Габариты' },
+        { code: 'bag_width', value: 17, label: 'Ширина сумки' },
+      ],
+    }, {
+      product: { category: 'bags', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['bags']),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['dimensions', 'bag_width_cm']),
+    })
+
+    expect(result.product.attributes).toEqual({
+      dimensions: '17 × 19.5 × 5',
+      bag_width_cm: 17,
+    })
+    expect(result.suggestions).toEqual([])
+  })
+
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
     const result = normalizeBatchAiOutput({
       product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },

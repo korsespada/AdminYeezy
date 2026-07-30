@@ -265,10 +265,19 @@ export function normalizeBatchAiOutput(raw: any, input: {
     return allowed.has(previous) ? previous : ''
   }
   const attributes: Record<string, unknown> = { ...(original.attributes || {}) }
-  const suggestions = Array.isArray(raw?.attribute_suggestions) ? raw.attribute_suggestions : []
+  const suggestions: any[] = []
+  for (const suggestion of (Array.isArray(raw?.attribute_suggestions) ? raw.attribute_suggestions : [])) {
+    const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
+    if (code && input.attributeCodes.has(code)) {
+      if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = suggestion.value
+    } else {
+      suggestions.push({ ...suggestion, code: code || suggestion?.code })
+    }
+  }
   for (const [code, value] of Object.entries(proposed.catalog_attributes || {})) {
-    if (input.attributeCodes.has(code)) attributes[code] = value
-    else suggestions.push({ code, label: code, value, reason: 'Новый код из результата AI' })
+    const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
+    if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
+    else suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
   }
   const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
   const sizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
@@ -360,6 +369,10 @@ const ATTRIBUTE_CODE_ALIASES: Record<string, string> = {
   model_names: 'model_name',
   bag_dimensions: 'dimensions',
   dimension: 'dimensions',
+  bag_width: 'bag_width_cm',
+  bag_height: 'bag_height_cm',
+  hardware: 'hardware_color',
+  hardware_colour: 'hardware_color',
 }
 
 export function canonicalBatchSuggestionKey(value: unknown, kind = 'attribute') {

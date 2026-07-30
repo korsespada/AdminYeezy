@@ -31,6 +31,7 @@ import { uploadToS3 } from '@/lib/s3'
 import {
   canonicalColorFamilyKey,
   reconcileBatchColorFamilySuggestions,
+  reconcileKnownAttributeSuggestions,
   reconcileBatchSubcategorySuggestions,
   saveBatchAiSuggestions,
 } from '@/lib/batch-ai-suggestions'
@@ -787,11 +788,17 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
 export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog = true) {
   await requireAdmin()
   if (syncCatalog) await syncCurrentRailsCatalogMappings()
+  const knownAttributeCodes = syncCatalog
+    ? new Set((await getCatalogAttributeDefinitions()).map((definition) => definition.code))
+    : null
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
     await reconcileBatchSubcategorySuggestions(client, batchId)
     await reconcileBatchColorFamilySuggestions(client, batchId)
+    if (knownAttributeCodes) {
+      await reconcileKnownAttributeSuggestions(client, batchId, knownAttributeCodes)
+    }
     const result = await client.query(`
       SELECT s.* FROM batch_ai_suggestions s
       JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1

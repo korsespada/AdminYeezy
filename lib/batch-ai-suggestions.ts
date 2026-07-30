@@ -240,6 +240,34 @@ export async function reconcileBatchColorFamilySuggestions(client: QueryClient, 
   }
 }
 
+export async function reconcileKnownAttributeSuggestions(
+  client: QueryClient,
+  batchId: string,
+  knownCodes: Set<string>,
+) {
+  const result = await client.query(`
+    SELECT s.* FROM batch_ai_suggestions s
+    JOIN batch_ai_runs r ON r.id=s.run_id
+    WHERE r.batch_id=$1 AND s.kind='attribute' AND s.status='pending'
+    ORDER BY s.created_at
+  `, [batchId])
+  for (const row of result.rows) {
+    const code = canonicalBatchSuggestionKey(row.payload?.code || row.canonical_key, 'attribute')
+    if (!code || !knownCodes.has(code) || row.payload?.value === undefined) continue
+    await client.query(`
+      UPDATE products SET
+        attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),ARRAY[$2]::text[],$3::jsonb,true),
+        updated_at=NOW()
+      WHERE id=ANY($1::int[])
+    `, [
+      row.affected_product_ids.map(Number),
+      code,
+      JSON.stringify(row.payload.value),
+    ])
+    await client.query("UPDATE batch_ai_suggestions SET status='approved',reviewed_at=NOW() WHERE id=$1", [row.id])
+  }
+}
+
 export async function reconcileBatchSubcategorySuggestions(client: QueryClient, batchId: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('batch-ai-suggestions:' || $1))", [batchId])
   const result = await client.query(`
