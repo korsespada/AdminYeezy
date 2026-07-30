@@ -5,6 +5,7 @@ import {
   BellRing,
   ClipboardList,
   CreditCard,
+  MessagesSquare,
   PackageCheck,
   RefreshCw,
   Users,
@@ -93,6 +94,15 @@ const workspaces = [
     tone: 'text-violet-300',
     countKey: 'notifications',
     countLabel: 'активных получателей',
+  },
+  {
+    title: 'Telegram-сообщения',
+    description: 'Рассылки клиентам бота: текст, фото, видео, кнопки и доставка по Telegram ID.',
+    href: '/admin/crm/telegram',
+    icon: MessagesSquare,
+    tone: 'text-emerald-300',
+    countKey: 'notifications',
+    countLabel: 'контактов бота',
   },
 ] as const
 

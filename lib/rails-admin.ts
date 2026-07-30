@@ -135,6 +135,38 @@ export interface RailsTelegramNotificationRecipient {
   updated_at?: string
 }
 
+export interface RailsStoreTelegramContact {
+  id: string
+  telegram_id: string
+  chat_id: string
+  username?: string | null
+  display_name: string
+  source: string
+  status: 'active' | 'blocked'
+  last_interaction_at: string
+  promo_received_at?: string | null
+}
+
+export interface RailsStoreTelegramCampaign {
+  id: string
+  title: string
+  body: string
+  media_type: 'none' | 'photo' | 'video'
+  media_url?: string | null
+  buttons: Array<{ text: string; url: string }>
+  audience: 'all' | 'selected' | 'direct'
+  status: 'draft' | 'sending' | 'completed'
+  created_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  deliveries: {
+    total: number
+    pending: number
+    sent: number
+    failed: number
+  }
+}
+
 export interface RailsCrmSupplierRequest {
   id: number | string
   supplier_id?: number | string
@@ -1045,6 +1077,51 @@ export async function testRailsTelegramNotificationRecipient(id: string) {
     `/admin/telegram_notification_recipients/${encodeURIComponent(id)}/test_delivery`,
     { method: 'POST' }
   )
+}
+
+export async function listRailsStoreTelegramContacts(): Promise<{
+  contacts: RailsStoreTelegramContact[]
+  total: number
+}> {
+  return railsFetch<{ contacts: RailsStoreTelegramContact[]; total: number }>(
+    '/admin/store_telegram_contacts'
+  )
+}
+
+export async function listRailsStoreTelegramCampaigns(): Promise<RailsStoreTelegramCampaign[]> {
+  const result = await railsFetch<{ campaigns: RailsStoreTelegramCampaign[] }>(
+    '/admin/store_telegram_campaigns'
+  )
+  return result.campaigns || []
+}
+
+export async function createRailsStoreTelegramCampaign(input: {
+  title: string
+  body: string
+  mediaType: 'none' | 'photo' | 'video'
+  mediaUrl?: string
+  audience: 'all' | 'selected' | 'direct'
+  contactIds: string[]
+  telegramIds: string[]
+  buttons: Array<{ text: string; url: string }>
+}) {
+  const result = await railsFetch<{ campaign: RailsStoreTelegramCampaign }>(
+    '/admin/store_telegram_campaigns',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        title: input.title,
+        body: input.body,
+        media_type: input.mediaType,
+        media_url: input.mediaUrl || null,
+        audience: input.audience,
+        contact_ids: input.contactIds,
+        telegram_ids: input.telegramIds,
+        buttons: input.buttons,
+      }),
+    }
+  )
+  return result.campaign
 }
 
 export async function approveRailsCrmRefund(id: string) {
