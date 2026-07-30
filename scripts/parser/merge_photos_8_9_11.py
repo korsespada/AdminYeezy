@@ -3,6 +3,78 @@ import json
 import sys
 import os
 
+
+def _photos(product):
+    value = product.get("photos") or []
+    if isinstance(value, list):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def _classify_subcategory(description, standalone=False):
+    cardholder_keywords = ['卡包']
+    wallet_keywords = ['钱包', '三折包', '折包', '零钱包', '证件包']
+    passport_keywords = ['护照夹']
+    bag_markers = ['hobo', 'woc', 'cf', '手提', '托特', '能装', '容量', '尺寸：17', '尺寸:17']
+    if not standalone:
+        bag_markers += [
+            '尺寸：30', '尺寸:30', '尺寸：25', '尺寸:25',
+            '尺寸：20', '尺寸:20', '尺寸：13.5x17',
+        ]
+    lowered = description.lower()
+    is_bag = any(keyword.lower() in lowered for keyword in bag_markers)
+    is_small_leather = not is_bag and (
+        any(keyword in description for keyword in passport_keywords)
+        or any(keyword in description for keyword in cardholder_keywords)
+        or any(keyword in description for keyword in wallet_keywords)
+    )
+    return "zugzfh1wu2tswfs" if is_small_leather else "dnckd3yiv2q0r5f", is_small_leather
+
+
+def process_products(products):
+    """Native JSON processor. Source order is significant for album pairing."""
+    result = []
+    index = 0
+    while index < len(products):
+        first = products[index]
+        first_photos = _photos(first)
+        photo_count = len(first_photos)
+
+        if photo_count not in (8, 9, 11):
+            index += 1
+            continue
+
+        second = products[index + 1] if index + 1 < len(products) else None
+        second_photos = _photos(second) if second else []
+        first_description = str(first.get("description") or "").strip()
+
+        if second and len(second_photos) == 4:
+            second_description = str(second.get("description") or "").strip()
+            description = " ".join(part for part in (second_description, first_description) if part)
+            index += 2
+            if any(keyword in description for keyword in ('开发准备中', '准备中')):
+                continue
+            merged = dict(first)
+            merged["description"] = description
+            merged["photos"] = second_photos + first_photos
+            merged["subcategory"], _ = _classify_subcategory(description)
+            result.append(merged)
+            continue
+
+        index += 1
+        if any(keyword in first_description for keyword in ('开发准备中', '准备中')):
+            continue
+        subcategory, is_small_leather = _classify_subcategory(first_description, standalone=True)
+        if is_small_leather:
+            standalone = dict(first)
+            standalone["subcategory"] = subcategory
+            result.append(standalone)
+
+    return result
+
 def process_csv(input_path, output_path=None):
     if not os.path.exists(input_path):
         print(f"Error: File {input_path} not found")

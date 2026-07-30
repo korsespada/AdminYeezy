@@ -248,7 +248,7 @@ async function batchContext(batchId: string, mode: 'sample' | 'full' | 'retry', 
   let predicate = ''
   const params: any[] = [batchId]
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY random() LIMIT 10'
-  if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY id'
+  if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'retry') {
     params.push(productId)
     predicate = `AND id=$${params.length} ORDER BY id`
@@ -550,17 +550,18 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
       mappingResult.rows as CatalogIdMapping[],
     )
     await client.query('DELETE FROM products WHERE batch_id=$1', [batchId])
-    for (const row of products) {
+    for (let position = 0; position < products.length; position++) {
+      const row = products[position]
       await client.query(`
         INSERT INTO products(external_id,name,description,price,status,brand,category,subcategory,gender,photos,attributes,
-          ai_processed,batch_id,h1,seo_title,seo_description,price_source,variant_group_key,ai_error,ai_confidence,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+          ai_processed,batch_id,h1,seo_title,seo_description,price_source,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
       `, [
         row.external_id, row.name, row.description, row.price, row.status, row.brand, row.category,
         row.subcategory, row.gender, JSON.stringify(row.photos || []), JSON.stringify(row.attributes || {}),
         row.ai_processed || false, batchId, row.h1, row.seo_title, row.seo_description,
         row.price_source || 'legacy', row.variant_group_key, row.ai_error, row.ai_confidence,
-        row.created_at || new Date(), new Date(),
+        row.source_position ?? position, row.created_at || new Date(), new Date(),
       ])
     }
     await client.query('UPDATE scraping_batches SET stage=$2,items_count=$3,updated_at=NOW() WHERE id=$1', [batchId, snapshot.rows[0].stage, products.length])

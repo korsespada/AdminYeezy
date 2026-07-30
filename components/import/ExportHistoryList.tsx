@@ -72,6 +72,7 @@ function formatDate(value?: string | null) {
 
 function fileName(filePath?: string | null) {
   if (!filePath) return 'Товары партии'
+  if (filePath.startsWith('db://')) return 'Снимок товаров в БД'
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
@@ -172,7 +173,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
   const handleDeleteFromDb = async (batch: ExportHistoryBatch) => {
     if (batch.isSynthetic) return
-    if (!confirm(`Удалить товары и фотографии S3 для выгрузки "${batch.name}"? Файлы CSV останутся в истории.`)) return
+    if (!confirm(`Удалить товары и фотографии S3 для выгрузки "${batch.name}"? История этапов останется в админке.`)) return
 
     setPendingAction(`db-${batch.id}`)
     const res = await deleteBatchAction(batch.id)
@@ -187,7 +188,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   const handleDeleteBatchFromAdmin = async (batch: ExportHistoryBatch) => {
-    if (!confirm(`Удалить выгрузку "${batch.name}" из админки и удалить связанные CSV-файлы?`)) return
+    if (!confirm(`Удалить выгрузку "${batch.name}" и связанную историю этапов из админки?`)) return
 
     setPendingAction(`admin-${batch.id}`)
     const res = batch.isSynthetic
@@ -510,10 +511,12 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       >
                         <td className="px-6 py-4" colSpan={2}>
                           <div className="flex min-w-0 items-center gap-3 pl-4">
-                            <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />
+                            {file.result_path?.startsWith('db://')
+                              ? <Database className="h-5 w-5 flex-shrink-0 text-slate-500" />
+                              : <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />}
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-slate-100">{fileName(file.result_path)}</div>
-                              <div className="text-xs text-slate-600">Файл #{file.id}</div>
+                              <div className="text-xs text-slate-600">Этап #{file.id}</div>
                             </div>
                           </div>
                         </td>
@@ -528,7 +531,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               handleDeleteFileFromAdmin(batch, file)
                             }}
                             className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
-                            title="Удалить файл из админки"
+                            title="Удалить этап из админки"
                           >
                             {pendingAction === `file-${file.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                           </button>

@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { S3Client, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
+const { runSupplierJsonProcess } = require('./lib/supplier-json-process');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -62,7 +63,7 @@ const RAILS_IMPORT_COLUMNS = [
 const CORE_PRODUCT_FIELDS = new Set([
   'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
-  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'created_at', 'updated_at',
+  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'source_position', 'created_at', 'updated_at',
 ]);
 
 function ensureDir(dir) {
@@ -152,6 +153,7 @@ function normalizeProduct(row) {
     variant_group_key: row.variant_group_key || null,
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence == null ? null : Number(row.ai_confidence),
+    source_position: row.source_position == null ? null : Number(row.source_position),
   };
 }
 
@@ -575,10 +577,10 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
     FROM products
     WHERE batch_id=$1
-    ORDER BY id ASC
+    ORDER BY source_position ASC NULLS LAST, id ASC
     ${paging}
   `, params);
 
@@ -593,7 +595,10 @@ async function saveBatchProducts(batchId, products) {
       SELECT entity_type, legacy_id, canonical_id, name, canonical_parent_id
       FROM catalog_id_mappings
     `);
-    const normalizedProducts = products.map((product) => normalizeProductCatalogReferences(product, mappingResult.rows));
+    const normalizedProducts = products.map((product, position) => normalizeProductCatalogReferences({
+      ...product,
+      source_position: product.source_position ?? position,
+    }, mappingResult.rows));
     const keptIds = [];
 
     for (const product of normalizedProducts) {
@@ -608,8 +613,8 @@ async function saveBatchProducts(batchId, products) {
           SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
               photos=$14::jsonb,attributes=$15::jsonb,ai_processed=$16,batch_id=$17,
-              variant_group_key=$18,ai_error=$19,ai_confidence=$20,updated_at=NOW()
-          WHERE id=$21 AND batch_id=$17
+              variant_group_key=$18,ai_error=$19,ai_confidence=$20,source_position=$21,updated_at=NOW()
+          WHERE id=$22 AND batch_id=$17
           RETURNING id
         `, [
           normalized.external_id,
@@ -632,6 +637,7 @@ async function saveBatchProducts(batchId, products) {
           normalized.variant_group_key,
           normalized.ai_error,
           normalized.ai_confidence,
+          normalized.source_position,
           numericId,
         ]);
         if (updateRes.rowCount > 0) {
@@ -641,8 +647,8 @@ async function saveBatchProducts(batchId, products) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
         ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -662,6 +668,7 @@ async function saveBatchProducts(batchId, products) {
           variant_group_key = EXCLUDED.variant_group_key,
           ai_error = EXCLUDED.ai_error,
           ai_confidence = EXCLUDED.ai_confidence,
+          source_position = EXCLUDED.source_position,
           updated_at = NOW()
         RETURNING id
       `, [
@@ -685,6 +692,7 @@ async function saveBatchProducts(batchId, products) {
         normalized.variant_group_key,
         normalized.ai_error,
         normalized.ai_confidence,
+        normalized.source_position,
       ]);
       if (insertRes.rows[0]?.id) keptIds.push(Number(insertRes.rows[0].id));
     }
@@ -716,7 +724,7 @@ async function recordBatchSnapshot(batchId, stage, label) {
 
 async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount }) {
   const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
-  const items = parseCsvObjects(fileContent);
+  const items = JSON.parse(fileContent);
   if (items.length === 0) return null;
 
   const batchId = crypto.randomUUID();
@@ -727,13 +735,8 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
   );
   await scrapingPool.query('UPDATE scraping_tasks SET batch_id=$1 WHERE id=$2', [batchId, taskId]);
 
-  const products = items.map((item) => {
-    let photos = [];
-    try {
-      photos = item.photos ? JSON.parse(item.photos) : [];
-    } catch {
-      photos = normalizePhotos(item.photos);
-    }
+  const products = items.map((item, sourcePosition) => {
+    const photos = normalizePhotos(item.photos);
     return normalizeProduct({
       ...item,
       external_id: item.external_id,
@@ -746,6 +749,7 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
       subcategory: item.subcategory || supplier.default_subcategory || null,
       gender: item.gender || supplier.default_gender || '',
       photos,
+      source_position: item.source_position ?? sourcePosition,
       batch_id: batchId,
     });
   }).filter((product) => product.external_id || product.name);
@@ -769,7 +773,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
 
   const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
   ensureDir(tmpDir);
-  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_${taskId}.csv`);
+  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_${taskId}.json`);
   const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py');
   const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || '';
   const args = [
@@ -777,6 +781,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
     '--album_id', supplier.album_id,
     '--cookie', cookie,
     '--output', outputPath,
+    '--format', 'json',
   ];
   if (endDate) args.push('--end_date', endDate);
 
@@ -809,7 +814,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
   });
 
   pythonProcess.on('close', async (code) => {
-    const status = code === 0 ? 'Сырой CSV' : 'failed';
+    const status = code === 0 ? 'Сырой товар' : 'failed';
     const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`);
     let itemsCount = 0;
     let batchId = null;
@@ -817,25 +822,34 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
     try {
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
-        const lines = fileContent.split('\n').filter((line) => line.trim());
-        itemsCount = Math.max(0, lines.length - 1);
+        const parsedProducts = JSON.parse(fileContent);
+        itemsCount = Array.isArray(parsedProducts) ? parsedProducts.length : 0;
       }
 
       await scrapingPool.query(
         `UPDATE scraping_tasks SET status=$1, result_path=$2, error_message=$3, items_count=$4, updated_at=NOW() WHERE id=$5`,
-        [status, code === 0 ? outputPath : null, errorMsg, itemsCount, taskId],
+        [status, null, errorMsg, itemsCount, taskId],
       );
 
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         batchId = await importScrapedFileToBatch({ supplier: parserSupplier, taskId, outputPath, itemsCount });
         if (batchId && supplier.post_process_enabled && supplier.post_process_script) {
           try {
-            await runBatchPostProcessScript(batchId, outputPath);
+            await runBatchPostProcessScript(batchId);
           } catch (postProcessError) {
             console.error(`[Scraper ${taskId}] Auto post-process failed:`, postProcessError);
           }
         }
       }
+      if (batchId) {
+        await scrapingPool.query(
+          'UPDATE scraping_tasks SET result_path=$1 WHERE id=$2',
+          [`db://batch/${batchId}/raw`, taskId],
+        );
+      }
+      try {
+        if (fs.existsSync(/*turbopackIgnore: true*/ outputPath)) fs.unlinkSync(/*turbopackIgnore: true*/ outputPath);
+      } catch {}
     } catch (error) {
       console.error(`[Scraper ${taskId}] import failed:`, error);
       await scrapingPool.query(
@@ -906,10 +920,7 @@ async function processBatchWithAi(batchId) {
 
   await saveBatchProducts(batchId, products);
 
-  const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
-  ensureDir(tmpDir);
-  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_ai_${Math.floor(Math.random() * 1000000)}.csv`);
-  fs.writeFileSync(/*turbopackIgnore: true*/ outputPath, serializeProductsToCsv(products), 'utf-8');
+  const outputPath = `db://batch/${batchId}/ai`;
 
   await scrapingPool.query(`
     INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
@@ -929,48 +940,30 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
 
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров');
+  const snapshotResult = await scrapingPool.query(`
+    SELECT products
+    FROM batch_snapshots
+    WHERE batch_id=$1 AND stage='SCRAPED'
+    ORDER BY created_at ASC
+    LIMIT 1
+  `, [batchId]);
+  const sourceProducts = Array.isArray(snapshotResult.rows[0]?.products)
+    ? snapshotResult.rows[0].products
+    : products;
+  const processedProducts = await runSupplierJsonProcess(supplier.post_process_script, sourceProducts);
+  if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
 
-  const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
-  ensureDir(tmpDir);
-  const taskId = Math.floor(Math.random() * 1000000);
-  const inputPath = sourceInputPath || path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
-  const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
-  if (!sourceInputPath) {
-    const rawArtifact = await scrapingPool.query(`
-      SELECT content FROM scraping_files
-      WHERE batch_id=$1 AND status='Сырой CSV' AND content IS NOT NULL
-      ORDER BY created_at DESC LIMIT 1
-    `, [batchId]);
-    fs.writeFileSync(
-      /*turbopackIgnore: true*/ inputPath,
-      rawArtifact.rows[0]?.content || serializeProductsToCsv(products, supplierScriptColumns(products)),
-      'utf-8',
-    );
-  }
-
-  const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', supplier.post_process_script);
-  await new Promise((resolve, reject) => {
-    const child = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', [scriptPath, inputPath, outputPath]);
-    let stderr = '';
-    child.stderr.on('data', (data) => { stderr += data.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) return reject(new Error(stderr || `Post-process exited with ${code}`));
-      resolve();
-    });
-  });
-
-  const processedProducts = fs.existsSync(/*turbopackIgnore: true*/ outputPath)
-    ? parseCsvText(fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8'))
-    : [];
-  if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой файл');
-
-  const originalByExternalId = new Map(products.map((product) => [String(product.external_id), product]));
-  for (const processedProduct of processedProducts) {
+  const originalByExternalId = new Map(sourceProducts.map((product, position) => [
+    String(product.external_id),
+    { ...product, source_position: product.source_position ?? position },
+  ]));
+  for (let position = 0; position < processedProducts.length; position++) {
+    const processedProduct = processedProducts[position];
     const original = originalByExternalId.get(String(processedProduct.external_id));
     if (Object.keys(processedProduct.attributes || {}).length === 0) {
       if (original?.attributes) processedProduct.attributes = original.attributes;
     }
+    processedProduct.source_position = original?.source_position ?? position;
     processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
       ? 'script'
       : (original?.price_source || 'default');
@@ -982,9 +975,9 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   await scrapingPool.query(`
     INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
     VALUES ($1, $2, 'Обработано скриптом', $3, $4, NOW())
-  `, [batch.supplier_id, batchId, outputPath, processedProducts.length]);
+  `, [batch.supplier_id, batchId, `db://batch/${batchId}/script`, processedProducts.length]);
 
-  return { processed: processedProducts.length, path: outputPath };
+  return { processed: processedProducts.length, path: `db://batch/${batchId}/script` };
 }
 
 const s3Client = new S3Client({

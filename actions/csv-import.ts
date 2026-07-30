@@ -39,6 +39,7 @@ export interface CsvProduct {
     variant_group_key?: string | null
     ai_error?: string | null
     ai_confidence?: number | null
+    source_position?: number | null
 }
 
 export interface Lookups {
@@ -128,6 +129,7 @@ function normalizeBatchProduct(row: any): CsvProduct {
     variant_group_key: row.variant_group_key || null,
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence === null || row.ai_confidence === undefined ? null : Number(row.ai_confidence),
+    source_position: row.source_position === null || row.source_position === undefined ? null : Number(row.source_position),
   }
 }
 
@@ -475,7 +477,7 @@ export async function getBatchProductsAction(batchId: string) {
       SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
         p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
-        p.ai_confidence, p.created_at, p.updated_at,
+        p.ai_confidence, p.source_position, p.created_at, p.updated_at,
         EXISTS (
           SELECT 1 FROM batch_ai_items i
           JOIN batch_ai_runs r ON r.id=i.run_id
@@ -483,7 +485,7 @@ export async function getBatchProductsAction(batchId: string) {
         ) AS ai_sampled
       FROM products p
       WHERE p.batch_id = $1
-      ORDER BY p.id ASC
+      ORDER BY p.source_position ASC NULLS LAST, p.id ASC
     `, [batchId])
 
     if (res.rows.length === 0) {
@@ -502,13 +504,13 @@ export async function getBatchProductsAction(batchId: string) {
           SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
             p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
             p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
-            p.ai_confidence, p.created_at, p.updated_at,
+            p.ai_confidence, p.source_position, p.created_at, p.updated_at,
             EXISTS (
               SELECT 1 FROM batch_ai_items i
               JOIN batch_ai_runs r ON r.id=i.run_id
               WHERE i.product_id=p.id AND r.batch_id=p.batch_id AND r.mode='sample'
             ) AS ai_sampled
-          FROM products p WHERE p.batch_id=$1 ORDER BY p.id ASC
+          FROM products p WHERE p.batch_id=$1 ORDER BY p.source_position ASC NULLS LAST, p.id ASC
         `, [batchId])
       }
     }
@@ -526,8 +528,12 @@ export async function getBatchProductsAction(batchId: string) {
   }
 }
 
-async function upsertBatchProduct(client: any, batchId: string, product: any) {
-  const normalized = normalizeBatchProduct({ ...product, batch_id: batchId })
+async function upsertBatchProduct(client: any, batchId: string, product: any, position: number) {
+  const normalized = normalizeBatchProduct({
+    ...product,
+    batch_id: batchId,
+    source_position: product.source_position ?? position,
+  })
   const numericId = normalized.id !== undefined && normalized.id !== null && String(normalized.id).match(/^\d+$/)
     ? Number(normalized.id)
     : null
@@ -538,8 +544,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       SET external_id=$1, name=$2, description=$3, h1=$4, seo_title=$5, seo_description=$6,
           price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
           photos=$14::jsonb, attributes=$15::jsonb, ai_processed=$16, batch_id=$17,
-          variant_group_key=$18, ai_error=$19, ai_confidence=$20, updated_at=NOW()
-      WHERE id=$21 AND batch_id=$17
+          variant_group_key=$18, ai_error=$19, ai_confidence=$20, source_position=$21, updated_at=NOW()
+      WHERE id=$22 AND batch_id=$17
       RETURNING id
     `, [
       normalized.external_id,
@@ -562,14 +568,15 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       normalized.variant_group_key || null,
       normalized.ai_error || null,
       normalized.ai_confidence ?? null,
+      normalized.source_position,
       numericId,
     ])
     if (updateRes.rowCount > 0) return updateRes.rows[0].id
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, created_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,NOW(),NOW())
+    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
     ON CONFLICT (batch_id, external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -589,6 +596,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
       variant_group_key = EXCLUDED.variant_group_key,
       ai_error = EXCLUDED.ai_error,
       ai_confidence = EXCLUDED.ai_confidence,
+      source_position = EXCLUDED.source_position,
       updated_at = NOW()
     RETURNING id
   `, [
@@ -612,6 +620,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any) {
     normalized.variant_group_key || null,
     normalized.ai_error || null,
     normalized.ai_confidence ?? null,
+    normalized.source_position,
   ])
 
   return insertRes.rows[0]?.id
@@ -633,8 +642,9 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
     )
     const keptIds: number[] = []
 
-    for (const product of normalizedProducts) {
-      const savedId = await upsertBatchProduct(client, batchId, product)
+    for (let position = 0; position < normalizedProducts.length; position++) {
+      const product = normalizedProducts[position]
+      const savedId = await upsertBatchProduct(client, batchId, product, position)
       if (savedId) keptIds.push(Number(savedId))
     }
 
@@ -783,34 +793,12 @@ export async function recordAiTaskAction({
 
     if (!supplierId) throw new Error("Missing supplierId");
 
-    // 1. Генерируем путь для нового AI-файла
-    const taskId = Math.floor(Math.random() * 1000000); // Генерим ID для имени файла
-    const fs = require('fs/promises');
-    const path = require('path');
-    const tmpDir = getWritableTmpDir();
-    const outputFileName = `task_ai_${taskId}.csv`;
-    const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, outputFileName);
-    const csvContent = serializeProductsToCsv(products, columns, delimiter);
-
-    // 2. Сохраняем файл во временную writable-директорию.
-    await fs.mkdir(tmpDir, { recursive: true });
-    await fs.writeFile(/*turbopackIgnore: true*/ outputPath, csvContent, 'utf-8');
-
-    // 3. Создаем запись в технической БД (scraping_tasks)
+    const resultPath = batchId ? `db://batch/${batchId}/ai` : null;
     const taskRes = await scrapingQuery(`
       INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
       RETURNING id
-    `, [supplierId, batchId || null, 'Обработано ИИ', outputPath, products.length]);
-
-    await saveScrapingFileArtifact({
-      taskId: taskRes.rows[0].id,
-      supplierId,
-      batchId,
-      status: 'Обработано ИИ',
-      filePath: outputPath,
-      content: csvContent,
-    });
+    `, [supplierId, batchId || null, 'Обработано ИИ', resultPath, products.length]);
 
     // 4. Обновляем стадию партии (если она есть)
     if (batchId) {
@@ -822,7 +810,7 @@ export async function recordAiTaskAction({
     revalidatePath('/admin/scraping');
     revalidatePath('/admin/batches');
 
-    return { success: true, path: outputPath };
+    return { success: true, path: resultPath, taskId: taskRes.rows[0].id };
   } catch (err: any) {
     console.error('Record AI task error:', err);
     return { success: false, error: err.message };
@@ -853,125 +841,72 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     if (!supplierData.post_process_script) {
         throw new Error("Скрипт не назначен для этого поставщика");
     }
+    if (!batchId) throw new Error("Для JSON-обработки требуется batchId");
 
-    const { spawn } = require('child_process');
-    const path = require('path');
-    const fs = require('fs');
-    
-    const tmpDir = getWritableTmpDir();
-    if (!fs.existsSync(/*turbopackIgnore: true*/ tmpDir)) {
-        fs.mkdirSync(/*turbopackIgnore: true*/ tmpDir, { recursive: true });
-    }
-    const taskId = Math.floor(Math.random() * 1000000);
-    let effectiveInputPath = inputPath ? resolveSafeRuntimePath(inputPath) : inputPath;
-    let originalProducts: any[] = [];
-    const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `task_custom_${taskId}.csv`);
-
-    if (batchId) {
-        const batchRes = await getBatchProductsAction(batchId);
-        if (!batchRes.success || !batchRes.data) {
-            throw new Error(batchRes.error || "Не удалось загрузить товары партии");
-        }
-        originalProducts = batchRes.data.products || [];
-        if (!effectiveInputPath) {
-          const rawArtifact = await scrapingQuery(`
-            SELECT content FROM scraping_files
-            WHERE batch_id=$1 AND status='Сырой CSV' AND content IS NOT NULL
-            ORDER BY created_at DESC LIMIT 1
-          `, [batchId]);
-          effectiveInputPath = path.join(/*turbopackIgnore: true*/ tmpDir, `batch_${batchId}_custom_input_${taskId}.csv`);
-          fs.writeFileSync(
-              /*turbopackIgnore: true*/ effectiveInputPath,
-              rawArtifact.rows[0]?.content || serializeProductsToCsv(batchRes.data.products, supplierScriptColumns(batchRes.data.products), ';'),
-              'utf-8'
-          );
-        }
+    const currentRes = await getBatchProductsAction(batchId);
+    if (!currentRes.success || !currentRes.data) {
+      throw new Error(currentRes.error || "Не удалось загрузить товары партии");
     }
 
-    if (!effectiveInputPath) throw new Error("Не указан CSV-файл или batchId");
+    const rawSnapshot = await scrapingQuery(`
+      SELECT products
+      FROM batch_snapshots
+      WHERE batch_id=$1 AND stage='SCRAPED'
+      ORDER BY created_at ASC
+      LIMIT 1
+    `, [batchId]);
+    const currentProducts = currentRes.data.products || [];
+    const sourceProducts = Array.isArray(rawSnapshot.rows[0]?.products)
+      ? rawSnapshot.rows[0].products
+      : currentProducts;
+    if (sourceProducts.length === 0) throw new Error("В партии нет товаров");
 
-    const parserDir = path.resolve(process.cwd(), 'scripts', 'parser');
-    const pythonScript = path.resolve(parserDir, supplierData.post_process_script);
-    if (!pythonScript.startsWith(`${parserDir}${path.sep}`)) {
-      throw new Error("Недопустимый post-process скрипт");
+    const { runSupplierJsonProcess } = require('../scripts/lib/supplier-json-process');
+    const processedProducts = await runSupplierJsonProcess(
+      supplierData.post_process_script,
+      sourceProducts,
+    );
+    if (!Array.isArray(processedProducts) || processedProducts.length === 0) {
+      throw new Error("Скрипт вернул пустой массив товаров");
     }
-    
-    return new Promise((resolve) => {
-        const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', [pythonScript, effectiveInputPath!, outputPath]);
-        let stderr = '';
-        
-        pythonProcess.stderr.on('data', (data: any) => {
-            stderr += data.toString();
-        });
 
-        pythonProcess.on('close', async (code: number) => {
-            if (code !== 0) {
-                resolve({ success: false, error: stderr || `Exit code ${code}` });
-            } else {
-                // Подсчитываем товары в новом файле
-                let itemsCount = 0;
-                try {
-                    if (fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
-                        const content = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
-                        const lines = content.split('\n').filter((l: string) => l.trim());
-                        if (lines.length > 1) itemsCount = lines.length - 1;
-                    }
-                } catch (e) {
-                    console.error("Error counting lines in custom script output:", e);
-                }
+    const originalByExternalId = new Map(
+      sourceProducts.map((product: any, position: number) => [
+        String(product.external_id),
+        { ...product, source_position: product.source_position ?? position },
+      ]),
+    );
+    for (let position = 0; position < processedProducts.length; position++) {
+      const processedProduct = processedProducts[position];
+      const original: any = originalByExternalId.get(String(processedProduct.external_id));
+      if (Object.keys(processedProduct.attributes || {}).length === 0 && original?.attributes) {
+        processedProduct.attributes = original.attributes;
+      }
+      processedProduct.source_position = original?.source_position ?? position;
+      processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
+        ? 'script'
+        : (original?.price_source || 'default');
+    }
 
-                // Создаем запись в истории
-                try {
-                    const taskRes = await scrapingQuery(`
-                        INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
-                        VALUES ($1, $2, $3, $4, $5, NOW())
-                        RETURNING id
-                    `, [supplierId, batchId || null, 'Обработано скриптом', outputPath, itemsCount]);
+    const saveRes = await saveBatchProductsAction(batchId, processedProducts);
+    if (!saveRes.success) throw new Error(saveRes.error);
+    await scrapingQuery("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
+    await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
 
-                    await saveScrapingFileArtifact({
-                        taskId: taskRes.rows[0].id,
-                        supplierId,
-                        batchId,
-                        status: 'Обработано скриптом',
-                        filePath: outputPath,
-                    });
+    const taskRes = await scrapingQuery(`
+      INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
+      VALUES ($1, $2, 'Обработано скриптом', $3, $4, NOW())
+      RETURNING id
+    `, [supplierId, batchId, `db://batch/${batchId}/script`, processedProducts.length]);
 
-                    if (batchId && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
-                        const processedText = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
-                        const processedProducts = parseServerCsv(processedText);
-                        const originalByExternalId = new Map(originalProducts.map((product: any) => [String(product.external_id), product]));
-                        for (const processedProduct of processedProducts) {
-                          const original = originalByExternalId.get(String(processedProduct.external_id));
-                          if (Object.keys(processedProduct.attributes || {}).length === 0) {
-                            if (original?.attributes) processedProduct.attributes = original.attributes;
-                          }
-                          processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
-                            ? 'script'
-                            : (original?.price_source || 'default');
-                        }
-                        const saveRes = await saveBatchProductsAction(batchId, processedProducts);
-                        if (!saveRes.success) throw new Error(saveRes.error);
-                        await scrapingQuery("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
-                        await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
-                        itemsCount = processedProducts.length;
-                        await scrapingQuery(
-                            'UPDATE scraping_tasks SET items_count=$1 WHERE result_path=$2',
-                            [itemsCount, outputPath]
-                        );
-                    }
-                    
-                    revalidatePath('/admin/scraping');
-                    revalidatePath('/admin/batches');
-                } catch (dbErr) {
-                    console.error("Error recording custom script task:", dbErr);
-                    resolve({ success: false, error: dbErr instanceof Error ? dbErr.message : "Ошибка сохранения результата скрипта" });
-                    return;
-                }
-
-                resolve({ success: true, path: outputPath });
-            }
-        });
-    });
+    revalidatePath('/admin/scraping');
+    revalidatePath('/admin/batches');
+    return {
+      success: true,
+      path: `db://batch/${batchId}/script`,
+      taskId: taskRes.rows[0].id,
+      count: processedProducts.length,
+    };
   } catch (err: any) {
     return { success: false, error: err.message };
   }

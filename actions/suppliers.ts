@@ -707,7 +707,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
     // 3. Подготавливаем пути
     const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp')
-    const outputFileName = `task_${taskId}.csv`
+    const outputFileName = `task_${taskId}.json`
     const outputPath = path.join(/*turbopackIgnore: true*/ tmpDir, outputFileName)
     const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
     
@@ -717,7 +717,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
       scriptPath,
       '--album_id', supplier.album_id,
       '--cookie', cookie,
-      '--output', outputPath
+      '--output', outputPath,
+      '--format', 'json'
     ]
     if (endDate) args.push('--end_date', endDate)
     
@@ -766,7 +767,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     })
 
     pythonProcess.on('close', async (code) => {
-      const status = code === 0 ? 'Сырой CSV' : 'failed'
+      const status = code === 0 ? 'Сырой товар' : 'failed'
       const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`)
       let batchId: string | null = null
       
@@ -774,10 +775,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         try {
           const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
-          const lines = fileContent.split('\n').filter(l => l.trim())
-          if (lines.length > 1) {
-            itemsCount = lines.length - 1
-          }
+          const products = JSON.parse(fileContent)
+          itemsCount = Array.isArray(products) ? products.length : 0
         } catch (e) {
           console.error(`[Scraper ${taskId}] Error reading file for count:`, e)
         }
@@ -785,17 +784,17 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
       await scrapingQuery(
         `UPDATE scraping_tasks SET status=$1, result_path=$2, error_message=$3, items_count=$4, updated_at=NOW() WHERE id=$5`,
-        [status, code === 0 ? outputPath : null, errorMsg, itemsCount, taskId]
+        [status, null, errorMsg, itemsCount, taskId]
       )
 
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         try {
           console.log(`[Scraper ${taskId}] Starting data import to batch...`)
-          // 1. Читаем CSV
+          // 1. Читаем JSON-массив парсера
           const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
-          const lines = fileContent.split('\n').filter(l => l.trim())
+          const items = JSON.parse(fileContent)
           
-          if (lines.length > 1) { // Если есть больше чем заголовок
+          if (Array.isArray(items) && items.length > 0) {
             const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`
             
             // 2. Создаем партию
@@ -812,22 +811,12 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
             )
 
             // 3. Импортируем товары
-            // Простой парсер CSV (учитывая кавычки в описании и разделитель ;)
-            const delimiter = lines[0].includes(';') ? ';' : ','
-            const headers = parseDelimitedLine(lines[0], delimiter)
-            for (let i = 1; i < lines.length; i++) {
-               const row = parseDelimitedLine(lines[i], delimiter)
-               if (row.length === 0) continue
-
-               const item: any = {}
-               headers.forEach((h, idx) => {
-                  item[h.trim()] = row[idx] || ''
-               })
-
+            for (let i = 0; i < items.length; i++) {
+               const item: any = items[i]
                // Мапим поля в БД
                const sql = `
-                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, created_at, updated_at)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, NOW(), NOW())
+                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, source_position, created_at, updated_at)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
                   ON CONFLICT (batch_id, external_id) DO UPDATE SET
                       name = EXCLUDED.name,
                       description = EXCLUDED.description,
@@ -839,6 +828,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                       gender = EXCLUDED.gender,
                       photos = EXCLUDED.photos,
                       attributes = EXCLUDED.attributes,
+                      source_position = EXCLUDED.source_position,
                       created_at = COALESCE(products.created_at, NOW()),
                       updated_at = NOW()
                `
@@ -867,7 +857,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                   gender,
                   JSON.stringify(photos),
                   JSON.stringify(extractProductAttributes(item)),
-                  batchId
+                  batchId,
+                  Number.isFinite(Number(item.source_position)) ? Number(item.source_position) : i
                ])
             }
             console.log(`[Scraper ${taskId}] Imported ${itemsCount} items to batch ${batchId}`)
@@ -876,9 +867,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
             if (supplier.post_process_enabled && supplier.post_process_script && batchId) {
               console.log(`[Scraper ${taskId}] Auto post-process enabled: ${supplier.post_process_script}`)
-              // Some supplier scripts pair neighbouring source albums. Use
-              // the raw parser file so DB upserts cannot reorder those rows.
-              const postProcessResult = await runCustomSupplierScriptAction(outputPath, supplier.id, batchId)
+              // Some supplier scripts pair neighbouring source albums. The
+              // JSONB snapshot preserves their source_position.
+              const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
               if (!postProcessResult?.success) {
                 console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error || 'unknown error'}`)
               }
@@ -888,17 +879,13 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
           console.error(`[Scraper ${taskId}] Import failed:`, importErr)
         }
 
-        try {
-          await saveScrapingFileArtifact({
-            taskId,
-            supplierId: supplier.id,
-            batchId,
-            status,
-            filePath: outputPath,
-          })
-        } catch (fileErr) {
-          console.error(`[Scraper ${taskId}] Failed to store CSV artifact in DB:`, fileErr)
+        if (batchId) {
+          await scrapingQuery(
+            'UPDATE scraping_tasks SET result_path=$1 WHERE id=$2',
+            [`db://batch/${batchId}/raw`, taskId],
+          )
         }
+        try { fs.unlinkSync(/*turbopackIgnore: true*/ outputPath) } catch {}
       }
 
       // Уведомление в Telegram

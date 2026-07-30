@@ -19,7 +19,7 @@ NocoDB         -> Rails CRM read-only access
 
 | Система | Что хранит | Кто пишет |
 |---|---|---|
-| `yeezy_scraping` | Поставщики, scraping-задачи, CSV-снапшоты, AI-результаты, партии | `AdminYeezy` |
+| `yeezy_scraping` | Поставщики, scraping-задачи, JSONB-снимки, AI-результаты, партии | `AdminYeezy` |
 | Rails CRM Postgres | Опубликованный каталог, клиенты, заказы, платежи, возвраты, wallet | Rails services |
 | Legacy `shop` | Старый каталог и переходные справочники | Старый контур до завершения миграции |
 | Elasticsearch | Поисковая read model | Rails search jobs |

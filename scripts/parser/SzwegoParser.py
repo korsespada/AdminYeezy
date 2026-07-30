@@ -115,7 +115,8 @@ def main():
     parser.add_argument("--end_date", help="Stop date (YYYY-MM-DD)")
     parser.add_argument("--group_id", default="", help="Group ID filter")
     parser.add_argument("--tag_id", default="", help="Tag ID filter")
-    parser.add_argument("--output", default="szwego.csv", help="Output CSV path")
+    parser.add_argument("--output", default="szwego.json", help="Output path")
+    parser.add_argument("--format", choices=("json", "csv"), default="json", help="Output format")
     parser.add_argument("--min_photos", type=int, default=3)
     parser.add_argument("--min_desc", type=int, default=10)
     parser.add_argument("--category", default="")
@@ -424,16 +425,27 @@ def main():
         if skip_reasons:
             print(f"Skip reasons: {skip_reasons}")
             
-        with open(args.output, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.writer(f, delimiter=";", lineterminator="\n")
-            writer.writerow(csv_header)
-            if all_rows:
-                writer.writerows(all_rows)
+        with open(args.output, "w", newline="", encoding="utf-8") as f:
+            if args.format == "json":
+                products = [
+                    {
+                        **dict(zip(csv_header, row)),
+                        "photos": json.loads(row[8]) if row[8] else [],
+                        "source_position": index,
+                    }
+                    for index, row in enumerate(all_rows)
+                ]
+                json.dump(products, f, ensure_ascii=False)
+            else:
+                writer = csv.writer(f, delimiter=";", lineterminator="\n")
+                writer.writerow(csv_header)
+                if all_rows:
+                    writer.writerows(all_rows)
         
         if all_rows:
             print(f"Final: Saved {len(all_rows)} items to {args.output}")
         else:
-            print("No items found, but CSV header created.")
+            print("No items found.")
 
 if __name__ == "__main__":
     main()

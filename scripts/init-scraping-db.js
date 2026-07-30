@@ -140,6 +140,7 @@ async function init() {
         gender TEXT,
         photos JSONB,
         attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+        source_position INTEGER,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()

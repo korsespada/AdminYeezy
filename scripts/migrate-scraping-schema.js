@@ -286,6 +286,7 @@ async function migrate() {
         gender TEXT,
         photos JSONB,
         attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+        source_position INTEGER,
         ai_processed BOOLEAN DEFAULT FALSE,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -295,6 +296,7 @@ async function migrate() {
 
     await pool.query(`
       ALTER TABLE products
+        ADD COLUMN IF NOT EXISTS source_position INTEGER,
         ADD COLUMN IF NOT EXISTS external_id TEXT,
         ADD COLUMN IF NOT EXISTS name TEXT,
         ADD COLUMN IF NOT EXISTS description TEXT,

@@ -1,8 +1,29 @@
-import pandas as pd
 import csv
 import os
 
+
+def process_products(products):
+    result = []
+    pending_indices = []
+    for product in products:
+        description = str(product.get("description") or "")
+        if description.startswith("细节图请品鉴"):
+            pending_indices.append(len(result))
+            result.append(dict(product))
+        elif "💰" in description:
+            if pending_indices:
+                for index in pending_indices:
+                    result[index]["description"] = description
+                pending_indices = []
+            else:
+                result.append(dict(product))
+        else:
+            result.append(dict(product))
+    return result
+
+
 def fix_csv_descriptions(input_path, output_path):
+    import pandas as pd
     print(f"Читаю файл: {input_path}...")
     # Загружаем CSV с разделителем ;
     df = pd.read_csv(input_path, sep=';', encoding='utf-8-sig')

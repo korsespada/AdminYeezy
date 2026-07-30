@@ -15,7 +15,7 @@ AdminYeezy -> yeezy_scraping
            -> Rails API -> Rails CRM Postgres -> storefront
 ```
 
-- `yeezy_scraping` - техническая БД этой админки: поставщики, задачи парсинга, CSV-снапшоты, AI и партии.
+- `yeezy_scraping` - техническая БД этой админки: поставщики, JSONB-снимки этапов, AI и партии.
 - Rails CRM Postgres - единственный source of truth для опубликованного каталога, сайта и будущей CRM.
 - `shop` - legacy-каталог, только источник bootstrap-импорта и переходных справочников.
 - NocoDB - дополнительный операторский инструмент, но не обход Rails workflow.
