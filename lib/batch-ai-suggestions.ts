@@ -30,6 +30,18 @@ export function subcategoryFamilyKey(value: unknown) {
     .join('_')
 }
 
+export function sameSubcategoryFamily(left: unknown, right: unknown) {
+  const leftTokens = subcategoryFamilyKey(left).split('_').filter(Boolean)
+  const rightTokens = subcategoryFamilyKey(right).split('_').filter(Boolean)
+  if (!leftTokens.length || !rightTokens.length) return false
+  if (leftTokens.join('_') === rightTokens.join('_')) return true
+  const leftSet = new Set(leftTokens)
+  const rightSet = new Set(rightTokens)
+  const shared = leftTokens.filter((token) => rightSet.has(token)).length
+  const shorter = Math.min(leftSet.size, rightSet.size)
+  return shared >= 2 && shared === shorter
+}
+
 function suggestionsFromOutput(normalized: any) {
   const suggestions = [...(normalized.suggestions || [])]
   if (normalized.subcategorySuggestion?.name) {
@@ -72,7 +84,7 @@ export async function saveBatchAiSuggestions(
       key = familyKey
       const parentId = String(suggestion.parent_category_id || '')
       const mappings = await catalogSubcategories(client, parentId)
-      const existing = mappings.find((row) => subcategoryFamilyKey(row.name) === familyKey)
+      const existing = mappings.find((row) => sameSubcategoryFamily(row.name, suggestion.name || suggestion.code))
       if (existing) {
         await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=$2', [String(existing.canonical_id), productId])
         continue
@@ -86,7 +98,7 @@ export async function saveBatchAiSuggestions(
       `, [batchId])
       const sameFamily = pending.rows.find((row) => {
         const payload = row.payload || {}
-        return subcategoryFamilyKey(payload.name || payload.code) === familyKey
+        return sameSubcategoryFamily(payload.name || payload.code, suggestion.name || suggestion.code)
           && (!parentId || !payload.parent_category_id || String(payload.parent_category_id) === parentId)
       })
       if (sameFamily) {
@@ -130,7 +142,7 @@ export async function reconcileBatchSubcategorySuggestions(client: QueryClient, 
     const familyKey = subcategoryFamilyKey(payload.name || payload.code || row.canonical_key)
     const parentId = String(payload.parent_category_id || '')
     const mappings = await catalogSubcategories(client, parentId)
-    const existing = mappings.find((mapping) => subcategoryFamilyKey(mapping.name) === familyKey)
+    const existing = mappings.find((mapping) => sameSubcategoryFamily(mapping.name, payload.name || payload.code || row.canonical_key))
     if (existing) {
       await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=ANY($2::int[])', [
         String(existing.canonical_id),
@@ -140,7 +152,11 @@ export async function reconcileBatchSubcategorySuggestions(client: QueryClient, 
       continue
     }
 
-    const duplicate = firstByFamily.get(`${parentId}:${familyKey}`)
+    const familyEntry = [...firstByFamily.entries()].find(([storedKey]) => {
+      const [storedParent, ...storedFamily] = storedKey.split(':')
+      return storedParent === parentId && sameSubcategoryFamily(storedFamily.join(':'), familyKey)
+    })
+    const duplicate = familyEntry?.[1]
     if (!duplicate) {
       firstByFamily.set(`${parentId}:${familyKey}`, row)
       continue
