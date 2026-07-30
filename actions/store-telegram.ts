@@ -8,6 +8,7 @@ import { uploadToS3 } from '@/lib/s3'
 
 const TELEGRAM_PATH = '/admin/crm/telegram'
 const MAX_MEDIA_SIZE = 20 * 1024 * 1024
+type TelegramButtonStyle = 'primary' | 'success' | 'danger'
 
 function requiredString(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -42,12 +43,21 @@ export async function createStoreTelegramCampaignAction(formData: FormData) {
     throw new Error('Укажите Telegram ID')
   }
 
+  const buttonColumns = formData.get('buttonColumns') === '2' ? 2 : 1
   const buttons = [1, 2, 3].flatMap((index) => {
     const text = String(formData.get(`buttonText${index}`) || '').trim()
     const url = String(formData.get(`buttonUrl${index}`) || '').trim()
     const webApp = formData.get(`buttonWebApp${index}`) === 'on'
-    return text && url ? [{ text, url, web_app: webApp }] : []
-  })
+    const styleValue = String(formData.get(`buttonStyle${index}`) || '')
+    const style: TelegramButtonStyle | undefined =
+      styleValue === 'primary' || styleValue === 'success' || styleValue === 'danger'
+      ? styleValue
+      : undefined
+    return text && url ? [{ text, url, web_app: webApp, style }] : []
+  }).map((button, index) => ({
+    ...button,
+    row: Math.floor(index / buttonColumns),
+  }))
 
   await createRailsStoreTelegramCampaign({
     title: requiredString(formData, 'title'),

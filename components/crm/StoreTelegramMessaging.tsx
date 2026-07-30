@@ -43,6 +43,24 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
             <Field label="Текст сообщения (поддерживается Telegram HTML)">
               <textarea name="body" required rows={8} placeholder="<b>Новая коллекция</b> уже на сайте" className={inputClassName} />
             </Field>
+            <details className="rounded-md border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
+              <summary className="cursor-pointer font-medium text-sky-300">
+                Подсказка по HTML-разметке
+              </summary>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <code>&lt;b&gt;жирный&lt;/b&gt;</code>
+                <code>&lt;i&gt;курсив&lt;/i&gt;</code>
+                <code>&lt;u&gt;подчёркнутый&lt;/u&gt;</code>
+                <code>&lt;s&gt;зачёркнутый&lt;/s&gt;</code>
+                <code>&lt;tg-spoiler&gt;скрытый текст&lt;/tg-spoiler&gt;</code>
+                <code>&lt;a href=&quot;https://...&quot;&gt;ссылка&lt;/a&gt;</code>
+                <code>&lt;code&gt;YOU10&lt;/code&gt;</code>
+                <code>&lt;blockquote&gt;цитата&lt;/blockquote&gt;</code>
+              </div>
+              <p className="mt-3">
+                Символы вне тегов экранируйте: &amp;lt; для &lt;, &amp;gt; для &gt; и &amp;amp; для &amp;.
+              </p>
+            </details>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Тип медиа">
@@ -61,20 +79,42 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
             </Field>
 
             <div>
-              <div className="mb-3 flex items-center gap-2">
-                <ImageIcon className="h-4 w-4 text-violet-300" />
-                <h3 className="font-medium">Кнопки</h3>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4 text-violet-300" />
+                  <h3 className="font-medium">Кнопки</h3>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-slate-400">
+                  Кнопок в строке
+                  <select name="buttonColumns" defaultValue="1" className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-white">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                  </select>
+                </label>
               </div>
               {[1, 2, 3].map((index) => (
                 <div key={index} className="mb-3 grid gap-3 rounded-md border border-slate-800 p-3 sm:grid-cols-2">
                   <input name={`buttonText${index}`} placeholder={`Текст кнопки ${index}`} className={inputClassName} />
                   <input name={`buttonUrl${index}`} type="url" placeholder="https://..." className={inputClassName} />
+                  <label className="grid gap-1 text-xs text-slate-400">
+                    Цвет кнопки
+                    <select name={`buttonStyle${index}`} defaultValue="" className={inputClassName}>
+                      <option value="">Обычный</option>
+                      <option value="primary">Синий — основное действие</option>
+                      <option value="success">Зелёный — успешное действие</option>
+                      <option value="danger">Красный — опасное действие</option>
+                    </select>
+                  </label>
                   <label className="flex items-center gap-2 text-xs text-slate-400 sm:col-span-2">
                     <input name={`buttonWebApp${index}`} type="checkbox" className="accent-sky-500" />
                     Открывать как Telegram Mini App
                   </label>
                 </div>
               ))}
+              <p className="text-xs text-slate-500">
+                Цвета поддерживаются Telegram для подходящих ботов и клиентов; отображение зависит от темы пользователя.
+                Mini App-кнопка работает в личном чате с ботом.
+              </p>
             </div>
           </div>
 
