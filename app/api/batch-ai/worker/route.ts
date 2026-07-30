@@ -186,7 +186,7 @@ async function finalizeCockpitRun(runId: string) {
   const result = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const run = result.rows[0]
   if (!run || run.status !== 'completed') return
-  if (!['sample', 'variants'].includes(run.mode)) {
+  if (!['sample', 'variants', 'selection'].includes(run.mode)) {
     await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
   }
   if (run.mode === 'variants') return

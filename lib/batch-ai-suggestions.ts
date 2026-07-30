@@ -19,6 +19,7 @@ const SUBCATEGORY_TOKEN_ALIASES: Record<string, string> = {
   клапаном: 'клапан',
   мини: 'мини',
   багет: 'багет',
+  боулинг: 'боулинг',
 }
 
 export function subcategoryFamilyKey(value: unknown) {
@@ -54,6 +55,7 @@ function redirectsToShoulderBags(value: unknown) {
     'клапан_сумка',
     'багет_сумка',
     'мини_сумка',
+    'боулинг_сумка',
   ].includes(subcategoryFamilyKey(value))
 }
 

@@ -281,9 +281,9 @@ async function syncCurrentRailsCatalogMappings() {
   }
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection'
 
-async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number) {
+async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
   await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
     SELECT b.*, s.ai_instructions, s.ai_photo_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
@@ -296,6 +296,11 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY random() LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true AND variant_group_key IS NULL ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'selection') {
+    const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
+    params.push(productIds)
+    predicate = `AND id=ANY($${params.length}::int[]) ORDER BY source_position ASC NULLS LAST, id`
+  }
   if (mode === 'retry') {
     params.push(productId)
     predicate = `AND id=$${params.length} ORDER BY id`
@@ -327,7 +332,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   }
 }
 
-export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number) {
+export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   await requireAdmin()
   try {
     let settings = await loadSettings()
@@ -596,7 +601,7 @@ async function finalizeRun(runId: string) {
   `, [runId, status, row.completed, row.failed, row.pending])
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
-    if (!['sample', 'variants'].includes(run.rows[0]?.mode)) {
+    if (!['sample', 'variants', 'selection'].includes(run.rows[0]?.mode)) {
       await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.rows[0].batch_id])
     }
     if (run.rows[0]?.mode !== 'variants') {
@@ -646,7 +651,15 @@ async function getBatchAiRun(runId: string) {
     SELECT product_id,external_id,error_message FROM batch_ai_items
     WHERE run_id=$1 AND status='failed' ORDER BY created_at
   `, [runId])
-  return { ...run.rows[0], errors: errors.rows }
+  const queue = await scrapingQuery(`
+    SELECT i.product_id,i.external_id,i.status,p.name,p.photos
+    FROM batch_ai_items i
+    LEFT JOIN products p ON p.id=i.product_id
+    WHERE i.run_id=$1 AND i.status IN ('running','queued')
+    ORDER BY CASE WHEN i.status='running' THEN 0 ELSE 1 END,i.created_at
+    LIMIT 12
+  `, [runId])
+  return { ...run.rows[0], errors: errors.rows, queue_items: queue.rows }
 }
 
 export async function getBatchAiRunAction(runId: string) {
@@ -901,7 +914,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
       WHERE (entity_type='category' AND lower(name)='сумки')
          OR (entity_type='subcategory' AND lower(name) IN (
            'сумки','сумки-косметички','сумки-кейсы','сумки с клапаном','сумки на плечо'
-           ,'сумки-багет','мини-сумки'
+           ,'сумки-багет','мини-сумки','сумки-боулинг'
          ))
     `)
     const bagCategoryId = bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id
@@ -914,6 +927,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
         'сумки с клапаном',
         'сумки-багет',
         'мини-сумки',
+        'сумки-боулинг',
       ].includes(String(row.name).toLowerCase()))
       .map((row) => String(row.canonical_id))
     if (bagCategoryId && shoulderBagId && redirectedIds.length) {

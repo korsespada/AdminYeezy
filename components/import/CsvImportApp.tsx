@@ -31,6 +31,8 @@ import {
   LayoutGrid,
   Rows3,
   Sparkles,
+  Settings2,
+  Users,
 } from "lucide-react";
 import {
   pushCsvProductsAction,
@@ -41,7 +43,6 @@ import {
   saveBatchProductsAction,
   updateBatchProductAction,
   deleteBatchProductAction,
-  exportBatchProductsCsvAction,
   recordAiTaskAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
@@ -63,6 +64,7 @@ import {
   stopBatchAiRunAction,
 } from "@/actions/batch-ai";
 import Image from "next/image";
+import Link from "next/link";
 import { imagePresets, resizeImageUrl } from "@/lib/image";
 import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
@@ -475,8 +477,10 @@ export default function CsvImportApp({
   const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterGender, setFilterGender] = useState("");
   const [filterPrice, setFilterPrice] = useState("");
+  const [filterModel, setFilterModel] = useState("");
+  const [filterColor, setFilterColor] = useState("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready">("");
-  const [viewMode, setViewMode] = useState<"cards" | "rows">("rows");
+  const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
@@ -491,6 +495,7 @@ export default function CsvImportApp({
   const isAiStoppedRef = useRef(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
+  const [aiQueue, setAiQueue] = useState<any[]>([]);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
 
@@ -560,6 +565,20 @@ export default function CsvImportApp({
     () => [...new Set([0, ...products.map((product) => Number(product.price) || 0)])].sort((a, b) => a - b),
     [products],
   );
+  const attributeValues = useCallback((value: unknown) => {
+    const values = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
+    return values.map((item) => String(item).trim()).filter(Boolean);
+  }, []);
+  const uniqueModels = useMemo(() => {
+    const values = [...new Set(products.flatMap((product) => attributeValues(product.attributes?.model_name)))].sort();
+    if (products.some((product) => attributeValues(product.attributes?.model_name).length === 0)) values.unshift("__EMPTY__");
+    return values;
+  }, [products, attributeValues]);
+  const uniqueColors = useMemo(() => {
+    const values = [...new Set(products.flatMap((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color)))].sort();
+    if (products.some((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color).length === 0)) values.unshift("__EMPTY__");
+    return values;
+  }, [products, attributeValues]);
 
   const aiReadyCount = useMemo(
     () => products.filter((product) => product.ai_processed === true || product.ai_processed === "true").length,
@@ -610,12 +629,16 @@ export default function CsvImportApp({
       if (filterPrice !== "" && (Number(p.price) || 0) !== Number(filterPrice)) {
         return false;
       }
+      const models = attributeValues(p.attributes?.model_name);
+      if (filterModel === "__EMPTY__" ? models.length > 0 : filterModel && !models.includes(filterModel)) return false;
+      const colors = attributeValues(p.attributes?.colors ?? p.attributes?.color);
+      if (filterColor === "__EMPTY__" ? colors.length > 0 : filterColor && !colors.includes(filterColor)) return false;
       const aiReady = p.ai_processed === true || p.ai_processed === "true";
       if (filterAiStatus === "raw" && aiReady) return false;
       if (filterAiStatus === "ready" && !aiReady) return false;
       return true;
     });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterAiStatus]);
+  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterAiStatus, attributeValues]);
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -749,6 +772,7 @@ export default function CsvImportApp({
           current: Number(run.completed_count || 0),
           total: Number(run.total_count || products.length),
         } : null);
+        setAiQueue(running ? run.queue_items || [] : []);
       } finally {
         requestInFlight = false;
       }
@@ -769,23 +793,6 @@ export default function CsvImportApp({
     }
     setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
     return false;
-  };
-
-  const exportBatchCsv = async () => {
-    if (!batchId) return;
-    const res = await exportBatchProductsCsvAction(batchId);
-    if (!res.success || !res.data) {
-      setSaveMsg("✗ Ошибка экспорта: " + ((res as any).error || "unknown"));
-      return;
-    }
-    const exportData = res.data as { fileName: string; content: string };
-    const blob = new Blob([exportData.content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = exportData.fileName;
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   const loadFromPath = async () => {
@@ -966,7 +973,7 @@ export default function CsvImportApp({
     setIsPushing(false);
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants") => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection", selectedProductIds?: number[]) => {
     if (!supplierId && products.length > 0) {
         alert("ID поставщика не найден. Пожалуйста, запустите обработку из истории выгрузок.");
         return;
@@ -977,7 +984,7 @@ export default function CsvImportApp({
       try {
         const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
         const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
-        const result = await startBatchAiAction(batchId, mode);
+        const result = await startBatchAiAction(batchId, mode, selectedProductIds);
         if (result.success) {
           const data: any = result.data;
           if (data?.runId) {
@@ -995,6 +1002,7 @@ export default function CsvImportApp({
                 current: Number(finalRun.completed_count || 0),
                 total: Number(finalRun.total_count || data.queued),
               });
+              setAiQueue(finalRun.queue_items || []);
               setSaveMsg(mode === "variants"
                 ? `Поиск вариантов: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
@@ -1019,6 +1027,7 @@ export default function CsvImportApp({
       } finally {
         setIsProcessing(false);
         setAiProgress(null);
+        setAiQueue([]);
         setTimeout(() => setSaveMsg(null), 5000);
       }
       return;
@@ -1467,14 +1476,25 @@ export default function CsvImportApp({
                 </div>
               )}
 
-              {isBatchSource && (
-                <button
-                  onClick={exportBatchCsv}
-                  className="px-4 py-2 text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 rounded-lg transition-all flex items-center gap-2"
+              {isBatchSource && supplierId && (
+                <Link
+                  href={`/admin/suppliers?supplier=${supplierId}`}
+                  target="_blank"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
                 >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Скачать CSV
-                </button>
+                  <Users className="h-4 w-4" />
+                  Поставщик
+                </Link>
+              )}
+              {isBatchSource && (
+                <Link
+                  href="/admin/ai-rules"
+                  target="_blank"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
+                >
+                  <Settings2 className="h-4 w-4" />
+                  Настройки ИИ
+                </Link>
               )}
 
               {isBatchSource ? (
@@ -1837,12 +1857,53 @@ export default function CsvImportApp({
           </div>
         )}
 
+        {isBatchSource && isProcessing && aiProgress && (
+          <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="flex items-center gap-2 font-bold text-white">
+                  <Sparkles className="h-4 w-4 text-indigo-300" />
+                  Очередь обработки ИИ
+                </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  Готово {aiProgress.current} из {aiProgress.total} · осталось {Math.max(0, aiProgress.total - aiProgress.current)}
+                </div>
+              </div>
+              <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-900">
+                <div
+                  className="h-full rounded-full bg-indigo-500 transition-all"
+                  style={{ width: `${aiProgress.total ? Math.min(100, aiProgress.current / aiProgress.total * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+            {aiQueue.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {aiQueue.map((item) => {
+                  const photo = Array.isArray(item.photos) ? item.photos[0] : null;
+                  return (
+                    <div key={`${item.product_id}-${item.status}`} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-600 bg-slate-900" title={item.name || item.external_id}>
+                      {photo ? (
+                        <Image src={resizeImageUrl(photo, imagePresets.productTable)} alt="" fill sizes="64px" className="object-cover" />
+                      ) : (
+                        <Sparkles className="absolute inset-0 m-auto h-5 w-5 text-slate-600" />
+                      )}
+                      <span className={`absolute bottom-1 right-1 h-2 w-2 rounded-full ${item.status === "running" ? "animate-pulse bg-emerald-400" : "bg-amber-400"}`} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Filters */}
         {products.length > 0 &&
           (uniqueBrands.length > 1 ||
             uniqueCategories.length > 1 ||
             uniqueSubcategories.length > 1 ||
             uniqueGenders.length > 1 ||
+            uniqueModels.length > 0 ||
+            uniqueColors.length > 0 ||
             uniquePrices.length > 0) && (
             <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
               <div className="flex items-center gap-2 text-slate-500 mr-1">
@@ -1941,11 +2002,35 @@ export default function CsvImportApp({
                 ))}
               </select>
 
+              <select
+                value={filterModel}
+                onChange={(e) => setFilterModel(e.target.value)}
+                className="min-w-[160px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все модели</option>
+                {uniqueModels.map((model) => (
+                  <option key={model} value={model}>{model === "__EMPTY__" ? "Без модели" : model}</option>
+                ))}
+              </select>
+
+              <select
+                value={filterColor}
+                onChange={(e) => setFilterColor(e.target.value)}
+                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все цвета</option>
+                {uniqueColors.map((color) => (
+                  <option key={color} value={color}>{color === "__EMPTY__" ? "Без цвета" : color}</option>
+                ))}
+              </select>
+
               {(filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
                 filterGender ||
                 filterAiStatus ||
+                filterModel ||
+                filterColor ||
                 filterPrice !== "") && (
                   <button
                     onClick={() => {
@@ -1955,6 +2040,8 @@ export default function CsvImportApp({
                       setFilterGender("");
                       setFilterAiStatus("");
                       setFilterPrice("");
+                      setFilterModel("");
+                      setFilterColor("");
                     }}
                     className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
                   >
@@ -1967,6 +2054,8 @@ export default function CsvImportApp({
                 filterSubcategory ||
                 filterGender ||
                 filterAiStatus ||
+                filterModel ||
+                filterColor ||
                 filterPrice !== "") && (
                   <span className="text-xs text-slate-500 ml-auto">
                     Показано{" "}
@@ -2205,6 +2294,21 @@ export default function CsvImportApp({
                   className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
                 >
                   Отмена
+                </button>
+                <button
+                  onClick={async () => {
+                    const ids = selectedForMerge
+                      .map((index) => Number(products[index]?.id))
+                      .filter(Number.isInteger);
+                    if (!ids.length) return;
+                    setSelectedForMerge([]);
+                    await handleAiProcess("selection", ids);
+                  }}
+                  disabled={isProcessing || !batchId}
+                  className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  Обработать с ИИ
                 </button>
                 <button
                   onClick={handleBulkApply}

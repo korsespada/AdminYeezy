@@ -66,7 +66,9 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 
 export const GLOBAL_BATCH_AI_CATALOG_RULES = `Глобальные правила каталога:
 - Для категории «Сумки» итоговая подкатегория «Сумки» запрещена: обязательно выбери более конкретную существующую подкатегорию из справочника.
-- Не предлагай и не назначай «Сумки-косметички», «Сумки-кейсы», «Сумки с клапаном», «Сумки-багет» и «Мини-сумки». Такие товары назначай в существующую подкатегорию «Сумки на плечо».
+- Не предлагай и не назначай «Сумки-косметички», «Сумки-кейсы», «Сумки с клапаном», «Сумки-багет», «Мини-сумки» и «Сумки-боулинг». Такие товары назначай в существующую подкатегорию «Сумки на плечо».
+- Caviar, кавьяровая и зернистая кожа описывают фактуру кожи, а не отдельный материал и не новый атрибут. В materials записывай «Кожа», а фактуру при необходимости указывай в описании.
+- «Кожа ягнёнка» и «Телячья кожа» являются самостоятельными материалами: сохраняй их, только если вид кожи подтверждён источником или фотографиями.
 - Эти правила относятся ко всем поставщикам категории «Сумки» и важнее инструкции отдельного поставщика.
 
 Глобальные правила сверки текста с фотографиями:
@@ -317,7 +319,27 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   const attributes: Record<string, unknown> = { ...(original.attributes || {}) }
   const suggestions: any[] = []
+  const normalizedMaterial = (value: unknown) => {
+    const text = String(value || '').trim()
+    const key = text.toLowerCase().replace(/ё/g, 'е')
+    if (/(caviar|кавьяр|рыбь.*икр|зернист.*кож)/i.test(key)) return 'Кожа'
+    if (/(lambskin|ягнен)/i.test(key)) return 'Кожа ягнёнка'
+    if (/(calfskin|теляч)/i.test(key)) return 'Телячья кожа'
+    return text
+  }
+  const normalizeMaterials = (value: unknown) => {
+    const values = Array.isArray(value) ? value : [value]
+    return [...new Set(values.map(normalizedMaterial).filter(Boolean))]
+  }
+  const isCaviarMaterialSuggestion = (suggestion: any) => {
+    const text = [suggestion?.code, suggestion?.label, suggestion?.value].flat().join(' ')
+    return /(caviar|кавьяр|рыбь.*икр|зернист.*кож)/i.test(text)
+  }
   for (const suggestion of (Array.isArray(raw?.attribute_suggestions) ? raw.attribute_suggestions : [])) {
+    if (isCaviarMaterialSuggestion(suggestion)) {
+      attributes.materials = normalizeMaterials([...(Array.isArray(attributes.materials) ? attributes.materials : []), 'Кожа'])
+      continue
+    }
     const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
     if (code && input.attributeCodes.has(code)) {
       if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = suggestion.value
@@ -327,9 +349,11 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   for (const [code, value] of Object.entries(proposed.catalog_attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
-    if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
+    if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(value)
+    else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
     else suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
   }
+  if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
   const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
   const sizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
   const photos = Array.isArray(original.photos)
@@ -352,6 +376,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       'сумки с клапаном',
       'сумки-багет', 'сумки багет',
       'мини-сумки', 'мини сумки',
+      'сумки-боулинг', 'сумки боулинг',
     ].includes(selectedName) && shoulderBags) {
       subcategory = shoulderBags[0]
     }

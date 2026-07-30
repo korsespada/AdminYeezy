@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
 import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import {
@@ -136,6 +136,8 @@ export default function SupplierList({
   catalogLookups: SupplierCatalogLookups
 }) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const openedSupplierFromQuery = React.useRef<number | null>(null)
   const normalizedInitialData = React.useMemo(
     () => initialData.map((supplier) => ({
       ...supplier,
@@ -257,6 +259,17 @@ export default function SupplierList({
     }
     setIsModalOpen(true)
   }
+
+  React.useEffect(() => {
+    const supplierId = Number(searchParams.get('supplier'))
+    if (!supplierId || openedSupplierFromQuery.current === supplierId) return
+    const supplier = normalizedInitialData.find((item) => item.id === supplierId)
+    if (!supplier) return
+    openedSupplierFromQuery.current = supplierId
+    handleOpenModal(supplier)
+    // Открываем указанного поставщика один раз при переходе из выгрузки.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, normalizedInitialData])
 
   const handleAddTagRow = () => {
     setModalTags([...modalTags, { type: 'tag', label: '', value: '' }])
