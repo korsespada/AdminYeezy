@@ -14,6 +14,9 @@ const SUBCATEGORY_TOKEN_ALIASES: Record<string, string> = {
   верхней: '',
   верхняя: '',
   верхние: '',
+  косметички: 'косметичка',
+  кейсы: 'кейс',
+  клапаном: 'клапан',
 }
 
 export function subcategoryFamilyKey(value: unknown) {
@@ -40,6 +43,18 @@ export function sameSubcategoryFamily(left: unknown, right: unknown) {
   const shared = leftTokens.filter((token) => rightSet.has(token)).length
   const shorter = Math.min(leftSet.size, rightSet.size)
   return shared >= 2 && shared === shorter
+}
+
+function redirectsToShoulderBags(value: unknown) {
+  return ['косметичка_сумка', 'кейс_сумка', 'клапан_сумка'].includes(subcategoryFamilyKey(value))
+}
+
+function isGenericBagsSubcategory(value: unknown) {
+  return subcategoryFamilyKey(value) === 'сумка'
+}
+
+function shoulderBagsMapping(rows: any[]) {
+  return rows.find((row) => String(row.name || '').trim().toLowerCase().replace(/ё/g, 'е') === 'сумки на плечо')
 }
 
 function normalizedTokens(value: unknown) {
@@ -177,13 +192,24 @@ export async function saveBatchAiSuggestions(
     if (kind === 'subcategory') {
       const familyKey = subcategoryFamilyKey(suggestion.name || suggestion.code)
       if (!familyKey) continue
+      const parentId = String(suggestion.parent_category_id || '')
+      const mappings = await catalogSubcategories(client, parentId)
+      if (redirectsToShoulderBags(suggestion.name || suggestion.code)) {
+        const shoulderBags = shoulderBagsMapping(mappings)
+        if (shoulderBags) {
+          await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=$2', [
+            String(shoulderBags.canonical_id),
+            productId,
+          ])
+        }
+        continue
+      }
+      if (isGenericBagsSubcategory(suggestion.name || suggestion.code)) continue
       if (rejected.rows.some((row) => (
         row.kind === 'subcategory'
         && sameSubcategoryFamily(row.payload?.name || row.payload?.code || row.canonical_key, suggestion.name || suggestion.code)
       ))) continue
       key = familyKey
-      const parentId = String(suggestion.parent_category_id || '')
-      const mappings = await catalogSubcategories(client, parentId)
       const existing = mappings.find((row) => sameSubcategoryFamily(row.name, suggestion.name || suggestion.code))
       if (existing) {
         await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=$2', [String(existing.canonical_id), productId])
@@ -385,6 +411,21 @@ export async function reconcileBatchSubcategorySuggestions(client: QueryClient, 
     const familyKey = subcategoryFamilyKey(payload.name || payload.code || row.canonical_key)
     const parentId = String(payload.parent_category_id || '')
     const mappings = await catalogSubcategories(client, parentId)
+    if (redirectsToShoulderBags(payload.name || payload.code || row.canonical_key)) {
+      const shoulderBags = shoulderBagsMapping(mappings)
+      if (shoulderBags) {
+        await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=ANY($2::int[])', [
+          String(shoulderBags.canonical_id),
+          row.affected_product_ids.map(Number),
+        ])
+        await client.query("UPDATE batch_ai_suggestions SET status='approved',reviewed_at=NOW() WHERE id=$1", [row.id])
+      }
+      continue
+    }
+    if (isGenericBagsSubcategory(payload.name || payload.code || row.canonical_key)) {
+      await client.query("UPDATE batch_ai_suggestions SET status='rejected',reviewed_at=NOW() WHERE id=$1", [row.id])
+      continue
+    }
     const existing = mappings.find((mapping) => sameSubcategoryFamily(mapping.name, payload.name || payload.code || row.canonical_key))
     if (existing) {
       await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=ANY($2::int[])', [

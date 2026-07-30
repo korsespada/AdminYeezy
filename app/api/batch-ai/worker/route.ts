@@ -95,6 +95,9 @@ async function complete(body: any) {
     brandIds: new Set((input.brands || []).map((row: any) => String(row.id))),
     categoryIds: new Set((input.categories || []).map((row: any) => String(row.id))),
     subcategoryIds: new Set((input.subcategories || []).map((row: any) => String(row.id))),
+    subcategoryParents: new Map((input.subcategories || []).map((row: any) => [String(row.id), String(row.parent_id || '')])),
+    categoryNames: new Map((input.categories || []).map((row: any) => [String(row.id), String(row.name || '')])),
+    subcategoryNames: new Map((input.subcategories || []).map((row: any) => [String(row.id), String(row.name || '')])),
     attributeCodes: new Set((input.attributeCodes || []).map(String)),
     priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
   })

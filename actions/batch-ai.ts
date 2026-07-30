@@ -9,6 +9,7 @@ import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
+  GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
   buildBatchAiUserPrompt,
   buildBatchAiVariantPrompt,
@@ -228,7 +229,11 @@ export async function uploadPriceRuleReferenceAction(supplierId: number, formDat
 
 async function loadSettings(): Promise<BatchAiSettings> {
   const result = await getBatchAiSettingsAction()
-  return result.data as BatchAiSettings
+  const settings = result.data as BatchAiSettings
+  return {
+    ...settings,
+    systemPrompt: `${settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT}\n\n${GLOBAL_BATCH_AI_CATALOG_RULES}`,
+  }
 }
 
 async function snapshotBatch(batchId: string, stage: string, label: string, settings: any = {}) {
@@ -420,7 +425,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
 }
 
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
-  const items = await scrapingQuery('SELECT * FROM batch_ai_items WHERE run_id=$1 ORDER BY created_at', [runId])
+  const items = await scrapingQuery("SELECT * FROM batch_ai_items WHERE run_id=$1 AND status='queued' ORDER BY created_at", [runId])
   let cursor = 0
   const concurrency = context.batch.ai_parallel_enabled === false
     ? 1
@@ -473,6 +478,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       categoryIds: new Set(context.categories.map((row: any) => String(row.id))),
       subcategoryIds: new Set(context.subcategories.map((row: any) => String(row.id))),
       subcategoryParents: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
+      categoryNames: new Map(context.categories.map((row: any) => [String(row.id), String(row.name || '')])),
+      subcategoryNames: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.name || '')])),
       attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })
@@ -598,6 +605,41 @@ async function finalizeRun(runId: string) {
   }
 }
 
+async function resumeStaleOpenRouterRun(runId: string) {
+  const locked = await scrapingQuery(`
+    UPDATE batch_ai_runs r SET started_at=NOW(),updated_at=NOW()
+    WHERE r.id=$1 AND r.provider='openrouter' AND r.status='running'
+      AND COALESCE(r.started_at,r.created_at) < NOW() - INTERVAL '60 seconds'
+      AND NOT EXISTS (
+        SELECT 1 FROM batch_ai_items i
+        WHERE i.run_id=r.id AND i.status='running' AND i.updated_at > NOW() - INTERVAL '90 seconds'
+      )
+      AND EXISTS (
+        SELECT 1 FROM batch_ai_items i
+        WHERE i.run_id=r.id AND (
+          i.status='queued'
+          OR (i.status='running' AND i.updated_at <= NOW() - INTERVAL '90 seconds')
+          OR (i.status='failed' AND i.attempts < 2 AND i.error_message='ИИ вернул невалидный JSON')
+        )
+      )
+    RETURNING r.batch_id,r.mode,r.settings_snapshot
+  `, [runId])
+  const run = locked.rows[0]
+  if (!run) return
+  await scrapingQuery(`
+    UPDATE batch_ai_items SET status='queued',error_message=NULL,completed_at=NULL,updated_at=NOW()
+    WHERE run_id=$1 AND (
+      (status='running' AND updated_at <= NOW() - INTERVAL '90 seconds')
+      OR (status='failed' AND attempts < 2 AND error_message='ИИ вернул невалидный JSON')
+    )
+  `, [runId])
+  const context = await batchContext(String(run.batch_id), run.mode as BatchAiRunMode)
+  const settings = run.settings_snapshot as BatchAiSettings
+  after(async () => {
+    await processOpenRouterRun(runId, context, settings)
+  })
+}
+
 async function getBatchAiRun(runId: string) {
   const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const errors = await scrapingQuery(`
@@ -610,6 +652,7 @@ async function getBatchAiRun(runId: string) {
 export async function getBatchAiRunAction(runId: string) {
   await requireAdmin()
   await finalizeRun(runId)
+  await resumeStaleOpenRouterRun(runId)
   return { success: true, data: await getBatchAiRun(runId) }
 }
 
@@ -622,6 +665,7 @@ export async function getLatestBatchAiRunAction(batchId: string) {
   `, [batchId])
   if (!latest.rows[0]) return { success: true, data: null }
   await finalizeRun(String(latest.rows[0].id))
+  await resumeStaleOpenRouterRun(String(latest.rows[0].id))
   return { success: true, data: await getBatchAiRun(String(latest.rows[0].id)) }
 }
 
@@ -851,6 +895,37 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
+    const bagCatalog = await client.query(`
+      SELECT entity_type,canonical_id,name
+      FROM catalog_id_mappings
+      WHERE (entity_type='category' AND lower(name)='сумки')
+         OR (entity_type='subcategory' AND lower(name) IN (
+           'сумки','сумки-косметички','сумки-кейсы','сумки с клапаном','сумки на плечо'
+         ))
+    `)
+    const bagCategoryId = bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id
+    const genericBagId = bagCatalog.rows.find((row) => row.entity_type === 'subcategory' && String(row.name).toLowerCase() === 'сумки')?.canonical_id
+    const shoulderBagId = bagCatalog.rows.find((row) => row.entity_type === 'subcategory' && String(row.name).toLowerCase() === 'сумки на плечо')?.canonical_id
+    const redirectedIds = bagCatalog.rows
+      .filter((row) => row.entity_type === 'subcategory' && [
+        'сумки-косметички',
+        'сумки-кейсы',
+        'сумки с клапаном',
+      ].includes(String(row.name).toLowerCase()))
+      .map((row) => String(row.canonical_id))
+    if (bagCategoryId && shoulderBagId && redirectedIds.length) {
+      await client.query(`
+        UPDATE products SET subcategory=$3,updated_at=NOW()
+        WHERE batch_id=$1 AND category=$2 AND subcategory=ANY($4::text[])
+      `, [batchId, String(bagCategoryId), String(shoulderBagId), redirectedIds])
+    }
+    if (bagCategoryId && genericBagId) {
+      await client.query(`
+        UPDATE products SET ai_processed=false,
+          ai_error='Для категории «Сумки» требуется конкретная подкатегория',updated_at=NOW()
+        WHERE batch_id=$1 AND category=$2 AND subcategory=$3 AND COALESCE(ai_processed,false)=true
+      `, [batchId, String(bagCategoryId), String(genericBagId)])
+    }
     await reconcileBatchSubcategorySuggestions(client, batchId)
     await reconcileBatchColorFamilySuggestions(client, batchId)
     if (knownAttributeCodes) {

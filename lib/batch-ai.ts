@@ -64,6 +64,11 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Для остальных категорий объединяй только при уверенном совпадении всех значимых характеристик кроме цвета.
 - Верни строго JSON без markdown.`
 
+export const GLOBAL_BATCH_AI_CATALOG_RULES = `Глобальные правила каталога:
+- Для категории «Сумки» итоговая подкатегория «Сумки» запрещена: обязательно выбери более конкретную существующую подкатегорию из справочника.
+- Не предлагай и не назначай «Сумки-косметички», «Сумки-кейсы» и «Сумки с клапаном». Такие товары назначай в существующую подкатегорию «Сумки на плечо».
+- Эти правила относятся ко всем поставщикам категории «Сумки» и важнее инструкции отдельного поставщика.`
+
 export function buildBatchAiUserPrompt(input: {
   product: any
   supplierInstructions?: string | null
@@ -266,7 +271,19 @@ export function parseBatchAiJson(text: string) {
   } catch {
     const object = clean.match(/\{[\s\S]*\}/)?.[0]
     if (!object) throw new Error('ИИ вернул невалидный JSON')
-    return JSON.parse(object)
+    try {
+      return JSON.parse(object)
+    } catch {
+      const repaired = object
+        .replace(/[“”]/g, '"')
+        .replace(/[‘’]/g, "'")
+        .replace(/,\s*([}\]])/g, '$1')
+      try {
+        return JSON.parse(repaired)
+      } catch {
+        throw new Error('ИИ вернул невалидный JSON')
+      }
+    }
   }
 }
 
@@ -276,6 +293,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
   categoryIds: Set<string>
   subcategoryIds: Set<string>
   subcategoryParents?: Map<string, string>
+  categoryNames?: Map<string, string>
+  subcategoryNames?: Map<string, string>
   attributeCodes: Set<string>
   priceRuleKeys?: Set<string>
 }) {
@@ -307,10 +326,28 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const photos = Array.isArray(original.photos)
     ? original.photos.filter((_: string, index: number) => !discard.has(index + 1) && !sizeCharts.has(index + 1))
     : []
-  const subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
+  let subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
   const proposedCategory = choose(proposed.category, input.categoryIds, original.category)
   const parentCategory = subcategory ? input.subcategoryParents?.get(subcategory) : undefined
   const category = parentCategory && input.categoryIds.has(parentCategory) ? parentCategory : proposedCategory
+  const normalizedName = (value: unknown) => String(value || '').trim().toLowerCase().replace(/ё/g, 'е')
+  if (normalizedName(input.categoryNames?.get(category)) === 'сумки') {
+    const selectedName = normalizedName(input.subcategoryNames?.get(subcategory))
+    const shoulderBags = [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
+      normalizedName(name) === 'сумки на плечо'
+      && (!input.subcategoryParents?.get(id) || input.subcategoryParents.get(id) === category)
+    ))
+    if ([
+      'сумки-косметички', 'сумки косметички',
+      'сумки-кейсы', 'сумки кейсы',
+      'сумки с клапаном',
+    ].includes(selectedName) && shoulderBags) {
+      subcategory = shoulderBags[0]
+    }
+    if (!subcategory || normalizedName(input.subcategoryNames?.get(subcategory)) === 'сумки') {
+      throw new Error('Для категории «Сумки» требуется конкретная подкатегория вместо «Сумки»')
+    }
+  }
 
   return {
     product: {
