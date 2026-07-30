@@ -28,7 +28,12 @@ import {
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { uploadToS3 } from '@/lib/s3'
-import { reconcileBatchSubcategorySuggestions, saveBatchAiSuggestions } from '@/lib/batch-ai-suggestions'
+import {
+  canonicalColorFamilyKey,
+  reconcileBatchColorFamilySuggestions,
+  reconcileBatchSubcategorySuggestions,
+  saveBatchAiSuggestions,
+} from '@/lib/batch-ai-suggestions'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -666,7 +671,12 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
     await scrapingQuery('UPDATE batch_ai_suggestions SET payload=$2::jsonb WHERE id=$1', [id, JSON.stringify(editedPayload)])
   }
   if (decision === 'approved' && row.kind === 'color_family') {
-    const key = crypto.createHash('sha256').update(row.canonical_key).digest('hex').slice(0, 32)
+    const colors = Array.isArray(row.payload?.observed_colors) ? row.payload.observed_colors : []
+    if (row.affected_product_ids.length < 2 || colors.length < 2) {
+      return { success: false, error: 'Для цветового семейства нужны минимум два товара разных цветов' }
+    }
+    const familyKey = canonicalColorFamilyKey(row.payload)
+    const key = crypto.createHash('sha256').update(familyKey || row.canonical_key).digest('hex').slice(0, 32)
     await scrapingQuery(
       'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE id=ANY($2::int[])',
       [key, row.affected_product_ids.map(Number)],
@@ -781,9 +791,18 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
   try {
     await client.query('BEGIN')
     await reconcileBatchSubcategorySuggestions(client, batchId)
+    await reconcileBatchColorFamilySuggestions(client, batchId)
     const result = await client.query(`
       SELECT s.* FROM batch_ai_suggestions s
       JOIN batch_ai_runs r ON r.id=s.run_id WHERE r.batch_id=$1
+        AND (
+          s.kind <> 'color_family'
+          OR s.status <> 'pending'
+          OR (
+            jsonb_array_length(s.affected_product_ids) >= 2
+            AND COALESCE(jsonb_array_length(s.payload->'observed_colors'),0) >= 2
+          )
+        )
       ORDER BY CASE WHEN s.status='pending' THEN 0 ELSE 1 END,s.created_at DESC
     `, [batchId])
     await client.query('COMMIT')

@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 
@@ -57,7 +56,8 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
 - Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
 - Отметь рекламные, нерелевантные и дублирующиеся изображения для исключения. Таблицы размеров исключи из публичной галереи, но распознай данные в sizes.
-- Для цветового семейства предложи один group_signature только когда это один и тот же товар, отличающийся цветом.
+- Для цветового семейства group_signature описывает неизменяемую основу товара и НИКОГДА не содержит цвет.
+- В group_signature обязательно включи бренд, точную модель/конструкцию, размер самого товара, материал и фурнитуру. Цвет верни только в отдельном поле color.
 - Для сумок должны совпадать бренд, model_name, размер самой сумки, материалы и фурнитура; разные размеры сумки не объединяй.
 - Для обуви должны совпадать бренд, model_name, конструкция и материал; обувные размеры являются вариантами внутри каждого цвета и не разделяют цветовое семейство.
 - Для одежды должны совпадать бренд, model_name/фасон и материал; размеры одежды являются вариантами внутри каждого цвета и не разделяют цветовое семейство.
@@ -300,9 +300,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
       price_rule_key: input.priceRuleKeys?.has(String(proposed.price_rule_key || ''))
         ? String(proposed.price_rule_key)
         : '',
-      variant_group_key: raw?.color_family?.confidence >= 0.75 && raw.color_family.group_signature
-        ? crypto.createHash('sha256').update(String(raw.color_family.group_signature).trim().toLowerCase()).digest('hex').slice(0, 32)
-        : original.variant_group_key || null,
+      // Цветовое семейство применяется только после серверной сверки нескольких
+      // разных цветов и ручного одобрения предложения.
+      variant_group_key: original.variant_group_key || null,
     },
     suggestions,
     subcategorySuggestion: raw?.subcategory_suggestion || null,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { sameSubcategoryFamily, subcategoryFamilyKey } from '@/lib/batch-ai-suggestions'
+import {
+  canonicalColorFamilyKey,
+  sameSubcategoryFamily,
+  subcategoryFamilyKey,
+} from '@/lib/batch-ai-suggestions'
 
 describe('subcategoryFamilyKey', () => {
   it('merges punctuation, number and harmless wording variants', () => {
@@ -14,5 +18,20 @@ describe('subcategoryFamilyKey', () => {
 
   it('merges a narrower wording into an existing broader family', () => {
     expect(sameSubcategoryFamily('Сумки с короткой ручкой', 'Сумки с ручкой')).toBe(true)
+  })
+})
+
+describe('canonicalColorFamilyKey', () => {
+  it('removes color from a candidate signature', () => {
+    expect(canonicalColorFamilyKey({
+      group_signature: 'Chanel Classic Flap medium Caviar gold white',
+      color: 'White',
+    })).toBe('chanel_classic_flap_medium_caviar_gold')
+  })
+
+  it('keeps size and construction differences separate', () => {
+    const small = canonicalColorFamilyKey({ group_signature: 'Chanel Classic Flap TopHandle small gold pink', color: 'pink' })
+    const medium = canonicalColorFamilyKey({ group_signature: 'Chanel Classic Flap medium gold white', color: 'white' })
+    expect(small).not.toBe(medium)
   })
 })
