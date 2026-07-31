@@ -47,7 +47,6 @@ export default function CsvModal({
           initialSupplierId={supplierId}
           initialBatchId={forceFileMode ? null : batchId}
           initialSnapshotId={snapshotId}
-          initialFallbackBatchId={forceFileMode ? batchId : null}
           initialSupplierName={supplierName}
           initialSupplierAvatar={supplierAvatar}
           initialSourceLabel={snapshotId ? 'Снимок этапа · только просмотр' : (forceFileMode ? 'Снимок CSV из истории' : (batchId ? 'Текущая БД-версия партии' : null))}

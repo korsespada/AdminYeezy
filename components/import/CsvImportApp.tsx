@@ -412,7 +412,6 @@ export default function CsvImportApp({
   initialSupplierId = null,
   initialBatchId = null,
   initialSnapshotId = null,
-  initialFallbackBatchId = null,
   initialSupplierName = null,
   initialSupplierAvatar = null,
   initialSourceLabel = null,
@@ -424,7 +423,6 @@ export default function CsvImportApp({
   initialSupplierId?: number | null;
   initialBatchId?: string | null;
   initialSnapshotId?: string | null;
-  initialFallbackBatchId?: string | null;
   initialSupplierName?: string | null;
   initialSupplierAvatar?: string | null;
   initialSourceLabel?: string | null;
@@ -477,11 +475,11 @@ export default function CsvImportApp({
   const [bulkSubcategory, setBulkSubcategory] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
+  const [activeSnapshotId, setActiveSnapshotId] = useState<string | null>(initialSnapshotId);
   const isBatchSource = Boolean(batchId);
-  const isSnapshotSource = Boolean(initialSnapshotId);
+  const isSnapshotSource = Boolean(activeSnapshotId);
   const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
-  const [isAiProcessed, setIsAiProcessed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
@@ -502,7 +500,8 @@ export default function CsvImportApp({
       getSupplierDataAction(initialSupplierId).then(setSupplierData).catch(console.error);
     }
     if (initialBatchId) {
-      if (!initialSnapshotId) setBatchId(initialBatchId);
+      setActiveSnapshotId(initialSnapshotId);
+      setBatchId(initialSnapshotId ? null : initialBatchId);
       handleLoadBatch(initialBatchId, initialSnapshotId);
     } else if (initialLocalPath) {
       setLocalPath(initialLocalPath);
@@ -595,6 +594,7 @@ export default function CsvImportApp({
     [products],
   );
   const aiRemainingCount = products.length - aiReadyCount;
+  const canPublish = isBatchSource && batchStage === "AI_PROCESSED" && products.length > 0 && aiRemainingCount === 0;
   const pendingAiSuggestions = useMemo(
     () => aiSuggestions.filter((item) => item.status === "pending"),
     [aiSuggestions],
@@ -677,7 +677,6 @@ export default function CsvImportApp({
       setProducts(products);
       setColumns(columns);
       setDelimiter(delimiter);
-      setIsAiProcessed(false);
     };
     reader.readAsText(file, "utf-8");
   }, []);
@@ -709,24 +708,10 @@ export default function CsvImportApp({
       setSourceLabel(res.source === 'db' ? 'Снимок CSV из истории' : 'Локальный CSV-файл');
       localStorage.setItem("csv_local_path", path);
 
-      // Проверяем, действительно ли ВСЕ товары обработаны
-      const allProcessed = products.length > 0 && products.every(p => {
-          const val = (p as any).ai_processed;
-          return val === true || val === "true" || val === "True";
-      });
-      setIsAiProcessed(allProcessed);
     } else {
       setPathError(res.error || "Не удалось прочитать файл");
     }
     setIsLoadingPath(false);
-  };
-
-  const openFallbackBatch = async () => {
-    if (!initialFallbackBatchId) return;
-    setBatchId(initialFallbackBatchId);
-    setLocalPath("");
-    setImportMode("local");
-    await handleLoadBatch(initialFallbackBatchId);
   };
 
   const handleLoadBatch = async (nextBatchId: string, snapshotId?: string | null) => {
@@ -738,16 +723,13 @@ export default function CsvImportApp({
     const res = await getBatchProductsAction(nextBatchId, snapshotId);
     if (!snapshotId) await loadAiSuggestions(nextBatchId);
     if (res.success && res.data) {
+      setActiveSnapshotId(snapshotId || null);
       setProducts(res.data.products);
       setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
       setDelimiter(res.data.delimiter || ";");
       setBatchStage(res.data.stage || "SCRAPED");
       setFileName(`Партия ${nextBatchId.slice(0, 8)}`);
       setSourceLabel(res.data.snapshot ? `${res.data.label} · только просмотр` : 'Текущая БД-версия партии');
-      const allProcessed =
-        res.data.products.length > 0 &&
-        res.data.products.every((p: any) => p.ai_processed === true || p.ai_processed === "true");
-      setIsAiProcessed(allProcessed);
       setImportMode("local");
     } else {
       setPathError(res.error || "Не удалось загрузить товары партии");
@@ -772,8 +754,6 @@ export default function CsvImportApp({
           setProducts(nextProducts);
           setColumns(productsResult.data.columns?.length ? productsResult.data.columns : DEFAULT_PRODUCT_COLUMNS);
           setBatchStage(productsResult.data.stage || "SCRAPED");
-          const completed = nextProducts.filter((product: CsvProduct) => product.ai_processed === true || product.ai_processed === "true").length;
-          setIsAiProcessed(nextProducts.length > 0 && completed === nextProducts.length);
         }
         setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
         const run: any = runResult.success ? runResult.data : null;
@@ -889,11 +869,8 @@ export default function CsvImportApp({
   };
 
   const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection", selectedProductIds?: number[]) => {
-    if (isSnapshotSource) {
-      setSaveMsg("Исторический снимок доступен только для просмотра. Откройте саму выгрузку, чтобы продолжить обработку.");
-      return;
-    }
-    if (!batchId) {
+    const targetBatchId = batchId || initialBatchId;
+    if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
       return;
     }
@@ -902,12 +879,17 @@ export default function CsvImportApp({
         return;
     }
 
-    if (batchId) {
+    if (targetBatchId) {
       setIsProcessing(true);
       try {
+        if (isSnapshotSource) {
+          setBatchId(targetBatchId);
+          setActiveSnapshotId(null);
+          await handleLoadBatch(targetBatchId);
+        }
         const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
         const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
-        const result = await startBatchAiAction(batchId, mode, selectedProductIds);
+        const result = await startBatchAiAction(targetBatchId, mode, selectedProductIds);
         if (result.success) {
           const data: any = result.data;
           if (data?.runId) {
@@ -931,7 +913,7 @@ export default function CsvImportApp({
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
-            await handleLoadBatch(batchId);
+            await handleLoadBatch(targetBatchId);
             if (mode === "variants" && finalRun?.status === "completed") setShowAiSuggestions(true);
             setActiveAiRunId(null);
             setSaveMsg(finalRun?.status === "cancelled"
@@ -1005,6 +987,7 @@ export default function CsvImportApp({
     
     if (res.success && res.path) {
         setBatchId(scriptBatchId);
+        setActiveSnapshotId(null);
         await handleLoadBatch(scriptBatchId);
         setSaveMsg("✓ Скрипт успешно отработал!");
         setTimeout(() => setSaveMsg(null), 5000);
@@ -1186,6 +1169,17 @@ export default function CsvImportApp({
   // ─── Render ───────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-900 font-sans text-slate-200">
+      {saveMsg && (
+        <div className={`fixed bottom-6 right-6 z-[220] max-w-lg rounded-xl border px-4 py-3 text-sm font-semibold shadow-2xl ${
+          saveMsg.startsWith("✓")
+            ? "border-emerald-500/30 bg-emerald-950 text-emerald-200"
+            : saveMsg.startsWith("Ошибка") || saveMsg.startsWith("✗")
+              ? "border-red-500/30 bg-red-950 text-red-200"
+              : "border-indigo-500/30 bg-slate-950 text-indigo-200"
+        }`}>
+          {saveMsg}
+        </div>
+      )}
       <div className="mx-auto max-w-[1600px] p-3 sm:p-4">
         {onClose && (
           <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
@@ -1261,11 +1255,6 @@ export default function CsvImportApp({
                     <Save className="w-4 h-4" />
                     {isSaving ? "Сохраняю..." : isBatchSource ? "Сохранить БД" : "Сохранить файл"}
                   </button>
-                  {saveMsg && (
-                    <span className={`absolute -bottom-6 text-[10px] font-bold whitespace-nowrap animate-in fade-in slide-in-from-top-1 ${saveMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {saveMsg}
-                    </span>
-                  )}
                 </div>
               )}
 
@@ -1290,7 +1279,11 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {!isAiProcessed || isProcessing ? (
+              {batchStage === "PUSHED" ? (
+                <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-300">
+                  <CheckCircle className="h-4 w-4" /> Запушено в БД
+                </span>
+              ) : !canPublish || isProcessing ? (
                 isProcessing ? (
                   <button
                       onClick={handleStopAi}
@@ -1476,21 +1469,6 @@ export default function CsvImportApp({
                       <p className="text-sm text-red-300 flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4" /> {pathError}
                       </p>
-                      {initialFallbackBatchId && (
-                        <div className="mt-3 flex flex-wrap items-center gap-3">
-                          <p className="text-xs text-slate-400">
-                            Этот исторический файл недоступен на текущем сервере. Можно открыть текущую версию партии из Scraping DB, но это не снимок выбранного CSV.
-                          </p>
-                          <button
-                            onClick={openFallbackBatch}
-                            disabled={isLoadingPath}
-                            className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-600 disabled:opacity-50"
-                          >
-                            <Database className="h-3.5 w-3.5" />
-                            Открыть текущую БД-версию
-                          </button>
-                        </div>
-                      )}
                     </div>
                   )}
                   <p className="mt-3 text-xs text-slate-500">

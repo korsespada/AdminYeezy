@@ -379,6 +379,7 @@ export interface ExportHistoryBatch {
   supplier_name: string | null
   supplier_avatar: string | null
   items_count: number
+  stage?: string | null
   status: string
   end_date: string | null
   created_at: string
@@ -392,6 +393,8 @@ export interface ExportHistoryBatch {
   ai_run_id?: string | null
   ai_completed_count?: number
   ai_failed_count?: number
+  product_count?: number
+  ai_product_count?: number
 }
 
 function normalizeTaskStatus(status: string | null, resultPath: string | null) {
@@ -663,6 +666,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         supplier_name: batch.supplier_name,
         supplier_avatar: batch.supplier_avatar,
         items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
+        stage: batch.stage,
         status: normalizeBatchStatus(allAiProcessed ? 'AI_PROCESSED' : batch.stage, sortedFiles),
         end_date: latestEndDate,
         created_at: batch.created_at,
@@ -676,6 +680,8 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai_run_id: batch.ai_run_id,
         ai_completed_count: batch.ai_completed_count,
         ai_failed_count: batch.ai_failed_count,
+        product_count: batch.product_count,
+        ai_product_count: batch.ai_product_count,
       }
     })
 

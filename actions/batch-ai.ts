@@ -358,6 +358,13 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     }
 
+    if (settings.provider === 'byesu' && !process.env.BYESU_API_KEY?.trim()) {
+      return { success: false, error: 'BYESU_API_KEY не задан в окружении AdminYeezy' }
+    }
+    if (settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
+      return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }
+    }
+
     if (mode === 'full') {
       const sample = await scrapingQuery(`
         SELECT settings_snapshot FROM batch_ai_runs
@@ -630,8 +637,8 @@ async function finalizeRun(runId: string) {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
     const currentRun = run.rows[0]
     try {
-      let promoteBatch = !['sample', 'variants', 'selection'].includes(currentRun?.mode)
-      if (currentRun?.mode !== 'variants' && currentRun?.mode !== 'sample') {
+      let promoteBatch = false
+      if (currentRun?.mode !== 'variants') {
         const remaining = await scrapingQuery(`
           SELECT 1 FROM products
           WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false

@@ -161,21 +161,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     })
   }
 
-  const openBatchProducts = (batch: ExportHistoryBatch) => {
-    if (batch.isSynthetic) return
-    setModalState({
-      localPath: '',
-      rawPath: batch.raw_path,
-      aiPath: batch.ai_path,
-      supplierId: batch.supplier_id,
-      batchId: batch.id,
-      snapshotId: null,
-      supplierName: batch.supplier_name,
-      supplierAvatar: batch.supplier_avatar,
-      forceFileMode: false,
-    })
-  }
-
   const handleDeleteFromDb = async (batch: ExportHistoryBatch) => {
     if (batch.isSynthetic) return
     if (!confirm(`Удалить товары и фотографии S3 для выгрузки "${batch.name}"? История этапов останется в админке.`)) return
@@ -338,7 +323,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     const result = await getBatchSnapshotsAction(batch.id)
     if (!result.success || !result.data?.length) return alert('Снимков для отката нет')
     const list = result.data.map((snapshot: any, index: number) => `${index + 1}. ${snapshot.label} · ${formatDate(snapshot.created_at)} · ${snapshot.items_count} шт.`).join('\n')
-    const selected = Number(prompt(`Выберите снимок для полного отката:\n${list}`))
+    const selected = Number(prompt(`Выберите этап, к которому вернуть товары:\n${list}`))
     const snapshot = result.data[selected - 1]
     if (!snapshot || !confirm('Поздние снимки и AI-версии будут удалены. Продолжить?')) return
     const rollbackResult = await rollbackBatchAction(batch.id, snapshot.id)
@@ -396,6 +381,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
               {visibleBatches.map((batch) => {
                 const isExpanded = expandedIds.has(batch.id)
                 const isBusy = pendingAction?.endsWith(batch.id)
+                const aiProductCount = Number(batch.ai_product_count || 0)
+                const productCount = Number(batch.product_count || batch.items_count || 0)
+                const hasAiRemaining = productCount > 0 && aiProductCount < productCount
+                const aiMode = aiProductCount > 0 ? 'full' : 'sample'
+                const canPublish = batch.stage === 'AI_PROCESSED' && productCount > 0 && aiProductCount === productCount
 
                 return (
                   <React.Fragment key={batch.id}>
@@ -437,23 +427,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       </td>
                       <td className="relative px-3 py-3 text-right">
                         <div className="ml-auto flex w-fit flex-nowrap items-center justify-end gap-0.5 whitespace-nowrap rounded-lg bg-slate-900/35 p-0.5">
-                          {!batch.isSynthetic && (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                openBatchProducts(batch)
-                              }}
-                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-                              title="Открыть текущие товары партии из БД"
-                              aria-label="Открыть товары из БД"
-                            >
-                              <Database className="h-4 w-4" />
-                            </button>
-                          )}
-                          {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
-                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на первых 10 товарах'} aria-label={batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
+                          {!batch.isSynthetic && hasAiRemaining && batch.status !== 'Удалено из БД' && (
+                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, aiMode) }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={aiMode === 'full' ? 'Продолжить обработку остальных' : 'Проверить ИИ на первых 10 товарах'} aria-label={aiMode === 'full' ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
                               {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                              {!batch.ai_completed_count && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
+                              {aiMode === 'sample' && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
                             </button>
                           )}
                           {!batch.isSynthetic && ['queued', 'running'].includes(batch.ai_run_status || '') && (
@@ -500,7 +477,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             className="absolute right-14 top-12 z-20 w-64 overflow-hidden rounded-lg border border-slate-700 bg-slate-950 py-1 text-left shadow-2xl"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && <>
+                            {!batch.isSynthetic && canPublish && <>
                               <button onClick={() => handlePushBatch(batch, 'upsert')} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
                                 <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Обновить и добавить</b><small className="text-slate-500">Совпавшие external_id обновить</small></span>
                               </button>
@@ -511,9 +488,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             <button
                               onClick={() => rollback(batch)}
                               disabled={batch.isSynthetic}
-                              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-500/10 disabled:text-slate-600"
+                              className="flex w-full items-start gap-2 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-500/10 disabled:text-slate-600"
                             >
-                              <RotateCcw className="h-4 w-4" /> Полный откат
+                              <RotateCcw className="mt-0.5 h-4 w-4 shrink-0" />
+                              <span><b className="block">Откатить к этапу…</b><small className="text-slate-500">Вернуть товары к сохранённому снимку</small></span>
                             </button>
                             <button
                               onClick={() => handleDeleteFromDb(batch)}

@@ -195,8 +195,8 @@ async function finalizeCockpitRun(runId: string) {
     return
   }
   try {
-    let promoteBatch = !['sample', 'variants', 'selection'].includes(run.mode)
-    if (run.mode !== 'variants' && run.mode !== 'sample') {
+    let promoteBatch = false
+    if (run.mode !== 'variants') {
       const remaining = await scrapingQuery(`
         SELECT 1 FROM products
         WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
