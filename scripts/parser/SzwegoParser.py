@@ -7,6 +7,7 @@ import os
 import argparse
 import sys
 import io
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from datetime import datetime, date
 
@@ -99,7 +100,7 @@ def get_item_date(item, session, album_id, headers):
     for k in ("goodsUrl", "goods_url", "detailUrl", "detail_url", "url", "link"):
         url = item.get(k)
         if isinstance(url, str) and url.strip():
-            d = _fetch_date_from_goods_page(session, url.strip(), headers)
+            d = _fetch_date_from_goods_page(session, urljoin("https://www.szwego.com", url.strip()), headers)
             if d: return d
     goods_id = item.get("goods_id", "") or item.get("selfGoodsId", "")
     if goods_id:
