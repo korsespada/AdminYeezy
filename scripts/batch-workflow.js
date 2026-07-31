@@ -1085,9 +1085,9 @@ async function uploadPhotoAttempt(url, key) {
   }
 }
 
-async function existingRailsExternalIds(externalIds) {
+async function existingRailsProducts(externalIds) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
-  const existing = new Set();
+  const existing = new Map();
   if (!ids.length) return existing;
   const token = await railsAdminToken();
   let cursor = 0;
@@ -1102,7 +1102,8 @@ async function existingRailsExternalIds(externalIds) {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.message || payload.error || `Rails external_id check failed with ${response.status}`);
       if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
-        existing.add(externalId);
+        const product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
+        if (product) existing.set(externalId, product);
       }
     }
   });
@@ -1110,7 +1111,61 @@ async function existingRailsExternalIds(externalIds) {
   return existing;
 }
 
-async function pushBatchToCatalog(batchId, onProgress) {
+async function existingRailsExternalIds(externalIds) {
+  return new Set((await existingRailsProducts(externalIds)).keys());
+}
+
+function railsUpdatePayload(product) {
+  const sizes = Array.isArray(product.attributes?.sizes) ? product.attributes.sizes : [];
+  return {
+    product: {
+      external_id: product.external_id || '',
+      name: product.name || '',
+      description: product.description || '',
+      h1: product.h1 || '',
+      seo_title: product.seo_title || '',
+      seo_description: product.seo_description || '',
+      price_cents: Math.round(Number(product.price || 0) * 100),
+      price_on_request: Number(product.price || 0) === 0,
+      status: product.status === 'inactive' ? 'hidden' : 'active',
+      brand_id: product.brand || null,
+      category_id: product.subcategory || product.category || null,
+      gender: normalizeCatalogGender(product.gender) || null,
+      catalog_attributes: normalizeAttributes(product.attributes),
+      media: normalizePhotos(product.photos).map((url, index) => ({
+        original_url: url,
+        thumb_url: url,
+        preview_url: url,
+        og_image_url: url,
+        alt_text: product.name || '',
+        sort_order: index,
+        processing_status: 'processed',
+      })),
+      variants: sizes.map((size) => ({
+        sku: `${product.external_id || 'product'}-size-${String(size).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        size: String(size),
+        price_cents: Math.round(Number(product.price || 0) * 100),
+        status: 'active',
+        metadata: { generated_from: 'catalog_attributes.sizes' },
+      })),
+    },
+  };
+}
+
+async function updateRailsProduct(id, product) {
+  const response = await fetch(railsApiUrl(`/admin/products/${encodeURIComponent(id)}`), {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${await railsAdminToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(railsUpdatePayload(product)),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || payload.error || `Rails update failed with ${response.status}`);
+}
+
+async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
 
@@ -1134,14 +1189,17 @@ async function pushBatchToCatalog(batchId, onProgress) {
 
   const batch = await getBatch(batchId);
   const lookups = await loadLegacyLookupMaps();
-  const existingExternalIds = await existingRailsExternalIds(products.map((product) => product.external_id));
+  const mode = options.mode === 'upsert' ? 'upsert' : 'add';
+  const existingProducts = await existingRailsProducts(products.map((product) => product.external_id));
+  const existingExternalIds = new Set(existingProducts.keys());
   const candidates = products
     .map((product, index) => ({ product, index }))
-    .filter(({ product }) => !existingExternalIds.has(String(product.external_id || '').trim()));
+    .filter(({ product }) => mode === 'upsert' || !existingExternalIds.has(String(product.external_id || '').trim()));
   const updatedProducts = products.map((product) => ({ ...product }));
   const errors = [];
   let prepared = 0;
   let imported = 0;
+  let updated = 0;
 
   for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
     const { product: sourceProduct, index: productIndex } = candidates[candidateIndex];
@@ -1172,8 +1230,23 @@ async function pushBatchToCatalog(batchId, onProgress) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
 
+  if (mode === 'upsert') {
+    for (const [externalId, railsProduct] of existingProducts.entries()) {
+      const product = updatedProducts.find((item) => String(item.external_id || '').trim() === externalId);
+      if (!product) continue;
+      try {
+        await updateRailsProduct(railsProduct.id, product);
+        updated += 1;
+      } catch (error) {
+        errors.push(`${externalId}: ${error.message}`);
+      }
+    }
+    if (errors.length > 0) throw new Error(`Обновление остановлено:\n${errors.slice(0, 20).join('\n')}`);
+  }
+
   const railsRows = candidates
     .map(({ index }) => updatedProducts[index])
+    .filter((product) => !existingExternalIds.has(String(product.external_id || '').trim()))
     .filter((product) => product.external_id || product.name)
     .map((product) => productToRailsCsvRow(product, lookups));
   const importBatches = [];
@@ -1195,6 +1268,7 @@ async function pushBatchToCatalog(batchId, onProgress) {
 
   return {
     success: imported,
+    updated,
     failed: errors.length,
     errors,
     total: products.length,

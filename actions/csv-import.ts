@@ -515,12 +515,14 @@ export async function getBatchProductsAction(batchId: string) {
       }
     }
 
+    const batch = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
     return {
       success: true,
       data: {
         products: res.rows.map(normalizeBatchProduct),
         columns: BATCH_PRODUCT_COLUMNS,
         delimiter: ';',
+        stage: batch.rows[0]?.stage || 'SCRAPED',
       },
     }
   } catch (err: any) {

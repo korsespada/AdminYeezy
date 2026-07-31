@@ -194,7 +194,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
     setPendingAction(`admin-${batch.id}`)
     const res = batch.isSynthetic
-      ? await deleteExportFileFromAdminAction(batch.files[0].id)
+      ? await deleteExportFileFromAdminAction(Number(batch.files[0].id))
       : await deleteExportBatchFromAdminAction(batch.id)
 
     if (res.success) {
@@ -207,10 +207,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   const handleDeleteFileFromAdmin = async (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
+    if (file.is_virtual) return
     if (!confirm(`Удалить этап "${fileName(file.result_path)}" из админки?`)) return
 
     setPendingAction(`file-${file.id}`)
-    const res = await deleteExportFileFromAdminAction(file.id)
+    const res = await deleteExportFileFromAdminAction(Number(file.id))
     if (res.success) {
       setBatches((prev) => prev
         .map((item) => item.id === batch.id ? { ...item, files: item.files.filter((f) => f.id !== file.id) } : item)
@@ -221,18 +222,19 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     setPendingAction(null)
   }
 
-  const handlePushBatch = async (batch: ExportHistoryBatch) => {
+  const handlePushBatch = async (batch: ExportHistoryBatch, mode: 'add' | 'upsert') => {
     if (batch.isSynthetic) return
     if (!confirm(`Запушить товары выгрузки "${batch.name}" в каталог?`)) return
 
     setPendingAction(`push-${batch.id}`)
-    const res = await pushBatchToCatalogAction(batch.id)
+    const res = await pushBatchToCatalogAction(batch.id, mode)
     if (res.success) {
       const pushed = res.data?.success || 0
       const failed = res.data?.failed || 0
       const skipped = res.data?.skippedExisting || 0
+      const updated = res.data?.updated || 0
       setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено в БД' } : item))
-      alert(`Пуш завершен. Новых: ${pushed}, уже были в БД: ${skipped}, ошибок: ${failed}`)
+      alert(`Пуш завершен. Новых: ${pushed}, обновлено: ${updated}, пропущено: ${skipped}, ошибок: ${failed}`)
     } else {
       alert(`Ошибка пуша: ${res.error}`)
     }
@@ -468,20 +470,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
                             <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ" aria-label="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
                           )}
-                          {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
-                            <button
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                handlePushBatch(batch)
-                              }}
-                              disabled={pendingAction === `push-${batch.id}`}
-                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-emerald-300 transition-colors hover:bg-emerald-500/10 hover:text-emerald-200 disabled:opacity-60"
-                              title="Запушить товары в каталог"
-                              aria-label="Пуш в каталог"
-                            >
-                              {pendingAction === `push-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                            </button>
-                          )}
                           <button
                             onClick={(event) => {
                               event.stopPropagation()
@@ -509,6 +497,14 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             className="absolute right-14 top-12 z-20 w-64 overflow-hidden rounded-lg border border-slate-700 bg-slate-950 py-1 text-left shadow-2xl"
                             onClick={(event) => event.stopPropagation()}
                           >
+                            {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && <>
+                              <button onClick={() => handlePushBatch(batch, 'upsert')} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
+                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Обновить и добавить</b><small className="text-slate-500">Совпавшие external_id обновить</small></span>
+                              </button>
+                              <button onClick={() => handlePushBatch(batch, 'add')} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
+                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Добавить только новые</b><small className="text-slate-500">Совпавшие external_id пропустить</small></span>
+                              </button>
+                            </>}
                             <button
                               onClick={() => rollback(batch)}
                               disabled={batch.isSynthetic}
@@ -548,8 +544,8 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               ? <Database className="h-5 w-5 flex-shrink-0 text-slate-500" />
                               : <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />}
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-medium text-slate-100">{fileName(file.result_path)}</div>
-                              <div className="text-xs text-slate-600">Этап #{file.id}</div>
+                              <div className="truncate text-sm font-medium text-slate-100">{file.label || fileName(file.result_path)}</div>
+                              <div className="text-xs text-slate-600">{file.is_virtual ? 'Состояние товаров партии' : `Этап #${file.id}`}</div>
                             </div>
                           </div>
                         </td>
@@ -558,7 +554,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                         <td className="px-6 py-4"><StatusBadge status={file.status} /></td>
                         <td className="px-6 py-4 text-sm text-slate-400">{file.end_date || '—'}</td>
                         <td className="px-6 py-4 text-right">
-                          <button
+                          {!file.is_virtual && <button
                             onClick={(event) => {
                               event.stopPropagation()
                               handleDeleteFileFromAdmin(batch, file)
@@ -567,7 +563,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             title="Удалить этап из админки"
                           >
                             {pendingAction === `file-${file.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                          </button>
+                          </button>}
                         </td>
                       </tr>
                     ))}

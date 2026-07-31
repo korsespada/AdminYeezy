@@ -371,7 +371,7 @@ export async function getTasksAction(): Promise<ActionResponse> {
 }
 
 export interface ExportHistoryFile {
-  id: number
+  id: number | string
   supplier_id: number | null
   supplier_name: string | null
   supplier_avatar: string | null
@@ -383,6 +383,8 @@ export interface ExportHistoryFile {
   end_date: string | null
   created_at: string
   updated_at: string
+  is_virtual?: boolean
+  label?: string
 }
 
 export interface ExportHistoryBatch {
@@ -524,7 +526,10 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai.id as ai_run_id,
         ai.status as ai_run_status,
         ai.completed_count as ai_completed_count,
-        ai.failed_count as ai_failed_count
+        ai.failed_count as ai_failed_count,
+        pc.product_count,
+        pc.ai_product_count,
+        pc.ai_updated_at
       FROM scraping_tasks t
       LEFT JOIN suppliers s ON t.supplier_id = s.id
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
@@ -533,6 +538,12 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         SELECT id, status, completed_count, failed_count FROM batch_ai_runs
         WHERE batch_id=b.id ORDER BY created_at DESC LIMIT 1
       ) ai ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS product_count,
+               COUNT(*) FILTER (WHERE COALESCE(ai_processed, false))::int AS ai_product_count,
+               MAX(updated_at) FILTER (WHERE COALESCE(ai_processed, false)) AS ai_updated_at
+        FROM products WHERE batch_id=b.id
+      ) pc ON TRUE
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
       ORDER BY COALESCE(b.created_at, t.created_at) DESC, t.created_at DESC
       LIMIT 500
@@ -577,6 +588,9 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             ai_run_id: row.ai_run_id || null,
             ai_completed_count: Number(row.ai_completed_count || 0),
             ai_failed_count: Number(row.ai_failed_count || 0),
+            product_count: Number(row.product_count || 0),
+            ai_product_count: Number(row.ai_product_count || 0),
+            ai_updated_at: row.ai_updated_at || null,
           },
           files: [],
         })
@@ -586,10 +600,30 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
     }
 
     const data: ExportHistoryBatch[] = Array.from(grouped.values()).map(({ batch, files }) => {
-      const sortedFiles = files.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      const allAiProcessed = batch.product_count > 0 && batch.ai_product_count === batch.product_count
+      if (allAiProcessed && !files.some((file) => file.status === 'Обработано ИИ')) {
+        files.push({
+          id: `ai-${batch.id}`,
+          supplier_id: batch.supplier_id,
+          supplier_name: batch.supplier_name,
+          supplier_avatar: batch.supplier_avatar,
+          batch_id: batch.id,
+          status: 'Обработано ИИ',
+          result_path: `db://batch/${batch.id}/ai`,
+          items_count: batch.product_count,
+          error_message: null,
+          end_date: null,
+          created_at: batch.ai_updated_at || batch.updated_at,
+          updated_at: batch.ai_updated_at || batch.updated_at,
+          is_virtual: true,
+          label: 'Обработано ИИ',
+        })
+      }
+      const stageRank: Record<string, number> = { 'Сырой товар': 0, 'Обработан скриптом': 1, 'Обработано ИИ': 2 }
+      const sortedFiles = files.sort((a, b) => (stageRank[a.status] ?? 9) - (stageRank[b.status] ?? 9) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       const rawFile = sortedFiles.find((file) => file.status === 'Сырой товар')
       const aiFile = sortedFiles.find((file) => file.status === 'Обработано ИИ')
-      const latestFile = sortedFiles[0]
+      const latestFile = [...sortedFiles].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
       const latestEndDate = sortedFiles.find((file) => file.end_date)?.end_date || null
       const latestItemsCount = latestFile?.items_count || 0
 
@@ -601,7 +635,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         supplier_name: batch.supplier_name,
         supplier_avatar: batch.supplier_avatar,
         items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
-        status: normalizeBatchStatus(batch.stage, sortedFiles),
+        status: normalizeBatchStatus(allAiProcessed ? 'AI_PROCESSED' : batch.stage, sortedFiles),
         end_date: latestEndDate,
         created_at: batch.created_at,
         updated_at: latestFile?.updated_at || batch.updated_at,
@@ -1036,11 +1070,11 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
     }
 }
 
-export async function pushBatchToCatalogAction(batchId: string): Promise<ActionResponse> {
+export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add'): Promise<ActionResponse> {
     try {
         await requireAdmin()
         const workflow = require('../scripts/batch-workflow')
-        const result = await workflow.pushBatchToCatalog(batchId)
+        const result = await workflow.pushBatchToCatalog(batchId, { mode })
         try {
             await redis.del('catalog:all')
         } catch (redisErr: any) {

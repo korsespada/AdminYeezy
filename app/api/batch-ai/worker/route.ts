@@ -187,13 +187,22 @@ async function finalizeCockpitRun(runId: string) {
   const result = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const run = result.rows[0]
   if (!run || run.status !== 'completed') return
-  if (!['sample', 'variants', 'selection'].includes(run.mode)) {
+  let promoteBatch = !['sample', 'variants', 'selection'].includes(run.mode)
+  if (run.mode === 'selection') {
+    const remaining = await scrapingQuery(`
+      SELECT 1 FROM products
+      WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
+      LIMIT 1
+    `, [run.batch_id])
+    promoteBatch = remaining.rows.length === 0
+  }
+  if (promoteBatch) {
     await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
   }
   if (run.mode === 'variants') return
-  const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `Обработано ИИ · ${run.id.slice(0, 8)}`
+  const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `${promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ'} · ${run.id.slice(0, 8)}`
   const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
-  if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, 'AI_PROCESSED', label, run.settings_snapshot)
+  if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', label, run.settings_snapshot)
 }
 
 async function updateRunCounts(client: any, runId: string) {

@@ -610,11 +610,21 @@ async function finalizeRun(runId: string) {
   `, [runId, status, row.completed, row.failed, row.pending])
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
-    if (!['sample', 'variants', 'selection'].includes(run.rows[0]?.mode)) {
-      await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.rows[0].batch_id])
+    const currentRun = run.rows[0]
+    let promoteBatch = !['sample', 'variants', 'selection'].includes(currentRun?.mode)
+    if (currentRun?.mode === 'selection') {
+      const remaining = await scrapingQuery(`
+        SELECT 1 FROM products
+        WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
+        LIMIT 1
+      `, [currentRun.batch_id])
+      promoteBatch = remaining.rows.length === 0
     }
-    if (run.rows[0]?.mode !== 'variants') {
-      await snapshotBatch(run.rows[0].batch_id, 'AI_PROCESSED', 'Обработано ИИ', run.rows[0].settings_snapshot)
+    if (promoteBatch) {
+      await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
+    }
+    if (currentRun?.mode !== 'variants') {
+      await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
     }
   }
 }
@@ -923,7 +933,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
       WHERE (entity_type='category' AND lower(name)='сумки')
          OR (entity_type='subcategory' AND lower(name) IN (
            'сумки','сумки-косметички','сумки-кейсы','сумки с клапаном','сумки на плечо'
-           ,'сумки-багет','мини-сумки','сумки-боулинг'
+           ,'сумки-багет','мини-сумки','сумки-боулинг','пляжные сумки'
          ))
     `)
     const bagCategoryId = bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id
@@ -937,6 +947,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
         'сумки-багет',
         'мини-сумки',
         'сумки-боулинг',
+        'пляжные сумки',
       ].includes(String(row.name).toLowerCase()))
       .map((row) => String(row.canonical_id))
     if (bagCategoryId && shoulderBagId && redirectedIds.length) {

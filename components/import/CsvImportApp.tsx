@@ -33,6 +33,8 @@ import {
   Sparkles,
   Settings2,
   Users,
+  MoreHorizontal,
+  ChevronDown,
 } from "lucide-react";
 import {
   pushCsvProductsAction,
@@ -441,6 +443,9 @@ export default function CsvImportApp({
   const [delimiter, setDelimiter] = useState(",");
   const [fileName, setFileName] = useState("");
   const [sourceLabel, setSourceLabel] = useState<string | null>(initialSourceLabel);
+  const [batchStage, setBatchStage] = useState("SCRAPED");
+  const [showMoreActions, setShowMoreActions] = useState(false);
+  const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [result, setResult] = useState<{
     success: number;
@@ -565,6 +570,15 @@ export default function CsvImportApp({
     () => [...new Set([0, ...products.map((product) => Number(product.price) || 0)])].sort((a, b) => a - b),
     [products],
   );
+  const countBy = useCallback((values: string[]) => {
+    const counts = new Map<string, number>();
+    values.forEach((value) => counts.set(value || "__EMPTY__", (counts.get(value || "__EMPTY__") || 0) + 1));
+    return counts;
+  }, []);
+  const brandCounts = useMemo(() => countBy(products.map((product) => String(product.brand || ""))), [products, countBy]);
+  const categoryCounts = useMemo(() => countBy(products.map((product) => String(product.category || ""))), [products, countBy]);
+  const subcategoryCounts = useMemo(() => countBy(products.map((product) => String(product.subcategory || ""))), [products, countBy]);
+  const genderCounts = useMemo(() => countBy(products.map((product) => String(product.gender || ""))), [products, countBy]);
   const attributeValues = useCallback((value: unknown) => {
     const values = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
     return values.map((item) => String(item).trim()).filter(Boolean);
@@ -579,6 +593,15 @@ export default function CsvImportApp({
     if (products.some((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color).length === 0)) values.unshift("__EMPTY__");
     return values;
   }, [products, attributeValues]);
+  const modelCounts = useMemo(() => countBy(products.flatMap((product) => {
+    const values = attributeValues(product.attributes?.model_name);
+    return values.length ? values : [""];
+  })), [products, attributeValues, countBy]);
+  const colorCounts = useMemo(() => countBy(products.flatMap((product) => {
+    const values = attributeValues(product.attributes?.colors ?? product.attributes?.color);
+    return values.length ? values : [""];
+  })), [products, attributeValues, countBy]);
+  const priceCounts = useMemo(() => countBy(products.map((product) => String(Number(product.price) || 0))), [products, countBy]);
 
   const aiReadyCount = useMemo(
     () => products.filter((product) => product.ai_processed === true || product.ai_processed === "true").length,
@@ -731,6 +754,7 @@ export default function CsvImportApp({
       setProducts(res.data.products);
       setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
       setDelimiter(res.data.delimiter || ";");
+      setBatchStage(res.data.stage || "SCRAPED");
       setFileName(`Партия ${nextBatchId.slice(0, 8)}`);
       setSourceLabel('Текущая БД-версия партии');
       const allProcessed =
@@ -760,6 +784,7 @@ export default function CsvImportApp({
           const nextProducts = productsResult.data.products;
           setProducts(nextProducts);
           setColumns(productsResult.data.columns?.length ? productsResult.data.columns : DEFAULT_PRODUCT_COLUMNS);
+          setBatchStage(productsResult.data.stage || "SCRAPED");
           const completed = nextProducts.filter((product: CsvProduct) => product.ai_processed === true || product.ai_processed === "true").length;
           setIsAiProcessed(nextProducts.length > 0 && completed === nextProducts.length);
         }
@@ -834,7 +859,7 @@ export default function CsvImportApp({
   };
 
   // ─── Data Handlers ────────────────────────────────────────────────
-  const handlePush = async () => {
+  const handlePush = async (mode: "add" | "upsert" = "add") => {
     if (products.length === 0) return;
     const validationIssues = validateProducts(products);
     const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
@@ -850,14 +875,15 @@ export default function CsvImportApp({
     if (batchId) {
       setIsPushing(true);
       await persistBatchProducts(products);
-      const pushResult = await pushBatchToCatalogAction(batchId);
+      const pushResult = await pushBatchToCatalogAction(batchId, mode);
       if (pushResult.success) {
         setResult({
           success: Number(pushResult.data?.success || 0),
           failed: Number(pushResult.data?.failed || 0),
           errors: pushResult.data?.errors || [],
         });
-        setSaveMsg("✓ Партия опубликована через batch API");
+        setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, пропущено: ${Number(pushResult.data?.skippedExisting || 0)}`);
+        setBatchStage("PUSHED");
       } else {
         setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
       }
@@ -1445,17 +1471,7 @@ export default function CsvImportApp({
             </div>
 
             <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-              {previousProducts && (
-                <button
-                  onClick={handleUndoMerge}
-                  className="px-4 py-2 text-sm font-medium bg-slate-700 hover:bg-slate-600 text-amber-400 border border-amber-500/30 rounded-lg transition-all flex items-center gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Отменить изменения
-                </button>
-              )}
-
-              {(importMode === "local" || isBatchSource) && (
+              {(importMode === "local" || isBatchSource) && isDirty && (
                 <div className="flex flex-col items-center relative">
                   <button
                     onClick={handleSaveToFile}
@@ -1476,63 +1492,12 @@ export default function CsvImportApp({
                 </div>
               )}
 
-              {isBatchSource && supplierId && (
-                <Link
-                  href={`/admin/suppliers?supplier=${supplierId}`}
-                  target="_blank"
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-                >
-                  <Users className="h-4 w-4" />
-                  Поставщик
-                </Link>
-              )}
-              {isBatchSource && (
-                <Link
-                  href="/admin/ai-rules"
-                  target="_blank"
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-700 hover:text-white"
-                >
-                  <Settings2 className="h-4 w-4" />
-                  Настройки ИИ
-                </Link>
-              )}
-
-              {isBatchSource ? (
-                <button
-                  onClick={() => {
-                    if (!batchId) return;
-                    if (isDirty && !confirm("Загрузить сохранённую версию из БД? Несохранённые изменения на экране будут потеряны.")) return;
-                    handleLoadBatch(batchId);
-                  }}
-                  disabled={isLoadingPath}
-                  className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
-                  title="Перезагрузить товары и предложения этой партии из технической БД. Сырой источник не перепарсивается."
-                >
-                  <RefreshCw className={`w-4 h-4 ${isLoadingPath ? "animate-spin" : ""}`} />
-                  Перезагрузить
-                </button>
-              ) : (
+              {!isBatchSource && (
                 <button
                   onClick={handleClear}
                   className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
                 >
                   Очистить
-                </button>
-              )}
-
-              {supplierData?.post_process_script && (
-                <button
-                    onClick={handleCustomScriptProcess}
-                    disabled={isRunningCustomScript}
-                    className="px-4 py-2.5 text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white rounded-xl transition-all shadow-lg shadow-amber-600/20 flex items-center gap-2 disabled:opacity-50"
-                    title={`Скрипт: ${supplierData.post_process_script}${supplierData.post_process_enabled ? ' (автоматически после парсинга)' : ''}`}
-                >
-                    {isRunningCustomScript ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                        <Filter className="w-4 h-4" />
-                    )}
-                    Пост-обработка скриптом
                 </button>
               )}
 
@@ -1570,33 +1535,48 @@ export default function CsvImportApp({
                 )
               ) : (
                 <div className="flex items-center gap-2">
-                  {isBatchSource && aiReadyCount >= 2 && (
+                  <div className="relative">
                     <button
-                      onClick={() => handleAiProcess("variants")}
-                      className="flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-bold text-violet-200 transition-all hover:bg-violet-500/20"
-                      title="Повторно проверить обработанные товары на цветовые варианты только по тексту"
+                      onClick={() => setShowPublishMenu((value) => !value)}
+                      disabled={isPushing}
+                      className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
                     >
-                      <Merge className="h-4 w-4" />
-                      Найти варианты
+                      {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      Публикация
+                      <ChevronDown className="h-4 w-4" />
                     </button>
-                  )}
-                  <button
-                    onClick={handlePush}
-                    disabled={isPushing}
-                    className="px-6 py-2.5 text-sm font-bold bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 disabled:opacity-50"
-                >
-                    {isPushing ? (
-                    <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        {pushProgress ? `${pushProgress.current}/${pushProgress.total}` : "..."}
-                    </>
-                    ) : (
-                    <>
-                        <Send className="w-4 h-4" />
-                        Запушить в основную базу
-                    </>
+                    {showPublishMenu && (
+                      <div className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
+                        <button onClick={() => { setShowPublishMenu(false); handlePush("upsert") }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-slate-800">
+                          <span className="block font-semibold">Обновить и добавить</span>
+                          <span className="text-xs text-slate-500">Совпавшие external_id обновить, остальные добавить</span>
+                        </button>
+                        <button onClick={() => { setShowPublishMenu(false); handlePush("add") }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-slate-800">
+                          <span className="block font-semibold">Добавить только новые</span>
+                          <span className="text-xs text-slate-500">Совпавшие external_id пропустить</span>
+                        </button>
+                      </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {isBatchSource && (
+                <div className="relative">
+                  <button onClick={() => setShowMoreActions((value) => !value)} className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-700" title="Дополнительные действия">
+                    <MoreHorizontal className="h-5 w-5" />
                   </button>
+                  {showMoreActions && (
+                    <div className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
+                      {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
+                      <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
+                      {previousProducts && <button onClick={handleUndoMerge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
+                      {supplierData?.post_process_script && batchStage === "SCRAPED" && (
+                        <button onClick={handleCustomScriptProcess} disabled={isRunningCustomScript} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-amber-300 hover:bg-slate-800 disabled:opacity-50"><Filter className="h-4 w-4" />Пост-обработка скриптом</button>
+                      )}
+                      {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Найти варианты</button>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1897,14 +1877,7 @@ export default function CsvImportApp({
         )}
 
         {/* Filters */}
-        {products.length > 0 &&
-          (uniqueBrands.length > 1 ||
-            uniqueCategories.length > 1 ||
-            uniqueSubcategories.length > 1 ||
-            uniqueGenders.length > 1 ||
-            uniqueModels.length > 0 ||
-            uniqueColors.length > 0 ||
-            uniquePrices.length > 0) && (
+        {products.length > 0 && (
             <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
               <div className="flex items-center gap-2 text-slate-500 mr-1">
                 <Filter className="w-4 h-4" />
@@ -1913,67 +1886,67 @@ export default function CsvImportApp({
                 </span>
               </div>
 
-              {uniqueBrands.length > 1 && (
+              {uniqueBrands.length > 0 && (
                 <select
                   value={filterBrand}
                   onChange={(e) => setFilterBrand(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
                 >
-                  <option value="">Все бренды</option>
+                  <option value="">Все бренды ({products.length})</option>
                   {uniqueBrands.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
-                        ? "Без бренда"
-                        : resolveName(id, lookups?.brands || [])}
+                        ? `Без бренда (${brandCounts.get("__EMPTY__") || 0})`
+                        : `${resolveName(id, lookups?.brands || [])} (${brandCounts.get(id) || 0})`}
                     </option>
                   ))}
                 </select>
               )}
 
-              {uniqueCategories.length > 1 && (
+              {uniqueCategories.length > 0 && (
                 <select
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
                 >
-                  <option value="">Все категории</option>
+                  <option value="">Все категории ({products.length})</option>
                   {uniqueCategories.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
-                        ? "Без категории"
-                        : resolveName(id, lookups?.categories || [])}
+                        ? `Без категории (${categoryCounts.get("__EMPTY__") || 0})`
+                        : `${resolveName(id, lookups?.categories || [])} (${categoryCounts.get(id) || 0})`}
                     </option>
                   ))}
                 </select>
               )}
 
-              {uniqueSubcategories.length > 1 && (
+              {uniqueSubcategories.length > 0 && (
                 <select
                   value={filterSubcategory}
                   onChange={(e) => setFilterSubcategory(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[180px]"
                 >
-                  <option value="">Все подкатегории</option>
+                  <option value="">Все подкатегории ({products.length})</option>
                   {uniqueSubcategories.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
-                        ? "Без подкатегории"
-                        : resolveName(id, lookups?.subcategories || [])}
+                        ? `Без подкатегории (${subcategoryCounts.get("__EMPTY__") || 0})`
+                        : `${resolveName(id, lookups?.subcategories || [])} (${subcategoryCounts.get(id) || 0})`}
                     </option>
                   ))}
                 </select>
               )}
 
-              {uniqueGenders.length > 1 && (
+              {uniqueGenders.length > 0 && (
                 <select
                   value={filterGender}
                   onChange={(e) => setFilterGender(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]"
                 >
-                  <option value="">Все гендеры (Для кого)</option>
+                  <option value="">Все гендеры ({products.length})</option>
                   {uniqueGenders.map((g) => (
                     <option key={g} value={g}>
-                      {g === "__EMPTY__" ? "Без гендера" : g}
+                      {g === "__EMPTY__" ? `Без гендера (${genderCounts.get("__EMPTY__") || 0})` : `${g} (${genderCounts.get(String(g)) || 0})`}
                     </option>
                   ))}
                 </select>
@@ -1984,9 +1957,9 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready")}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все по ИИ</option>
-                <option value="raw">Сырой</option>
-                <option value="ready">ИИ готово</option>
+                <option value="">Все по ИИ ({products.length})</option>
+                <option value="raw">Сырой ({aiRemainingCount})</option>
+                <option value="ready">ИИ готово ({aiReadyCount})</option>
               </select>
 
               <select
@@ -1994,10 +1967,10 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterPrice(e.target.value)}
                 className="min-w-[140px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все цены</option>
+                <option value="">Все цены ({products.length})</option>
                 {uniquePrices.map((price) => (
                   <option key={price} value={String(price)}>
-                    {price.toLocaleString("ru-RU")} ₽
+                    {price.toLocaleString("ru-RU")} ₽ ({priceCounts.get(String(price)) || 0})
                   </option>
                 ))}
               </select>
@@ -2007,9 +1980,9 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterModel(e.target.value)}
                 className="min-w-[160px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все модели</option>
+                <option value="">Все модели ({products.length})</option>
                 {uniqueModels.map((model) => (
-                  <option key={model} value={model}>{model === "__EMPTY__" ? "Без модели" : model}</option>
+                  <option key={model} value={model}>{model === "__EMPTY__" ? `Без модели (${modelCounts.get("__EMPTY__") || 0})` : `${model} (${modelCounts.get(model) || 0})`}</option>
                 ))}
               </select>
 
@@ -2018,9 +1991,9 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterColor(e.target.value)}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все цвета</option>
+                <option value="">Все цвета ({products.length})</option>
                 {uniqueColors.map((color) => (
-                  <option key={color} value={color}>{color === "__EMPTY__" ? "Без цвета" : color}</option>
+                  <option key={color} value={color}>{color === "__EMPTY__" ? `Без цвета (${colorCounts.get("__EMPTY__") || 0})` : `${color} (${colorCounts.get(color) || 0})`}</option>
                 ))}
               </select>
 
@@ -2074,18 +2047,7 @@ export default function CsvImportApp({
               <Database className="h-7 w-7 text-slate-500" />
             </div>
             <h3 className="mb-2 text-lg font-semibold text-white">В партии нет товаров</h3>
-            <p className="text-sm text-slate-400">
-              Если товары были изменены через NocoDB, обновите партию из базы.
-            </p>
-            <button
-              onClick={() => batchId && handleLoadBatch(batchId)}
-              disabled={isLoadingPath}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
-              title="Перезагрузить товары этой партии из технической БД"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoadingPath ? "animate-spin" : ""}`} />
-              Перезагрузить товары
-            </button>
+            <p className="text-sm text-slate-400">В этой выгрузке пока нет товарных карточек.</p>
           </div>
         )}
 
