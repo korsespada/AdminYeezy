@@ -92,6 +92,69 @@ describe('batch AI normalization', () => {
     expect(result.suggestions).toEqual([])
   })
 
+  it('recovers an explicit shoe size range when the model omits sizes', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sandals',
+        description: 'Чёрные босоножки с ремешками. Доступные размеры: EU 35–41.',
+        catalog_attributes: { colors: ['Чёрный'] },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'sandals', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sandals']),
+      subcategoryParents: new Map([['sandals', 'shoes']]),
+      subcategoryNames: new Map([['sandals', 'Сандалии и босоножки']]),
+      attributeCodes: new Set(['sizes', 'size_system', 'colors']),
+    })
+
+    expect(result.product.attributes).toMatchObject({
+      colors: ['Чёрный'],
+      sizes: ['35', '36', '37', '38', '39', '40', '41'],
+      size_system: 'EU',
+    })
+  })
+
+  it('maps a known shoe construction suggestion to an existing broad subcategory', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'shoes', subcategory: 'generic-shoes' },
+      subcategory_suggestion: { name: 'Дерби', parent_category_id: 'shoes' },
+    }, {
+      product: { category: 'shoes', subcategory: 'generic-shoes', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['generic-shoes', 'flat-shoes']),
+      subcategoryParents: new Map([['generic-shoes', 'shoes'], ['flat-shoes', 'shoes']]),
+      subcategoryNames: new Map([
+        ['generic-shoes', 'Туфли'],
+        ['flat-shoes', 'Туфли на плоской подошве'],
+      ]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('flat-shoes')
+    expect(result.subcategorySuggestion).toBeNull()
+  })
+
+  it('rejects the legacy generic shoe subcategory', () => {
+    expect(() => normalizeBatchAiOutput({
+      product: { category: 'shoes', subcategory: 'generic-shoes' },
+    }, {
+      product: { category: 'shoes', subcategory: 'generic-shoes', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['generic-shoes']),
+      subcategoryParents: new Map([['generic-shoes', 'shoes']]),
+      subcategoryNames: new Map([['generic-shoes', 'Туфли']]),
+      attributeCodes: new Set(),
+    })).toThrow('конкретная подкатегория')
+  })
+
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
     const result = normalizeBatchAiOutput({
       product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },

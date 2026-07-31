@@ -1,6 +1,12 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
+import { extractExplicitShoeAttributes } from '@/lib/product-attributes'
+import {
+  canonicalShoeSubcategoryName,
+  isGenericShoeSubcategory,
+  SHOE_TAXONOMY_AI_RULES,
+} from '@/lib/shoe-taxonomy'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -74,6 +80,8 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Глобальные правил�
 - Эти правила относятся ко всем поставщикам категории «Сумки» и важнее инструкции отдельного поставщика.
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
 - Атрибут stones предназначен только для ювелирных изделий и бижутерии. Стразы, кристаллы и декоративные вставки на обуви, одежде или сумках описывай как декор в description, но никогда не записывай в stones и не предлагай stones как новый атрибут.
+
+${SHOE_TAXONOMY_AI_RULES}
 
 Глобальные правила сверки текста с фотографиями:
 - Исходный текст ненадёжен и может относиться к другой карточке. Не переноси из него модель или характеристики автоматически.
@@ -403,6 +411,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
+  if (input.attributeCodes.has('sizes') && scalarAttribute(attributes.sizes).length === 0) {
+    const explicit = extractExplicitShoeAttributes([
+      original.name,
+      original.description,
+      proposed.name,
+      proposed.description,
+      proposed.h1,
+      proposed.seo_description,
+    ].filter(Boolean).join('\n'))
+    if (Array.isArray(explicit.sizes) && explicit.sizes.length > 0) attributes.sizes = explicit.sizes
+    if (!attributes.size_system && explicit.size_system && input.attributeCodes.has('size_system')) {
+      attributes.size_system = explicit.size_system
+    }
+  }
   const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
   const sizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
   const photos = Array.isArray(original.photos)
@@ -435,6 +457,30 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
 
+  let subcategorySuggestion = raw?.subcategory_suggestion || null
+  if (normalizedName(input.categoryNames?.get(category)) === 'обувь') {
+    const canonicalFromSelection = canonicalShoeSubcategoryName(input.subcategoryNames?.get(subcategory))
+    const canonicalFromSuggestion = canonicalShoeSubcategoryName(subcategorySuggestion?.name)
+    const canonicalName = canonicalFromSuggestion || canonicalFromSelection
+    const canonicalEntry = canonicalName
+      ? [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
+        canonicalShoeSubcategoryName(name) === canonicalName
+        && (!input.subcategoryParents?.get(id) || input.subcategoryParents.get(id) === category)
+      ))
+      : undefined
+
+    if (canonicalEntry) {
+      subcategory = canonicalEntry[0]
+      if (canonicalFromSuggestion) subcategorySuggestion = null
+    }
+    if (!subcategory || isGenericShoeSubcategory(input.subcategoryNames?.get(subcategory))) {
+      throw new Error('Для категории «Обувь» требуется конкретная подкатегория вместо общей «Туфли»')
+    }
+    if (subcategorySuggestion && !canonicalFromSuggestion) {
+      throw new Error('Для категории «Обувь» нельзя создавать новую подкатегорию: выберите существующий тип конструкции')
+    }
+  }
+
   return {
     product: {
       ...original,
@@ -460,7 +506,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       variant_group_key: original.variant_group_key || null,
     },
     suggestions,
-    subcategorySuggestion: raw?.subcategory_suggestion || null,
+    subcategorySuggestion,
     colorFamily: raw?.color_family || null,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },
   }

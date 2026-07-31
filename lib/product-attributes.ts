@@ -92,7 +92,7 @@ export function extractExplicitShoeAttributes(textValue: unknown): ProductAttrib
   if (!text.trim()) return {}
 
   const attributes: ProductAttributes = {}
-  const sizesRaw = labelledValue(text, /(?:размеры?|sizes?)/i)
+  const sizesRaw = labelledValue(text, /(?:(?:доступные|available)\s+)?(?:размеры?|sizes?)/i)
   const sizes = normalizeNumericSizes(sizesRaw)
   if (sizes.length > 0) attributes.sizes = sizes
 
@@ -112,7 +112,7 @@ export function extractExplicitShoeAttributes(textValue: unknown): ProductAttrib
 }
 
 function labelledValue(text: string, label: RegExp): string {
-  const match = text.match(new RegExp(`(?:^|\\n)\\s*${label.source}\\s*[:\\-]\\s*([^\\n]+)`, 'i'))
+  const match = text.match(new RegExp(`(?:^|\\n|[.!?]\\s+)\\s*${label.source}\\s*[:\\-]\\s*([^\\n.!?]+)`, 'i'))
   return match?.[1]?.trim() || ''
 }
 
@@ -132,7 +132,10 @@ function assignLabelled(
 
 function normalizeNumericSizes(raw: string): string[] {
   if (!raw) return []
-  const cleaned = raw.replace(/\b(?:EU|US|UK|IT|RU)\b/gi, '').trim()
+  const cleaned = raw
+    .replace(/\b(?:EU|US|UK|IT|RU)\b/gi, '')
+    .replace(/\s*(?:размер(?:ы|ный ряд)?|sizes?)\s*$/i, '')
+    .trim()
   const range = cleaned.match(/^(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)$/)
   if (range) {
     const from = Number(range[1].replace(',', '.'))
@@ -146,7 +149,7 @@ function normalizeNumericSizes(raw: string): string[] {
 
   return [...new Set(cleaned
     .split(/[,;/|]+/)
-    .map((item) => item.trim().replace(',', '.'))
+    .map((item) => item.trim().replace(',', '.').replace(/[^\d.]+$/g, ''))
     .filter((item) => /^(?:\d{1,3})(?:\.5)?$/.test(item)))]
 }
 
