@@ -10,6 +10,7 @@ export default function CsvModal({
   localPath, 
   supplierId, 
   batchId,
+  snapshotId,
   rawPath,
   aiPath,
   supplierName,
@@ -21,6 +22,7 @@ export default function CsvModal({
   localPath?: string, 
   supplierId?: number | null, 
   batchId?: string | null,
+  snapshotId?: string | null,
   rawPath?: string,
   aiPath?: string,
   supplierName?: string | null,
@@ -44,10 +46,11 @@ export default function CsvModal({
           initialAiPath={aiPath}
           initialSupplierId={supplierId}
           initialBatchId={forceFileMode ? null : batchId}
+          initialSnapshotId={snapshotId}
           initialFallbackBatchId={forceFileMode ? batchId : null}
           initialSupplierName={supplierName}
           initialSupplierAvatar={supplierAvatar}
-          initialSourceLabel={forceFileMode ? 'Снимок CSV из истории' : (batchId ? 'Текущая БД-версия партии' : null)}
+          initialSourceLabel={snapshotId ? 'Снимок этапа · только просмотр' : (forceFileMode ? 'Снимок CSV из истории' : (batchId ? 'Текущая БД-версия партии' : null))}
           onClose={onClose}
         />
       </div>

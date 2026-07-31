@@ -421,6 +421,7 @@ export default function CsvImportApp({
   initialAiPath = "",
   initialSupplierId = null,
   initialBatchId = null,
+  initialSnapshotId = null,
   initialFallbackBatchId = null,
   initialSupplierName = null,
   initialSupplierAvatar = null,
@@ -432,6 +433,7 @@ export default function CsvImportApp({
   initialAiPath?: string;
   initialSupplierId?: number | null;
   initialBatchId?: string | null;
+  initialSnapshotId?: string | null;
   initialFallbackBatchId?: string | null;
   initialSupplierName?: string | null;
   initialSupplierAvatar?: string | null;
@@ -490,8 +492,9 @@ export default function CsvImportApp({
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
-  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
+  const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
   const isBatchSource = Boolean(batchId);
+  const isSnapshotSource = Boolean(initialSnapshotId);
 
   const [isAiProcessed, setIsAiProcessed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -515,8 +518,8 @@ export default function CsvImportApp({
       getSupplierDataAction(initialSupplierId).then(setSupplierData).catch(console.error);
     }
     if (initialBatchId) {
-      setBatchId(initialBatchId);
-      handleLoadBatch(initialBatchId);
+      if (!initialSnapshotId) setBatchId(initialBatchId);
+      handleLoadBatch(initialBatchId, initialSnapshotId);
     } else if (initialLocalPath) {
       setLocalPath(initialLocalPath);
       setImportMode("local");
@@ -528,7 +531,7 @@ export default function CsvImportApp({
       if (savedMode === "local") setImportMode("local");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialLocalPath, initialSupplierId, initialBatchId]);
+  }, [initialLocalPath, initialSupplierId, initialBatchId, initialSnapshotId]);
 
   useEffect(() => {
     const timers = batchUpdateTimers.current;
@@ -742,21 +745,21 @@ export default function CsvImportApp({
     await handleLoadBatch(initialFallbackBatchId);
   };
 
-  const handleLoadBatch = async (nextBatchId: string) => {
+  const handleLoadBatch = async (nextBatchId: string, snapshotId?: string | null) => {
     setIsLoadingPath(true);
     setPathError("");
     setResult(null);
     setSaveMsg(null);
     setIsDirty(false);
-    const res = await getBatchProductsAction(nextBatchId);
-    await loadAiSuggestions(nextBatchId);
+    const res = await getBatchProductsAction(nextBatchId, snapshotId);
+    if (!snapshotId) await loadAiSuggestions(nextBatchId);
     if (res.success && res.data) {
       setProducts(res.data.products);
       setColumns(res.data.columns?.length ? res.data.columns : DEFAULT_PRODUCT_COLUMNS);
       setDelimiter(res.data.delimiter || ";");
       setBatchStage(res.data.stage || "SCRAPED");
       setFileName(`Партия ${nextBatchId.slice(0, 8)}`);
-      setSourceLabel('Текущая БД-версия партии');
+      setSourceLabel(res.data.snapshot ? `${res.data.label} · только просмотр` : 'Текущая БД-версия партии');
       const allProcessed =
         res.data.products.length > 0 &&
         res.data.products.every((p: any) => p.ai_processed === true || p.ai_processed === "true");
@@ -769,7 +772,7 @@ export default function CsvImportApp({
   };
 
   useEffect(() => {
-    if (!batchId) return;
+    if (!batchId || isSnapshotSource) return;
     let requestInFlight = false;
     const refreshDynamicState = async () => {
       if (requestInFlight || document.hidden) return;
@@ -805,9 +808,13 @@ export default function CsvImportApp({
     refreshDynamicState();
     const interval = window.setInterval(refreshDynamicState, 3000);
     return () => window.clearInterval(interval);
-  }, [batchId, isDirty, selectedIdx, products.length]);
+  }, [batchId, isDirty, selectedIdx, products.length, isSnapshotSource]);
 
   const persistBatchProducts = async (nextProducts: CsvProduct[]) => {
+    if (isSnapshotSource) {
+      setSaveMsg('Снимок этапа доступен только для просмотра');
+      return false;
+    }
     if (!batchId) return true;
     const res = await saveBatchProductsAction(batchId, nextProducts);
     if (res.success) {

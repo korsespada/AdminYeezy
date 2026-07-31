@@ -469,9 +469,31 @@ export async function saveLocalCsvAction(filePath: string, products: any[], colu
   }
 }
 
-export async function getBatchProductsAction(batchId: string) {
+export async function getBatchProductsAction(batchId: string, snapshotId?: string | null) {
   try {
     await requireAdmin()
+
+    if (snapshotId) {
+      const snapshot = await scrapingQuery(`
+        SELECT stage,label,products
+        FROM batch_snapshots
+        WHERE id=$1 AND batch_id=$2
+        LIMIT 1
+      `, [snapshotId, batchId])
+      if (!snapshot.rows[0]) throw new Error('Снимок этапа не найден')
+      const products = Array.isArray(snapshot.rows[0].products) ? snapshot.rows[0].products : []
+      return {
+        success: true,
+        data: {
+          products: products.map(normalizeBatchProduct),
+          columns: BATCH_PRODUCT_COLUMNS,
+          delimiter: ';',
+          stage: snapshot.rows[0].stage || 'SCRAPED',
+          snapshot: true,
+          label: snapshot.rows[0].label || 'Снимок этапа',
+        },
+      }
+    }
 
     let res = await scrapingQuery(`
       SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,

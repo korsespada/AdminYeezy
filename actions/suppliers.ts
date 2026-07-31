@@ -399,6 +399,8 @@ export interface ExportHistoryFile {
   updated_at: string
   is_virtual?: boolean
   label?: string
+  snapshot_id?: string | null
+  snapshot_label?: string | null
 }
 
 export interface ExportHistoryBatch {
@@ -613,6 +615,47 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       grouped.get(key)!.files.push(file)
     }
 
+    const realBatchIds = [...grouped.values()]
+      .map(({ batch }) => batch.isSynthetic ? null : String(batch.id))
+      .filter((id): id is string => Boolean(id))
+    const snapshotsByBatch = new Map<string, any[]>()
+    if (realBatchIds.length > 0) {
+      const snapshots = await scrapingQuery(`
+        SELECT id,batch_id,stage,label,jsonb_array_length(products)::int AS items_count,created_at
+        FROM batch_snapshots
+        WHERE batch_id=ANY($1::uuid[])
+        ORDER BY created_at ASC
+      `, [realBatchIds])
+      for (const snapshot of snapshots.rows) {
+        const list = snapshotsByBatch.get(String(snapshot.batch_id)) || []
+        list.push(snapshot)
+        snapshotsByBatch.set(String(snapshot.batch_id), list)
+      }
+    }
+
+    const snapshotStageByStatus: Record<string, string> = {
+      'Сырой товар': 'SCRAPED',
+      'Обработан скриптом': 'SCRIPT_PROCESSED',
+      'Обработано ИИ': 'AI_PROCESSED',
+    }
+    const attachSnapshot = (file: ExportHistoryFile) => {
+      if (!file.batch_id) return file
+      const stage = snapshotStageByStatus[file.status]
+      if (!stage) return file
+      const stageCandidates = (snapshotsByBatch.get(file.batch_id) || []).filter((snapshot) => snapshot.stage === stage)
+      const labeled = stageCandidates.filter((snapshot) => String(snapshot.label || '').trim() === file.status)
+      const candidates = labeled.length ? labeled : stageCandidates
+      const exact = candidates.filter((snapshot) => Number(snapshot.items_count) === Number(file.items_count))
+      const snapshot = [...(exact.length ? exact : candidates)].sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )[0]
+      if (snapshot) {
+        file.snapshot_id = String(snapshot.id)
+        file.snapshot_label = String(snapshot.label || file.status)
+      }
+      return file
+    }
+
     const data: ExportHistoryBatch[] = Array.from(grouped.values()).map(({ batch, files }) => {
       const allAiProcessed = batch.product_count > 0 && batch.ai_product_count === batch.product_count
       if (allAiProcessed && !files.some((file) => file.status === 'Обработано ИИ')) {
@@ -633,6 +676,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
           label: 'Обработано ИИ',
         })
       }
+      files.forEach(attachSnapshot)
       const stageRank: Record<string, number> = { 'Сырой товар': 0, 'Обработан скриптом': 1, 'Обработано ИИ': 2 }
       const sortedFiles = files.sort((a, b) => (stageRank[a.status] ?? 9) - (stageRank[b.status] ?? 9) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       const rawFile = sortedFiles.find((file) => file.status === 'Сырой товар')

@@ -50,6 +50,7 @@ type ModalState = {
   aiPath?: string | null
   supplierId: number | null
   batchId: string | null
+  snapshotId?: string | null
   supplierName: string | null
   supplierAvatar: string | null
   forceFileMode?: boolean
@@ -143,19 +144,16 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   const openFile = (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
-    if (!batch.isSynthetic && file.batch_id) {
-      openBatchProducts(batch)
-      return
-    }
     setModalState({
       localPath: file.result_path || '',
       rawPath: batch.raw_path,
       aiPath: batch.ai_path,
       supplierId: file.supplier_id,
       batchId: file.batch_id,
+      snapshotId: file.snapshot_id,
       supplierName: file.supplier_name,
       supplierAvatar: file.supplier_avatar,
-      forceFileMode: Boolean(file.result_path),
+      forceFileMode: Boolean(file.result_path) && !file.snapshot_id,
     })
   }
 
@@ -167,6 +165,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       aiPath: batch.ai_path,
       supplierId: batch.supplier_id,
       batchId: batch.id,
+      snapshotId: null,
       supplierName: batch.supplier_name,
       supplierAvatar: batch.supplier_avatar,
       forceFileMode: false,
@@ -591,6 +590,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         aiPath={modalState?.aiPath || undefined}
         supplierId={modalState?.supplierId}
         batchId={modalState?.batchId}
+        snapshotId={modalState?.snapshotId}
         supplierName={modalState?.supplierName}
         supplierAvatar={modalState?.supplierAvatar}
         forceFileMode={modalState?.forceFileMode}
