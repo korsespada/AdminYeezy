@@ -495,6 +495,7 @@ export default function CsvImportApp({
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
   const isBatchSource = Boolean(batchId);
   const isSnapshotSource = Boolean(initialSnapshotId);
+  const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
   const [isAiProcessed, setIsAiProcessed] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -1226,20 +1227,15 @@ export default function CsvImportApp({
   };
 
   const handleCustomScriptProcess = async () => {
-    if (!supplierId || (!localPath && !batchId)) return;
+    if (!supplierId || !scriptBatchId) return;
     setIsRunningCustomScript(true);
     setSaveMsg("Запуск скрипта...");
     
-    const res = await runCustomSupplierScriptAction(localPath || null, supplierId, batchId);
+    const res = await runCustomSupplierScriptAction(localPath || null, supplierId, scriptBatchId);
     
     if (res.success && res.path) {
-        if (batchId) {
-          await handleLoadBatch(batchId);
-        } else {
-          setLocalPath(res.path);
-          localStorage.setItem("csv_local_path", res.path);
-          await handleLoadPath(res.path);
-        }
+        setBatchId(scriptBatchId);
+        await handleLoadBatch(scriptBatchId);
         setSaveMsg("✓ Скрипт успешно отработал!");
         setTimeout(() => setSaveMsg(null), 5000);
     } else {
@@ -1512,6 +1508,18 @@ export default function CsvImportApp({
                 </button>
               )}
 
+              {supplierData?.post_process_script && batchStage === "SCRAPED" && scriptBatchId && (
+                <button
+                  onClick={handleCustomScriptProcess}
+                  disabled={isRunningCustomScript}
+                  className="flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-amber-600/20 transition-all hover:bg-amber-500 disabled:opacity-50"
+                  title={`Скрипт: ${supplierData.post_process_script}`}
+                >
+                  {isRunningCustomScript ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
+                  Пост-обработка скриптом
+                </button>
+              )}
+
               {!isAiProcessed || isProcessing ? (
                 isProcessing ? (
                   <button
@@ -1582,9 +1590,6 @@ export default function CsvImportApp({
                       {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
                       {previousProducts && <button onClick={handleUndoMerge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
-                      {supplierData?.post_process_script && batchStage === "SCRAPED" && (
-                        <button onClick={handleCustomScriptProcess} disabled={isRunningCustomScript} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-amber-300 hover:bg-slate-800 disabled:opacity-50"><Filter className="h-4 w-4" />Пост-обработка скриптом</button>
-                      )}
                       {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Найти варианты</button>}
                     </div>
                   )}
