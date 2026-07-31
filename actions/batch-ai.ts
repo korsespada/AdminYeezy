@@ -41,6 +41,7 @@ import {
 const SETTINGS_KEYS = [
   'batch_ai_provider',
   'batch_ai_openrouter_model',
+  'batch_ai_byesu_model',
   'batch_ai_temperature',
   'batch_ai_max_tokens',
   'batch_ai_concurrency',
@@ -56,7 +57,9 @@ export async function getBatchAiSettingsAction() {
   await requireAdmin()
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
-  const provider: BatchAiProvider = values.batch_ai_provider === 'cockpit' ? 'cockpit' : 'openrouter'
+  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider)
+    ? values.batch_ai_provider as BatchAiProvider
+    : 'openrouter'
   const worker = await scrapingQuery(`
     SELECT worker_id, provider, model, heartbeat_at, metadata,
            heartbeat_at > NOW() - INTERVAL '30 seconds' AS available
@@ -69,6 +72,7 @@ export async function getBatchAiSettingsAction() {
     data: {
       provider,
       openrouterModel: values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
+      byesuModel: values.batch_ai_byesu_model || 'gpt-5.6-luna',
       temperature: finiteNumber(values.batch_ai_temperature, 0.1),
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
@@ -80,10 +84,13 @@ export async function getBatchAiSettingsAction() {
 
 export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
   await requireAdmin()
-  const provider: BatchAiProvider = settings.provider === 'cockpit' ? 'cockpit' : 'openrouter'
+  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(settings.provider)
+    ? settings.provider
+    : 'openrouter'
   const values: Record<string, string> = {
     batch_ai_provider: provider,
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
+    batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gpt-5.6-luna',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
     batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
     batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
@@ -418,7 +425,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     }
 
     revalidatePath('/admin/batches')
-    if (settings.provider === 'openrouter') {
+    if (settings.provider !== 'cockpit') {
       after(async () => {
         await processOpenRouterRun(runId, context, settings)
       })
@@ -613,7 +620,7 @@ async function finalizeRun(runId: string) {
 async function resumeStaleOpenRouterRun(runId: string) {
   const locked = await scrapingQuery(`
     UPDATE batch_ai_runs r SET started_at=NOW(),updated_at=NOW()
-    WHERE r.id=$1 AND r.provider='openrouter' AND r.status='running'
+    WHERE r.id=$1 AND r.provider IN ('openrouter','byesu') AND r.status='running'
       AND COALESCE(r.started_at,r.created_at) < NOW() - INTERVAL '60 seconds'
       AND NOT EXISTS (
         SELECT 1 FROM batch_ai_items i

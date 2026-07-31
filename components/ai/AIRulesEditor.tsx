@@ -20,6 +20,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
     provider: initialSettings.provider,
     openrouterModel: initialSettings.openrouterModel,
+    byesuModel: initialSettings.byesuModel,
     temperature: initialSettings.temperature,
     maxTokens: initialSettings.maxTokens,
     concurrency: initialSettings.concurrency,
@@ -39,7 +40,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     setMessage(result.success
       ? {
           type: 'success',
-          text: `Настройки сохранены. Новые тесты используют ${settings.openrouterModel}; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
+          text: `Настройки сохранены. Новые тесты используют ${settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel}; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
         }
       : { type: 'error', text: result.error || 'Не удалось сохранить настройки' })
   })
@@ -72,7 +73,13 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         <div className="grid gap-5 p-6 lg:grid-cols-2">
           <div className="space-y-3">
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдер</span>
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <ProviderButton
+                active={settings.provider === 'byesu'}
+                title="BYESU API"
+                description="OpenAI-совместимый облачный API"
+                onClick={() => update('provider', 'byesu')}
+              />
               <ProviderButton
                 active={settings.provider === 'openrouter'}
                 title="OpenRouter"
@@ -98,6 +105,17 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               onChange={(event) => update('openrouterModel', event.target.value)}
               disabled={settings.provider !== 'openrouter'}
               placeholder="google/gemini-2.5-flash"
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50"
+            />
+            <label htmlFor="batch-ai-byesu-model" className="block pt-2 text-xs font-bold uppercase tracking-widest text-slate-500">
+              Модель BYESU
+            </label>
+            <input
+              id="batch-ai-byesu-model"
+              value={settings.byesuModel}
+              onChange={(event) => update('byesuModel', event.target.value)}
+              disabled={settings.provider !== 'byesu'}
+              placeholder="gpt-5.6-luna"
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50"
             />
             <div className={`rounded-xl border p-3 text-sm ${
@@ -147,7 +165,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               onChange={(event) => update('concurrency', Number(event.target.value))}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
             />
-            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter и Cockpit. Поставщик может запретить параллельную обработку.</span>
+            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter, BYESU и Cockpit. Поставщик может запретить параллельную обработку.</span>
           </label>
         </div>
       </section>

@@ -1,11 +1,13 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
+import { byesuChatCompletion } from '@/lib/byesu'
 
-export type BatchAiProvider = 'openrouter' | 'cockpit'
+export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
 export type BatchAiSettings = {
   provider: BatchAiProvider
   openrouterModel: string
+  byesuModel: string
   temperature: number
   maxTokens: number
   concurrency: number
@@ -216,8 +218,9 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const payload = await openRouterChatCompletion({
-    model: input.settings.openrouterModel,
+  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
+  const payload = await completion({
+    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
     messages: [
       { role: 'system', content: input.systemPrompt },
       { role: 'user', content },
@@ -263,8 +266,9 @@ export async function runBatchAiOpenRouterRefinement(input: {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const payload = await openRouterChatCompletion({
-    model: input.settings.openrouterModel,
+  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
+  const payload = await completion({
+    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
     messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
     temperature: input.settings.temperature,
     max_tokens: input.settings.maxTokens,
