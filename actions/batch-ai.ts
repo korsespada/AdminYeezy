@@ -38,6 +38,7 @@ import {
   reconcileBatchSubcategorySuggestions,
   saveBatchAiSuggestions,
 } from '@/lib/batch-ai-suggestions'
+import { byesuApiKeyStatus, byesuModelGroup } from '@/lib/byesu'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -68,17 +69,24 @@ export async function getBatchAiSettingsAction() {
     WHERE provider='cockpit'
     ORDER BY heartbeat_at DESC LIMIT 1
   `).catch(() => ({ rows: [] }))
+  const byesuKeys = byesuApiKeyStatus()
   return {
     success: true,
     data: {
       provider,
       openrouterModel: values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
-      byesuModel: values.batch_ai_byesu_model || 'gpt-5.6-luna',
+      byesuModel: values.batch_ai_byesu_model || 'gemini-3.1-flash-lite',
       temperature: finiteNumber(values.batch_ai_temperature, 0.1),
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
       systemPrompt: values.batch_ai_system_prompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       cockpitWorker: worker.rows[0] || null,
+      credentials: {
+        openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+        byesuGemini: byesuKeys.gemini,
+        byesuOpenai: byesuKeys.openai,
+        byesuLegacy: byesuKeys.legacy,
+      },
     },
   }
 }
@@ -91,7 +99,7 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
   const values: Record<string, string> = {
     batch_ai_provider: provider,
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
-    batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gpt-5.6-luna',
+    batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gemini-3.1-flash-lite',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
     batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
     batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
@@ -358,8 +366,17 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     }
 
-    if (settings.provider === 'byesu' && !process.env.BYESU_API_KEY?.trim()) {
-      return { success: false, error: 'BYESU_API_KEY не задан в окружении AdminYeezy' }
+    if (settings.provider === 'byesu') {
+      const group = byesuModelGroup(settings.byesuModel)
+      const keys = byesuApiKeyStatus()
+      if (!keys[group]) {
+        return {
+          success: false,
+          error: group === 'gemini'
+            ? 'Для этой модели нужен BYESU_GEMINI_API_KEY (группа Gemini Business)'
+            : 'Для этой модели нужен BYESU_OPENAI_API_KEY (группа OpenAI Codex)',
+        }
+      }
     }
     if (settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
       return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }

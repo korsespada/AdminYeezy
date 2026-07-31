@@ -13,8 +13,21 @@ type WorkerState = {
 } | null
 
 type Props = {
-  initialSettings: BatchAiSettings & { cockpitWorker?: WorkerState }
+  initialSettings: BatchAiSettings & {
+    cockpitWorker?: WorkerState
+    credentials?: {
+      openrouter?: boolean
+      byesuGemini?: boolean
+      byesuOpenai?: boolean
+      byesuLegacy?: boolean
+    }
+  }
 }
+
+const BYESU_MODELS = [
+  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'Gemini Business' },
+  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', group: 'OpenAI Codex' },
+] as const
 
 export default function AIRulesEditor({ initialSettings }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
@@ -29,6 +42,11 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
   const worker = initialSettings.cockpitWorker
+  const credentials = initialSettings.credentials
+  const selectedByesuGroup = settings.byesuModel.toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
+  const selectedByesuKeyReady = selectedByesuGroup === 'gemini'
+    ? credentials?.byesuGemini
+    : credentials?.byesuOpenai
 
   const update = <K extends keyof BatchAiSettings>(key: K, value: BatchAiSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
@@ -40,7 +58,13 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     setMessage(result.success
       ? {
           type: 'success',
-          text: `Настройки сохранены. Новые тесты используют ${settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel}; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
+          text: `Настройки сохранены. Новые тесты используют ${
+            settings.provider === 'byesu'
+              ? settings.byesuModel
+              : settings.provider === 'openrouter'
+                ? settings.openrouterModel
+                : worker?.model || 'модель Cockpit worker'
+          }; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
         }
       : { type: 'error', text: result.error || 'Не удалось сохранить настройки' })
   })
@@ -77,13 +101,13 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               <ProviderButton
                 active={settings.provider === 'byesu'}
                 title="BYESU API"
-                description="OpenAI-совместимый облачный API"
+                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'}`}
                 onClick={() => update('provider', 'byesu')}
               />
               <ProviderButton
                 active={settings.provider === 'openrouter'}
                 title="OpenRouter"
-                description="Обработка через облачную модель"
+                description={credentials?.openrouter ? 'Ключ подключён' : 'Ключ не задан'}
                 onClick={() => update('provider', 'openrouter')}
               />
               <ProviderButton
@@ -96,38 +120,71 @@ export default function AIRulesEditor({ initialSettings }: Props) {
           </div>
 
           <div className="space-y-3">
-            <label htmlFor="batch-ai-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
-              Модель OpenRouter
-            </label>
-            <input
-              id="batch-ai-model"
-              value={settings.openrouterModel}
-              onChange={(event) => update('openrouterModel', event.target.value)}
-              disabled={settings.provider !== 'openrouter'}
-              placeholder="google/gemini-2.5-flash"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50"
-            />
-            <label htmlFor="batch-ai-byesu-model" className="block pt-2 text-xs font-bold uppercase tracking-widest text-slate-500">
-              Модель BYESU
-            </label>
-            <input
-              id="batch-ai-byesu-model"
-              value={settings.byesuModel}
-              onChange={(event) => update('byesuModel', event.target.value)}
-              disabled={settings.provider !== 'byesu'}
-              placeholder="gpt-5.6-luna"
-              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500 disabled:opacity-50"
-            />
-            <div className={`rounded-xl border p-3 text-sm ${
-              worker?.available
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-slate-700 bg-slate-950/60 text-slate-400'
-            }`}>
-              <div className="flex items-center gap-2 font-semibold"><Server size={16} /> Cockpit worker</div>
-              <p className="mt-1">
-                {worker?.available ? `Онлайн · ${worker.model || 'модель не сообщена'}` : 'Не подключён · запуск Cockpit будет отклонён после 30 секунд без heartbeat'}
-              </p>
-            </div>
+            {settings.provider === 'byesu' && (
+              <>
+                <label htmlFor="batch-ai-byesu-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                  Модель BYESU
+                </label>
+                <select
+                  id="batch-ai-byesu-model"
+                  value={settings.byesuModel}
+                  onChange={(event) => update('byesuModel', event.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
+                >
+                  {!BYESU_MODELS.some((model) => model.value === settings.byesuModel) && (
+                    <option value={settings.byesuModel}>{settings.byesuModel}</option>
+                  )}
+                  {BYESU_MODELS.map((model) => (
+                    <option key={model.value} value={model.value}>{model.label} · {model.group}</option>
+                  ))}
+                </select>
+                <div className={`rounded-xl border p-3 text-sm ${
+                  selectedByesuKeyReady
+                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                }`}>
+                  <div className="font-semibold">
+                    {selectedByesuGroup === 'gemini' ? 'Группа Gemini Business' : 'Группа OpenAI Codex'}
+                  </div>
+                  <p className="mt-1">
+                    {selectedByesuKeyReady
+                      ? 'Нужный API-ключ подключён.'
+                      : `Добавьте ${selectedByesuGroup === 'gemini' ? 'BYESU_GEMINI_API_KEY' : 'BYESU_OPENAI_API_KEY'} в Coolify.`}
+                  </p>
+                </div>
+                <p className="text-xs leading-relaxed text-slate-500">
+                  BYESU привязывает ключ к группе. Ключи задаются один раз глобально в Coolify и автоматически выбираются по модели — в поставщиках их вводить не нужно.
+                </p>
+              </>
+            )}
+
+            {settings.provider === 'openrouter' && (
+              <>
+                <label htmlFor="batch-ai-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                  Модель OpenRouter
+                </label>
+                <input
+                  id="batch-ai-model"
+                  value={settings.openrouterModel}
+                  onChange={(event) => update('openrouterModel', event.target.value)}
+                  placeholder="google/gemini-2.5-flash"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
+                />
+              </>
+            )}
+
+            {settings.provider === 'cockpit' && (
+              <div className={`rounded-xl border p-3 text-sm ${
+                worker?.available
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  : 'border-slate-700 bg-slate-950/60 text-slate-400'
+              }`}>
+                <div className="flex items-center gap-2 font-semibold"><Server size={16} /> Cockpit worker</div>
+                <p className="mt-1">
+                  {worker?.available ? `Онлайн · ${worker.model || 'модель не сообщена'}` : 'Не подключён · запуск Cockpit будет отклонён после 30 секунд без heartbeat'}
+                </p>
+              </div>
+            )}
           </div>
 
           <label className="space-y-2 text-sm text-slate-300">

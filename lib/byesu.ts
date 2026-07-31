@@ -4,9 +4,41 @@ const BYESU_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 type ByesuPayload = Record<string, any>
 
+export type ByesuModelGroup = 'gemini' | 'openai'
+
+export function byesuModelGroup(model: unknown): ByesuModelGroup {
+  return String(model || '').trim().toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
+}
+
+export function byesuApiKeyStatus() {
+  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
+  const legacyKey = process.env.BYESU_API_KEY?.trim()
+  return {
+    gemini: Boolean(process.env.BYESU_GEMINI_API_KEY?.trim() || (legacyGroup === 'gemini' && legacyKey)),
+    openai: Boolean(process.env.BYESU_OPENAI_API_KEY?.trim() || (legacyGroup === 'openai' && legacyKey)),
+    legacy: Boolean(legacyKey),
+  }
+}
+
+function byesuApiKey(model: unknown) {
+  const group = byesuModelGroup(model)
+  const direct = group === 'gemini'
+    ? process.env.BYESU_GEMINI_API_KEY?.trim()
+    : process.env.BYESU_OPENAI_API_KEY?.trim()
+  if (direct) return { apiKey: direct, group }
+
+  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
+  const legacyKey = process.env.BYESU_API_KEY?.trim()
+  return { apiKey: legacyGroup === group ? legacyKey : undefined, group }
+}
+
 export async function byesuChatCompletion(requestBody: Record<string, any>): Promise<ByesuPayload> {
-  const apiKey = process.env.BYESU_API_KEY?.trim()
-  if (!apiKey) throw new Error('BYESU_API_KEY не задан')
+  const { apiKey, group } = byesuApiKey(requestBody.model)
+  if (!apiKey) {
+    throw new Error(group === 'gemini'
+      ? 'BYESU_GEMINI_API_KEY не задан для группы Gemini Business'
+      : 'BYESU_OPENAI_API_KEY не задан для группы OpenAI Codex')
+  }
 
   const response = await fetch(BYESU_CHAT_URL, {
     method: 'POST',
