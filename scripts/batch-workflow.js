@@ -1148,10 +1148,9 @@ function ownedS3Key(url) {
 
 async function uploadPhotoIfNeeded(url, key) {
   if (!url) throw new Error('пустая ссылка на фото');
-  // Для повторной публикации старой партии ссылка уже может указывать на наш
-  // публичный S3. В этом случае бакет и доступ к API не нужны: файл не
-  // переносится повторно, а Rails получает существующий URL.
-  if (isAlreadyHosted(url) && !process.env.S3_BUCKET) return url;
+  // Ссылка уже ведет на наш S3: не скачиваем ее и не делаем HEAD
+  // при каждой повторной публикации.
+  if (isAlreadyHosted(url)) return url;
   if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен');
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1225,24 +1224,30 @@ async function existingRailsProducts(externalIds, options = {}) {
   if (!ids.length) return existing;
   const token = await railsAdminToken();
   let cursor = 0;
+  let completed = 0;
   const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
     while (cursor < ids.length) {
       const externalId = ids[cursor++];
-      const params = new URLSearchParams({ page: '1', per_page: '10', external_id: externalId });
-      const payload = await fetchJsonWithRetry(railsApiUrl(`/admin/products?${params}`), {
-        headers: { Authorization: `Bearer ${token}` },
-      }, 'Rails external_id check');
-      if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
-        let product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
-        if (product && options.includeDetails && product.id && existingRailsPhotoMap(product).size === 0) {
-          const detail = await fetchJsonWithRetry(
-            railsApiUrl(`/admin/products/${encodeURIComponent(product.id)}`),
-            { headers: { Authorization: `Bearer ${token}` } },
-            'Rails product media',
-          );
-          product = detail.product || detail || product;
+      try {
+        const params = new URLSearchParams({ page: '1', per_page: '10', external_id: externalId });
+        const payload = await fetchJsonWithRetry(railsApiUrl(`/admin/products?${params}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        }, 'Rails external_id check');
+        if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
+          let product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
+          if (product && options.includeDetails && product.id && existingRailsPhotoMap(product).size === 0) {
+            const detail = await fetchJsonWithRetry(
+              railsApiUrl(`/admin/products/${encodeURIComponent(product.id)}`),
+              { headers: { Authorization: `Bearer ${token}` } },
+              'Rails product media',
+            );
+            product = detail.product || detail || product;
+          }
+          if (product) existing.set(externalId, product);
         }
-        if (product) existing.set(externalId, product);
+      } finally {
+        completed += 1;
+        if (options.onProgress) await options.onProgress({ current: completed, total: ids.length });
       }
     }
   });
@@ -1349,6 +1354,10 @@ async function recordBatchPublication(batchId, externalId, railsProductId) {
 }
 
 async function pushBatchToCatalog(batchId, options = {}, onProgress) {
+  if (typeof options === 'function' && !onProgress) {
+    onProgress = options;
+    options = {};
+  }
   const operationOwnerId = crypto.randomUUID();
   const operation = await scrapingPool.query(`
     INSERT INTO batch_operation_locks(batch_id,operation,owner_id) VALUES($1,'publish',$2)
@@ -1388,9 +1397,15 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
 
   const lookups = await loadLegacyLookupMaps();
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
+  if (onProgress) await onProgress({ phase: 'lookup', current: 0, total: products.length, success: 0, failed: 0 });
   const existingProducts = await existingRailsProducts(
     products.map((product) => product.external_id),
-    { includeDetails: mode === 'upsert' },
+    {
+      includeDetails: mode === 'upsert',
+      onProgress: onProgress
+        ? ({ current, total }) => onProgress({ phase: 'lookup', current, total, success: 0, failed: 0 })
+        : undefined,
+    },
   );
   const existingExternalIds = new Set(existingProducts.keys());
   const candidates = products
@@ -1401,6 +1416,9 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   let prepared = 0;
   let imported = 0;
   let updated = 0;
+  let batchProductsChanged = false;
+
+  if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0 });
 
   for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
     const { product: sourceProduct, index: productIndex } = candidates[candidateIndex];
@@ -1413,12 +1431,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const requestedPhotos = normalizePhotos(product.photos);
     const existingCanonicalPhotos = [...new Set(existingPhotoUrls.values())];
     const preserveExistingRailsPhotos = mode === 'upsert'
-      && !process.env.S3_BUCKET
       && existingCanonicalPhotos.length > 0
       && requestedPhotos.some((url) => !existingPhotoUrls.has(String(url || '').trim()));
-    // Старые партии могли сохранить исходные Szwego URL, хотя Rails уже
-    // содержит перенесённые S3-медиа. Без доступа к бакету сохраняем
-    // опубликованную галерею и обновляем только остальные поля товара.
+    // Старая партия может хранить Szwego URL, хотя Rails уже имеет S3-галерею.
+    // При upsert берем готовые фото Rails и обновляем только остальные поля.
     const publicationPhotos = preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos;
     for (let photoIndex = 0; photoIndex < publicationPhotos.length; photoIndex += 1) {
       const sourceUrl = publicationPhotos[photoIndex];
@@ -1438,39 +1454,57 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       }
     }
     product.photos = photos.filter(Boolean);
+    if (JSON.stringify(product.photos) !== JSON.stringify(normalizePhotos(sourceProduct.photos))) {
+      batchProductsChanged = true;
+    }
     updatedProducts[productIndex] = product;
-    // Фиксируем уже перенесенные URL после каждого товара. Повторный запуск
-    // продолжит с этого места и проверит S3 через HEAD, а не скачает всё заново.
-    await scrapingPool.query(
-      'UPDATE products SET photos=$3::jsonb,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
-      [batchId, product.id, JSON.stringify(product.photos)],
-    );
-    await scrapingPool.query(
-      'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
-      [batchId, operationOwnerId],
-    );
+    if ((candidateIndex + 1) % 10 === 0 || candidateIndex + 1 === candidates.length) {
+      await scrapingPool.query(
+        'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
+        [batchId, operationOwnerId],
+      );
+    }
     if (!productFailed) prepared += 1;
 
-    if (onProgress) await onProgress({ current: candidateIndex + 1, total: candidates.length, success: prepared, failed: errors.length });
+    if (onProgress) await onProgress({ phase: 'media', current: candidateIndex + 1, total: candidates.length, success: prepared, failed: errors.length });
   }
 
-  await saveBatchProducts(batchId, updatedProducts);
+  if (batchProductsChanged) await saveBatchProducts(batchId, updatedProducts);
   if (errors.length > 0) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
 
   if (mode === 'upsert') {
-    for (const [externalId, railsProduct] of existingProducts.entries()) {
-      const product = updatedProducts.find((item) => String(item.external_id || '').trim() === externalId);
-      if (!product) continue;
-      try {
-        await updateRailsProduct(railsProduct.id, product);
-        updated += 1;
-        await recordBatchPublication(batchId, externalId, railsProduct.id);
-      } catch (error) {
-        errors.push(`${externalId}: ${error.message}`);
+    const existingEntries = [...existingProducts.entries()];
+    const productsByExternalId = new Map(updatedProducts.map((product) => [String(product.external_id || '').trim(), product]));
+    let updateCursor = 0;
+    let updateCompleted = 0;
+    if (onProgress) await onProgress({ phase: 'publish', current: 0, total: existingEntries.length, success: 0, failed: 0 });
+    const updateWorkers = Array.from({ length: Math.min(8, existingEntries.length) }, async () => {
+      while (updateCursor < existingEntries.length) {
+        const [externalId, railsProduct] = existingEntries[updateCursor++];
+        const product = productsByExternalId.get(externalId);
+        try {
+          if (product) {
+            await updateRailsProduct(railsProduct.id, product);
+            updated += 1;
+            await recordBatchPublication(batchId, externalId, railsProduct.id);
+          }
+        } catch (error) {
+          errors.push(`${externalId}: ${error.message}`);
+        } finally {
+          updateCompleted += 1;
+          if (onProgress) await onProgress({
+            phase: 'publish',
+            current: updateCompleted,
+            total: existingEntries.length,
+            success: updated,
+            failed: errors.length,
+          });
+        }
       }
-    }
+    });
+    await Promise.all(updateWorkers);
     if (errors.length > 0) throw new Error(`Обновление остановлено:\n${errors.slice(0, 20).join('\n')}`);
   }
 
@@ -1480,6 +1514,11 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     .filter((product) => product.external_id || product.name)
     .map((product) => productToRailsCsvRow(product, lookups));
   const importBatches = [];
+  const newRowsTotal = railsRows.length;
+  let importedProcessed = 0;
+  if (newRowsTotal > 0 && onProgress) {
+    await onProgress({ phase: 'publish', current: 0, total: newRowsTotal, success: 0, failed: 0 });
+  }
   for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 200)).entries()) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
@@ -1493,6 +1532,14 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     if (payload.result?.products_failed) {
       for (const error of payload.result.errors || []) errors.push(`Rails line ${error.line}: ${error.error}`);
     }
+    importedProcessed += chunk.length;
+    if (onProgress) await onProgress({
+      phase: 'publish',
+      current: importedProcessed,
+      total: newRowsTotal,
+      success: imported,
+      failed: errors.length,
+    });
   }
 
   if (errors.length > 0) {
@@ -1512,7 +1559,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     failed: errors.length,
     errors,
     total: products.length,
-    skippedExisting: existingExternalIds.size,
+    skippedExisting: mode === 'add' ? existingExternalIds.size : 0,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
   } finally {

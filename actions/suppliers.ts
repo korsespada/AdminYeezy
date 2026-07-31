@@ -1131,7 +1131,27 @@ export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'u
     try {
         await requireAdmin()
         const workflow = require('../scripts/batch-workflow')
-        const result = await workflow.pushBatchToCatalog(batchId, { mode })
+        const lastReported = new Map<string, number>()
+        let progressWrite = Promise.resolve()
+        const result = await workflow.pushBatchToCatalog(batchId, { mode }, async (progress: any) => {
+            const phase = ['lookup', 'media', 'publish'].includes(progress?.phase) ? progress.phase : 'publish'
+            const current = Math.max(0, Number(progress?.current || 0))
+            const total = Math.max(0, Number(progress?.total || 0))
+            const previous = lastReported.get(phase) ?? -5
+            if (current !== 0 && current !== total && current - previous < 5) return
+            lastReported.set(phase, current)
+            progressWrite = progressWrite.then(async () => {
+              try {
+                await scrapingQuery(
+                  'UPDATE batch_operation_locks SET operation=$2,updated_at=NOW() WHERE batch_id=$1',
+                  [batchId, `publish|${phase}|${current}|${total}`],
+                )
+              } catch (progressError: any) {
+                console.warn('Could not persist batch publish progress:', progressError.message)
+              }
+            })
+            await progressWrite
+        })
         try {
             await redis.del('catalog:all')
         } catch (redisErr: any) {
@@ -1158,6 +1178,33 @@ export async function createBatchAction(name: string, supplierId?: number, items
         return { success: false, error: 'Партия создаётся только транзакционным импортом парсера', data: null }
     } catch (err: any) {
         return { success: false, error: err.message, data: null }
+    }
+}
+
+export async function getBatchPublishProgressAction(batchId: string): Promise<ActionResponse> {
+    try {
+        await requireAdmin()
+        const result = await scrapingQuery(
+          'SELECT operation,updated_at FROM batch_operation_locks WHERE batch_id=$1',
+          [batchId],
+        )
+        const operation = String(result.rows[0]?.operation || '')
+        if (!operation.startsWith('publish')) {
+          return { success: true, data: { running: false, phase: null, current: 0, total: 0 } }
+        }
+        const [, phase = 'lookup', current = '0', total = '0'] = operation.split('|')
+        return {
+          success: true,
+          data: {
+            running: true,
+            phase,
+            current: Number(current) || 0,
+            total: Number(total) || 0,
+            updatedAt: result.rows[0]?.updated_at || null,
+          },
+        }
+    } catch (err: any) {
+        return { success: false, error: err.message }
     }
 }
 

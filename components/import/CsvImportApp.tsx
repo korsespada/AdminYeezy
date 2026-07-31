@@ -49,7 +49,7 @@ import {
   type CsvProduct,
   type Lookups,
 } from "@/actions/csv-import";
-import { pushBatchToCatalogAction } from "@/actions/suppliers";
+import { getBatchPublishProgressAction, pushBatchToCatalogAction } from "@/actions/suppliers";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -437,8 +437,15 @@ export default function CsvImportApp({
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [publishProgress, setPublishProgress] = useState<{
+    phase: "lookup" | "media" | "publish";
+    current: number;
+    total: number;
+  } | null>(null);
   const [result, setResult] = useState<{
     success: number;
+    updated: number;
+    skipped: number;
     failed: number;
     errors: string[];
   } | null>(null);
@@ -535,6 +542,29 @@ export default function CsvImportApp({
       timers.clear();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isPushing || !batchId) return;
+    let cancelled = false;
+    const poll = async () => {
+      const response = await getBatchPublishProgressAction(batchId);
+      if (cancelled || !response.success || !response.data?.running) return;
+      const phase = ["lookup", "media", "publish"].includes(response.data.phase)
+        ? response.data.phase as "lookup" | "media" | "publish"
+        : "publish";
+      setPublishProgress({
+        phase,
+        current: Number(response.data.current || 0),
+        total: Number(response.data.total || products.length),
+      });
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 800);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isPushing, batchId, products.length]);
 
 
   // Unique values for filters (derived from all products)
@@ -876,20 +906,30 @@ export default function CsvImportApp({
 
     if (batchId) {
       setIsPushing(true);
-      await persistBatchProducts(products);
-      const pushResult = await pushBatchToCatalogAction(batchId, mode);
-      if (pushResult.success) {
-        setResult({
-          success: Number(pushResult.data?.success || 0),
-          failed: Number(pushResult.data?.failed || 0),
-          errors: pushResult.data?.errors || [],
-        });
-        setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, пропущено: ${Number(pushResult.data?.skippedExisting || 0)}`);
-        setBatchStage("PUSHED");
-      } else {
-        setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
+      setPublishProgress({ phase: "lookup", current: 0, total: products.length });
+      try {
+        const saved = await persistBatchProducts(products);
+        if (!saved) return;
+        const pushResult = await pushBatchToCatalogAction(batchId, mode);
+        if (pushResult.success) {
+          setResult({
+            success: Number(pushResult.data?.success || 0),
+            updated: Number(pushResult.data?.updated || 0),
+            skipped: Number(pushResult.data?.skippedExisting || 0),
+            failed: Number(pushResult.data?.failed || 0),
+            errors: pushResult.data?.errors || [],
+          });
+          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, пропущено: ${Number(pushResult.data?.skippedExisting || 0)}`);
+          setBatchStage("PUSHED");
+        } else {
+          setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
+        }
+      } catch (error: any) {
+        setSaveMsg(`✗ Ошибка публикации: ${error.message || "unknown"}`);
+      } finally {
+        setIsPushing(false);
+        setPublishProgress(null);
       }
-      setIsPushing(false);
       return;
     }
 
@@ -1402,7 +1442,9 @@ export default function CsvImportApp({
                       className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
                     >
                       {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      Публикация
+                      {isPushing && publishProgress
+                        ? `${publishProgress.phase === "lookup" ? "Проверка" : publishProgress.phase === "media" ? "Фото" : "Публикация"} ${publishProgress.current}/${publishProgress.total}`
+                        : "Публикация"}
                       <ChevronDown className="h-4 w-4" />
                     </button>
                     {showPublishMenu && (
@@ -1584,12 +1626,20 @@ export default function CsvImportApp({
                 )}
                 <div>
                   <h3 className="text-lg font-bold text-white">
-                    Результаты импорта
+                    Результаты публикации
                   </h3>
                   <p className="text-sm text-slate-400">
-                    Успешно:{" "}
+                    Добавлено:{" "}
                     <span className="text-emerald-400 font-bold">
                       {result.success}
+                    </span>{" "}
+                    | Обновлено:{" "}
+                    <span className="text-cyan-400 font-bold">
+                      {result.updated}
+                    </span>{" "}
+                    | Пропущено:{" "}
+                    <span className="text-slate-300 font-bold">
+                      {result.skipped}
                     </span>{" "}
                     | Ошибки:{" "}
                     <span className="text-red-400 font-bold">

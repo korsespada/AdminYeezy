@@ -59,11 +59,11 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
-  it('reuses an already hosted photo when the bucket API is not configured', async () => {
+  it('reuses an already hosted photo without another S3 request', async () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
     const previousBucket = process.env.S3_BUCKET
     process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
-    delete process.env.S3_BUCKET
+    process.env.S3_BUCKET = 'yeezy-products'
     try {
       await expect(workflow.uploadPhotoIfNeeded(
         'https://static.yeezyunique.ru/batches/old/product-1.jpg',
