@@ -623,7 +623,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       const snapshots = await scrapingQuery(`
         SELECT id,batch_id,stage,label,jsonb_array_length(products)::int AS items_count,created_at
         FROM batch_snapshots
-        WHERE batch_id=ANY($1::uuid[])
+        WHERE batch_id=ANY($1::text[])
         ORDER BY created_at ASC
       `, [realBatchIds])
       for (const snapshot of snapshots.rows) {
