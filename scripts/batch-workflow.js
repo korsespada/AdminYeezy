@@ -800,6 +800,27 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
 
   const pythonProcess = spawn(/*turbopackIgnore: true*/ process.env.PYTHON_PATH || 'python', args);
   let stderr = '';
+  let stdoutBuffer = '';
+  let lastProgress = 0;
+
+  pythonProcess.stdout.on('data', (data) => {
+    const text = data.toString();
+    console.log(`[Scraper ${taskId}] ${text}`);
+    stdoutBuffer += text;
+    const lines = stdoutBuffer.split(/\r?\n/);
+    stdoutBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const match = line.match(/^PROGRESS:(\d+)$/);
+      if (!match) continue;
+      const count = Number(match[1]);
+      if (!Number.isFinite(count) || count < lastProgress) continue;
+      lastProgress = count;
+      scrapingPool.query(
+        "UPDATE scraping_tasks SET items_count=$1,updated_at=NOW() WHERE id=$2 AND status='running'",
+        [count, taskId],
+      ).catch((error) => console.error(`[Scraper ${taskId}] Progress update failed`, error));
+    }
+  });
 
   pythonProcess.stderr.on('data', (data) => {
     stderr += data.toString();

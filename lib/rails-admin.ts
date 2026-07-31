@@ -18,6 +18,7 @@ import { isPriceCentsOnRequest, isPriceOnRequest } from './product-pricing'
 import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
+let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
 const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
 
@@ -615,6 +616,19 @@ export async function getRailsCatalogLookups() {
   }
 }
 
+async function resolveCategoryFilterSlug(value?: string) {
+  const raw = value?.trim() || ''
+  if (!raw || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(raw)) return raw
+  if (!cachedCategorySlugs || cachedCategorySlugs.expiresAt < Date.now()) {
+    const lookups = await getRailsCatalogLookups()
+    cachedCategorySlugs = {
+      expiresAt: Date.now() + 5 * 60_000,
+      byId: new Map([...lookups.categories, ...lookups.subcategories].map((item) => [item.id, String(item.slug || '')])),
+    }
+  }
+  return cachedCategorySlugs.byId.get(raw) || raw
+}
+
 export async function listRailsAdminProducts(options: {
   page: number
   perPage: number
@@ -633,6 +647,11 @@ export async function listRailsAdminProducts(options: {
   attributeKey?: string
   attributeValue?: string
 }) {
+  options = {
+    ...options,
+    category: await resolveCategoryFilterSlug(options.category),
+    subcategory: await resolveCategoryFilterSlug(options.subcategory),
+  }
   if (
     (options.brand
       || options.category
@@ -678,6 +697,11 @@ async function listRailsCatalogProducts(options: {
   attributeKey?: string
   attributeValue?: string
 }) {
+  options = {
+    ...options,
+    category: await resolveCategoryFilterSlug(options.category),
+    subcategory: await resolveCategoryFilterSlug(options.subcategory),
+  }
   if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
     return listRailsCatalogProductsInChunks(options)
   }
@@ -1651,6 +1675,11 @@ type RailsProductFacetPayload = {
 }
 
 async function fetchRailsProductFacets(options: ProductFacetFilters) {
+  options = {
+    ...options,
+    category: await resolveCategoryFilterSlug(options.category),
+    subcategory: await resolveCategoryFilterSlug(options.subcategory),
+  }
   const params = buildRailsAdminProductsParams({
     ...options,
     page: 1,
