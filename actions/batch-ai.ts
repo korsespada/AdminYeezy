@@ -6,7 +6,10 @@ import { revalidatePath } from 'next/cache'
 import { after } from 'next/server'
 import { requireAdmin } from '@/lib/admin-session'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
+import {
+  filterCatalogAttributeDefinitionsForCategory,
+  getCatalogAttributeDefinitions,
+} from '@/lib/catalog-attribute-registry'
 import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   GLOBAL_BATCH_AI_CATALOG_RULES,
@@ -303,6 +306,27 @@ async function syncCurrentRailsCatalogMappings() {
 
 type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection'
 
+function catalogName(value: unknown, entityType: string, mappings: CatalogIdMapping[]) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const normalized = raw.toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ')
+  const mapping = mappings.find((item) => item.entity_type === entityType && (
+    String(item.canonical_id || '') === raw
+    || String(item.legacy_id || '') === raw
+    || String(item.name || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ') === normalized
+  ))
+  return String(mapping?.name || raw).trim()
+}
+
+function productAttributeDefinitions(product: any, context: any) {
+  const mappedCategory = catalogName(product.category, 'category', context.mappings)
+  const categoryName = context.categories.length === 1
+    ? String(context.categories[0].name || mappedCategory)
+    : mappedCategory
+  const subcategoryName = catalogName(product.subcategory, 'subcategory', context.mappings)
+  return filterCatalogAttributeDefinitionsForCategory(context.definitions, categoryName, subcategoryName)
+}
+
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
   await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
@@ -434,6 +458,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
     const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
     for (const product of context.products) {
+      const attributeDefinitions = mode === 'variants' ? [] : productAttributeDefinitions(product, context)
       const userPrompt = mode === 'variants'
         ? buildBatchAiVariantPrompt(product)
         : buildBatchAiUserPrompt({
@@ -442,7 +467,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             brands: context.brands,
             categories: context.categories,
             subcategories: context.subcategories,
-            attributes: context.definitions,
+            attributes: attributeDefinitions,
             priceRules,
           })
       await scrapingQuery(`
@@ -457,8 +482,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         brands: context.brands,
         categories: context.categories,
         subcategories: context.subcategories,
-        attributeCodes: context.definitions.map((item: any) => item.code),
-        attributeDictionaryValues: context.definitions.flatMap((item: any) => item.dictionary_values || []),
+        attributeCodes: attributeDefinitions.map((item: any) => item.code),
+        knownAttributeCodes: context.definitions.map((item: any) => item.code),
+        attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
         priceRules,
         priceReferenceUrls: mode === 'variants' ? [] : priceReferenceUrls,
       })])
@@ -542,7 +568,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       subcategoryParents: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
       categoryNames: new Map(context.categories.map((row: any) => [String(row.id), String(row.name || '')])),
       subcategoryNames: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.name || '')])),
-      attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
+      attributeCodes: new Set((input.attributeCodes || []).map(String)),
+      knownAttributeCodes: new Set((input.knownAttributeCodes || []).map(String)),
       attributeDictionaryValues: input.attributeDictionaryValues || [],
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })

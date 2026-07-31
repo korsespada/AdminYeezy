@@ -4,12 +4,25 @@ import {
   resolveCatalogAttributeCode,
   resolveSupplierAttributeCodes,
 } from '@/lib/catalog-attribute-schema'
+import { filterCatalogAttributeDefinitionsForCategory } from '@/lib/catalog-attribute-registry'
 import {
   normalizeCatalogAttributes,
   normalizeSizes,
 } from '@/lib/catalog-attribute-values'
 
 describe('catalog attribute schema', () => {
+  it('does not expose jewelry stones to footwear AI processing', () => {
+    const definitions = filterCatalogAttributeDefinitionsForCategory([
+      { ...getCatalogAttributeDefinitionsForCategory('Обувь')[0], code: 'sizes', active: true },
+      {
+        code: 'stones', label: 'Камни', category_scope: 'Ювелирные изделия и бижутерия',
+        value_type: 'multi_enum', sort_order: 20, parser_rules: [], aliases: [],
+        show_as_characteristic: true, use_as_filter: true, use_as_variant_dimension: false, active: true,
+      },
+    ], 'Обувь')
+
+    expect(definitions.map((item) => item.code)).toEqual(['sizes'])
+  })
   it('combines common and category-specific attributes', () => {
     const clothing = getCatalogAttributeDefinitionsForCategory('Одежда').map((item) => item.code)
     expect(clothing).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'materials', 'fit']))

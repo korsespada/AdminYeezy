@@ -72,12 +72,16 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Глобальные правил�
 - Caviar, кавьяровая и зернистая кожа описывают фактуру кожи, а не отдельный материал и не новый атрибут. В materials записывай «Кожа», а фактуру при необходимости указывай в описании.
 - «Кожа ягнёнка» и «Телячья кожа» являются самостоятельными материалами: сохраняй их, только если вид кожи подтверждён источником или фотографиями.
 - Эти правила относятся ко всем поставщикам категории «Сумки» и важнее инструкции отдельного поставщика.
+- Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
+- Атрибут stones предназначен только для ювелирных изделий и бижутерии. Стразы, кристаллы и декоративные вставки на обуви, одежде или сумках описывай как декор в description, но никогда не записывай в stones и не предлагай stones как новый атрибут.
 
 Глобальные правила сверки текста с фотографиями:
 - Исходный текст ненадёжен и может относиться к другой карточке. Не переноси из него модель или характеристики автоматически.
 - Если фотографии переданы, сначала установи общий товар на всей серии кадров, затем отдельно сверь с ним каждое утверждение исходного текста.
 - При противоречии фотографий и текста фотографии важнее для модели, типа товара, цвета, материала, фурнитуры, категории, подкатегории, названия и описания.
 - Если по визуальным признакам уверенно определяется более конкретная модель, используй её вместо общего или ошибочного названия из текста.
+- Если фотографии переданы, description должен дополнять скудный исходный текст подтверждёнными визуальными деталями, а не просто пересказывать его. Опиши не менее четырёх информативных признаков, когда они различимы: тип и силуэт, форму, фактуру и цвет, конструкцию, застёжку или шнуровку, подошву и каблук, фурнитуру и декор. Для обуви отдельно учитывай форму мыска, высоту голенища, тип подошвы/каблука и способ фиксации. Не выдумывай скрытые свойства и точный состав материала.
+- При наличии нескольких информативных фотографий делай description содержательным, обычно 350–700 знаков. Не сокращай его до одной общей фразы, даже если исходное китайское описание короткое.
 - Не смешивай признаки разных товаров. Если кадр явно относится к другому товару, рекламе или упаковке, исключи его через media.discard_indexes.
 - При противоречии текста и фотографий запроси через inspect_full_size_indexes до трёх наиболее информативных оригиналов, если они помогут уточнить модель, логотип или конструкцию.`
 
@@ -311,6 +315,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   categoryNames?: Map<string, string>
   subcategoryNames?: Map<string, string>
   attributeCodes: Set<string>
+  knownAttributeCodes?: Set<string>
   attributeDictionaryValues?: Array<{
     id?: string
     attribute_code?: string
@@ -328,7 +333,11 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const previous = String(fallback || '')
     return allowed.has(previous) ? previous : ''
   }
-  const attributes: Record<string, unknown> = { ...(original.attributes || {}) }
+  const attributes: Record<string, unknown> = {}
+  for (const [code, value] of Object.entries(original.attributes || {})) {
+    const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
+    if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
+  }
   const suggestions: any[] = []
   const dictionaryByCode = new Map<string, Map<string, string>>()
   for (const item of input.attributeDictionaryValues || []) {
@@ -381,7 +390,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
     if (code && input.attributeCodes.has(code)) {
       if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = resolveDictionaryValue(code, suggestion.value)
-    } else {
+    } else if (!input.knownAttributeCodes?.has(code)) {
       suggestions.push({ ...suggestion, code: code || suggestion?.code })
     }
   }
@@ -389,7 +398,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
     if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(resolveDictionaryValue(canonicalCode, value))
     else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = resolveDictionaryValue(canonicalCode, value)
-    else suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
+    else if (!input.knownAttributeCodes?.has(canonicalCode)) {
+      suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
+    }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
   const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))

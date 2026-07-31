@@ -1,5 +1,6 @@
 import {
   CATALOG_ATTRIBUTE_DEFINITIONS,
+  getCatalogAttributeDefinitionsForCategory,
   type CatalogAttributeDictionaryValue,
   type CatalogAttributeDefinition,
   type CatalogAttributeValueType,
@@ -14,6 +15,31 @@ import { scrapingQuery } from '@/lib/db'
 
 export type { CatalogAttributeDictionaryValue, CatalogAttributeDefinition, CatalogAttributeValueType }
 export const DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS = CATALOG_ATTRIBUTE_DEFINITIONS
+
+export function filterCatalogAttributeDefinitionsForCategory(
+  definitions: CatalogAttributeDefinition[],
+  categoryName?: string | null,
+  subcategoryName?: string | null,
+) {
+  const builtInCodes = new Set(DEFAULT_CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => item.code))
+  const allowedBuiltInCodes = new Set(
+    getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName).map((item) => item.code),
+  )
+  const normalizedCategory = normalizeScopeName(categoryName)
+  const normalizedSubcategory = normalizeScopeName(subcategoryName)
+
+  return definitions.filter((definition) => {
+    if (!definition.active) return false
+    if (builtInCodes.has(definition.code)) return allowedBuiltInCodes.has(definition.code)
+
+    const scope = normalizeScopeName(definition.category_scope)
+    if (!scope || scope === 'все категории') return true
+    return Boolean(
+      (normalizedCategory && scope.includes(normalizedCategory))
+      || (normalizedSubcategory && scope.includes(normalizedSubcategory)),
+    )
+  })
+}
 
 export async function getCatalogAttributeDefinitions(): Promise<CatalogAttributeDefinition[]> {
   try {
@@ -178,4 +204,8 @@ function asciiFilterValue(aliases: unknown) {
 
 function normalizeDictionaryText(value: unknown) {
   return String(value || '').trim().toLowerCase().replace(/[ -]+/g, '_')
+}
+
+function normalizeScopeName(value: unknown) {
+  return String(value || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ')
 }

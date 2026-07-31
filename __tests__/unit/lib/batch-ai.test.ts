@@ -68,6 +68,30 @@ describe('batch AI normalization', () => {
     expect(result.suggestions).toEqual([])
   })
 
+  it('drops registered attributes that are not allowed for the product category', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        catalog_attributes: { sizes: ['38'], stones: ['Стразы'] },
+      },
+      attribute_suggestions: [{ code: 'stones', value: ['Стразы'], label: 'Камни' }],
+    }, {
+      product: {
+        category: 'shoes',
+        photos: [],
+        attributes: { stones: ['Стразы'], upper_material: 'Кожа' },
+      },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'upper_material']),
+      knownAttributeCodes: new Set(['sizes', 'upper_material', 'stones']),
+    })
+
+    expect(result.product.attributes).toEqual({ upper_material: 'Кожа', sizes: ['38'] })
+    expect(result.suggestions).toEqual([])
+  })
+
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
     const result = normalizeBatchAiOutput({
       product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },

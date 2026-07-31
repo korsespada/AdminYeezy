@@ -1,3 +1,9 @@
+import {
+  CATALOG_ATTRIBUTE_DEFINITIONS,
+  getCatalogAttributeDefinitionsForCategory,
+  resolveCatalogAttributeCode,
+} from '@/lib/catalog-attribute-schema'
+
 export interface CatalogIdMapping {
   entity_type: 'brand' | 'category' | 'subcategory' | string
   legacy_id: string
@@ -91,6 +97,17 @@ export function normalizeProductCatalogReferences<T extends Record<string, any>>
   const category = resolveMapping(product.category, 'category', mappings)
   const canonicalCategory = category?.canonical_id || String(product.category || '')
   const subcategory = resolveMapping(product.subcategory, 'subcategory', mappings, canonicalCategory)
+  const categoryName = category?.name || unresolvedValue(product.category)
+  const subcategoryName = subcategory?.name || unresolvedValue(product.subcategory)
+  const allowedBuiltInCodes = new Set(
+    getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName).map((item) => item.code),
+  )
+  const builtInCodes = new Set(CATALOG_ATTRIBUTE_DEFINITIONS.map((item) => item.code))
+  const attributes = Object.fromEntries(Object.entries(product.attributes || {}).flatMap(([rawCode, value]) => {
+    const code = category ? resolveCatalogAttributeCode(rawCode) : rawCode
+    if (category && builtInCodes.has(code) && !allowedBuiltInCodes.has(code)) return []
+    return [[code, value]]
+  }))
 
   return {
     ...product,
@@ -98,6 +115,7 @@ export function normalizeProductCatalogReferences<T extends Record<string, any>>
     category: subcategory?.canonical_parent_id || category?.canonical_id || unresolvedValue(product.category),
     subcategory: subcategory?.canonical_id || unresolvedValue(product.subcategory),
     gender: normalizeCatalogGender(product.gender),
+    ...(product.attributes && typeof product.attributes === 'object' ? { attributes } : {}),
   }
 }
 

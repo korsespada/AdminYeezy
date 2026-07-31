@@ -43,6 +43,7 @@ import {
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
+import { shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
 type ModalState = {
   localPath: string
@@ -157,7 +158,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       snapshotId: file.snapshot_id,
       supplierName: file.supplier_name,
       supplierAvatar: file.supplier_avatar,
-      forceFileMode: Boolean(file.result_path) && !file.snapshot_id,
+      forceFileMode: shouldOpenBatchArtifactAsFile(file.result_path, file.snapshot_id),
     })
   }
 
@@ -526,7 +527,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               : <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />}
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-slate-100">{file.label || fileName(file.result_path)}</div>
-                              <div className="text-xs text-slate-600">{file.snapshot_missing ? 'Исторический снимок недоступен' : file.is_virtual ? 'Состояние товаров партии' : `Этап #${file.id}`}</div>
+                              <div className="text-xs text-slate-600">{file.snapshot_missing ? 'Исторический снимок недоступен' : file.is_current ? 'Текущая редактируемая версия' : file.is_virtual ? 'Состояние товаров партии' : `Этап #${file.id} · только просмотр`}</div>
                             </div>
                           </div>
                         </td>

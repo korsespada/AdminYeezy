@@ -100,6 +100,7 @@ async function complete(body: any) {
     categoryNames: new Map((input.categories || []).map((row: any) => [String(row.id), String(row.name || '')])),
     subcategoryNames: new Map((input.subcategories || []).map((row: any) => [String(row.id), String(row.name || '')])),
     attributeCodes: new Set((input.attributeCodes || []).map(String)),
+    knownAttributeCodes: new Set((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
     priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
   })

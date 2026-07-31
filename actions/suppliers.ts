@@ -21,6 +21,7 @@ import {
   deleteScrapingFileArtifactForTask,
   deleteScrapingFileArtifactsForBatch,
 } from '@/lib/scraping-files'
+import { currentBatchHistoryStatus } from '@/lib/batch-history'
 
 // --- Suppliers CRUD ---
 
@@ -369,6 +370,7 @@ export interface ExportHistoryFile {
   snapshot_id?: string | null
   snapshot_label?: string | null
   snapshot_missing?: boolean
+  is_current?: boolean
 }
 
 export interface ExportHistoryBatch {
@@ -650,6 +652,15 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         })
       }
       files.forEach(attachSnapshot)
+      const currentStatus = currentBatchHistoryStatus(batch.stage)
+      const currentFile = [...files]
+        .filter((file) => file.status === currentStatus)
+        .sort((left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime())[0]
+      if (currentFile) {
+        currentFile.snapshot_id = null
+        currentFile.snapshot_missing = false
+        currentFile.is_current = true
+      }
       const stageRank: Record<string, number> = { 'Сырой товар': 0, 'Обработан скриптом': 1, 'Обработано ИИ': 2 }
       const sortedFiles = files.sort((a, b) => (stageRank[a.status] ?? 9) - (stageRank[b.status] ?? 9) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
       const rawFile = sortedFiles.find((file) => file.status === 'Сырой товар')

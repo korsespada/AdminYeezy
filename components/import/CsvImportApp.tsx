@@ -1011,6 +1011,10 @@ export default function CsvImportApp({
 
   const updateProduct = useCallback(
     (index: number, field: keyof CsvProduct, value: any) => {
+      if (isSnapshotSource) {
+        setSaveMsg('Исторический снимок доступен только для просмотра');
+        return;
+      }
       const currentProduct = products[index];
       setProducts((prev) =>
         prev.map((p, i) => (i === index ? { ...p, [field]: value, ...(field === 'price' ? { price_source: 'manual' } : {}) } : p)),
@@ -1040,10 +1044,14 @@ export default function CsvImportApp({
         }
       }
     },
-    [batchId, products],
+    [batchId, isSnapshotSource, products],
   );
 
   const handleRemove = useCallback((index: number) => {
+    if (isSnapshotSource) {
+      setSaveMsg('Исторический снимок доступен только для просмотра');
+      return;
+    }
     const productToRemove = products[index];
     const nextProducts = products.filter((_, i) => i !== index);
     setProducts(nextProducts);
@@ -1076,7 +1084,7 @@ export default function CsvImportApp({
           selectedIndex > index ? selectedIndex - 1 : selectedIndex,
         ),
     );
-  }, [batchId, products]);
+  }, [batchId, isSnapshotSource, products]);
 
   const handleClear = () => {
     setProducts([]);
@@ -1109,6 +1117,7 @@ export default function CsvImportApp({
   };
 
   const handleBulkApply = () => {
+    if (isSnapshotSource) return;
     const updates: Partial<CsvProduct> = {};
     if (bulkBrand) updates.brand = bulkBrand;
     if (bulkCategory) updates.category = bulkCategory;
@@ -1133,6 +1142,7 @@ export default function CsvImportApp({
   };
 
   const handleMergePhotos = () => {
+    if (isSnapshotSource) return;
     if (selectedForMerge.length < 2) return;
 
     // Сохраняем состояние для отмены
@@ -1168,6 +1178,7 @@ export default function CsvImportApp({
   };
 
   const handleUndoMerge = () => {
+    if (isSnapshotSource) return;
     if (previousProducts) {
       setProducts(previousProducts);
       setPreviousProducts(null);
@@ -1252,7 +1263,7 @@ export default function CsvImportApp({
             </div>
 
             <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-              {(importMode === "local" || isBatchSource) && isDirty && (
+              {(importMode === "local" || isBatchSource) && isDirty && !isSnapshotSource && (
                 <div className="flex flex-col items-center relative">
                   <button
                     onClick={handleSaveToFile}
@@ -1268,7 +1279,7 @@ export default function CsvImportApp({
                 </div>
               )}
 
-              {!isBatchSource && (
+              {!isBatchSource && !isSnapshotSource && (
                 <button
                   onClick={handleClear}
                   className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
@@ -1289,7 +1300,7 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {batchStage === "PUSHED" ? (
+              {!isSnapshotSource && (batchStage === "PUSHED" ? (
                 <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-300">
                   <CheckCircle className="h-4 w-4" /> Запушено в БД
                 </span>
@@ -1351,7 +1362,7 @@ export default function CsvImportApp({
                     )}
                   </div>
                 </div>
-              )}
+              ))}
 
               {isBatchSource && (
                 <div className="relative">
