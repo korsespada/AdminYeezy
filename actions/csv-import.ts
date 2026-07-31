@@ -816,13 +816,14 @@ export async function recordAiTaskAction({
     await requireAdmin()
 
     if (!supplierId) throw new Error("Missing supplierId");
+    if (!batchId) throw new Error("AI-этап можно записать только в связанную партию");
 
-    const resultPath = batchId ? `db://batch/${batchId}/ai` : null;
+    const resultPath = `db://batch/${batchId}/ai`;
     const taskRes = await scrapingQuery(`
       INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
       VALUES ($1, $2, $3, $4, $5, NOW())
       RETURNING id
-    `, [supplierId, batchId || null, 'Обработано ИИ', resultPath, products.length]);
+    `, [supplierId, batchId, 'Обработано ИИ', resultPath, products.length]);
 
     // 4. Обновляем стадию партии (если она есть)
     if (batchId) {

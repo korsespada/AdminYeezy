@@ -1007,6 +1007,10 @@ export default function CsvImportApp({
   };
 
   const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection", selectedProductIds?: number[]) => {
+    if (isSnapshotSource) {
+      setSaveMsg("Исторический снимок доступен только для просмотра. Откройте саму выгрузку, чтобы продолжить обработку.");
+      return;
+    }
     if (!supplierId && products.length > 0) {
         alert("ID поставщика не найден. Пожалуйста, запустите обработку из истории выгрузок.");
         return;
