@@ -276,21 +276,85 @@ async function safeLookup(tableName) {
   }
 }
 
+async function mappedCatalogLookups() {
+  const result = await scrapingPool.query(`
+    SELECT entity_type,legacy_id,canonical_id,name
+    FROM catalog_id_mappings
+    WHERE entity_type IN ('brand','category','subcategory')
+  `);
+  const lookups = { brands: new Map(), categories: new Map(), subcategories: new Map() };
+  const mapByType = {
+    brand: lookups.brands,
+    category: lookups.categories,
+    subcategory: lookups.subcategories,
+  };
+  for (const row of result.rows) {
+    const target = mapByType[row.entity_type];
+    const name = String(row.name || '').trim();
+    if (!target || !name) continue;
+    if (row.legacy_id) target.set(String(row.legacy_id), name);
+    if (row.canonical_id) target.set(String(row.canonical_id), name);
+  }
+  return lookups;
+}
+
+async function railsCatalogLookups() {
+  const [brandsPayload, categoriesPayload] = await Promise.all([
+    fetchJsonWithRetry(railsApiUrl('/catalog/brands'), {}, 'Rails brands lookup'),
+    fetchJsonWithRetry(railsApiUrl('/catalog/categories'), {}, 'Rails categories lookup'),
+  ]);
+  const lookups = { brands: new Map(), categories: new Map(), subcategories: new Map() };
+  for (const brand of brandsPayload.brands || []) {
+    if (brand?.id && brand?.name) lookups.brands.set(String(brand.id), String(brand.name));
+  }
+  const walk = (items, parentId = null) => {
+    for (const item of items || []) {
+      if (item?.id && item?.name) {
+        (parentId ? lookups.subcategories : lookups.categories).set(String(item.id), String(item.name));
+      }
+      walk(item?.children || [], item?.id ? String(item.id) : parentId);
+    }
+  };
+  walk(categoriesPayload.categories || []);
+  return lookups;
+}
+
 async function loadLegacyLookupMaps() {
-  const [brands, categories, subcategories] = await Promise.all([
+  const [brands, categories, subcategories, mappings, rails] = await Promise.all([
     safeLookup('brands'),
     safeLookup('categories'),
     safeLookup('subcategories'),
+    mappedCatalogLookups(),
+    railsCatalogLookups().catch((error) => {
+      console.warn(`Rails catalog lookups unavailable: ${error.message}`);
+      return { brands: new Map(), categories: new Map(), subcategories: new Map() };
+    }),
   ]);
+  for (const [key, value] of mappings.brands) brands.set(key, value);
+  for (const [key, value] of mappings.categories) categories.set(key, value);
+  for (const [key, value] of mappings.subcategories) subcategories.set(key, value);
+  for (const [key, value] of rails.brands) brands.set(key, value);
+  for (const [key, value] of rails.categories) categories.set(key, value);
+  for (const [key, value] of rails.subcategories) subcategories.set(key, value);
   return { brands, categories, subcategories };
 }
 
-function lookupName(map, value) {
+function looksLikeCatalogId(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+    || /^[a-z0-9_-]{15}$/i.test(value);
+}
+
+function lookupName(map, value, label = 'справочника') {
   if (value === undefined || value === null) return '';
-  if (Array.isArray(value)) return lookupName(map, value.filter(Boolean)[0]);
+  if (Array.isArray(value)) return lookupName(map, value.filter(Boolean)[0], label);
   const key = String(value).trim();
   if (!key) return '';
-  return map.get(key) || key;
+  const name = map.get(key);
+  if (name) return name;
+  if (looksLikeCatalogId(key)) {
+    throw new Error(`Публикация остановлена: не найдено название ${label} для ID ${key}`);
+  }
+  return key;
 }
 
 function productToRailsCsvRow(product, lookups) {
@@ -303,9 +367,9 @@ function productToRailsCsvRow(product, lookups) {
     seo_description: product.seo_description || '',
     price: product.price || 0,
     status: product.status === 'inactive' ? 'hidden' : 'active',
-    brand: lookupName(lookups.brands, product.brand),
-    category: lookupName(lookups.categories, product.category),
-    subcategory: lookupName(lookups.subcategories, product.subcategory),
+    brand: lookupName(lookups.brands, product.brand, 'бренда'),
+    category: lookupName(lookups.categories, product.category, 'категории'),
+    subcategory: lookupName(lookups.subcategories, product.subcategory, 'подкатегории'),
     gender: product.gender || '',
     photos: normalizePhotos(product.photos).join('|'),
     attributes: normalizeAttributes(product.attributes),
@@ -1582,6 +1646,7 @@ module.exports = {
   getLatestBatches,
   getSupplier,
   isAlreadyHosted,
+  lookupName,
   parseCsvObjects,
   listAllSuppliers,
   listFavoriteSuppliers,

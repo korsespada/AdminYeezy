@@ -47,6 +47,19 @@ describe('batch workflow CSV compatibility adapter', () => {
     })
   })
 
+  it('resolves catalog IDs to names before creating a Rails CSV import', () => {
+    const id = '9168dfab-3808-4c98-85f2-827de398f959'
+    expect(workflow.lookupName(new Map([[id, 'Обувь']]), id, 'категории')).toBe('Обувь')
+  })
+
+  it('stops publication instead of creating a UUID-named category', () => {
+    expect(() => workflow.lookupName(
+      new Map(),
+      '9168dfab-3808-4c98-85f2-827de398f959',
+      'категории',
+    )).toThrow('не найдено название категории')
+  })
+
   it('recognizes only the configured S3 host as already stored', () => {
     const previous = process.env.S3_PUBLIC_DOMAIN
     process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
