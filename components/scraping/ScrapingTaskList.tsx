@@ -12,7 +12,7 @@ interface ScrapingTask {
   id: number
   supplier_id: number
   supplier_name: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'Сырой CSV' | 'Обработано скриптом' | 'Обработано ИИ'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'Сырой CSV' | 'Сырой товар' | 'Обработано скриптом' | 'Обработано ИИ'
   end_date: string
   result_path: string
   error_message: string
@@ -78,6 +78,7 @@ export default function ScrapingTaskList({ initialData }: { initialData: Scrapin
     switch (status) {
       case 'completed':
       case 'Сырой CSV':
+      case 'Сырой товар':
       case 'Обработано скриптом':
       case 'Обработано ИИ':
         return <CheckCircle2 className="w-5 h-5 text-emerald-400" />
@@ -96,13 +97,15 @@ export default function ScrapingTaskList({ initialData }: { initialData: Scrapin
     const currentTaskStatus = isAiFile ? 'Обработано ИИ' : task.status
 
     // 1. Если это определенный статус файла, всегда показываем его, даже если партия уже в процессе
-    if (currentTaskStatus === 'Сырой CSV' || currentTaskStatus === 'Обработано скриптом') {
+    if (currentTaskStatus === 'Сырой CSV' || currentTaskStatus === 'Сырой товар' || currentTaskStatus === 'Обработано скриптом') {
        const labels: Record<string, string> = {
          'Сырой CSV': 'СОБРАНО (RAW)',
+         'Сырой товар': 'СЫРОЙ ТОВАР',
          'Обработано скриптом': 'ОБРАБОТАНО СКРИПТОМ'
        };
        const colors: Record<string, string> = {
          'Сырой CSV': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+         'Сырой товар': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
          'Обработано скриптом': 'bg-amber-500/10 text-amber-400 border-amber-500/20'
        };
        return (
@@ -116,6 +119,7 @@ export default function ScrapingTaskList({ initialData }: { initialData: Scrapin
     if (task.batch_stage) {
        const stageMap: Record<string, { label: string, color: string }> = {
          'SCRAPED': { label: 'СОБРАНО', color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+         'SCRIPT_PROCESSED': { label: 'ОБРАБОТАНО СКРИПТОМ', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
          'AI_PROCESSED': { label: 'ОБРАБОТАНО ИИ', color: 'bg-violet-500/10 text-violet-400 border-violet-500/20' },
          'PUSHED': { label: 'ЗАПУШЕНО', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' }
        }
@@ -134,6 +138,7 @@ export default function ScrapingTaskList({ initialData }: { initialData: Scrapin
     
     const colors: Record<string, string> = {
       'Сырой CSV': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+      'Сырой товар': 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
       'Обработано скриптом': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
       'Обработано ИИ': 'bg-violet-500/10 text-violet-400 border-violet-500/20',
       'completed': 'bg-blue-500/10 text-blue-400 border-blue-500/20',
@@ -144,6 +149,7 @@ export default function ScrapingTaskList({ initialData }: { initialData: Scrapin
 
     const labels: Record<string, string> = {
       'Сырой CSV': 'СОБРАНО (RAW)',
+      'Сырой товар': 'СЫРОЙ ТОВАР',
       'Обработано скриптом': 'ОБРАБОТАНО СКРИПТОМ',
       'Обработано ИИ': 'ОБРАБОТАНО ИИ',
       'completed': 'СОБРАНО',

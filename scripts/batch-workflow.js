@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { S3Client, PutObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const { runSupplierJsonProcess } = require('./lib/supplier-json-process');
 
@@ -247,6 +247,25 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+async function fetchJsonWithRetry(url, init, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(45_000) });
+      const payload = await response.json().catch(() => ({}));
+      if (response.ok) return payload;
+      const error = new Error(payload.message || payload.error || `${label} failed with ${response.status}`);
+      if (response.status !== 429 && response.status < 500) throw error;
+      lastError = error;
+    } catch (error) {
+      lastError = error;
+      if (attempt === 3) break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+  }
+  throw lastError || new Error(`${label} failed`);
+}
+
 async function safeLookup(tableName) {
   try {
     const result = await legacyCatalogPool.query(`SELECT id::text, name FROM ${tableName}`);
@@ -349,7 +368,7 @@ function normalizeProductCatalogReferences(product, mappings) {
 }
 
 async function postRailsImportBatch({ name, products }) {
-  const response = await fetch(railsApiUrl('/admin/import_batches'), {
+  return fetchJsonWithRetry(railsApiUrl('/admin/import_batches'), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${await railsAdminToken()}`,
@@ -360,13 +379,7 @@ async function postRailsImportBatch({ name, products }) {
       name,
       csv_text: serializeProductsToCsv(products, RAILS_IMPORT_COLUMNS, ','),
     }),
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.message || payload.error || `Rails import failed with ${response.status}`);
-  }
-  return payload;
+  }, 'Rails import');
 }
 
 function parseCsvText(text) {
@@ -497,38 +510,6 @@ function parseCsvObjects(text) {
   return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
 }
 
-async function resolveLegacySupplierDefaults(supplier) {
-  const values = [
-    supplier.default_brand,
-    supplier.default_category,
-    supplier.default_subcategory,
-  ].filter(Boolean).map(String);
-  if (values.length === 0) return supplier;
-
-  try {
-    const result = await scrapingPool.query(
-      `SELECT entity_type, legacy_id, canonical_id
-       FROM catalog_id_mappings
-       WHERE canonical_id = ANY($1::text[]) OR legacy_id = ANY($1::text[])`,
-      [values],
-    );
-    const legacyByValue = new Map();
-    for (const row of result.rows) {
-      legacyByValue.set(String(row.canonical_id), String(row.legacy_id));
-      legacyByValue.set(String(row.legacy_id), String(row.legacy_id));
-    }
-    return {
-      ...supplier,
-      default_brand: legacyByValue.get(String(supplier.default_brand || '')) || supplier.default_brand,
-      default_category: legacyByValue.get(String(supplier.default_category || '')) || supplier.default_category,
-      default_subcategory: legacyByValue.get(String(supplier.default_subcategory || '')) || supplier.default_subcategory,
-    };
-  } catch (error) {
-    console.warn('Catalog ID compatibility mapping unavailable:', error.message);
-    return supplier;
-  }
-}
-
 async function listFavoriteSuppliers() {
   try {
     const res = await scrapingPool.query(
@@ -587,7 +568,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   return res.rows.map(normalizeProduct);
 }
 
-async function saveBatchProducts(batchId, products) {
+async function saveBatchProducts(batchId, products, options = {}) {
   const client = await scrapingPool.connect();
   try {
     await client.query('BEGIN');
@@ -703,9 +684,35 @@ async function saveBatchProducts(batchId, products) {
       await client.query('DELETE FROM products WHERE batch_id=$1', [batchId]);
     }
 
-    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId]);
+    let taskId = null;
+    if (options.finalizeStage) {
+      await client.query('UPDATE scraping_batches SET items_count=$1,stage=$3,updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId, options.finalizeStage]);
+      if (options.snapshotLabel) {
+        await client.query(`
+          INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+          SELECT $1,$2,$3,$4,payload,'{}'::jsonb
+          FROM (
+            SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb) AS payload
+            FROM products p WHERE p.batch_id=$2
+          ) current
+          WHERE NOT EXISTS (
+            SELECT 1 FROM batch_snapshots s
+            WHERE s.batch_id=$2 AND s.stage=$3 AND s.label=$4 AND s.products=current.payload
+          )
+        `, [crypto.randomUUID(), batchId, options.finalizeStage, options.snapshotLabel]);
+      }
+      if (options.supplierId && options.taskStatus) {
+        const task = await client.query(`
+          INSERT INTO scraping_tasks(supplier_id,batch_id,status,result_path,items_count,updated_at)
+          VALUES($1,$2,$3,$4,$5,NOW()) RETURNING id
+        `, [options.supplierId, batchId, options.taskStatus, options.resultPath || null, normalizedProducts.length]);
+        taskId = task.rows[0]?.id || null;
+      }
+    } else {
+      await client.query('UPDATE scraping_batches SET items_count=$1,updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId]);
+    }
     await client.query('COMMIT');
-    return { count: normalizedProducts.length };
+    return { count: normalizedProducts.length, taskId };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -716,10 +723,34 @@ async function saveBatchProducts(batchId, products) {
 
 async function recordBatchSnapshot(batchId, stage, label) {
   const products = await getBatchProducts(batchId);
+  const serialized = JSON.stringify(products);
+  const duplicate = await scrapingPool.query(`
+    SELECT id FROM batch_snapshots WHERE batch_id=$1 AND stage=$2 AND label=$3 AND products=$4::jsonb
+    ORDER BY created_at DESC LIMIT 1
+  `, [batchId, stage, label, serialized]);
+  if (duplicate.rows[0]) return duplicate.rows[0].id;
+  const id = crypto.randomUUID();
   await scrapingPool.query(`
     INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
     VALUES($1,$2,$3,$4,$5::jsonb,'{}'::jsonb)
-  `, [crypto.randomUUID(), batchId, stage, label, JSON.stringify(products)]);
+  `, [id, batchId, stage, label, serialized]);
+  if (!['Сырой товар','Обработан скриптом'].includes(label)) {
+    await scrapingPool.query(`DELETE FROM batch_snapshots s USING (
+      SELECT id,row_number FROM (
+        SELECT id,label,ROW_NUMBER() OVER (
+          PARTITION BY CASE
+            WHEN label LIKE 'До AI · %' THEN 'before_ai'
+            WHEN label LIKE 'Обработано ИИ%' THEN 'ai_done'
+            WHEN label LIKE 'Частично обработано ИИ%' OR label LIKE 'AI-тест%' THEN 'ai_partial'
+            ELSE label
+          END ORDER BY created_at DESC
+        ) AS row_number
+        FROM batch_snapshots WHERE batch_id=$1
+          AND label NOT IN ('Сырой товар','Обработан скриптом')
+      ) ranked WHERE row_number>10
+    ) old WHERE s.id=old.id`, [batchId]);
+  }
+  return id;
 }
 
 async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCount }) {
@@ -729,12 +760,6 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
 
   const batchId = crypto.randomUUID();
   const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`;
-  await scrapingPool.query(
-    'INSERT INTO scraping_batches (id, name, supplier_id, items_count, stage) VALUES ($1, $2, $3, $4, $5)',
-    [batchId, batchName, supplier.id, items.length || itemsCount, 'SCRAPED'],
-  );
-  await scrapingPool.query('UPDATE scraping_tasks SET batch_id=$1 WHERE id=$2', [batchId, taskId]);
-
   const products = items.map((item, sourcePosition) => {
     const photos = normalizePhotos(item.photos);
     return normalizeProduct({
@@ -752,23 +777,62 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
       source_position: item.source_position ?? sourcePosition,
       batch_id: batchId,
     });
-  }).filter((product) => product.external_id || product.name);
-
-  await saveBatchProducts(batchId, products);
-  await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар');
-  return batchId;
+  });
+  if (products.some((product) => !String(product.external_id || '').trim())) {
+    throw new Error('Один или несколько товаров не имеют external_id');
+  }
+  const client = await scrapingPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'INSERT INTO scraping_batches (id, name, supplier_id, items_count, stage) VALUES ($1, $2, $3, $4, $5)',
+      [batchId, batchName, supplier.id, products.length || itemsCount, 'SCRAPED'],
+    );
+    for (let position = 0; position < products.length; position += 1) {
+      const normalized = normalizeProduct({ ...products[position], batch_id: batchId, source_position: products[position].source_position ?? position });
+      await client.query(`
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
+      `, [normalized.external_id,normalized.name,normalized.description,normalized.h1,normalized.seo_title,normalized.seo_description,
+        normalized.price,normalized.price_source || 'default',normalized.status,normalized.brand,normalized.category,normalized.subcategory,
+        normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.attributes || {}),false,batchId,
+        normalized.variant_group_key,normalized.ai_error,normalized.ai_confidence,normalized.source_position]);
+    }
+    await client.query(`
+      INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+      SELECT $1,$2,'SCRAPED','Сырой товар',COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb),'{}'::jsonb
+      FROM products p WHERE p.batch_id=$2
+    `, [crypto.randomUUID(), batchId]);
+    const linkedTask = await client.query(`UPDATE scraping_tasks SET batch_id=$1,status='Сырой товар',result_path=$2,error_message=NULL,items_count=$3,updated_at=NOW() WHERE id=$4`,
+      [batchId, `db://batch/${batchId}/raw`, products.length, taskId]);
+    if (linkedTask.rowCount !== 1) throw new Error('Задача выгрузки была удалена до завершения импорта');
+    await client.query('COMMIT');
+    return batchId;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function startScraping(supplierId, endDate, overrideTag, overrideGroup, onComplete) {
   const supplier = await getSupplier(supplierId);
   if (!supplier) throw new Error('Поставщик не найден');
-  const parserSupplier = await resolveLegacySupplierDefaults(supplier);
+  const parserSupplier = supplier;
 
+  await scrapingPool.query(`
+    UPDATE scraping_tasks SET status='failed',error_message='Остановлено: нет обновлений более 12 часов',updated_at=NOW()
+    WHERE supplier_id=$1 AND status='running' AND updated_at<NOW()-INTERVAL '12 hours'
+  `, [supplierId]);
   const taskRes = await scrapingPool.query(
     `INSERT INTO scraping_tasks (supplier_id, status, end_date)
-     VALUES ($1, 'running', $2) RETURNING id`,
+     VALUES ($1, 'running', $2)
+     ON CONFLICT (supplier_id) WHERE status='running' DO NOTHING
+     RETURNING id`,
     [supplierId, endDate || null],
   );
+  if (!taskRes.rows[0]) throw new Error('Для этого поставщика выгрузка уже запущена');
   const taskId = taskRes.rows[0].id;
 
   const tmpDir = path.join(/*turbopackIgnore: true*/ process.cwd(), 'tmp');
@@ -835,22 +899,25 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
   });
 
   pythonProcess.on('close', async (code) => {
-    const status = code === 0 ? 'Сырой товар' : 'failed';
-    const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`);
+    let status = code === 0 ? 'Сырой товар' : 'failed';
+    let errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`);
     let itemsCount = 0;
     let batchId = null;
 
     try {
+      if (code === 0 && !fs.existsSync(/*turbopackIgnore: true*/ outputPath)) throw new Error('Парсер не создал JSON-файл');
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8');
         const parsedProducts = JSON.parse(fileContent);
         itemsCount = Array.isArray(parsedProducts) ? parsedProducts.length : 0;
       }
 
-      await scrapingPool.query(
-        `UPDATE scraping_tasks SET status=$1, result_path=$2, error_message=$3, items_count=$4, updated_at=NOW() WHERE id=$5`,
-        [status, null, errorMsg, itemsCount, taskId],
-      );
+      if (code !== 0) {
+        await scrapingPool.query(
+          `UPDATE scraping_tasks SET status='failed', result_path=NULL, error_message=$1, items_count=$2, updated_at=NOW() WHERE id=$3`,
+          [errorMsg, itemsCount, taskId],
+        );
+      }
 
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         batchId = await importScrapedFileToBatch({ supplier: parserSupplier, taskId, outputPath, itemsCount });
@@ -872,6 +939,8 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
         if (fs.existsSync(/*turbopackIgnore: true*/ outputPath)) fs.unlinkSync(/*turbopackIgnore: true*/ outputPath);
       } catch {}
     } catch (error) {
+      status = 'failed';
+      errorMsg = error.message;
       console.error(`[Scraper ${taskId}] import failed:`, error);
       await scrapingPool.query(
         `UPDATE scraping_tasks SET status='failed', error_message=$1, updated_at=NOW() WHERE id=$2`,
@@ -888,6 +957,13 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
 }
 
 async function processBatchWithAi(batchId) {
+  const operationOwnerId = crypto.randomUUID();
+  const lock = await scrapingPool.query(`
+    INSERT INTO batch_operation_locks(batch_id,operation,owner_id) VALUES($1,'ai',$2)
+    ON CONFLICT(batch_id) DO NOTHING RETURNING owner_id
+  `, [batchId, operationOwnerId]);
+  if (!lock.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
+  try {
   const batch = await getBatch(batchId);
   if (!batch?.supplier_id) throw new Error('У партии не найден поставщик');
 
@@ -939,20 +1015,29 @@ async function processBatchWithAi(batchId) {
     }
   }
 
-  await saveBatchProducts(batchId, products);
-
   const outputPath = `db://batch/${batchId}/ai`;
-
-  await scrapingPool.query(`
-    INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
-    VALUES ($1, $2, 'Обработано ИИ', $3, $4, NOW())
-  `, [batch.supplier_id, batchId, outputPath, products.length]);
-  await scrapingPool.query("UPDATE scraping_batches SET stage='AI_PROCESSED', updated_at=NOW() WHERE id=$1", [batchId]);
+  await saveBatchProducts(batchId, products, {
+    finalizeStage: 'AI_PROCESSED',
+    snapshotLabel: 'Обработано ИИ',
+    supplierId: batch.supplier_id,
+    taskStatus: 'Обработано ИИ',
+    resultPath: outputPath,
+  });
 
   return { processed: unprocessed.length, total: products.length, path: outputPath };
+  } finally {
+    await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
+  }
 }
 
 async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
+  const operationOwnerId = crypto.randomUUID();
+  const lock = await scrapingPool.query(`
+    INSERT INTO batch_operation_locks(batch_id,operation,owner_id) VALUES($1,'script',$2)
+    ON CONFLICT(batch_id) DO NOTHING RETURNING owner_id
+  `, [batchId, operationOwnerId]);
+  if (!lock.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
+  try {
   const batch = await getBatch(batchId);
   if (!batch?.supplier_id) throw new Error('У партии не найден поставщик');
   const supplier = await getSupplier(batch.supplier_id);
@@ -990,15 +1075,18 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       : (original?.price_source || 'default');
   }
 
-  await saveBatchProducts(batchId, processedProducts);
-  await scrapingPool.query("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
-  await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
-  await scrapingPool.query(`
-    INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
-    VALUES ($1, $2, 'Обработано скриптом', $3, $4, NOW())
-  `, [batch.supplier_id, batchId, `db://batch/${batchId}/script`, processedProducts.length]);
+  await saveBatchProducts(batchId, processedProducts, {
+    finalizeStage: 'SCRIPT_PROCESSED',
+    snapshotLabel: 'Обработан скриптом',
+    supplierId: batch.supplier_id,
+    taskStatus: 'Обработано скриптом',
+    resultPath: `db://batch/${batchId}/script`,
+  });
 
-  return { processed: processedProducts.length, path: `db://batch/${batchId}/script` };
+    return { processed: processedProducts.length, path: `db://batch/${batchId}/script` };
+  } finally {
+    await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
+  }
 }
 
 const s3Client = new S3Client({
@@ -1106,6 +1194,27 @@ async function uploadPhotoAttempt(url, key) {
   }
 }
 
+async function cleanupUnusedBatchPhotos(batchId, products) {
+  const prefix = `batches/${batchId}/`;
+  const keep = new Set(products.flatMap((product) => normalizePhotos(product.photos).map(ownedS3Key).filter(Boolean)));
+  let continuationToken;
+  do {
+    const listed = await s3Client.send(new ListObjectsV2Command({
+      Bucket: process.env.S3_BUCKET,
+      Prefix: prefix,
+      ContinuationToken: continuationToken,
+    }));
+    const stale = (listed.Contents || []).map((item) => item.Key).filter((key) => key && !keep.has(key));
+    if (stale.length) {
+      await s3Client.send(new DeleteObjectsCommand({
+        Bucket: process.env.S3_BUCKET,
+        Delete: { Objects: stale.map((Key) => ({ Key })), Quiet: true },
+      }));
+    }
+    continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+  } while (continuationToken);
+}
+
 async function existingRailsProducts(externalIds) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
   const existing = new Map();
@@ -1116,12 +1225,9 @@ async function existingRailsProducts(externalIds) {
     while (cursor < ids.length) {
       const externalId = ids[cursor++];
       const params = new URLSearchParams({ page: '1', per_page: '10', external_id: externalId });
-      const response = await fetch(railsApiUrl(`/admin/products?${params}`), {
+      const payload = await fetchJsonWithRetry(railsApiUrl(`/admin/products?${params}`), {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(30_000),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.message || payload.error || `Rails external_id check failed with ${response.status}`);
+      }, 'Rails external_id check');
       if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
         const product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
         if (product) existing.set(externalId, product);
@@ -1174,26 +1280,63 @@ function railsUpdatePayload(product) {
 }
 
 async function updateRailsProduct(id, product) {
-  const response = await fetch(railsApiUrl(`/admin/products/${encodeURIComponent(id)}`), {
+  await fetchJsonWithRetry(railsApiUrl(`/admin/products/${encodeURIComponent(id)}`), {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${await railsAdminToken()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(railsUpdatePayload(product)),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message || payload.error || `Rails update failed with ${response.status}`);
+  }, 'Rails update');
+}
+
+async function recordBatchPublications(batchId, externalIds) {
+  const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
+  if (!ids.length) return;
+  const publishedProducts = await existingRailsProducts(ids);
+  for (const externalId of ids) {
+    const railsProduct = publishedProducts.get(externalId);
+    if (!railsProduct) continue;
+    await scrapingPool.query(`
+      INSERT INTO batch_publications(batch_id,external_id,rails_product_id,published_at)
+      VALUES($1,$2,$3,NOW())
+      ON CONFLICT(batch_id,external_id) DO UPDATE SET rails_product_id=EXCLUDED.rails_product_id,published_at=NOW()
+    `, [batchId, externalId, railsProduct.id ? String(railsProduct.id) : null]);
+  }
+}
+
+async function recordBatchPublication(batchId, externalId, railsProductId) {
+  await scrapingPool.query(`
+    INSERT INTO batch_publications(batch_id,external_id,rails_product_id,published_at)
+    VALUES($1,$2,$3,NOW())
+    ON CONFLICT(batch_id,external_id) DO UPDATE SET rails_product_id=EXCLUDED.rails_product_id,published_at=NOW()
+  `, [batchId, externalId, railsProductId ? String(railsProductId) : null]);
 }
 
 async function pushBatchToCatalog(batchId, options = {}, onProgress) {
+  const operationOwnerId = crypto.randomUUID();
+  const operation = await scrapingPool.query(`
+    INSERT INTO batch_operation_locks(batch_id,operation,owner_id) VALUES($1,'publish',$2)
+    ON CONFLICT(batch_id) DO NOTHING RETURNING owner_id
+  `, [batchId, operationOwnerId]);
+  if (!operation.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
+  try {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
+  const batch = await getBatch(batchId);
+  if (!['AI_PROCESSED', 'PUSHED'].includes(String(batch?.stage || ''))) {
+    throw new Error('Публикация доступна только после полной AI-обработки партии');
+  }
+  const unfinished = products.filter((product) => !product.ai_processed);
+  if (unfinished.length > 0) {
+    throw new Error(`Публикация остановлена: ${unfinished.length} товаров ещё не обработаны ИИ`);
+  }
 
   const seenExternalIds = new Set();
   const validationErrors = [];
   products.forEach((product, index) => {
     const externalId = String(product.external_id || '').trim();
+    if (!externalId) validationErrors.push(`Строка ${index + 1}: отсутствует external_id`);
     if (externalId && seenExternalIds.has(externalId)) {
       validationErrors.push(`Строка ${index + 1}: дубликат external_id ${externalId}`);
     }
@@ -1208,7 +1351,6 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     throw new Error(`Партия не прошла проверку:\n${validationErrors.slice(0, 20).join('\n')}`);
   }
 
-  const batch = await getBatch(batchId);
   const lookups = await loadLegacyLookupMaps();
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
   const existingProducts = await existingRailsProducts(products.map((product) => product.external_id));
@@ -1241,6 +1383,16 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
     product.photos = photos.filter(Boolean);
     updatedProducts[productIndex] = product;
+    // Фиксируем уже перенесенные URL после каждого товара. Повторный запуск
+    // продолжит с этого места и проверит S3 через HEAD, а не скачает всё заново.
+    await scrapingPool.query(
+      'UPDATE products SET photos=$3::jsonb,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
+      [batchId, product.id, JSON.stringify(product.photos)],
+    );
+    await scrapingPool.query(
+      'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
+      [batchId, operationOwnerId],
+    );
     if (!productFailed) prepared += 1;
 
     if (onProgress) await onProgress({ current: candidateIndex + 1, total: candidates.length, success: prepared, failed: errors.length });
@@ -1258,6 +1410,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       try {
         await updateRailsProduct(railsProduct.id, product);
         updated += 1;
+        await recordBatchPublication(batchId, externalId, railsProduct.id);
       } catch (error) {
         errors.push(`${externalId}: ${error.message}`);
       }
@@ -1278,14 +1431,24 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     });
     importBatches.push(payload.import_batch?.id);
     imported += Number(payload.result?.products_imported || 0);
+    // Коммитим владение сразу после каждого успешно принятого Rails-чанка.
+    // Если следующий чанк упадет, повторный запуск не потеряет уже опубликованное.
+    await recordBatchPublications(batchId, chunk.map((row) => row.external_id));
     if (payload.result?.products_failed) {
       for (const error of payload.result.errors || []) errors.push(`Rails line ${error.line}: ${error.error}`);
     }
   }
 
-  if (importBatches.length > 0 || candidates.length === 0) {
-    await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
+  if (errors.length > 0) {
+    throw new Error(`Публикация завершилась с ошибками:\n${errors.slice(0, 20).join('\n')}`);
   }
+
+  try {
+    await cleanupUnusedBatchPhotos(batchId, updatedProducts);
+  } catch (error) {
+    console.warn(`Could not clean stale S3 photos for batch ${batchId}:`, error.message);
+  }
+  await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
 
   return {
     success: imported,
@@ -1296,6 +1459,9 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     skippedExisting: existingExternalIds.size,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
+  } finally {
+    await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
+  }
 }
 
 async function closePools() {

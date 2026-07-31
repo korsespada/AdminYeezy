@@ -67,7 +67,7 @@ describe('batch product server actions', () => {
           ai_processed: true,
         },
       ],
-    })
+    }).mockResolvedValueOnce({ rows: [{ stage: 'AI_PROCESSED' }] })
 
     const res = await getBatchProductsAction('batch-1')
 
@@ -88,6 +88,9 @@ describe('batch product server actions', () => {
 
   it('saves a full batch inside a transaction and prunes removed rows', async () => {
     const { saveBatchProductsAction } = await import('@/actions/csv-import')
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
     mocks.client.query
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ rows: [] })
@@ -128,7 +131,9 @@ describe('batch product server actions', () => {
 
   it('patches one batch product by id', async () => {
     const { updateBatchProductAction } = await import('@/actions/csv-import')
-    mocks.scrapingQuery.mockResolvedValueOnce({ rowCount: 1 })
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 })
 
     const res = await updateBatchProductAction(10, { price: 250, photos: ['next.jpg'] }, 'batch-1')
 
@@ -141,18 +146,20 @@ describe('batch product server actions', () => {
 
   it('deletes one batch product and refreshes the batch count', async () => {
     const { deleteBatchProductAction } = await import('@/actions/csv-import')
-    mocks.scrapingQuery.mockResolvedValue({ rowCount: 1 })
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValue({ rowCount: 1 })
 
     const res = await deleteBatchProductAction('ext-1', 'batch-1')
 
     expect(res.success).toBe(true)
     expect(mocks.scrapingQuery).toHaveBeenNthCalledWith(
-      1,
+      2,
       'DELETE FROM products WHERE external_id=$1 AND batch_id=$2',
       ['ext-1', 'batch-1'],
     )
     expect(mocks.scrapingQuery).toHaveBeenNthCalledWith(
-      2,
+      3,
       'UPDATE scraping_batches SET items_count=(SELECT COUNT(*) FROM products WHERE batch_id=$1), updated_at=NOW() WHERE id=$1',
       ['batch-1'],
     )
@@ -179,7 +186,7 @@ describe('batch product server actions', () => {
           attributes: { color: 'black', model: 'M60895' },
         },
       ],
-    })
+    }).mockResolvedValueOnce({ rows: [{ stage: 'SCRAPED' }] })
 
     const res = await exportBatchProductsCsvAction('batch-1')
 

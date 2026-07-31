@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { saveBatchAiSuggestions } from '@/lib/batch-ai-suggestions'
 
 export const dynamic = 'force-dynamic'
@@ -147,6 +148,7 @@ async function complete(body: any) {
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
     await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
     await updateRunCounts(client, item.run_id)
+    await touchRunLock(client, item.run_id)
     await client.query('COMMIT')
     await finalizeCockpitRun(item.run_id)
     return NextResponse.json({ ok: true })
@@ -171,6 +173,7 @@ async function fail(body: any) {
     }
     if (result.rows[0]) {
       await updateRunCounts(client, result.rows[0].run_id)
+      await touchRunLock(client, result.rows[0].run_id)
     }
     await client.query('COMMIT')
     if (result.rows[0]) await finalizeCockpitRun(result.rows[0].run_id)
@@ -186,23 +189,39 @@ async function fail(body: any) {
 async function finalizeCockpitRun(runId: string) {
   const result = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const run = result.rows[0]
-  if (!run || run.status !== 'completed') return
-  let promoteBatch = !['sample', 'variants', 'selection'].includes(run.mode)
-  if (run.mode === 'selection') {
-    const remaining = await scrapingQuery(`
-      SELECT 1 FROM products
-      WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
-      LIMIT 1
-    `, [run.batch_id])
-    promoteBatch = remaining.rows.length === 0
+  if (!run) return
+  if (run.status !== 'completed') {
+    if (['failed','cancelled'].includes(run.status)) await releaseBatchOperation(String(run.batch_id), runId)
+    return
   }
-  if (promoteBatch) {
-    await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
+  try {
+    let promoteBatch = !['sample', 'variants', 'selection'].includes(run.mode)
+    if (run.mode !== 'variants' && run.mode !== 'sample') {
+      const remaining = await scrapingQuery(`
+        SELECT 1 FROM products
+        WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
+        LIMIT 1
+      `, [run.batch_id])
+      promoteBatch = remaining.rows.length === 0
+    }
+    if (promoteBatch) {
+      await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
+    }
+    if (run.mode === 'variants') return
+    const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `${promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ'} · ${run.id.slice(0, 8)}`
+    const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
+    if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', label, run.settings_snapshot)
+  } finally {
+    await releaseBatchOperation(String(run.batch_id), runId)
   }
-  if (run.mode === 'variants') return
-  const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `${promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ'} · ${run.id.slice(0, 8)}`
-  const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
-  if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', label, run.settings_snapshot)
+}
+
+async function touchRunLock(client: any, runId: string) {
+  await client.query(`
+    UPDATE batch_operation_locks l SET updated_at=NOW()
+    FROM batch_ai_runs r
+    WHERE r.id=$1 AND l.batch_id=r.batch_id AND l.owner_id=r.id
+  `, [runId])
 }
 
 async function updateRunCounts(client: any, runId: string) {

@@ -28,6 +28,7 @@ import {
   upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { activeBatchOperation, claimBatchOperation, releaseBatchOperation, touchBatchOperation } from '@/lib/batch-operation-lock'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { uploadToS3 } from '@/lib/s3'
 import {
@@ -300,7 +301,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (!batch.rows[0]) throw new Error('Выгрузка не найдена')
   let predicate = ''
   const params: any[] = [batchId]
-  if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY random() LIMIT 10'
+  if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true AND variant_group_key IS NULL ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'selection') {
@@ -341,7 +342,11 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
 
 export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   await requireAdmin()
+  const runId = crypto.randomUUID()
+  let operationClaimed = false
   try {
+    const active = await scrapingQuery("SELECT id FROM batch_ai_runs WHERE batch_id=$1 AND status IN ('queued','running') LIMIT 1", [batchId])
+    if (active.rows[0]) return { success: false, error: 'Для этой выгрузки уже выполняется AI-обработка' }
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
     if (context.products.length === 0) {
@@ -371,7 +376,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       if (!worker.rows[0]) return { success: false, error: 'Cockpit worker недоступен: heartbeat старше 30 секунд' }
     }
 
-    const runId = crypto.randomUUID()
+    operationClaimed = Boolean(await claimBatchOperation(batchId, 'ai', runId))
+    if (!operationClaimed) return { success: false, error: 'Для этой выгрузки уже выполняется другое действие' }
     const supplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
       context.batch.ai_instructions,
       context.batch.ai_photo_enabled && context.batch.ai_photo_instructions ? `Особенности фото: ${context.batch.ai_photo_instructions}` : '',
@@ -428,11 +434,21 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     revalidatePath('/admin/batches')
     if (settings.provider !== 'cockpit') {
       after(async () => {
-        await processOpenRouterRun(runId, context, settings)
+        try {
+          await processOpenRouterRun(runId, context, settings)
+        } catch (error) {
+          await scrapingQuery(`
+            UPDATE batch_ai_runs SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
+            WHERE id=$1 AND status IN ('queued','running')
+          `, [runId, String((error as any)?.message || error).slice(0, 4000)]).catch(() => undefined)
+          await releaseBatchOperation(batchId, runId).catch(() => undefined)
+          throw error
+        }
       })
     }
     return { success: true, data: { runId, queued: context.products.length, provider: settings.provider } }
   } catch (error: any) {
+    if (operationClaimed) await releaseBatchOperation(batchId, runId).catch(() => undefined)
     return { success: false, error: error.message }
   }
 }
@@ -509,6 +525,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     if (failed.rows[0] && !item.input_snapshot?.variantScanOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
+  } finally {
+    await touchBatchOperation(String(context.batch.id), String(item.run_id)).catch(() => undefined)
   }
 }
 
@@ -611,21 +629,28 @@ async function finalizeRun(runId: string) {
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
     const currentRun = run.rows[0]
-    let promoteBatch = !['sample', 'variants', 'selection'].includes(currentRun?.mode)
-    if (currentRun?.mode === 'selection') {
-      const remaining = await scrapingQuery(`
-        SELECT 1 FROM products
-        WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
-        LIMIT 1
-      `, [currentRun.batch_id])
-      promoteBatch = remaining.rows.length === 0
+    try {
+      let promoteBatch = !['sample', 'variants', 'selection'].includes(currentRun?.mode)
+      if (currentRun?.mode !== 'variants' && currentRun?.mode !== 'sample') {
+        const remaining = await scrapingQuery(`
+          SELECT 1 FROM products
+          WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
+          LIMIT 1
+        `, [currentRun.batch_id])
+        promoteBatch = remaining.rows.length === 0
+      }
+      if (promoteBatch) {
+        await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
+      }
+      if (currentRun?.mode !== 'variants') {
+        await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
+      }
+    } finally {
+      await releaseBatchOperation(String(currentRun.batch_id), runId)
     }
-    if (promoteBatch) {
-      await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
-    }
-    if (currentRun?.mode !== 'variants') {
-      await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
-    }
+  } else if (row.pending === 0) {
+    const finishedRun = await scrapingQuery('SELECT batch_id FROM batch_ai_runs WHERE id=$1', [runId])
+    if (finishedRun.rows[0]) await releaseBatchOperation(String(finishedRun.rows[0].batch_id), runId)
   }
 }
 
@@ -650,6 +675,17 @@ async function resumeStaleOpenRouterRun(runId: string) {
   `, [runId])
   const run = locked.rows[0]
   if (!run) return
+  const operation = await scrapingQuery('SELECT owner_id FROM batch_operation_locks WHERE batch_id=$1', [run.batch_id])
+  if (!operation.rows[0]) {
+    const claimed = await claimBatchOperation(String(run.batch_id), 'ai', runId)
+    if (!claimed) return
+  } else if (String(operation.rows[0].owner_id) !== runId) {
+    await scrapingQuery(`
+      UPDATE batch_ai_runs SET status='failed',error_message='Выгрузка занята другой операцией',completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1
+    `, [runId])
+    return
+  }
   await scrapingQuery(`
     UPDATE batch_ai_items SET status='queued',error_message=NULL,completed_at=NULL,updated_at=NOW()
     WHERE run_id=$1 AND (
@@ -706,11 +742,12 @@ export async function stopBatchAiRunAction(runId: string) {
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
-    const run = await client.query('SELECT id,status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [runId])
+    const run = await client.query('SELECT id,batch_id,status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [runId])
     if (!run.rows[0]) {
       await client.query('ROLLBACK')
       return { success: false, error: 'Запуск ИИ не найден' }
     }
+    await client.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [run.rows[0].batch_id, runId])
     if (['queued', 'running'].includes(run.rows[0].status)) {
       await client.query(`
         UPDATE batch_ai_items SET status='cancelled',lease_token=NULL,leased_at=NULL,
@@ -744,10 +781,12 @@ export async function getBatchSnapshotsAction(batchId: string) {
 
 export async function rollbackBatchAction(batchId: string, snapshotId: string) {
   await requireAdmin()
-  const snapshot = await scrapingQuery('SELECT * FROM batch_snapshots WHERE id=$1 AND batch_id=$2', [snapshotId, batchId])
-  if (!snapshot.rows[0]) return { success: false, error: 'Снимок не найден' }
+  const operationOwnerId = await claimBatchOperation(batchId, 'rollback')
+  if (!operationOwnerId) return { success: false, error: 'Выгрузка занята другой операцией' }
   const client = await getScrapingClient()
   try {
+    const snapshot = await client.query('SELECT * FROM batch_snapshots WHERE id=$1 AND batch_id=$2', [snapshotId, batchId])
+    if (!snapshot.rows[0]) return { success: false, error: 'Снимок не найден' }
     await client.query('BEGIN')
     const mappingResult = await client.query(`
       SELECT entity_type, legacy_id, canonical_id, name, canonical_parent_id
@@ -783,6 +822,7 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
     return { success: false, error: error.message }
   } finally {
     client.release()
+    await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
   }
 }
 
@@ -800,6 +840,13 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
   const suggestion = await scrapingQuery('SELECT * FROM batch_ai_suggestions WHERE id=$1', [id])
   const row = suggestion.rows[0]
   if (!row) return { success: false, error: 'Предложение не найдено' }
+  if (decision === 'approved') {
+    const run = await scrapingQuery('SELECT batch_id FROM batch_ai_runs WHERE id=$1', [row.run_id])
+    const batchId = run.rows[0]?.batch_id ? String(run.rows[0].batch_id) : ''
+    if (batchId && await activeBatchOperation(batchId)) {
+      return { success: false, error: 'Дождитесь завершения обработки выгрузки перед применением предложения' }
+    }
+  }
   if (editedPayload && typeof editedPayload === 'object' && !Array.isArray(editedPayload)) {
     row.payload = editedPayload
     await scrapingQuery('UPDATE batch_ai_suggestions SET payload=$2::jsonb WHERE id=$1', [id, JSON.stringify(editedPayload)])

@@ -269,7 +269,7 @@ async function resolveSourcePath({
         WHERE batch_id = $1
           AND result_path IS NOT NULL
           AND result_path <> ''
-          AND status IN ('Обработано скриптом', 'Сырой CSV')
+          AND status IN ('Обработано скриптом', 'Сырой CSV', 'Сырой товар')
         ORDER BY
           CASE WHEN status = 'Обработано скриптом' THEN 0 ELSE 1 END,
           created_at DESC

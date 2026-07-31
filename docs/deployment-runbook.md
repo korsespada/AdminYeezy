@@ -75,6 +75,15 @@ RAILS_API_URL=https://api.yeezyunique.ru/api/v1
 SCRAPING_DATABASE_URL=postgresql://...
 ```
 
+Перед запуском нового образа применить все scraping/AI-миграции:
+
+```bash
+npm run db:migrate:scraping
+npm run db:audit:batches
+```
+
+Команда идемпотентна. В том числе она создаёт блокировки операций, реестр публикаций, уникальный активный запуск парсера на поставщика и ограничения связей задач/партий/товаров.
+
 Auth:
 
 - production UI login идет через `POST /api/v1/admin/auth/login`;

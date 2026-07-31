@@ -37,7 +37,6 @@ import {
   ChevronDown,
 } from "lucide-react";
 import {
-  pushCsvProductsAction,
   fetchLookupsAction,
   readLocalCsvAction,
   saveLocalCsvAction,
@@ -45,19 +44,12 @@ import {
   saveBatchProductsAction,
   updateBatchProductAction,
   deleteBatchProductAction,
-  recordAiTaskAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
   type CsvProduct,
   type Lookups,
 } from "@/actions/csv-import";
-import {
-  createBatchAction,
-  updateBatchStageAction,
-  linkBatchToTaskAction,
-  pushBatchToCatalogAction,
-} from "@/actions/suppliers";
-import { processAiAction } from "@/actions/ai-process";
+import { pushBatchToCatalogAction } from "@/actions/suppliers";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -417,8 +409,6 @@ function SearchableLookupSelect({
 
 export default function CsvImportApp({
   initialLocalPath = "",
-  initialRawPath = "",
-  initialAiPath = "",
   initialSupplierId = null,
   initialBatchId = null,
   initialSnapshotId = null,
@@ -454,10 +444,6 @@ export default function CsvImportApp({
     failed: number;
     errors: string[];
   } | null>(null);
-  const [pushProgress, setPushProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
   const [lookups, setLookups] = useState<Lookups | null>(null);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [selectedForMerge, setSelectedForMerge] = useState<number[]>([]); // Список индексов в порядке выбора
@@ -470,8 +456,6 @@ export default function CsvImportApp({
   const [localPath, setLocalPath] = useState("");
   const [isLoadingPath, setIsLoadingPath] = useState(false);
   
-  const [batchName, setBatchName] = useState("");
-  const [isBatchActive, setIsBatchActive] = useState(false);
   const [pathError, setPathError] = useState("");
 
   // Dirty flag — были ли изменения с момента последнего сохранения
@@ -501,7 +485,6 @@ export default function CsvImportApp({
   const [isProcessing, setIsProcessing] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
-  const isAiStoppedRef = useRef(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [aiQueue, setAiQueue] = useState<any[]>([]);
@@ -869,6 +852,10 @@ export default function CsvImportApp({
   // ─── Data Handlers ────────────────────────────────────────────────
   const handlePush = async (mode: "add" | "upsert" = "add") => {
     if (products.length === 0) return;
+    if (!batchId) {
+      setSaveMsg("Публикация доступна только из JSONB-партии. Откройте текущую выгрузку, а не старый CSV-артефакт.");
+      return;
+    }
     const validationIssues = validateProducts(products);
     const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
     if (validationErrors.length > 0) {
@@ -899,117 +886,15 @@ export default function CsvImportApp({
       return;
     }
 
-    setIsPushing(true);
-    setResult(null);
-    setPushProgress({ current: 0, total: products.length });
-
-    let currentBatchId: string | undefined = undefined;
-
-    // Если указано имя партии, создаем её перед началом импорта
-    if (batchName.trim()) {
-      try {
-        const batchRes = await createBatchAction(batchName.trim(), undefined, products.length);
-        if (batchRes.success && batchRes.data?.id) {
-          currentBatchId = batchRes.data.id;
-          
-          // Попробуем связать с задачей из истории
-          if (localPath) {
-            const taskMatch = localPath.match(/task_(\d+)/);
-            if (taskMatch && taskMatch[1]) {
-              await linkBatchToTaskAction(currentBatchId, parseInt(taskMatch[1]));
-            }
-          }
-        } else {
-          console.error("Failed to create batch:", batchRes.error);
-        }
-      } catch (err) {
-        console.error("Batch creation error:", err);
-      }
-    }
-
-    const CHUNK_SIZE = 20;
-    const total = products.length;
-    const errors: string[] = [];
-    let success = 0;
-    let failed = 0;
-    
-    // Создаем копию всех товаров для постепенного обновления
-    let currentProducts = [...products];
-
-    try {
-      for (let i = 0; i < total; i += CHUNK_SIZE) {
-        const chunk = products.slice(i, i + CHUNK_SIZE);
-        setPushProgress({ current: i, total });
-
-        // Определяем, какой ID партии использовать: свежесозданный или тот, что уже был у задачи
-        const effectiveBatchId = currentBatchId || batchId;
-
-        // Добавляем batchId к каждому товару в чанке
-        const chunkWithBatch = chunk.map(p => ({
-            ...p,
-            batchId: effectiveBatchId || undefined
-        }));
-
-        const res = await pushCsvProductsAction(chunkWithBatch);
-        if (res.success && res.data) {
-          success += res.data.success;
-          failed += res.data.failed;
-          errors.push(...res.data.errors);
-          
-          if (res.data.updatedProducts) {
-             // Заменяем старые товары на обновленные (со ссылками S3) в нашем массиве
-             res.data.updatedProducts.forEach((updatedProduct: any, idx: number) => {
-                 currentProducts[i + idx] = updatedProduct;
-             });
-          }
-        } else {
-          failed += chunk.length;
-          errors.push(
-            res.error || "Server error on chunk " + (i / CHUNK_SIZE + 1),
-          );
-        }
-
-        // Обновляем состояние после каждого чанка, чтобы UI видел новые ссылки S3
-        setProducts([...currentProducts]);
-        
-        // --- СОХРАНЕНИЕ ПРОГРЕССА ПОСЛЕ КАЖДОЙ ПАЧКИ ---
-        if (batchId) {
-           try {
-             await saveBatchProductsAction(batchId, currentProducts);
-           } catch(e) {
-             console.warn("Failed to save intermediate DB state:", e);
-           }
-        } else if (localPath) {
-           try {
-             await saveLocalCsvAction(localPath, currentProducts, columns, delimiter);
-           } catch(e) {
-             console.warn("Failed to save intermediate state:", e);
-           }
-        }
-      }
-      
-      setResult({ success, failed, errors });
-
-      // Если все прошло успешно (или почти все), обновляем статус партии на PUSHED
-      const finalBatchId = currentBatchId || batchId;
-      if (finalBatchId && success > 0) {
-          await updateBatchStageAction(finalBatchId, 'PUSHED');
-      }
-    } catch (e: any) {
-      setResult({
-        success,
-        failed,
-        errors: [...errors, "Network or unexpected error: " + e.message],
-      });
-    }
-
-    setPushProgress(null);
-    setIsPushing(false);
   };
 
   const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection", selectedProductIds?: number[]) => {
     if (isSnapshotSource) {
       setSaveMsg("Исторический снимок доступен только для просмотра. Откройте саму выгрузку, чтобы продолжить обработку.");
+      return;
+    }
+    if (!batchId) {
+      setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
       return;
     }
     if (!supplierId && products.length > 0) {
@@ -1070,120 +955,6 @@ export default function CsvImportApp({
       }
       return;
     }
-    
-    setIsProcessing(true);
-    isAiStoppedRef.current = false;
-
-    let currentAiPath = localPath;
-    let effectiveProducts = [...products];
-    let effectiveColumns = [...columns];
-
-    // Убедимся, что колонка ai_processed существует, чтобы сохранять статус
-    if (!effectiveColumns.some(c => c.key === 'ai_processed')) {
-        effectiveColumns.push({ name: 'ai_processed', key: 'ai_processed' });
-        setColumns(effectiveColumns);
-    }
-
-    // В legacy file mode создаем новый AI CSV; в batch mode рабочее состояние сразу пишется в БД.
-    if (!batchId && !localPath.includes('task_ai_')) {
-        try {
-            const recordRes = await recordAiTaskAction({
-                supplierId,
-                batchId,
-                products: effectiveProducts,
-                columns: effectiveColumns,
-                delimiter
-            });
-            if (recordRes.success && recordRes.path) {
-                currentAiPath = recordRes.path;
-                setLocalPath(currentAiPath);
-                localStorage.setItem("csv_local_path", currentAiPath);
-                setSaveMsg("✓ Создан файл для ИИ-обработки");
-            } else {
-                alert("Ошибка при создании файла для ИИ: " + recordRes.error);
-                setIsProcessing(false);
-                return;
-            }
-        } catch (e: any) {
-            alert("Критическая ошибка: " + e.message);
-            setIsProcessing(false);
-            return;
-        }
-    }
-
-    const isParallel = supplierData?.ai_parallel_enabled ?? false;
-    const parallelCount = supplierData?.ai_parallel_count ?? 5;
-    
-    // Если многопоточность выключена (важно для кэша), то отправляем по 5 товаров.
-    // Скрипт Питона обработает их СТРОГО ПО ОЧЕРЕДИ: первый обработает -> запишет в кэш -> второй возьмет из кэша.
-    // Если включена, отправляем порцию равную количеству потоков * 2, чтобы загрузить потоки.
-    const CHUNK_SIZE = isParallel ? Math.max(5, parallelCount * 2) : 5;
-
-    const total = effectiveProducts.length;
-    let processedCount = effectiveProducts.filter(p => {
-        const val = (p as any).ai_processed;
-        return val === true || val === "true" || val === "True";
-    }).length;
-    
-    setAiProgress({ current: processedCount, total });
-
-    for (let i = 0; i < total; i += CHUNK_SIZE) {
-        if (isAiStoppedRef.current) {
-            setSaveMsg("Обработка остановлена пользователем");
-            break;
-        }
-
-        const chunk = effectiveProducts.slice(i, i + CHUNK_SIZE);
-        const unprocessedChunk = chunk.filter(p => {
-            const val = (p as any).ai_processed;
-            return val !== true && val !== "true" && val !== "True";
-        });
-
-        if (unprocessedChunk.length > 0) {
-            // Вызов процесса ИИ без передачи currentAiPath, чтобы не делать бэкапы на каждый чанк
-            const res = await processAiAction(supplierId!, unprocessedChunk, undefined);
-            
-            if (res.success && res.data) {
-                res.data.forEach((updatedProduct: any) => {
-                    const idx = effectiveProducts.findIndex(p => p.external_id === updatedProduct.external_id);
-                    if (idx !== -1) {
-                        effectiveProducts[idx] = { ...effectiveProducts[idx], ...updatedProduct, ai_processed: true };
-                    }
-                });
-                
-                processedCount += unprocessedChunk.length;
-                setAiProgress({ current: processedCount, total });
-                setProducts([...effectiveProducts]);
-                
-                try {
-                    if (batchId) {
-                      await saveBatchProductsAction(batchId, effectiveProducts);
-                    } else {
-                      await saveLocalCsvAction(currentAiPath, effectiveProducts, effectiveColumns, delimiter);
-                    }
-                } catch(e) {
-                    console.warn("Failed to save intermediate AI state:", e);
-                }
-            } else {
-                alert("Ошибка ИИ на части товаров: " + res.error);
-                break;
-            }
-        }
-    }
-    
-    const allProcessed = effectiveProducts.every(p => {
-        const val = (p as any).ai_processed;
-        return val === true || val === "true" || val === "True";
-    });
-    
-    setIsAiProcessed(allProcessed);
-    if (batchId && allProcessed) {
-      await updateBatchStageAction(batchId, 'AI_PROCESSED');
-    }
-    setIsDirty(false);
-    setTimeout(() => setSaveMsg(null), 5000);
-    setIsProcessing(false);
-    setAiProgress(null);
   };
 
   const handleStopAi = async () => {
@@ -1200,7 +971,6 @@ export default function CsvImportApp({
         await handleLoadBatch(batchId);
         return;
       }
-      isAiStoppedRef.current = true;
   };
 
   const handleRetryProductAi = async (product: CsvProduct) => {
@@ -2486,7 +2256,6 @@ function CsvProductCard({
   onRemove,
   onUpdate,
   onClick,
-  localPath,
   onRetryAi,
 }: CsvProductCardProps) {
   const [editField, setEditField] = useState<"name" | "price" | null>(null);

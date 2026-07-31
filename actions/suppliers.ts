@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache'
-import { query, scrapingQuery, redis, describeScrapingDatabaseConnection } from '@/lib/db'
+import { query, scrapingQuery, getScrapingClient, redis, describeScrapingDatabaseConnection } from '@/lib/db'
 import { deleteS3Folder } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
 import { requireAdmin } from '@/lib/admin-session'
@@ -10,6 +10,7 @@ import { extractProductAttributes } from '@/lib/product-attributes'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
+import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -19,9 +20,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import {
   deleteScrapingFileArtifactForTask,
   deleteScrapingFileArtifactsForBatch,
-  saveScrapingFileArtifact,
 } from '@/lib/scraping-files'
-import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 
 // --- Suppliers CRUD ---
 
@@ -121,38 +120,6 @@ export async function getSupplierCatalogLookupsAction(): Promise<ActionResponse>
     }
   } catch (err: any) {
     return { success: false, error: err.message }
-  }
-}
-
-async function resolveLegacySupplierDefaults(supplier: any) {
-  const values = [
-    supplier.default_brand,
-    supplier.default_category,
-    supplier.default_subcategory,
-  ].filter(Boolean).map(String)
-  if (values.length === 0) {
-    return {
-      brand: supplier.default_brand,
-      category: supplier.default_category,
-      subcategory: supplier.default_subcategory,
-    }
-  }
-
-  const result = await scrapingQuery(
-    `SELECT entity_type, legacy_id, canonical_id
-     FROM catalog_id_mappings
-     WHERE canonical_id = ANY($1::text[]) OR legacy_id = ANY($1::text[])`,
-    [values],
-  )
-  const byValue = new Map<string, string>()
-  for (const row of result.rows) {
-    byValue.set(String(row.canonical_id), String(row.legacy_id))
-    byValue.set(String(row.legacy_id), String(row.legacy_id))
-  }
-  return {
-    brand: byValue.get(String(supplier.default_brand || '')) || supplier.default_brand,
-    category: byValue.get(String(supplier.default_category || '')) || supplier.default_category,
-    subcategory: byValue.get(String(supplier.default_subcategory || '')) || supplier.default_subcategory,
   }
 }
 
@@ -401,6 +368,7 @@ export interface ExportHistoryFile {
   label?: string
   snapshot_id?: string | null
   snapshot_label?: string | null
+  snapshot_missing?: boolean
 }
 
 export interface ExportHistoryBatch {
@@ -652,6 +620,8 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       if (snapshot) {
         file.snapshot_id = String(snapshot.id)
         file.snapshot_label = String(snapshot.label || file.status)
+      } else if (file.result_path?.startsWith('db://')) {
+        file.snapshot_missing = true
       }
       return file
     }
@@ -759,6 +729,63 @@ async function forwardScrapingToWorker(supplierId: number, endDate?: string, ove
   }
 }
 
+async function importScrapedProductsTransaction(taskId: number, supplier: any, parserDefaults: any, items: any[]) {
+  if (!Array.isArray(items) || items.length === 0) throw new Error('Парсер не вернул товары')
+  const client = await getScrapingClient()
+  const batchId = crypto.randomUUID()
+  try {
+    await client.query('BEGIN')
+    const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`
+    await client.query(
+      'INSERT INTO scraping_batches(id,name,supplier_id,items_count,stage) VALUES($1,$2,$3,$4,$5)',
+      [batchId, batchName, supplier.id, items.length, 'SCRAPED'],
+    )
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index]
+      const externalId = String(item.external_id || '').trim()
+      if (!externalId) throw new Error(`Товар ${index + 1}: отсутствует external_id`)
+      const photos = Array.isArray(item.photos)
+        ? item.photos.map(String).filter(Boolean)
+        : (() => { try { return item.photos ? JSON.parse(item.photos) : [] } catch { return [] } })()
+      await client.query(`
+        INSERT INTO products(external_id,name,description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,batch_id,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,'default','inactive',$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,NOW(),NOW())
+        ON CONFLICT(batch_id,external_id) DO UPDATE SET
+          name=EXCLUDED.name,description=EXCLUDED.description,price=EXCLUDED.price,price_source=EXCLUDED.price_source,
+          status=EXCLUDED.status,brand=EXCLUDED.brand,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,
+          gender=EXCLUDED.gender,photos=EXCLUDED.photos,attributes=EXCLUDED.attributes,
+          source_position=EXCLUDED.source_position,updated_at=NOW()
+      `, [
+        externalId, item.name || 'Без названия', item.description || '',
+        parseFloat(item.price) || supplier.default_price || 0,
+        item.brand || parserDefaults.brand || '', item.category || parserDefaults.category || '',
+        item.subcategory || parserDefaults.subcategory || null, item.gender || supplier.default_gender || '',
+        JSON.stringify(Array.isArray(photos) ? photos : []), JSON.stringify(extractProductAttributes(item)),
+        batchId, Number.isFinite(Number(item.source_position)) ? Number(item.source_position) : index,
+      ])
+    }
+    const actual = await client.query('SELECT COUNT(*)::int AS count FROM products WHERE batch_id=$1', [batchId])
+    if (Number(actual.rows[0]?.count) !== items.length) throw new Error(`Импортировано ${actual.rows[0]?.count || 0} из ${items.length} товаров`)
+    await client.query(`
+      INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+      SELECT $1,$2,'SCRAPED','Сырой товар',COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb),'{}'::jsonb
+      FROM products p WHERE p.batch_id=$2
+    `, [crypto.randomUUID(), batchId])
+    const linkedTask = await client.query(`
+      UPDATE scraping_tasks SET batch_id=$1,status='Сырой товар',result_path=$2,error_message=NULL,items_count=$3,updated_at=NOW()
+      WHERE id=$4
+    `, [batchId, `db://batch/${batchId}/raw`, items.length, taskId])
+    if (linkedTask.rowCount !== 1) throw new Error('Задача выгрузки была удалена до завершения импорта')
+    await client.query('COMMIT')
+    return batchId
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 export async function toggleSupplierFavoriteAction(id: number): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -791,14 +818,25 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
     const supplier = supplierRes.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
-    const parserDefaults = await resolveLegacySupplierDefaults(supplier)
+    const parserDefaults = {
+      brand: supplier.default_brand,
+      category: supplier.default_category,
+      subcategory: supplier.default_subcategory,
+    }
 
     // 2. Создаем задачу в БД
+    await scrapingQuery(`
+      UPDATE scraping_tasks SET status='failed',error_message='Остановлено: нет обновлений более 12 часов',updated_at=NOW()
+      WHERE supplier_id=$1 AND status='running' AND updated_at<NOW()-INTERVAL '12 hours'
+    `, [supplierId])
     const taskRes = await scrapingQuery(
       `INSERT INTO scraping_tasks (supplier_id, status, end_date)
-       VALUES ($1, 'running', $2) RETURNING id`,
+       VALUES ($1, 'running', $2)
+       ON CONFLICT (supplier_id) WHERE status='running' DO NOTHING
+       RETURNING id`,
       [supplierId, endDate || null]
     )
+    if (!taskRes.rows[0]) return { success: false, error: 'Для этого поставщика выгрузка уже запущена' }
     const taskId = taskRes.rows[0].id
 
     // 3. Подготавливаем пути
@@ -847,10 +885,10 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 
     pythonProcess.on('error', (err) => {
       console.error(`[Scraper ${taskId}] Failed to start python:`, err)
-      scrapingQuery(
+      void scrapingQuery(
         `UPDATE scraping_tasks SET status='failed', error_message=$1, updated_at=NOW() WHERE id=$2`,
         [`Failed to start python: ${err.message}`, taskId]
-      )
+      ).catch((error) => console.error(`[Scraper ${taskId}] Failed to persist spawn error`, error))
     })
 
     let stdoutBuffer = ''
@@ -880,131 +918,35 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     })
 
     pythonProcess.on('close', async (code) => {
-      const status = code === 0 ? 'Сырой товар' : 'failed'
-      const errorMsg = code === 0 ? null : (stderr || `Exit code ${code}`)
       let batchId: string | null = null
-      
       let itemsCount = 0
-      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
-        try {
-          const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
-          const products = JSON.parse(fileContent)
-          itemsCount = Array.isArray(products) ? products.length : 0
-        } catch (e) {
-          console.error(`[Scraper ${taskId}] Error reading file for count:`, e)
+      let finalStatus = 'failed'
+      let errorMsg: string | null = code === 0 ? null : (stderr || `Exit code ${code}`)
+      try {
+        if (code !== 0) throw new Error(errorMsg || `Exit code ${code}`)
+        if (!fs.existsSync(/*turbopackIgnore: true*/ outputPath)) throw new Error('Парсер не создал JSON-файл')
+        const items = JSON.parse(fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8'))
+        itemsCount = Array.isArray(items) ? items.length : 0
+        batchId = await importScrapedProductsTransaction(taskId, supplier, parserDefaults, items)
+        finalStatus = 'Сырой товар'
+        if (supplier.post_process_enabled && supplier.post_process_script) {
+          const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
+          if (!postProcessResult?.success) console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error}`)
         }
-      }
-
-      await scrapingQuery(
-        `UPDATE scraping_tasks SET status=$1, result_path=$2, error_message=$3, items_count=$4, updated_at=NOW() WHERE id=$5`,
-        [status, null, errorMsg, itemsCount, taskId]
-      )
-
-      if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
-        try {
-          console.log(`[Scraper ${taskId}] Starting data import to batch...`)
-          // 1. Читаем JSON-массив парсера
-          const fileContent = fs.readFileSync(/*turbopackIgnore: true*/ outputPath, 'utf-8')
-          const items = JSON.parse(fileContent)
-          
-          if (Array.isArray(items) && items.length > 0) {
-            const batchName = `${supplier.name} - ${new Date().toLocaleString('ru-RU')}`
-            
-            // 2. Создаем партию
-            batchId = crypto.randomUUID()
-            await scrapingQuery(
-               'INSERT INTO scraping_batches (id, name, supplier_id, items_count) VALUES ($1, $2, $3, $4)',
-               [batchId, batchName, supplier.id, itemsCount]
-            )
-
-            // 2.1. Привязываем партию к задаче
-            await scrapingQuery(
-               'UPDATE scraping_tasks SET batch_id = $1 WHERE id = $2',
-               [batchId, taskId]
-            )
-
-            // 3. Импортируем товары
-            for (let i = 0; i < items.length; i++) {
-               const item: any = items[i]
-               // Мапим поля в БД
-               const sql = `
-                  INSERT INTO products (external_id, name, description, price, status, brand, category, subcategory, gender, photos, attributes, batch_id, source_position, created_at, updated_at)
-                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, NOW(), NOW())
-                  ON CONFLICT (batch_id, external_id) DO UPDATE SET
-                      name = EXCLUDED.name,
-                      description = EXCLUDED.description,
-                      price = EXCLUDED.price,
-                      status = EXCLUDED.status,
-                      brand = EXCLUDED.brand,
-                      category = EXCLUDED.category,
-                      subcategory = EXCLUDED.subcategory,
-                      gender = EXCLUDED.gender,
-                      photos = EXCLUDED.photos,
-                      attributes = EXCLUDED.attributes,
-                      source_position = EXCLUDED.source_position,
-                      created_at = COALESCE(products.created_at, NOW()),
-                      updated_at = NOW()
-               `
-               
-               const price = parseFloat(item.price) || supplier.default_price || 0
-               const gender = item.gender || supplier.default_gender || ''
-               const cat = item.category || parserDefaults.category || ''
-               const sub = item.subcategory || parserDefaults.subcategory || ''
-               const brandStr = item.brand || parserDefaults.brand || ''
-               let photos: string[] = []
-               try {
-                 photos = Array.isArray(item.photos) ? item.photos.map(String) : item.photos ? JSON.parse(item.photos) : []
-               } catch {
-                 photos = []
-               }
-
-               await scrapingQuery(sql, [
-                  item.external_id, 
-                  item.name || 'Без названия',
-                  item.description || '',
-                  price,
-                  'inactive',
-                  brandStr,
-                  cat,
-                  sub || null,
-                  gender,
-                  JSON.stringify(photos),
-                  JSON.stringify(extractProductAttributes(item)),
-                  batchId,
-                  Number.isFinite(Number(item.source_position)) ? Number(item.source_position) : i
-               ])
-            }
-            console.log(`[Scraper ${taskId}] Imported ${itemsCount} items to batch ${batchId}`)
-            await scrapingQuery("UPDATE products SET price_source='default' WHERE batch_id=$1", [batchId])
-            await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар')
-
-            if (supplier.post_process_enabled && supplier.post_process_script && batchId) {
-              console.log(`[Scraper ${taskId}] Auto post-process enabled: ${supplier.post_process_script}`)
-              // Some supplier scripts pair neighbouring source albums. The
-              // JSONB snapshot preserves their source_position.
-              const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
-              if (!postProcessResult?.success) {
-                console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error || 'unknown error'}`)
-              }
-            }
-          }
-        } catch (importErr) {
-          console.error(`[Scraper ${taskId}] Import failed:`, importErr)
-        }
-
-        if (batchId) {
-          await scrapingQuery(
-            'UPDATE scraping_tasks SET result_path=$1 WHERE id=$2',
-            [`db://batch/${batchId}/raw`, taskId],
-          )
-        }
-        try { fs.unlinkSync(/*turbopackIgnore: true*/ outputPath) } catch {}
+      } catch (error: any) {
+        errorMsg = String(error?.message || error)
+        await scrapingQuery(
+          `UPDATE scraping_tasks SET status='failed',error_message=$1,updated_at=NOW() WHERE id=$2`,
+          [errorMsg, taskId],
+        )
+      } finally {
+        try { if (fs.existsSync(/*turbopackIgnore: true*/ outputPath)) fs.unlinkSync(/*turbopackIgnore: true*/ outputPath) } catch {}
       }
 
       // Уведомление в Telegram
-      await notifyTelegram(supplier.name, status, taskId, outputPath, itemsCount)
+      await notifyTelegram(supplier.name, finalStatus, taskId, outputPath, itemsCount)
       
-      console.log(`[Scraper ${taskId}] Finished with status: ${status}`)
+      console.log(`[Scraper ${taskId}] Finished with status: ${finalStatus}`)
       revalidatePath('/admin/batches')
     })
 
@@ -1019,7 +961,12 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
 export async function deleteTaskAction(taskId: number): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const res = await scrapingQuery('SELECT result_path FROM scraping_tasks WHERE id=$1', [taskId])
+    const res = await scrapingQuery('SELECT result_path,status,batch_id FROM scraping_tasks WHERE id=$1', [taskId])
+    if (['running', 'pending'].includes(res.rows[0]?.status)) return { success: false, error: 'Нельзя удалить выполняющуюся выгрузку' }
+    if (res.rows[0]?.batch_id) {
+      const operation = await scrapingQuery('SELECT operation FROM batch_operation_locks WHERE batch_id=$1', [res.rows[0].batch_id])
+      if (operation.rows[0]) return { success: false, error: `Выгрузка занята операцией: ${operation.rows[0].operation}` }
+    }
     const filePath = res.rows[0]?.result_path
     await deleteScrapingFileArtifactForTask(taskId)
     
@@ -1048,8 +995,11 @@ export async function deleteExportFileFromAdminAction(taskId: number): Promise<A
 }
 
 export async function deleteExportBatchFromAdminAction(batchId: string): Promise<ActionResponse> {
+    let operationOwnerId: string | null = null
     try {
         await requireAdmin()
+        operationOwnerId = await claimBatchOperation(batchId, 'delete')
+        if (!operationOwnerId) throw new Error('Выгрузка занята другой операцией')
 
         const tasksRes = await scrapingQuery(
             'SELECT id, result_path FROM scraping_tasks WHERE batch_id = $1',
@@ -1078,6 +1028,8 @@ export async function deleteExportBatchFromAdminAction(batchId: string): Promise
         return { success: true, data: { deletedCount: tasksRes.rowCount } }
     } catch (err: any) {
         return { success: false, error: err.message }
+    } finally {
+        if (operationOwnerId) await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
     }
 }
 
@@ -1088,7 +1040,7 @@ async function notifyTelegram(supplierName: string, status: string, taskId: numb
   
   if (!token || chatIds.length === 0) return
 
-  const isSuccess = status === 'completed' || status === 'Сырой CSV'
+  const isSuccess = status === 'completed' || status === 'Сырой CSV' || status === 'Сырой товар'
   const message = isSuccess 
     ? `✅ Выгрузка завершена!\nПоставщик: ${supplierName}\nЗадача: #${taskId}\nВыгружено товаров: ${itemsCount}\n\nТеперь вы можете проверить товары в админке.`
     : `❌ Ошибка выгрузки!\nПоставщик: ${supplierName}\nЗадача: #${taskId}`
@@ -1124,7 +1076,8 @@ async function notifyTelegram(supplierName: string, status: string, taskId: numb
 export async function linkBatchToTaskAction(batchId: string, taskId: number) {
     try {
         await requireAdmin()
-        await scrapingQuery('UPDATE scraping_tasks SET batch_id = $1 WHERE id = $2', [batchId, taskId])
+        const result = await scrapingQuery("UPDATE scraping_tasks SET batch_id=$1 WHERE id=$2 AND batch_id IS NULL AND status NOT IN ('running','pending') RETURNING id", [batchId, taskId])
+        if (!result.rows[0]) throw new Error('Задача уже привязана к партии и не может быть перенесена')
         return { success: true }
     } catch (err: any) {
         return { success: false, error: err.message }
@@ -1137,6 +1090,18 @@ export async function linkBatchToTaskAction(batchId: string, taskId: number) {
 export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' | 'AI_PROCESSED' | 'PUSHED') {
     try {
         await requireAdmin()
+        if (stage === 'PUSHED') throw new Error('Этап PUSHED выставляется только подтверждённой публикацией в Rails')
+        const operation = await scrapingQuery('SELECT operation FROM batch_operation_locks WHERE batch_id=$1', [batchId])
+        if (operation.rows[0]) throw new Error(`Выгрузка занята операцией: ${operation.rows[0].operation}`)
+        if (stage === 'AI_PROCESSED') {
+          const remaining = await scrapingQuery(`
+            SELECT COUNT(*)::int AS total,COUNT(*) FILTER(WHERE COALESCE(ai_processed,false)=false)::int AS remaining
+            FROM products WHERE batch_id=$1
+          `, [batchId])
+          if (!Number(remaining.rows[0]?.total) || Number(remaining.rows[0]?.remaining)) {
+            throw new Error('Нельзя завершить AI-этап: часть товаров не обработана')
+          }
+        }
         await scrapingQuery('UPDATE scraping_batches SET stage = $1 WHERE id = $2', [stage, batchId])
         revalidatePath('/admin/batches')
         return { success: true }
@@ -1167,17 +1132,15 @@ export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'u
 /**
  * Создание записи о партии
  */
-export async function createBatchAction(name: string, supplierId?: number, itemsCount: number = 0) {
+export async function createBatchAction(name: string, supplierId?: number, itemsCount: number = 0): Promise<ActionResponse> {
     try {
         await requireAdmin()
-        const id = crypto.randomUUID()
-        await scrapingQuery(
-            'INSERT INTO scraping_batches (id, name, supplier_id, items_count, stage) VALUES ($1, $2, $3, $4, $5)',
-            [id, name, supplierId || null, itemsCount, 'SCRAPED']
-        )
-        return { success: true, data: { id } }
+        void name
+        void supplierId
+        void itemsCount
+        return { success: false, error: 'Партия создаётся только транзакционным импортом парсера', data: null }
     } catch (err: any) {
-        return { success: false, error: err.message }
+        return { success: false, error: err.message, data: null }
     }
 }
 
@@ -1189,7 +1152,7 @@ export async function getBatchesAction() {
         await requireAdmin()
         const res = await scrapingQuery(`
             SELECT b.id, b.name, b.supplier_id, b.items_count, b.stage, b.created_at, s.name as supplier_name, s.avatar_url as supplier_avatar,
-                   (SELECT result_path FROM scraping_tasks WHERE batch_id = b.id AND status = 'Сырой CSV' ORDER BY created_at ASC LIMIT 1) as raw_path,
+                   (SELECT result_path FROM scraping_tasks WHERE batch_id = b.id AND status IN ('Сырой товар','Сырой CSV') ORDER BY created_at ASC LIMIT 1) as raw_path,
                    (SELECT result_path FROM scraping_tasks WHERE batch_id = b.id AND status = 'Обработано ИИ' ORDER BY created_at DESC LIMIT 1) as ai_path
             FROM scraping_batches b 
             LEFT JOIN suppliers s ON s.id = b.supplier_id 
@@ -1205,36 +1168,45 @@ export async function getBatchesAction() {
  * Удаление партии и всех связанных с ней товаров
  */
 export async function deleteBatchAction(batchId: string) {
+    let operationOwnerId: string | null = null
     try {
         await requireAdmin()
-        // 0. Удаляем фотографии из S3 бакета Beget
-        try {
-            await deleteS3Folder(`batches/${batchId}/`);
-        } catch (s3Err: any) {
-            console.warn('Could not delete images from S3:', s3Err.message);
-        }
+        operationOwnerId = await claimBatchOperation(batchId, 'delete')
+        if (!operationOwnerId) throw new Error('Выгрузка занята другой операцией')
+        const batchResult = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
+        const batchStage = String(batchResult.rows[0]?.stage || '')
 
-        // Сначала фиксируем external_id, потому что Rails-каталог не хранит batch_id.
-        const batchProducts = await scrapingQuery(
-          'SELECT external_id FROM products WHERE batch_id = $1',
-          [batchId]
-        )
-        const externalIds = batchProducts.rows
-          .map((row) => String(row.external_id || '').trim())
-          .filter(Boolean)
+        // Удаляем из Rails только товары, опубликованные исключительно этой партией.
+        // Общий external_id другой партии нельзя удалять вместе с историей текущей.
+        const publications = await scrapingQuery(`
+          SELECT bp.external_id,EXISTS(
+            SELECT 1 FROM batch_publications other
+            WHERE other.external_id=bp.external_id AND other.batch_id<>bp.batch_id
+          ) AS shared
+          FROM batch_publications bp
+          WHERE bp.batch_id=$1
+        `, [batchId])
+        const externalIds = publications.rows.filter((row) => !row.shared).map((row) => String(row.external_id)).filter(Boolean)
 
         // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
         let catalogDeletedCount = 0
         if (externalIds.length > 0 && process.env.RAILS_API_URL) {
           const result = await deleteRailsAdminProductsByExternalIds(externalIds)
           catalogDeletedCount = result.deleted
-        } else if (externalIds.length > 0) {
-          // Совместимость со старой схемой, где у основной таблицы был batch_id.
+        }
+
+        await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
+
+        // Если хотя бы один external_id разделяется с другой публикацией, Rails может
+        // ссылаться на фотографии этой партии — весь префикс удалять небезопасно.
+        const canDeleteS3 = publications.rows.length > 0
+          ? publications.rows.every((row) => !row.shared)
+          : batchStage !== 'PUSHED'
+        if (canDeleteS3) {
           try {
-            const legacyResult = await query('DELETE FROM products WHERE external_id = ANY($1::text[])', [externalIds])
-            catalogDeletedCount = legacyResult.rowCount || 0
-          } catch (legacyError: any) {
-            console.warn('Could not delete legacy catalog products:', legacyError.message)
+            await deleteS3Folder(`batches/${batchId}/`)
+          } catch (s3Err: any) {
+            console.warn('Could not delete images from S3:', s3Err.message)
           }
         }
 
@@ -1258,6 +1230,8 @@ export async function deleteBatchAction(batchId: string) {
         return { success: true, deletedCount, catalogDeletedCount }
     } catch (err: any) {
         return { success: false, error: err.message }
+    } finally {
+        if (operationOwnerId) await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
     }
 }
 

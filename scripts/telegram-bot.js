@@ -218,7 +218,7 @@ async function showProducts(ctx, batchId, page = 0) {
 }
 
 async function handleCompletedExport(chatId, result) {
-  if (result.status !== 'Сырой CSV' || !result.batchId) {
+  if (!['Сырой CSV', 'Сырой товар'].includes(result.status) || !result.batchId) {
     await bot.telegram.sendMessage(
       chatId,
       `❌ Ошибка выгрузки\nПоставщик: ${result.supplier.name}\nЗадача: #${result.taskId}\n${result.error || ''}`,

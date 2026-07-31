@@ -3,7 +3,7 @@
 import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { uploadToS3 } from '@/lib/s3'
-import { getScrapingFileArtifact, saveScrapingFileArtifact } from '@/lib/scraping-files'
+import { getScrapingFileArtifact } from '@/lib/scraping-files'
 import { requireAdmin } from '@/lib/admin-session'
 import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
 import {
@@ -12,7 +12,7 @@ import {
   normalizeProductAttributes,
   type ProductAttributes,
 } from '@/lib/product-attributes'
-import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { activeBatchOperation, claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 
@@ -510,33 +510,6 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
       ORDER BY p.source_position ASC NULLS LAST, p.id ASC
     `, [batchId])
 
-    if (res.rows.length === 0) {
-      const artifact = await scrapingQuery(`
-        SELECT content FROM scraping_files
-        WHERE batch_id=$1 AND content IS NOT NULL
-        ORDER BY CASE WHEN status='Сырой CSV' THEN 0 ELSE 1 END, updated_at ASC
-        LIMIT 1
-      `, [batchId])
-      const recovered = artifact.rows[0]?.content ? parseServerCsv(artifact.rows[0].content) : []
-      if (recovered.length > 0) {
-        const saved = await saveBatchProductsAction(batchId, recovered)
-        if (!saved.success) throw new Error(saved.error || 'Не удалось восстановить товары партии')
-        await recordBatchSnapshot(batchId, 'SCRAPED', 'Сырой товар · восстановлено из артефакта')
-        res = await scrapingQuery(`
-          SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
-            p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
-            p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
-            p.ai_confidence, p.source_position, p.created_at, p.updated_at,
-            EXISTS (
-              SELECT 1 FROM batch_ai_items i
-              JOIN batch_ai_runs r ON r.id=i.run_id
-              WHERE i.product_id=p.id AND r.batch_id=p.batch_id AND r.mode='sample'
-            ) AS ai_sampled
-          FROM products p WHERE p.batch_id=$1 ORDER BY p.source_position ASC NULLS LAST, p.id ASC
-        `, [batchId])
-      }
-    }
-
     const batch = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
     return {
       success: true,
@@ -650,8 +623,19 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
   return insertRes.rows[0]?.id
 }
 
-export async function saveBatchProductsAction(batchId: string, products: any[]) {
+export async function saveBatchProductsAction(
+  batchId: string,
+  products: any[],
+  operationOwnerId?: string | null,
+  finalizeScript?: { supplierId: number },
+) {
   await requireAdmin()
+  const activeRun = await scrapingQuery("SELECT 1 FROM batch_ai_runs WHERE batch_id=$1 AND status IN ('queued','running') LIMIT 1", [batchId])
+  if (activeRun.rows[0]) return { success: false, error: 'Нельзя сохранять партию во время AI-обработки' }
+  const operation = await scrapingQuery('SELECT operation,owner_id FROM batch_operation_locks WHERE batch_id=$1', [batchId])
+  if (operation.rows[0] && operation.rows[0].owner_id !== operationOwnerId) {
+    return { success: false, error: `Выгрузка занята операцией: ${operation.rows[0].operation}` }
+  }
 
   const client = await getScrapingClient()
   try {
@@ -678,11 +662,33 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
       await client.query('DELETE FROM products WHERE batch_id=$1', [batchId])
     }
 
-    await client.query('UPDATE scraping_batches SET items_count=$1, updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId])
+    let taskId: number | undefined
+    if (finalizeScript) {
+      await client.query("UPDATE scraping_batches SET items_count=$1,stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$2", [normalizedProducts.length, batchId])
+      await client.query(`
+        INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+        SELECT $1,$2,'SCRIPT_PROCESSED','Обработан скриптом',payload,'{}'::jsonb
+        FROM (
+          SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb) AS payload
+          FROM products p WHERE p.batch_id=$2
+        ) current
+        WHERE NOT EXISTS (
+          SELECT 1 FROM batch_snapshots s
+          WHERE s.batch_id=$2 AND s.stage='SCRIPT_PROCESSED' AND s.label='Обработан скриптом' AND s.products=current.payload
+        )
+      `, [crypto.randomUUID(), batchId])
+      const task = await client.query(`
+        INSERT INTO scraping_tasks(supplier_id,batch_id,status,result_path,items_count,updated_at)
+        VALUES($1,$2,'Обработано скриптом',$3,$4,NOW()) RETURNING id
+      `, [finalizeScript.supplierId, batchId, `db://batch/${batchId}/script`, normalizedProducts.length])
+      taskId = Number(task.rows[0]?.id)
+    } else {
+      await client.query('UPDATE scraping_batches SET items_count=$1,updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId])
+    }
     await client.query('COMMIT')
     revalidatePath('/admin/batches')
     revalidatePath('/admin/scraping')
-    return { success: true, data: { count: normalizedProducts.length } }
+    return { success: true, data: { count: normalizedProducts.length, taskId } }
   } catch (err: any) {
     await client.query('ROLLBACK')
     return { success: false, error: err.message }
@@ -694,6 +700,8 @@ export async function saveBatchProductsAction(batchId: string, products: any[]) 
 export async function updateBatchProductAction(identifier: string | number, patch: Partial<CsvProduct>, batchId?: string | null) {
   try {
     await requireAdmin()
+    if (!batchId) return { success: false, error: 'Для изменения товара требуется batchId' }
+    if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя менять товар во время обработки выгрузки' }
 
     const keys = Object.keys(patch).filter((key) => [
       'external_id',
@@ -757,6 +765,8 @@ export async function updateBatchProductAction(identifier: string | number, patc
 export async function deleteBatchProductAction(identifier: string | number, batchId?: string | null) {
   try {
     await requireAdmin()
+    if (!batchId) return { success: false, error: 'Для удаления товара требуется batchId' }
+    if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя удалять товар во время обработки выгрузки' }
 
     const isNumericId = String(identifier).match(/^\d+$/)
     const values: any[] = [identifier]
@@ -817,25 +827,37 @@ export async function recordAiTaskAction({
 
     if (!supplierId) throw new Error("Missing supplierId");
     if (!batchId) throw new Error("AI-этап можно записать только в связанную партию");
+    if (await activeBatchOperation(batchId)) throw new Error('Выгрузка занята другой операцией')
 
-    const resultPath = `db://batch/${batchId}/ai`;
-    const taskRes = await scrapingQuery(`
-      INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
-      VALUES ($1, $2, $3, $4, $5, NOW())
-      RETURNING id
-    `, [supplierId, batchId, 'Обработано ИИ', resultPath, products.length]);
+    const client = await getScrapingClient()
+    try {
+      await client.query('BEGIN')
+      const state = await client.query(`
+        SELECT COUNT(*)::int AS total,COUNT(*) FILTER(WHERE COALESCE(ai_processed,false)=false)::int AS remaining
+        FROM products WHERE batch_id=$1
+      `, [batchId])
+      if (!Number(state.rows[0]?.total) || Number(state.rows[0]?.remaining)) {
+        throw new Error('Нельзя записать AI-этап: часть товаров не обработана')
+      }
 
-    // 4. Обновляем стадию партии (если она есть)
-    if (batchId) {
-      await scrapingQuery(`
-        UPDATE scraping_batches SET stage = 'AI_PROCESSED' WHERE id = $1
-      `, [batchId]);
+      const resultPath = `db://batch/${batchId}/ai`;
+      const taskRes = await client.query(`
+        INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
+        VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id
+      `, [supplierId, batchId, 'Обработано ИИ', resultPath, Number(state.rows[0].total)]);
+      await client.query("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
+      await client.query('COMMIT')
+
+      revalidatePath('/admin/scraping');
+      revalidatePath('/admin/batches');
+
+      return { success: true, path: resultPath, taskId: taskRes.rows[0].id };
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
     }
-
-    revalidatePath('/admin/scraping');
-    revalidatePath('/admin/batches');
-
-    return { success: true, path: resultPath, taskId: taskRes.rows[0].id };
   } catch (err: any) {
     console.error('Record AI task error:', err);
     return { success: false, error: err.message };
@@ -855,6 +877,7 @@ export async function getSupplierDataAction(supplierId: number) {
 }
 
 export async function runCustomSupplierScriptAction(inputPath: string | null, supplierId: number, batchId?: string | null): Promise<any> {
+  let operationOwnerId: string | null = null
   try {
     await requireAdmin()
 
@@ -867,6 +890,8 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         throw new Error("Скрипт не назначен для этого поставщика");
     }
     if (!batchId) throw new Error("Для JSON-обработки требуется batchId");
+    operationOwnerId = await claimBatchOperation(batchId, 'script')
+    if (!operationOwnerId) throw new Error('Выгрузка уже обрабатывается другим процессом')
 
     const currentRes = await getBatchProductsAction(batchId);
     if (!currentRes.success || !currentRes.data) {
@@ -913,26 +938,20 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         : (original?.price_source || 'default');
     }
 
-    const saveRes = await saveBatchProductsAction(batchId, processedProducts);
+    const saveRes = await saveBatchProductsAction(batchId, processedProducts, operationOwnerId, { supplierId });
     if (!saveRes.success) throw new Error(saveRes.error);
-    await scrapingQuery("UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW() WHERE id=$1", [batchId]);
-    await recordBatchSnapshot(batchId, 'SCRIPT_PROCESSED', 'Обработан скриптом');
-
-    const taskRes = await scrapingQuery(`
-      INSERT INTO scraping_tasks (supplier_id, batch_id, status, result_path, items_count, updated_at)
-      VALUES ($1, $2, 'Обработано скриптом', $3, $4, NOW())
-      RETURNING id
-    `, [supplierId, batchId, `db://batch/${batchId}/script`, processedProducts.length]);
 
     revalidatePath('/admin/scraping');
     revalidatePath('/admin/batches');
     return {
       success: true,
       path: `db://batch/${batchId}/script`,
-      taskId: taskRes.rows[0].id,
+      taskId: saveRes.data?.taskId,
       count: processedProducts.length,
     };
   } catch (err: any) {
     return { success: false, error: err.message };
+  } finally {
+    if (batchId && operationOwnerId) await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
   }
 }

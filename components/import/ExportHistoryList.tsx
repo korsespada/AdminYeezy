@@ -144,6 +144,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   const openFile = (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
+    if (file.snapshot_missing) {
+      alert('Исторический снимок этого этапа не сохранился. Текущие товары партии не будут показаны вместо него.')
+      return
+    }
     setModalState({
       localPath: file.result_path || '',
       rawPath: batch.raw_path,
@@ -447,7 +451,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             </button>
                           )}
                           {!batch.isSynthetic && batch.status !== 'Запушено в БД' && batch.status !== 'Удалено из БД' && (
-                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на 10 случайных товарах'} aria-label={batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
+                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, batch.ai_completed_count ? 'full' : 'sample') }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={batch.ai_completed_count ? 'Продолжить обработку остальных' : 'Проверить ИИ на первых 10 товарах'} aria-label={batch.ai_completed_count ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
                               {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
                               {!batch.ai_completed_count && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
                             </button>
@@ -534,7 +538,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                     {isExpanded && batch.files.map((file) => (
                       <tr
                         key={file.id}
-                        className="cursor-pointer border-b border-slate-800 bg-slate-900 transition-colors hover:bg-slate-800/60"
+                        className={`${file.snapshot_missing ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-800/60'} border-b border-slate-800 bg-slate-900 transition-colors`}
                         onClick={() => openFile(batch, file)}
                       >
                         <td className="px-6 py-4" colSpan={2}>
@@ -544,7 +548,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               : <FileSpreadsheet className="h-5 w-5 flex-shrink-0 text-slate-500" />}
                             <div className="min-w-0">
                               <div className="truncate text-sm font-medium text-slate-100">{file.label || fileName(file.result_path)}</div>
-                              <div className="text-xs text-slate-600">{file.is_virtual ? 'Состояние товаров партии' : `Этап #${file.id}`}</div>
+                              <div className="text-xs text-slate-600">{file.snapshot_missing ? 'Исторический снимок недоступен' : file.is_virtual ? 'Состояние товаров партии' : `Этап #${file.id}`}</div>
                             </div>
                           </div>
                         </td>
