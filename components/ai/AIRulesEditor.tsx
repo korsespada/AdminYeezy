@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
-import { Bot, CheckCircle2, Cpu, Image, Save, Server, ShieldAlert } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, Cpu, Image, Save, Server, ShieldAlert } from 'lucide-react'
 import { updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
+import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
 
 type WorkerState = {
   available?: boolean
@@ -75,8 +76,8 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         <InfoCard icon={Image} title="Опциональные фото 3×3">
           Для каждого поставщика можно включить фото. Без галочки AI работает только с китайским текстом.
         </InfoCard>
-        <InfoCard icon={Bot} title="Один общий промпт">
-          Инструкции поставщика только дополняют этот системный промпт особенностями его выгрузки.
+        <InfoCard icon={Bot} title="Промпт + правила категорий">
+          Общий промпт задаёт формат и качество, а классификация подключается отдельно по категории товара.
         </InfoCard>
         <InfoCard icon={CheckCircle2} title="Snapshot на запуск">
           Тестовые 10 товаров и продолжение используют одинаковые зафиксированные настройки.
@@ -235,7 +236,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
           <div>
             <h2 className="text-xl font-bold text-white">Системный промпт китайского каталога</h2>
             <p className="mt-1 text-sm text-slate-400">
-              Определяет SEO-поля, классификацию, атрибуты, фильтрацию фото, таблицы размеров и предложения цветовых вариантов.
+              Общие требования к SEO, атрибутам, фотографиям и формату ответа. Классификация категорий хранится отдельно ниже.
             </p>
           </div>
         </header>
@@ -250,6 +251,49 @@ export default function AIRulesEditor({ initialSettings }: Props) {
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             Изменение действует только на новые запуски. Уже начатая тестовая обработка продолжится со своим snapshot настроек.
           </div>
+        </div>
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 shadow-xl">
+        <header className="flex items-center gap-3 border-b border-slate-700 bg-slate-800/50 p-6">
+          <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 p-2 text-violet-400">
+            <BookOpen size={24} />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-bold text-white">Автоматические правила категорий</h2>
+              <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-xs font-bold text-violet-200">
+                {BATCH_AI_CATEGORY_RULES.length} набора
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-slate-400">
+              Подключаются только к товару соответствующей категории и имеют приоритет над инструкцией поставщика.
+            </p>
+          </div>
+        </header>
+        <div className="grid gap-4 p-6 lg:grid-cols-2">
+          {BATCH_AI_CATEGORY_RULES.map((rule) => (
+            <details key={rule.categoryName} className="group rounded-xl border border-slate-700 bg-slate-950/60 open:border-violet-500/30">
+              <summary className="cursor-pointer list-none p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md bg-violet-500/10 px-2 py-1 text-xs font-bold text-violet-300">{rule.categoryName}</span>
+                      <span className="font-semibold text-white">{rule.title}</span>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-400">{rule.description}</p>
+                  </div>
+                  <span className="text-lg text-slate-500 transition group-open:rotate-45">+</span>
+                </div>
+              </summary>
+              <pre className="whitespace-pre-wrap border-t border-slate-800 px-4 py-4 font-sans text-sm leading-relaxed text-slate-300">
+                {rule.rules}
+              </pre>
+            </details>
+          ))}
+        </div>
+        <div className="border-t border-slate-700 px-6 py-4 text-sm text-slate-500">
+          Для остальных категорий пока действует только общий системный промпт. Новые наборы добавляются сюда по мере появления реальных сценариев.
         </div>
       </section>
 

@@ -1,0 +1,59 @@
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] failed daa7b0dd-07b2-4616-90f6-509468b93d8f: fetch failed
+[ai-catalog-worker] could not report failure daa7b0dd-07b2-4616-90f6-509468b93d8f: fetch failed
+[ai-catalog-worker] failed 66818efa-c4b4-4d6f-a97c-e61ec8573ef7: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] failed 74a4e947-d943-418b-b04d-689478e7ba7a: fetch failed
+[ai-catalog-worker] failed e2c55374-506e-43aa-831f-06d5a353b74a: fetch failed
+[ai-catalog-worker] could not report failure 66818efa-c4b4-4d6f-a97c-e61ec8573ef7: fetch failed
+[ai-catalog-worker] could not report failure 74a4e947-d943-418b-b04d-689478e7ba7a: fetch failed
+[ai-catalog-worker] could not report failure e2c55374-506e-43aa-831f-06d5a353b74a: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] failed 10c668fe-2ecf-44a0-ad94-f726d64c96b2: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] failed 10c668fe-2ecf-44a0-ad94-f726d64c96b2: The operation was aborted due to timeout
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] could not report failure 10c668fe-2ecf-44a0-ad94-f726d64c96b2: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: The operation was aborted due to timeout
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] failed 63de0e5d-d495-412a-9b7e-c19c398bd5a2: fetch failed
+[ai-catalog-worker] could not report failure 63de0e5d-d495-412a-9b7e-c19c398bd5a2: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: claim: Bad Gateway
+[ai-catalog-worker] failed 74a4e947-d943-418b-b04d-689478e7ba7a: Unexpected token ']', ..."мнями",
+  ],
+  "gend"... is not valid JSON
+[ai-catalog-worker] failed 74a4e947-d943-418b-b04d-689478e7ba7a: /admin/seo_ai/worker/generations/74a4e947-d943-418b-b04d-689478e7ba7a/complete: HTTP 500
+[ai-catalog-worker] failed c646f377-0e37-49c5-8c0d-a964523bf37c: Unexpected token ']', ..."мнями",
+  ],
+  "gend"... is not valid JSON
+[ai-catalog-worker] failed 772a6ba1-501b-4e5a-ba76-6c3316bfa189: Unexpected token ']', ..."мнями",
+  ],
+  "gend"... is not valid JSON
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: fetch failed
+[ai-catalog-worker] queue unavailable, retrying: claim: Bad Gateway
+[ai-catalog-worker] queue unavailable, retrying: claim: Bad Gateway
+[ai-catalog-worker] queue unavailable, retrying: claim: Bad Gateway
+[ai-catalog-worker] queue unavailable, retrying: claim: Bad Gateway

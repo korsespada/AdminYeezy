@@ -1,0 +1,11 @@
+Golden Goose sneakers: 803; labeled: 424; missing: 379
+Classifying batch 1/8
+Classifying batch 2/8
+Classifying batch 3/8
+Classifying batch 4/8
+Classifying batch 5/8
+Classifying batch 6/8
+Classifying batch 7/8
+Classifying batch 8/8
+Validation accuracy: 31/59 (52.5%)
+C:\vibecoding\AdminYeezy\output\golden-goose-model-validation.json

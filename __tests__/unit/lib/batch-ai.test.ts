@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 
 describe('batch AI normalization', () => {
   it('keeps unknown taxonomy out of the applied product and removes rejected media', () => {
@@ -182,6 +182,63 @@ describe('batch AI normalization', () => {
     })
 
     expect(result.product.subcategory).toBe('heel-shoes')
+  })
+
+  it('keeps heeled mules in the mule taxonomy and cleans model placeholders', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Чёрные мюли Chanel на тонком каблуке',
+        h1: 'Мюли Chanel без задника',
+        category: 'shoes',
+        subcategory: 'heel-shoes',
+        confidence: 95,
+        catalog_attributes: {
+          model_name: '26C',
+          upper_material: 'не определён',
+        },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'heel-shoes', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['heel-shoes', 'mules']),
+      subcategoryParents: new Map([['heel-shoes', 'shoes'], ['mules', 'shoes']]),
+      subcategoryNames: new Map([
+        ['heel-shoes', 'Туфли на каблуке'],
+        ['mules', 'Мюли и сабо'],
+      ]),
+      attributeCodes: new Set(['model_name', 'upper_material']),
+    })
+
+    expect(result.product.subcategory).toBe('mules')
+    expect(result.product.attributes).toEqual({})
+    expect(result.product.ai_confidence).toBe(0.95)
+  })
+
+  it('adds category rules only for the matching product category', () => {
+    const base = {
+      product: { category: 'shoes' },
+      supplierInstructions: 'Особенности поставщика',
+      brands: [],
+      subcategories: [],
+      attributes: [],
+      priceRules: [],
+    }
+    const shoePrompt = buildBatchAiUserPrompt({
+      ...base,
+      categories: [{ id: 'shoes', name: 'Обувь' }],
+    })
+    const accessoryPrompt = buildBatchAiUserPrompt({
+      ...base,
+      product: { category: 'accessories' },
+      categories: [{ id: 'accessories', name: 'Аксессуары' }],
+    })
+
+    expect(shoePrompt).toContain('Автоматические правила категории «Обувь»')
+    expect(shoePrompt).toContain('мюли на каблуке остаются')
+    expect(accessoryPrompt).toContain('дополнительные автоматические правила пока не заданы')
+    expect(accessoryPrompt).not.toContain('Правила классификации категории «Обувь»')
   })
 
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {

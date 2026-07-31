@@ -1148,6 +1148,10 @@ function ownedS3Key(url) {
 
 async function uploadPhotoIfNeeded(url, key) {
   if (!url) throw new Error('пустая ссылка на фото');
+  // Для повторной публикации старой партии ссылка уже может указывать на наш
+  // публичный S3. В этом случае бакет и доступ к API не нужны: файл не
+  // переносится повторно, а Rails получает существующий URL.
+  if (isAlreadyHosted(url) && !process.env.S3_BUCKET) return url;
   if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен');
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -1236,6 +1240,29 @@ async function existingRailsProducts(externalIds) {
   });
   await Promise.all(workers);
   return existing;
+}
+
+function existingRailsPhotoMap(product) {
+  const urls = new Map();
+  const media = [
+    ...(Array.isArray(product?.media) ? product.media : []),
+    ...(Array.isArray(product?.photos) ? product.photos : []),
+    ...(Array.isArray(product?.images) ? product.images : []),
+  ];
+  for (const item of media) {
+    if (typeof item === 'string') {
+      if (item.trim()) urls.set(item.trim(), item.trim());
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const canonical = String(item.original_url || item.preview_url || item.thumb_url || item.og_image_url || '').trim();
+    if (!canonical) continue;
+    for (const candidate of [item.original_url, item.preview_url, item.thumb_url, item.og_image_url]) {
+      const value = String(candidate || '').trim();
+      if (value) urls.set(value, canonical);
+    }
+  }
+  return urls;
 }
 
 async function existingRailsExternalIds(externalIds) {
@@ -1369,8 +1396,26 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const product = { ...sourceProduct, batchId };
     const photos = [];
     let productFailed = false;
-    for (let photoIndex = 0; photoIndex < product.photos.length; photoIndex += 1) {
-      const sourceUrl = product.photos[photoIndex];
+    const existingPhotoUrls = existingRailsPhotoMap(
+      existingProducts.get(String(product.external_id || '').trim()),
+    );
+    const requestedPhotos = normalizePhotos(product.photos);
+    const existingCanonicalPhotos = [...new Set(existingPhotoUrls.values())];
+    const preserveExistingRailsPhotos = mode === 'upsert'
+      && !process.env.S3_BUCKET
+      && existingCanonicalPhotos.length > 0
+      && requestedPhotos.some((url) => !existingPhotoUrls.has(String(url || '').trim()));
+    // Старые партии могли сохранить исходные Szwego URL, хотя Rails уже
+    // содержит перенесённые S3-медиа. Без доступа к бакету сохраняем
+    // опубликованную галерею и обновляем только остальные поля товара.
+    const publicationPhotos = preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos;
+    for (let photoIndex = 0; photoIndex < publicationPhotos.length; photoIndex += 1) {
+      const sourceUrl = publicationPhotos[photoIndex];
+      const existingRailsUrl = existingPhotoUrls.get(String(sourceUrl || '').trim());
+      if (existingRailsUrl) {
+        photos.push(existingRailsUrl);
+        continue;
+      }
       const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
       const key = `batches/${batchId}/${safeExternalId}_${photoIndex}.jpg`;
       try {
@@ -1472,6 +1517,7 @@ module.exports = {
   PRODUCT_COLUMNS,
   closePools,
   existingRailsExternalIds,
+  existingRailsPhotoMap,
   getBatch,
   getBatchProducts,
   getLatestBatches,

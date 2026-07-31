@@ -59,6 +59,37 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('reuses an already hosted photo when the bucket API is not configured', async () => {
+    const previousDomain = process.env.S3_PUBLIC_DOMAIN
+    const previousBucket = process.env.S3_BUCKET
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    delete process.env.S3_BUCKET
+    try {
+      await expect(workflow.uploadPhotoIfNeeded(
+        'https://static.yeezyunique.ru/batches/old/product-1.jpg',
+        'unused.jpg',
+      )).resolves.toBe('https://static.yeezyunique.ru/batches/old/product-1.jpg')
+    } finally {
+      if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
+      else process.env.S3_PUBLIC_DOMAIN = previousDomain
+      if (previousBucket === undefined) delete process.env.S3_BUCKET
+      else process.env.S3_BUCKET = previousBucket
+    }
+  })
+
+  it('recognizes photos already attached to an existing Rails product', () => {
+    const urls = workflow.existingRailsPhotoMap({
+      media: [{
+        original_url: 'https://s3.example/original.jpg',
+        preview_url: 'https://s3.example/preview.jpg',
+        thumb_url: 'https://s3.example/thumb.jpg',
+      }],
+    })
+
+    expect(urls.get('https://s3.example/original.jpg')).toBe('https://s3.example/original.jpg')
+    expect(urls.get('https://s3.example/preview.jpg')).toBe('https://s3.example/original.jpg')
+  })
+
   it('finds exact existing external IDs before a batch push', async () => {
     const previousToken = process.env.RAILS_ADMIN_TOKEN
     const previousUrl = process.env.RAILS_API_URL

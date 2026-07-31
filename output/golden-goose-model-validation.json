@@ -1,0 +1,417 @@
+{
+  "total": 59,
+  "exact": 31,
+  "accuracy": 0.5254237288135594,
+  "rows": [
+    {
+      "id": "045e112f-0809-46dd-81c9-28dd4e82c67f",
+      "expected": "Top Star",
+      "model": "V-Star",
+      "confidence": 0.92,
+      "reason": "Низкий узкий силуэт, тонкая подошва и контрастная звезда."
+    },
+    {
+      "id": "05d7b774-bef7-46f2-90ec-5a874accf3bb",
+      "expected": "Top Star",
+      "model": "V-Star",
+      "confidence": 0.98,
+      "reason": "Совпадают низкая посадка, тонкая подошва и форма бордовой звезды."
+    },
+    {
+      "id": "07a4e51b-93d2-460b-b0aa-3658963115e1",
+      "expected": "Top Star",
+      "model": "Top Star",
+      "confidence": 0.93,
+      "reason": "Низкий силуэт с блестящим верхом и характерной боковой звездой."
+    },
+    {
+      "id": "080975b8-de7c-4b69-a71a-667c4166ee44",
+      "expected": "Top Star",
+      "model": "Ball Star",
+      "confidence": 0.91,
+      "reason": "Более широкий баскетбольный силуэт, объемный носок и контрастный задник."
+    },
+    {
+      "id": "0852f15f-d0f8-45fd-8190-9bd6daca3d48",
+      "expected": "Top Star",
+      "model": "Super-Star",
+      "confidence": 0.9,
+      "reason": "Классический низкий профиль, стандартная плоская подошва и контрастная звезда."
+    },
+    {
+      "id": "0873b820-f825-4d40-8367-aefdc682f7bc",
+      "expected": "Top Star",
+      "model": "V-Star",
+      "confidence": 0.97,
+      "reason": "Тонкий низкий силуэт и серебристая боковая звезда соответствуют эталонам."
+    },
+    {
+      "id": "0897cd0b-9775-4af4-bfdf-58b0430fb8bf",
+      "expected": "Top Star",
+      "model": "Top Star",
+      "confidence": 0.85,
+      "reason": "Низкая посадка, плоская подошва и монохромная боковая конструкция."
+    },
+    {
+      "id": "0a9a6ddd-c5a4-4a0b-8781-3d92f9136604",
+      "expected": "Top Star",
+      "model": "Space",
+      "confidence": 0.96,
+      "reason": "Выраженная массивная платформа и блестящий фактурный верх."
+    },
+    {
+      "id": "031d1afa-4019-4001-9a5e-5e2888d5f3e7",
+      "expected": "V-Star",
+      "model": "Top Star",
+      "confidence": 0.94,
+      "reason": "Низкий силуэт с леопардовым верхом и характерной звездой, близкий к R07."
+    },
+    {
+      "id": "070410ef-cedd-49bc-9a53-092de10b269f",
+      "expected": "V-Star",
+      "model": "V-Star",
+      "confidence": 0.82,
+      "reason": "Низкий узкий профиль, гладкий верх и плоская светлая подошва, ближе всего к R09."
+    },
+    {
+      "id": "0ebaa06d-eb19-4b82-abfc-62bf2eaa3f93",
+      "expected": "V-Star",
+      "model": "Super-Star",
+      "confidence": 0.84,
+      "reason": "Классический низкий силуэт с контрастной звездой и панельным верхом, как у R06."
+    },
+    {
+      "id": "1d93498f-693e-406c-a073-36e69ba65da7",
+      "expected": "V-Star",
+      "model": "Ball Star",
+      "confidence": 0.86,
+      "reason": "Более высокий и объемный баскетбольный силуэт с широкой носовой частью, как у R01."
+    },
+    {
+      "id": "24ceeeaf-a702-4124-b16d-d42b80c91755",
+      "expected": "V-Star",
+      "model": "V-Star",
+      "confidence": 0.9,
+      "reason": "Низкий теннисный силуэт с плоской подошвой и контрастной звездой, близкий к R09."
+    },
+    {
+      "id": "262e3173-92d5-40ba-90c7-381eea72f02b",
+      "expected": "V-Star",
+      "model": "Super-Star",
+      "confidence": 0.91,
+      "reason": "Классический низкий профиль с белой звездой на черном верхе и кремовой подошвой, как у R06."
+    },
+    {
+      "id": "296b5255-5e92-42b6-bafe-23db08b04de5",
+      "expected": "V-Star",
+      "model": "Top Star",
+      "confidence": 0.93,
+      "reason": "Узкий низкий силуэт с контрастной звездой и лаконичным верхом, близкий к R07."
+    },
+    {
+      "id": "396bc95e-70ff-48fa-84a6-41cd00e49af1",
+      "expected": "V-Star",
+      "model": "True-Star",
+      "confidence": 0.9,
+      "reason": "Объемный низкий силуэт с массивной подошвой и блестящими панелями, как у R08."
+    },
+    {
+      "id": "040c1ec4-5ede-4ec5-a12c-7db71d9b3cba",
+      "expected": "Ball Star",
+      "model": "Mid Star",
+      "confidence": 0.97,
+      "reason": "Высокий силуэт с мягким голенищем и характерной высокой шнуровкой."
+    },
+    {
+      "id": "05259b0a-d12f-44b2-b9d5-3cd51397b6db",
+      "expected": "Ball Star",
+      "model": "Super-Star",
+      "confidence": 0.88,
+      "reason": "Классический низкий силуэт с плоской подошвой и крупной боковой звездой."
+    },
+    {
+      "id": "05312c00-9ac2-49b0-93d1-a69683ac96cc",
+      "expected": "Ball Star",
+      "model": "V-Star",
+      "confidence": 0.83,
+      "reason": "Низкий вытянутый силуэт, тонкая подошва и контрастная цветная зона пятки."
+    },
+    {
+      "id": "06073e25-d756-46b8-b7f0-6a607dd8284f",
+      "expected": "Ball Star",
+      "model": "Ball Star",
+      "confidence": 0.86,
+      "reason": "Более широкий баскетбольный силуэт, объемный носок и крупная боковая звезда."
+    },
+    {
+      "id": "0a04a0f4-9717-41b9-a97b-a5d00684487e",
+      "expected": "Ball Star",
+      "model": "Top Star",
+      "confidence": 0.88,
+      "reason": "Низкий компактный силуэт с тонкой плоской подошвой и яркой боковой звездой."
+    },
+    {
+      "id": "0a7ad831-ce33-4e15-89b2-07a4b8231fa0",
+      "expected": "Ball Star",
+      "model": "True-Star",
+      "confidence": 0.82,
+      "reason": "Более массивная форма верха и заметно плотная широкая подошва."
+    },
+    {
+      "id": "0aa3afcb-9a4f-43dd-afb4-b2335b8eaec2",
+      "expected": "Ball Star",
+      "model": "Ball Star",
+      "confidence": 0.81,
+      "reason": "Широкий низкий силуэт с выраженным баскетбольным носком и крупной звездой."
+    },
+    {
+      "id": "0cfbecae-74d7-4483-ab4c-db4a9e497695",
+      "expected": "Ball Star",
+      "model": "Francy",
+      "confidence": 0.98,
+      "reason": "Высокий верх до щиколотки, высокая шнуровка и характерная форма хайтопа."
+    },
+    {
+      "id": "01cf6c66-385f-4552-9a57-d443e0c44a7e",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Низкий силуэт с массивной платформенной подошвой и округлым носком"
+    },
+    {
+      "id": "1bf2efef-f40f-4909-8cc3-d54e567013d6",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Низкий верх на толстой объемной подошве, характерная форма Space"
+    },
+    {
+      "id": "2d0466bc-b46c-4d6d-90bf-bcc6696127d5",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Низкая конструкция и широкая платформа совпадают с эталонами R05"
+    },
+    {
+      "id": "2d185614-5320-4a35-8b8c-60b3db6e21c1",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.99,
+      "reason": "Массивная светлая подошва и низкий округлый силуэт"
+    },
+    {
+      "id": "433aa97e-e504-460e-82cc-bc7d4c3e592f",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Платформенная подошва и низкий верх визуально соответствуют R05"
+    },
+    {
+      "id": "64931811-e539-48c1-bcd7-23fae9940180",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Низкий силуэт с широкой толстой подошвой как у эталонов Space"
+    },
+    {
+      "id": "678461db-d4f5-4234-b460-8d8f46981d00",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Минималистичный низкий верх на массивной платформе"
+    },
+    {
+      "id": "72cba8d1-94d5-4413-beb3-d892c3c21327",
+      "expected": "Space",
+      "model": "Space",
+      "confidence": 0.98,
+      "reason": "Округлый низкий силуэт и объемная подошва совпадают с группой R05"
+    },
+    {
+      "id": "06c5716e-309c-48af-9237-7a51f1593f20",
+      "expected": "Mid Star",
+      "model": "Francy",
+      "confidence": 0.96,
+      "reason": "Высокий силуэт с высоким голенищем и контрастной звездой"
+    },
+    {
+      "id": "0a0ef6f5-b66d-44cb-b29a-fe66ee192de4",
+      "expected": "Mid Star",
+      "model": "Mid Star",
+      "confidence": 0.9,
+      "reason": "Средняя высота верха, узкий высокий силуэт и боковая звезда"
+    },
+    {
+      "id": "18f9f26b-ad63-4cbd-8ce5-023f98b97227",
+      "expected": "Mid Star",
+      "model": "V-Star",
+      "confidence": 0.87,
+      "reason": "Низкий теннисный силуэт с контрастной звездой и цветной пяткой"
+    },
+    {
+      "id": "30f98009-643c-416e-9807-8ab71b4f1c2b",
+      "expected": "Mid Star",
+      "model": "Ball Star",
+      "confidence": 0.89,
+      "reason": "Более массивный низкий силуэт с широкой носовой частью и звездой"
+    },
+    {
+      "id": "314a9fe6-e4e9-4566-a172-8af4576e5b9b",
+      "expected": "Mid Star",
+      "model": "Top Star",
+      "confidence": 0.84,
+      "reason": "Низкий лаконичный силуэт с тонкой подошвой и тональным верхом"
+    },
+    {
+      "id": "35f44a33-7cc5-4565-bd61-d698b86d3c5e",
+      "expected": "Mid Star",
+      "model": "Dad-Star",
+      "confidence": 0.96,
+      "reason": "Объемный беговой силуэт с многослойной рельефной подошвой"
+    },
+    {
+      "id": "37f76a9b-6ccb-4628-9423-6a48e62b6a40",
+      "expected": "Mid Star",
+      "model": "Super-Star",
+      "confidence": 0.9,
+      "reason": "Классический низкий силуэт с плоской подошвой и боковой звездой"
+    },
+    {
+      "id": "555e0134-163f-4111-a536-3b6d5eb64570",
+      "expected": "Mid Star",
+      "model": "True-Star",
+      "confidence": 0.94,
+      "reason": "Низкий широкий силуэт с заметной массивной подошвой и блестящей звездой"
+    },
+    {
+      "id": "0766ad95-2153-4651-9a80-4d7bae68694f",
+      "expected": "Dad-Star",
+      "model": "Dad-Star",
+      "confidence": 0.99,
+      "reason": "Массивный беговой силуэт и многослойная объемная подошва как у R02."
+    },
+    {
+      "id": "12acc2b0-7e47-49b3-b27a-dc4541854e37",
+      "expected": "Dad-Star",
+      "model": "Dad-Star",
+      "confidence": 0.99,
+      "reason": "Массивный runner-силуэт, объемная подошва и многослойный верх соответствуют R02."
+    },
+    {
+      "id": "1b548e5e-3f0f-4892-8d67-644948d19e98",
+      "expected": "Dad-Star",
+      "model": "Dad-Star",
+      "confidence": 0.99,
+      "reason": "Золотистый многослойный верх и крупная рельефная подошва совпадают с эталонами R02."
+    },
+    {
+      "id": "25b5d683-cd94-4f02-90b6-4d72b5d93bd9",
+      "expected": "Dad-Star",
+      "model": "Dad-Star",
+      "confidence": 0.98,
+      "reason": "Широкий спортивный силуэт, контрастные накладки и массивная подошва как у R02."
+    },
+    {
+      "id": "73a829e5-cf82-4546-ba65-de94ac460d58",
+      "expected": "Dad-Star",
+      "model": "Dad-Star",
+      "confidence": 0.98,
+      "reason": "Серебристый многослойный runner с высокой объемной подошвой соответствует R02."
+    },
+    {
+      "id": "1fbcc0c8-41d2-4903-ba90-bb92f09e85fc",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.9,
+      "reason": "Высокий баскетбольный силуэт с крупной боковой звездой ближе всего к R03."
+    },
+    {
+      "id": "2d4da44f-076c-4c84-bea3-e8c117fc59c4",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.88,
+      "reason": "Высокий силуэт с боковой звездой и выраженной верхней частью совпадает с R03."
+    },
+    {
+      "id": "384583c5-baed-4541-a533-90c323888da4",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.95,
+      "reason": "Высокая модель с удлиненным голенищем и крупной боковой звездой как у R03."
+    },
+    {
+      "id": "5cf7f2e0-46e3-4797-a5f5-29ec68a98b6a",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.99,
+      "reason": "Высокий силуэт и звезда на боковой панели соответствуют эталонам R03."
+    },
+    {
+      "id": "75ba6ea7-89e8-451e-81b0-a5d5868a7611",
+      "expected": "Francy"
+    },
+    {
+      "id": "84945513-a9e1-4042-8ad4-b7a25043c475",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.96,
+      "reason": "Высокий верх, узкий нос и боковая звезда близки к R03."
+    },
+    {
+      "id": "c626683b-0848-49d2-a0fd-9244b557a55d",
+      "expected": "Francy",
+      "model": "Francy",
+      "confidence": 0.96,
+      "reason": "Высокий силуэт и форма голенища совпадают с эталонами R03."
+    },
+    {
+      "id": "4d2be0f7-83a9-4667-80cc-fc3b2b84f798",
+      "expected": "Super-Star",
+      "model": "Super-Star",
+      "confidence": 0.94,
+      "reason": "Низкий классический силуэт с плоской подошвой и боковой звездой."
+    },
+    {
+      "id": "e41baf2d-7e43-4984-b3be-18b72880b287",
+      "expected": "Super-Star",
+      "model": "Super-Star",
+      "confidence": 0.93,
+      "reason": "Низкая cupsole-конструкция и форма верха соответствуют R06."
+    },
+    {
+      "id": "fc99fb30-df0b-4c70-81ba-bbadcf58cc25",
+      "expected": "Super-Star",
+      "model": "Super-Star",
+      "confidence": 0.91,
+      "reason": "Классический низкий силуэт, плоская подошва и фирменная звезда."
+    },
+    {
+      "id": "0fef2f16-fd23-47b2-a4f5-5332e38f791f",
+      "expected": "True-Star",
+      "model": "True-Star",
+      "confidence": 0.98,
+      "reason": "Низкий массивный силуэт с заметно толстой подошвой, как у R08."
+    },
+    {
+      "id": "443ef6f4-8079-4306-86f6-97b75a4bac65",
+      "expected": "True-Star",
+      "model": "True-Star",
+      "confidence": 0.94,
+      "reason": "Низкий силуэт с массивной светлой подошвой и характерной металлической звездой; совпадает с R08."
+    },
+    {
+      "id": "58d4baf6-71a6-43c9-8d13-1d9cdb6436e8",
+      "expected": "True-Star",
+      "model": "Top Star",
+      "confidence": 0.86,
+      "reason": "Низкий спортивный профиль, плоская подошва и контрастная звезда; ближе всего к эталонам R07."
+    },
+    {
+      "id": "967879cf-dd1a-49ab-a617-d9a0f0825536",
+      "expected": "True-Star",
+      "model": "V-Star",
+      "confidence": 0.92,
+      "reason": "Стройный низкий силуэт с тонкой подошвой, крупной белой звездой и маркировкой у пятки; соответствует R09."
+    }
+  ]
+}

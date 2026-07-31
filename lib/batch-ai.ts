@@ -6,8 +6,8 @@ import {
   canonicalShoeSubcategoryName,
   inferGenericShoeSubcategoryName,
   isGenericShoeSubcategory,
-  SHOE_TAXONOMY_AI_RULES,
 } from '@/lib/shoe-taxonomy'
+import { batchAiCategoryRuleFor } from '@/lib/batch-ai-category-rules'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -54,9 +54,11 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Не начинай текст словами «на фото видно», «на фотографиях представлено», «исходный текст» и подобными служебными фразами.
 - Не используй слова «оригинал», «официальный», «лучший», «премиальный» или «трендовый» и не делай заявлений о подлинности.
 - Внутренние артикулы не являются моделью и не должны попадать в публичные тексты.
+- Коды сезона и коллекции вроде 24B, 25C и 26C не являются моделью и не должны попадать в model_name.
 - Каждый подтверждённый материал перенеси и в description, и в подходящий атрибут.
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
 - model_name — свободное каноничное название конкретной линейки/модели. При низкой уверенности оставь пустым.
+- Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
 - Используй существующие коды атрибутов. Новый атрибут вынеси только в attribute_suggestions.
 - Новую подкатегорию вынеси только в subcategory_suggestion; не подменяй ею исходную подкатегорию.
 - Перед предложением новой подкатегории сверь её со всем переданным справочником. Учитывай регистр, дефисы, число слов и близкие формулировки.
@@ -73,16 +75,11 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Для остальных категорий объединяй только при уверенном совпадении всех значимых характеристик кроме цвета.
 - Верни строго JSON без markdown.`
 
-export const GLOBAL_BATCH_AI_CATALOG_RULES = `Глобальные правила каталога:
-- Для категории «Сумки» итоговая подкатегория «Сумки» запрещена: обязательно выбери более конкретную существующую подкатегорию из справочника.
-- Не предлагай и не назначай «Сумки-косметички», «Сумки-кейсы», «Сумки с клапаном», «Сумки-багет», «Мини-сумки», «Сумки-боулинг» и «Пляжные сумки». Такие товары назначай в существующую подкатегорию «Сумки на плечо».
-- Caviar, кавьяровая и зернистая кожа описывают фактуру кожи, а не отдельный материал и не новый атрибут. В materials записывай «Кожа», а фактуру при необходимости указывай в описании.
-- «Кожа ягнёнка» и «Телячья кожа» являются самостоятельными материалами: сохраняй их, только если вид кожи подтверждён источником или фотографиями.
-- Эти правила относятся ко всем поставщикам категории «Сумки» и важнее инструкции отдельного поставщика.
+export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные правила каталога для всех категорий:
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
 - Атрибут stones предназначен только для ювелирных изделий и бижутерии. Стразы, кристаллы и декоративные вставки на обуви, одежде или сумках описывай как декор в description, но никогда не записывай в stones и не предлагай stones как новый атрибут.
-
-${SHOE_TAXONOMY_AI_RULES}
+- Коды сезона и коллекции вроде 24B, 25C и 26C не являются model_name. Если точная коммерческая модель неизвестна, оставь model_name пустым.
+- Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
 
 Глобальные правила сверки текста с фотографиями:
 - Исходный текст ненадёжен и может относиться к другой карточке. Не переноси из него модель или характеристики автоматически.
@@ -91,6 +88,7 @@ ${SHOE_TAXONOMY_AI_RULES}
 - Если по визуальным признакам уверенно определяется более конкретная модель, используй её вместо общего или ошибочного названия из текста.
 - Если фотографии переданы, description должен дополнять скудный исходный текст подтверждёнными визуальными деталями, а не просто пересказывать его. Опиши не менее четырёх информативных признаков, когда они различимы: тип и силуэт, форму, фактуру и цвет, конструкцию, застёжку или шнуровку, подошву и каблук, фурнитуру и декор. Для обуви отдельно учитывай форму мыска, высоту голенища, тип подошвы/каблука и способ фиксации. Не выдумывай скрытые свойства и точный состав материала.
 - При наличии нескольких информативных фотографий делай description содержательным, обычно 350–700 знаков. Не сокращай его до одной общей фразы, даже если исходное китайское описание короткое.
+- Не добавляй рекламные и неподтверждённые фразы вроде «идеальный выбор», «обеспечивает комфорт», «гарантирует устойчивость», «универсальное дополнение» или «купить».
 - Не смешивай признаки разных товаров. Если кадр явно относится к другому товару, рекламе или упаковке, исключи его через media.discard_indexes.
 - При противоречии текста и фотографий запроси через inspect_full_size_indexes до трёх наиболее информативных оригиналов, если они помогут уточнить модель, логотип или конструкцию.`
 
@@ -104,6 +102,9 @@ export function buildBatchAiUserPrompt(input: {
   priceRules?: BatchAiPriceRuleHint[]
 }) {
   const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [] } = input
+  const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
+    || (categories.length === 1 ? categories[0] : null)
+  const categoryRule = batchAiCategoryRuleFor(selectedCategory?.name)
   let referenceOffset = 0
   const priceRulePrompt = priceRules.map((rule) => {
     const references = (rule.reference_images || []).map((_, index) => referenceOffset + index + 1)
@@ -134,6 +135,9 @@ export function buildBatchAiUserPrompt(input: {
     'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, логотипа или конфликта между исходным текстом и фотографиями.',
     'До заполнения product сначала внутренне проверь согласованность текста и всей серии фотографий. Исходный текст может принадлежать другой карточке; противоречащие фотографиям сведения не используй.',
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
+    categoryRule
+      ? `Автоматические правила категории «${categoryRule.categoryName}». Они важнее особенностей поставщика:\n${categoryRule.rules}`
+      : 'Для категории товара дополнительные автоматические правила пока не заданы.',
     `Товар: ${JSON.stringify(product)}`,
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
@@ -412,6 +416,28 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
+  const emptyAttributeValues = new Set([
+    '', '-', '—', 'null', 'n/a', 'unknown', 'неизвестно', 'не известно',
+    'не определено', 'не определен', 'не определён', 'не указано', 'нет данных',
+  ])
+  const cleanAttributeValue = (code: string, value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => cleanAttributeValue(code, item))
+        .filter((item) => item !== '' && item !== null && item !== undefined)
+    }
+    if (typeof value !== 'string') return value
+    const text = value.trim()
+    const key = text.toLowerCase().replace(/ё/g, 'е')
+    if (emptyAttributeValues.has(key)) return ''
+    if (code === 'model_name' && /^\d{2}\s*[a-z]$/i.test(text)) return ''
+    return text
+  }
+  for (const [code, value] of Object.entries(attributes)) {
+    const cleaned = cleanAttributeValue(code, value)
+    if (cleaned === '' || (Array.isArray(cleaned) && cleaned.length === 0)) delete attributes[code]
+    else attributes[code] = cleaned
+  }
   if (input.attributeCodes.has('sizes') && scalarAttribute(attributes.sizes).length === 0) {
     const explicit = extractExplicitShoeAttributes([
       original.name,
@@ -458,11 +484,23 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
 
-  let subcategorySuggestion = raw?.subcategory_suggestion || null
+  let subcategorySuggestion = typeof raw?.subcategory_suggestion === 'string'
+    ? { name: raw.subcategory_suggestion }
+    : raw?.subcategory_suggestion || null
   if (normalizedName(input.categoryNames?.get(category)) === 'обувь') {
     const canonicalFromSelection = canonicalShoeSubcategoryName(input.subcategoryNames?.get(subcategory))
     const canonicalFromSuggestion = canonicalShoeSubcategoryName(subcategorySuggestion?.name)
-    const canonicalName = canonicalFromSuggestion || canonicalFromSelection
+    let canonicalName = canonicalFromSuggestion || canonicalFromSelection
+    const proposedShoeText = [
+      proposed.name,
+      proposed.h1,
+      proposed.seo_title,
+      proposed.catalog_attributes?.model_name,
+    ].filter(Boolean).join(' ')
+    const explicitlyMules = /(мюл(?:и|ей|ям|ями|ях)?|\bmules?\b|穆勒鞋)/i.test(proposedShoeText)
+    if (explicitlyMules && ['Туфли на каблуке', 'Туфли на плоской подошве'].includes(canonicalName)) {
+      canonicalName = 'Мюли и сабо'
+    }
     const canonicalEntry = canonicalName
       ? [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
         canonicalShoeSubcategoryName(name) === canonicalName
@@ -498,6 +536,11 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
 
+  const rawConfidence = Number(proposed.confidence || 0)
+  const normalizedConfidence = rawConfidence > 1 && rawConfidence <= 100
+    ? rawConfidence / 100
+    : rawConfidence
+
   return {
     product: {
       ...original,
@@ -514,7 +557,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       attributes,
       ai_processed: true,
       ai_error: null,
-      ai_confidence: Math.max(0, Math.min(1, Number(proposed.confidence || 0))),
+      ai_confidence: Math.max(0, Math.min(1, normalizedConfidence)),
       price_rule_key: input.priceRuleKeys?.has(String(proposed.price_rule_key || ''))
         ? String(proposed.price_rule_key)
         : '',
