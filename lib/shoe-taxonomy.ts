@@ -65,6 +65,33 @@ export function isGenericShoeSubcategory(value: unknown) {
   return normalizeShoeTaxonomyName(value) === 'туфли'
 }
 
+export function inferGenericShoeSubcategoryName(value: unknown) {
+  const text = normalizeShoeTaxonomyName(value)
+  if (!text) return 'Туфли на плоской подошве'
+
+  const explicitlyFlat = [
+    /без.{0,24}каблук/,
+    /плоск(?:ая|ой|ую|ие|их|ом) подошв/,
+    /низкий ход/,
+    /\bflat(?:s)?\b/,
+    /平底/,
+  ].some((pattern) => pattern.test(text))
+  if (explicitlyFlat) return 'Туфли на плоской подошве'
+
+  const hasHeel = [
+    /каблук/,
+    /шпильк/,
+    /лодочк/,
+    /\bpumps?\b/,
+    /\bhigh heels?\b/,
+    /\bstiletto\b/,
+    /高跟/,
+    /细跟/,
+    /粗跟/,
+  ].some((pattern) => pattern.test(text))
+  return hasHeel ? 'Туфли на каблуке' : 'Туфли на плоской подошве'
+}
+
 function normalizeShoeTaxonomyName(value: unknown) {
   return String(value || '')
     .trim()

@@ -529,6 +529,7 @@ async function processOpenRouterRun(runId: string, context: any, settings: Batch
 }
 
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
+  let rawOutput: any = null
   try {
     const claimed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='running',attempts=attempts+1,updated_at=NOW()
@@ -548,6 +549,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       contactSheets: sheets,
       referenceSheets,
     })
+    rawOutput = raw
     if (input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
       raw = await runBatchAiOpenRouterRefinement({
         settings,
@@ -557,6 +559,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         photoUrls: input.photoUrls || [],
         indexes: raw.inspect_full_size_indexes,
       })
+      rawOutput = raw
     }
     const normalized = input.variantScanOnly
       ? variantScanResult(raw, input.product)
@@ -577,11 +580,11 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     else await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
     const failed = await scrapingQuery(`
-      UPDATE batch_ai_items i SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
+      UPDATE batch_ai_items i SET status='failed',error_message=$2,output=$3::jsonb,completed_at=NOW(),updated_at=NOW()
       FROM batch_ai_runs r
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
       RETURNING i.product_id
-    `, [item.id, String(error.message || error).slice(0, 4000)])
+    `, [item.id, String(error.message || error).slice(0, 4000), JSON.stringify(rawOutput ?? null)])
     if (failed.rows[0] && !item.input_snapshot?.variantScanOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
@@ -763,8 +766,11 @@ async function resumeStaleOpenRouterRun(runId: string) {
 async function getBatchAiRun(runId: string) {
   const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
   const errors = await scrapingQuery(`
-    SELECT product_id,external_id,error_message FROM batch_ai_items
-    WHERE run_id=$1 AND status='failed' ORDER BY created_at
+    SELECT i.product_id,i.external_id,i.error_message,i.attempts,i.updated_at,
+           p.name,p.photos,i.output
+    FROM batch_ai_items i
+    LEFT JOIN products p ON p.id=i.product_id
+    WHERE i.run_id=$1 AND i.status='failed' ORDER BY i.created_at
   `, [runId])
   const queue = await scrapingQuery(`
     SELECT i.product_id,i.external_id,i.status,p.name,p.photos

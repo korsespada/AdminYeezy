@@ -155,6 +155,35 @@ describe('batch AI normalization', () => {
     })).toThrow('конкретная подкатегория')
   })
 
+  it('resolves a legacy generic shoe result into the existing heel taxonomy', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'generic-shoes',
+        description: 'Кожаные туфли-лодочки на каблуке 7 см.',
+      },
+    }, {
+      product: { category: 'shoes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['generic-shoes', 'heel-shoes', 'flat-shoes']),
+      subcategoryParents: new Map([
+        ['generic-shoes', 'shoes'],
+        ['heel-shoes', 'shoes'],
+        ['flat-shoes', 'shoes'],
+      ]),
+      subcategoryNames: new Map([
+        ['generic-shoes', 'Туфли'],
+        ['heel-shoes', 'Туфли на каблуке'],
+        ['flat-shoes', 'Туфли на плоской подошве'],
+      ]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('heel-shoes')
+  })
+
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
     const result = normalizeBatchAiOutput({
       product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },

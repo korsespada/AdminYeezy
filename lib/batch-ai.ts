@@ -4,6 +4,7 @@ import { byesuChatCompletion } from '@/lib/byesu'
 import { extractExplicitShoeAttributes } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
+  inferGenericShoeSubcategoryName,
   isGenericShoeSubcategory,
   SHOE_TAXONOMY_AI_RULES,
 } from '@/lib/shoe-taxonomy'
@@ -472,6 +473,22 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (canonicalEntry) {
       subcategory = canonicalEntry[0]
       if (canonicalFromSuggestion) subcategorySuggestion = null
+    }
+    if (subcategory && isGenericShoeSubcategory(input.subcategoryNames?.get(subcategory))) {
+      const inferredName = inferGenericShoeSubcategoryName([
+        proposed.name,
+        proposed.description,
+        proposed.h1,
+        proposed.seo_title,
+        proposed.seo_description,
+        original.name,
+        original.description,
+      ].filter(Boolean).join('\n'))
+      const inferredEntry = [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
+        canonicalShoeSubcategoryName(name) === inferredName
+        && (!input.subcategoryParents?.get(id) || input.subcategoryParents.get(id) === category)
+      ))
+      if (inferredEntry) subcategory = inferredEntry[0]
     }
     if (!subcategory || isGenericShoeSubcategory(input.subcategoryNames?.get(subcategory))) {
       throw new Error('Для категории «Обувь» требуется конкретная подкатегория вместо общей «Туфли»')

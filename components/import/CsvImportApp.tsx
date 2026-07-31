@@ -468,11 +468,12 @@ export default function CsvImportApp({
   const [filterPrice, setFilterPrice] = useState("");
   const [filterModel, setFilterModel] = useState("");
   const [filterColor, setFilterColor] = useState("");
-  const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready">("");
+  const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
+  const [bulkPrice, setBulkPrice] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
   const [activeSnapshotId, setActiveSnapshotId] = useState<string | null>(initialSnapshotId);
@@ -483,9 +484,10 @@ export default function CsvImportApp({
   const [isProcessing, setIsProcessing] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
-  const [aiProgress, setAiProgress] = useState<{current: number, total: number} | null>(null);
+  const [aiProgress, setAiProgress] = useState<{current: number, total: number, failed: number} | null>(null);
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [aiQueue, setAiQueue] = useState<any[]>([]);
+  const [latestAiRun, setLatestAiRun] = useState<any | null>(null);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
 
@@ -604,6 +606,18 @@ export default function CsvImportApp({
     [products],
   );
   const aiRemainingCount = products.length - aiReadyCount;
+  const aiErrorProducts = useMemo(
+    () => products.filter((product) => !(product.ai_processed === true || product.ai_processed === "true") && Boolean(product.ai_error)),
+    [products],
+  );
+  const aiErrorGroups = useMemo(() => {
+    const groups = new Map<string, number>();
+    for (const product of aiErrorProducts) {
+      const message = String(product.ai_error || "Неизвестная ошибка");
+      groups.set(message, (groups.get(message) || 0) + 1);
+    }
+    return [...groups.entries()].sort((left, right) => right[1] - left[1]);
+  }, [aiErrorProducts]);
   const canPublish = isBatchSource && batchStage === "AI_PROCESSED" && products.length > 0 && aiRemainingCount === 0;
   const pendingAiSuggestions = useMemo(
     () => aiSuggestions.filter((item) => item.status === "pending"),
@@ -656,6 +670,7 @@ export default function CsvImportApp({
       const aiReady = p.ai_processed === true || p.ai_processed === "true";
       if (filterAiStatus === "raw" && aiReady) return false;
       if (filterAiStatus === "ready" && !aiReady) return false;
+      if (filterAiStatus === "error" && (aiReady || !p.ai_error)) return false;
       return true;
     });
   }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterAiStatus, attributeValues]);
@@ -767,12 +782,14 @@ export default function CsvImportApp({
         }
         setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
         const run: any = runResult.success ? runResult.data : null;
+        setLatestAiRun(run);
         const running = Boolean(run && ["queued", "running"].includes(run.status));
         setActiveAiRunId(running ? String(run.id) : null);
         setIsProcessing(running);
         setAiProgress(running ? {
-          current: Number(run.completed_count || 0),
+          current: Number(run.completed_count || 0) + Number(run.failed_count || 0),
           total: Number(run.total_count || products.length),
+          failed: Number(run.failed_count || 0),
         } : null);
         setAiQueue(running ? run.queue_items || [] : []);
       } finally {
@@ -913,9 +930,11 @@ export default function CsvImportApp({
               const run = await getBatchAiRunAction(data.runId);
               if (!run.success) break;
               finalRun = run.data;
+              setLatestAiRun(finalRun);
               setAiProgress({
-                current: Number(finalRun.completed_count || 0),
+                current: Number(finalRun.completed_count || 0) + Number(finalRun.failed_count || 0),
                 total: Number(finalRun.total_count || data.queued),
+                failed: Number(finalRun.failed_count || 0),
               });
               setAiQueue(finalRun.queue_items || []);
               setSaveMsg(mode === "variants"
@@ -1100,6 +1119,7 @@ export default function CsvImportApp({
     setBulkBrand("");
     setBulkCategory("");
     setBulkSubcategory("");
+    setBulkPrice("");
     setSelectedForMerge([]);
     setPreviousProducts(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1116,12 +1136,29 @@ export default function CsvImportApp({
     setSelectedForMerge(filteredProducts.map((product) => products.indexOf(product)));
   };
 
+  const handleRetryFailedAi = async () => {
+    const ids = aiErrorProducts
+      .map((product) => Number(product.id))
+      .filter(Number.isInteger);
+    if (!ids.length) return;
+    await handleAiProcess("selection", ids);
+  };
+
   const handleBulkApply = () => {
     if (isSnapshotSource) return;
     const updates: Partial<CsvProduct> = {};
     if (bulkBrand) updates.brand = bulkBrand;
     if (bulkCategory) updates.category = bulkCategory;
     if (bulkSubcategory) updates.subcategory = bulkSubcategory;
+    if (bulkPrice !== "") {
+      const price = Number(bulkPrice);
+      if (!Number.isFinite(price) || price < 0) {
+        setSaveMsg("Цена должна быть числом не меньше 0");
+        return;
+      }
+      updates.price = price;
+      updates.price_source = "manual";
+    }
     if (Object.keys(updates).length === 0 || selectedForMerge.length === 0) return;
 
     setPreviousProducts([...products]);
@@ -1138,6 +1175,7 @@ export default function CsvImportApp({
     setBulkBrand("");
     setBulkCategory("");
     setBulkSubcategory("");
+    setBulkPrice("");
     setIsDirty(true);
   };
 
@@ -1631,7 +1669,9 @@ export default function CsvImportApp({
                   Очередь обработки ИИ
                 </div>
                 <div className="mt-1 text-xs text-slate-400">
-                  Готово {aiProgress.current} из {aiProgress.total} · осталось {Math.max(0, aiProgress.total - aiProgress.current)}
+                  Завершено {aiProgress.current} из {aiProgress.total}
+                  {aiProgress.failed > 0 ? ` · ошибок ${aiProgress.failed}` : ""}
+                  {` · осталось ${Math.max(0, aiProgress.total - aiProgress.current)}`}
                 </div>
               </div>
               <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-900">
@@ -1658,6 +1698,56 @@ export default function CsvImportApp({
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {isBatchSource && !isProcessing && aiErrorProducts.length > 0 && (
+          <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2 font-bold text-white">
+                  <AlertTriangle className="h-4 w-4 text-red-300" />
+                  Не обработано ИИ: {aiErrorProducts.length}
+                  {latestAiRun && (
+                    <span className="rounded-full border border-slate-600 bg-slate-900/60 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                      {latestAiRun.provider} · {latestAiRun.status} · запуск {String(latestAiRun.id || "").slice(0, 8)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-red-200">
+                  {aiErrorGroups.slice(0, 4).map(([message, count]) => (
+                    <div key={message}><span className="font-bold">{count} шт.</span> — {message}</div>
+                  ))}
+                </div>
+                {Array.isArray(latestAiRun?.errors) && latestAiRun.errors.length > 0 && (
+                  <details className="mt-3 text-xs text-slate-400">
+                    <summary className="cursor-pointer font-semibold text-slate-300">Подробный журнал последнего запуска</summary>
+                    <div className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950/60 p-3 font-mono">
+                      {latestAiRun.errors.slice(0, 50).map((item: any) => (
+                        <div key={`${item.product_id}-${item.external_id}`}>
+                          #{item.product_id} · {item.external_id || "без external_id"} · попыток {Number(item.attempts || 0)} · {item.error_message}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  onClick={() => setFilterAiStatus("error")}
+                  className="rounded-lg border border-red-400/30 px-3 py-2 text-xs font-bold text-red-200 hover:bg-red-500/10"
+                >
+                  Показать товары
+                </button>
+                <button
+                  onClick={handleRetryFailedAi}
+                  disabled={!batchId}
+                  className="rounded-lg bg-red-600 px-3 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:opacity-50"
+                >
+                  Повторить ошибки · {aiErrorProducts.length}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1739,12 +1829,13 @@ export default function CsvImportApp({
 
               <select
                 value={filterAiStatus}
-                onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready")}
+                onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready" | "error")}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
                 <option value="">Все по ИИ ({products.length})</option>
                 <option value="raw">Сырой ({aiRemainingCount})</option>
                 <option value="ready">ИИ готово ({aiReadyCount})</option>
+                <option value="error">Ошибка ИИ ({aiErrorProducts.length})</option>
               </select>
 
               <select
@@ -1999,7 +2090,19 @@ export default function CsvImportApp({
                 </div>
               </div>
 
-                <div className="grid min-w-[min(760px,calc(100vw-3rem))] flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid min-w-[min(920px,calc(100vw-3rem))] flex-1 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <label className="relative">
+                    <span className="sr-only">Цена для выбранных</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={bulkPrice}
+                      onChange={(event) => setBulkPrice(event.target.value)}
+                      placeholder="Цена для выбранных, ₽"
+                      className="h-full min-h-10 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 text-sm text-white outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500"
+                    />
+                  </label>
                   <SearchableLookupSelect
                     value={bulkBrand}
                     onChange={setBulkBrand}
@@ -2059,10 +2162,10 @@ export default function CsvImportApp({
                 </button>
                 <button
                   onClick={handleBulkApply}
-                  disabled={!bulkBrand && !bulkCategory && !bulkSubcategory}
+                  disabled={bulkPrice === "" && !bulkBrand && !bulkCategory && !bulkSubcategory}
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:grayscale"
                 >
-                  Применить поля
+                  Применить цену и поля
                 </button>
                 <button
                   onClick={handleMergePhotos}
