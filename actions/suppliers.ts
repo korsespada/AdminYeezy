@@ -179,6 +179,20 @@ function normalizeSupplierIdList(value: FormDataEntryValue | null, fallback?: Fo
   return scalar ? [scalar] : []
 }
 
+async function canonicalizeSupplierIdList(entityType: 'brand' | 'category' | 'subcategory', ids: string[]) {
+  if (!ids.length) return ids
+  const mappings = await scrapingQuery(`
+    SELECT legacy_id,canonical_id FROM catalog_id_mappings
+    WHERE entity_type=$1 AND (legacy_id=ANY($2::text[]) OR canonical_id=ANY($2::text[]))
+  `, [entityType, ids])
+  const canonicalById = new Map<string, string>()
+  for (const row of mappings.rows) {
+    canonicalById.set(String(row.legacy_id), String(row.canonical_id))
+    canonicalById.set(String(row.canonical_id), String(row.canonical_id))
+  }
+  return [...new Set(ids.map((id) => canonicalById.get(id) || id))]
+}
+
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -186,9 +200,9 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
-    const allowed_category_ids = normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category'))
-    const allowed_subcategory_ids = normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory'))
-    const allowed_brand_ids = normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand'))
+    const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
+    const allowed_subcategory_ids = await canonicalizeSupplierIdList('subcategory', normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory')))
+    const allowed_brand_ids = await canonicalizeSupplierIdList('brand', normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand')))
     const default_category = allowed_category_ids[0] || null
     const default_subcategory = allowed_subcategory_ids[0] || null
     const default_brand = allowed_brand_ids[0] || null
@@ -239,9 +253,9 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const album_id = formData.get('album_id') as string
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
-    const allowed_category_ids = normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category'))
-    const allowed_subcategory_ids = normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory'))
-    const allowed_brand_ids = normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand'))
+    const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
+    const allowed_subcategory_ids = await canonicalizeSupplierIdList('subcategory', normalizeSupplierIdList(formData.get('allowed_subcategory_ids'), formData.get('default_subcategory')))
+    const allowed_brand_ids = await canonicalizeSupplierIdList('brand', normalizeSupplierIdList(formData.get('allowed_brand_ids'), formData.get('default_brand')))
     const default_category = allowed_category_ids[0] || null
     const default_subcategory = allowed_subcategory_ids[0] || null
     const default_brand = allowed_brand_ids[0] || null
@@ -895,7 +909,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
                const brandStr = item.brand || parserDefaults.brand || ''
                let photos: string[] = []
                try {
-                 photos = item.photos ? JSON.parse(item.photos) : []
+                 photos = Array.isArray(item.photos) ? item.photos.map(String) : item.photos ? JSON.parse(item.photos) : []
                } catch {
                  photos = []
                }
