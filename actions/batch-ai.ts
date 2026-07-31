@@ -29,7 +29,11 @@ import {
 } from '@/lib/rails-admin'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { activeBatchOperation, claimBatchOperation, releaseBatchOperation, touchBatchOperation } from '@/lib/batch-operation-lock'
-import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
+import {
+  normalizeProductsCatalogReferences,
+  sanitizeSupplierAiInstructions,
+  type CatalogIdMapping,
+} from '@/lib/catalog-reference-normalizer'
 import { uploadToS3 } from '@/lib/s3'
 import {
   canonicalColorFamilyKey,
@@ -323,7 +327,8 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   }
   const products = await scrapingQuery(`SELECT * FROM products WHERE batch_id=$1 ${predicate}`, params)
   const mappings = await scrapingQuery(`
-    SELECT entity_type, canonical_id AS id, name, canonical_parent_id AS parent_id
+    SELECT entity_type, legacy_id, canonical_id, canonical_id AS id, name,
+           legacy_parent_id, canonical_parent_id, canonical_parent_id AS parent_id
     FROM catalog_id_mappings ORDER BY entity_type, name
   `)
   const definitions = await getCatalogAttributeDefinitions()
@@ -338,7 +343,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const categories = mappings.rows.filter((row) => row.entity_type === 'category')
   const subcategories = mappings.rows.filter((row) => row.entity_type === 'subcategory')
   return {
-    batch: batch.rows[0], products: products.rows, definitions,
+    batch: batch.rows[0], products: products.rows, definitions, mappings: mappings.rows,
     brands: allowedBrands.size ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
     categories: allowedCategories.size ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
     // Всегда передаём полный справочник подкатегорий: ограничения поставщика помогают
@@ -402,11 +407,15 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
 
     operationClaimed = Boolean(await claimBatchOperation(batchId, 'ai', runId))
     if (!operationClaimed) return { success: false, error: 'Для этой выгрузки уже выполняется другое действие' }
-    const supplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
+    const rawSupplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
       context.batch.ai_instructions,
       context.batch.ai_photo_enabled && context.batch.ai_photo_instructions ? `Особенности фото: ${context.batch.ai_photo_instructions}` : '',
       context.batch.ai_photo_enabled && context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
     ].filter(Boolean).join('\n')
+    const supplierInstructions = sanitizeSupplierAiInstructions(
+      rawSupplierInstructions,
+      context.mappings as CatalogIdMapping[],
+    )
     const snapshot = {
       ...settings,
       systemPrompt: mode === 'variants'

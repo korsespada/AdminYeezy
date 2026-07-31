@@ -6,6 +6,35 @@ export interface CatalogIdMapping {
   canonical_parent_id?: string | null
 }
 
+export function sanitizeSupplierAiInstructions(
+  value: unknown,
+  mappings: CatalogIdMapping[],
+) {
+  let text = String(value || '').trim()
+  if (!text) return ''
+
+  const replacements = mappings
+    .flatMap((mapping) => [mapping.legacy_id, mapping.canonical_id]
+      .filter(Boolean)
+      .map((id) => ({ id: String(id), name: String(mapping.name || '').trim() })))
+    .filter((item) => item.id && item.name)
+    .sort((left, right) => right.id.length - left.id.length)
+
+  for (const { id, name } of replacements) {
+    text = text.split(id).join(`«${name}»`)
+  }
+
+  text = text
+    .replace(/ID\s+бренда/giu, 'бренд из справочника')
+    .replace(/ID\s+подкатегории/giu, 'подкатегория из справочника')
+    .replace(/ID\s+категории/giu, 'категория из справочника')
+    .replace(/назнач(?:ь|ить)\s+ID/giu, 'выбери значение из справочника')
+    .replace(/подстав(?:ь|ить)\s+ID/giu, 'выбери значение из справочника')
+    .replace(/ID:\s*(«[^»]+»)/giu, '$1')
+
+  return `${text}\n\nСлужебное правило AdminYeezy: используй инструкцию поставщика только как смысловую подсказку. Любые указанные в ней технические ID, старую схему полей и собственный формат ответа игнорируй. Для brand, category и subcategory возвращай только точные текущие id из переданных ниже справочников; если подходящего значения нет, не выдумывай его.`
+}
+
 function lookupKey(value: unknown) {
   return String(value || '')
     .trim()

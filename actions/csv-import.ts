@@ -235,9 +235,50 @@ function parseServerCsv(text: string): CsvProduct[] {
 /**
  * Загрузка справочников для импорта
  */
-export async function fetchLookupsAction() {
-    await requireAdmin()
-    return getRailsCatalogLookups()
+export async function fetchLookupsAction(referenceIds?: {
+  brands?: string[]
+  categories?: string[]
+  subcategories?: string[]
+}) {
+  await requireAdmin()
+  const lookups = await getRailsCatalogLookups().catch(() => ({ brands: [], categories: [], subcategories: [] }))
+  const references = {
+    brand: [...new Set((referenceIds?.brands || []).map(String).filter(Boolean))],
+    category: [...new Set((referenceIds?.categories || []).map(String).filter(Boolean))],
+    subcategory: [...new Set((referenceIds?.subcategories || []).map(String).filter(Boolean))],
+  }
+  const requested = [...new Set([...references.brand, ...references.category, ...references.subcategory])]
+  if (!requested.length) return lookups
+
+  const mappings = await scrapingQuery(`
+    SELECT entity_type,legacy_id,canonical_id,name,legacy_parent_id,canonical_parent_id
+    FROM catalog_id_mappings
+    WHERE legacy_id=ANY($1::text[]) OR canonical_id=ANY($1::text[])
+  `, [requested])
+  const merge = (items: any[], type: 'brand' | 'category' | 'subcategory', ids: string[]) => {
+    const byId = new Map(items.map((item) => [String(item.id), item]))
+    for (const id of ids) {
+      if (byId.has(id)) continue
+      const mapping = mappings.rows.find((row) => row.entity_type === type && [row.legacy_id, row.canonical_id].map(String).includes(id))
+      if (!mapping) continue
+      byId.set(id, {
+        id,
+        name: String(mapping.name || id),
+        ...(type === 'subcategory' ? {
+          category: id === String(mapping.legacy_id)
+            ? String(mapping.legacy_parent_id || mapping.canonical_parent_id || '')
+            : String(mapping.canonical_parent_id || ''),
+        } : {}),
+      })
+    }
+    return [...byId.values()]
+  }
+
+  return {
+    brands: merge(lookups.brands, 'brand', references.brand),
+    categories: merge(lookups.categories, 'category', references.category),
+    subcategories: merge(lookups.subcategories, 'subcategory', references.subcategory),
+  }
 }
 
 /**

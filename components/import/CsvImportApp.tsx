@@ -491,6 +491,11 @@ export default function CsvImportApp({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const catalogReferenceSignature = useMemo(() => JSON.stringify({
+    brands: [...new Set(products.map((product) => String(product.brand || "")).filter(Boolean))].sort(),
+    categories: [...new Set(products.map((product) => String(product.category || "")).filter(Boolean))].sort(),
+    subcategories: [...new Set(products.map((product) => String(product.subcategory || "")).filter(Boolean))].sort(),
+  }), [products]);
 
   useEffect(() => {
     fetchLookupsAction().then(setLookups).catch(console.error);
@@ -515,6 +520,11 @@ export default function CsvImportApp({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialLocalPath, initialSupplierId, initialBatchId, initialSnapshotId]);
+
+  useEffect(() => {
+    if (!products.length) return;
+    fetchLookupsAction(JSON.parse(catalogReferenceSignature)).then(setLookups).catch(console.error);
+  }, [catalogReferenceSignature, products.length]);
 
   useEffect(() => {
     const timers = batchUpdateTimers.current;
