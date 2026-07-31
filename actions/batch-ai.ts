@@ -419,6 +419,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         categories: context.categories,
         subcategories: context.subcategories,
         attributeCodes: context.definitions.map((item: any) => item.code),
+        attributeDictionaryValues: context.definitions.flatMap((item: any) => item.dictionary_values || []),
         priceRules,
         priceReferenceUrls: mode === 'variants' ? [] : priceReferenceUrls,
       })])
@@ -493,6 +494,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       categoryNames: new Map(context.categories.map((row: any) => [String(row.id), String(row.name || '')])),
       subcategoryNames: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.name || '')])),
       attributeCodes: new Set(context.definitions.map((row: any) => String(row.code))),
+      attributeDictionaryValues: input.attributeDictionaryValues || [],
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })
     if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)

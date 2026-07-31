@@ -311,6 +311,13 @@ export function normalizeBatchAiOutput(raw: any, input: {
   categoryNames?: Map<string, string>
   subcategoryNames?: Map<string, string>
   attributeCodes: Set<string>
+  attributeDictionaryValues?: Array<{
+    id?: string
+    attribute_code?: string
+    filter_value?: string
+    canonical_value?: string
+    aliases?: string[]
+  }>
   priceRuleKeys?: Set<string>
 }) {
   const proposed = raw?.product || {}
@@ -323,6 +330,33 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   const attributes: Record<string, unknown> = { ...(original.attributes || {}) }
   const suggestions: any[] = []
+  const dictionaryByCode = new Map<string, Map<string, string>>()
+  for (const item of input.attributeDictionaryValues || []) {
+    const code = String(item.attribute_code || '')
+    const canonical = String(item.canonical_value || '').trim()
+    if (!code || !canonical) continue
+    const values = dictionaryByCode.get(code) || new Map<string, string>()
+    for (const candidate of [item.id, item.filter_value, item.canonical_value, ...(item.aliases || [])]) {
+      const key = String(candidate || '').trim().toLowerCase()
+      if (key) values.set(key, canonical)
+    }
+    dictionaryByCode.set(code, values)
+  }
+  const resolveDictionaryValue = (code: string, value: unknown) => {
+    const dictionary = dictionaryByCode.get(code)
+    if (!dictionary) return value
+    const source = Array.isArray(value)
+      ? value
+      : String(value || '').split(/\s*,\s*/).filter(Boolean)
+    const resolved = source.map((item) => dictionary.get(String(item).trim().toLowerCase()) || String(item).trim()).filter(Boolean)
+    if (['colors', 'materials'].includes(code) || Array.isArray(value) || resolved.length > 1) {
+      return [...new Set(resolved)]
+    }
+    return resolved[0] || ''
+  }
+  for (const [code, value] of Object.entries(attributes)) {
+    attributes[code] = resolveDictionaryValue(code, value)
+  }
   const normalizedMaterial = (value: unknown) => {
     const text = String(value || '').trim()
     const key = text.toLowerCase().replace(/ё/g, 'е')
@@ -346,15 +380,15 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
     const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
     if (code && input.attributeCodes.has(code)) {
-      if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = suggestion.value
+      if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = resolveDictionaryValue(code, suggestion.value)
     } else {
       suggestions.push({ ...suggestion, code: code || suggestion?.code })
     }
   }
   for (const [code, value] of Object.entries(proposed.catalog_attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
-    if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(value)
-    else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
+    if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(resolveDictionaryValue(canonicalCode, value))
+    else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = resolveDictionaryValue(canonicalCode, value)
     else suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
