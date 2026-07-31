@@ -113,4 +113,37 @@ describe('batch workflow CSV compatibility adapter', () => {
       else process.env.RAILS_API_URL = previousUrl
     }
   })
+
+  it('loads full Rails media for an existing product during an update', async () => {
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/admin/products/product-1')) {
+        return new Response(JSON.stringify({
+          product: {
+            id: 'product-1',
+            external_id: 'exists',
+            media: [{ original_url: 'https://s3.example/product-1.jpg' }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        products: [{ id: 'product-1', external_id: 'exists' }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      const existing = await workflow.existingRailsProducts(['exists'], { includeDetails: true })
+      expect(workflow.existingRailsPhotoMap(existing.get('exists')).size).toBe(1)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      fetchMock.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
+    }
+  })
 })

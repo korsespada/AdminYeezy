@@ -1219,7 +1219,7 @@ async function cleanupUnusedBatchPhotos(batchId, products) {
   } while (continuationToken);
 }
 
-async function existingRailsProducts(externalIds) {
+async function existingRailsProducts(externalIds, options = {}) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
   const existing = new Map();
   if (!ids.length) return existing;
@@ -1233,7 +1233,15 @@ async function existingRailsProducts(externalIds) {
         headers: { Authorization: `Bearer ${token}` },
       }, 'Rails external_id check');
       if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
-        const product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
+        let product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
+        if (product && options.includeDetails && product.id && existingRailsPhotoMap(product).size === 0) {
+          const detail = await fetchJsonWithRetry(
+            railsApiUrl(`/admin/products/${encodeURIComponent(product.id)}`),
+            { headers: { Authorization: `Bearer ${token}` } },
+            'Rails product media',
+          );
+          product = detail.product || detail || product;
+        }
         if (product) existing.set(externalId, product);
       }
     }
@@ -1380,7 +1388,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
 
   const lookups = await loadLegacyLookupMaps();
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
-  const existingProducts = await existingRailsProducts(products.map((product) => product.external_id));
+  const existingProducts = await existingRailsProducts(
+    products.map((product) => product.external_id),
+    { includeDetails: mode === 'upsert' },
+  );
   const existingExternalIds = new Set(existingProducts.keys());
   const candidates = products
     .map((product, index) => ({ product, index }))
@@ -1517,6 +1528,7 @@ module.exports = {
   PRODUCT_COLUMNS,
   closePools,
   existingRailsExternalIds,
+  existingRailsProducts,
   existingRailsPhotoMap,
   getBatch,
   getBatchProducts,
