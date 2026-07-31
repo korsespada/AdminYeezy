@@ -116,13 +116,18 @@ async function complete(body: any) {
     ? input.priceRules.map((rule: any) => ({ ...rule, enabled: true }))
     : storedRules.rows
   const product = normalized.product
-  const rule = input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
-  if (!input.variantScanOnly && rule) {
-    product.price = Number(rule.price)
-    product.price_source = 'rule'
-  } else if (!input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
-    product.price = Number(context.rows[0].default_price)
-    product.price_source = 'default'
+  if (!input.variantScanOnly && input.preserveExistingPrice) {
+    product.price = Number(input.product?.price || 0)
+    product.price_source = input.product?.price_source || 'legacy'
+  } else {
+    const rule = input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
+    if (!input.variantScanOnly && rule) {
+      product.price = Number(rule.price)
+      product.price_source = 'rule'
+    } else if (!input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
+      product.price = Number(context.rows[0].default_price)
+      product.price_source = 'default'
+    }
   }
   const client = await getScrapingClient()
   try {

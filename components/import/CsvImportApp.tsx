@@ -783,7 +783,7 @@ export default function CsvImportApp({
         setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
         const run: any = runResult.success ? runResult.data : null;
         setLatestAiRun(run);
-        const running = Boolean(run && ["queued", "running"].includes(run.status));
+        const running = Boolean(run && ["preparing", "queued", "running"].includes(run.status));
         setActiveAiRunId(running ? String(run.id) : null);
         setIsProcessing(running);
         setAiProgress(running ? {
@@ -895,7 +895,7 @@ export default function CsvImportApp({
 
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1144,6 +1144,15 @@ export default function CsvImportApp({
     await handleAiProcess("selection", ids);
   };
 
+  const handleReprocessAll = async () => {
+    if (!window.confirm(
+      `Повторно обработать ИИ все ${products.length} товаров?\n\n` +
+      "Перед запуском будет создан снимок. Текущие цены сохранятся, а SEO, классификация, атрибуты и медиарешения будут рассчитаны заново.",
+    )) return;
+    setShowMoreActions(false);
+    await handleAiProcess("reprocess");
+  };
+
   const handleBulkApply = () => {
     if (isSnapshotSource) return;
     const updates: Partial<CsvProduct> = {};
@@ -1338,10 +1347,20 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {!isSnapshotSource && (batchStage === "PUSHED" ? (
-                <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-300">
-                  <CheckCircle className="h-4 w-4" /> Запушено в БД
-                </span>
+              {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleReprocessAll}
+                    disabled={isProcessing}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-500/20 disabled:opacity-50"
+                    title="Создать снимок и заново применить актуальные AI-настройки ко всей партии"
+                  >
+                    <RefreshCw className="h-4 w-4" /> Переобработать ИИ
+                  </button>
+                  <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-300">
+                    <CheckCircle className="h-4 w-4" /> Запушено в БД
+                  </span>
+                </div>
               ) : !canPublish || isProcessing ? (
                 isProcessing ? (
                   <button
@@ -1412,6 +1431,7 @@ export default function CsvImportApp({
                       {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
                       {previousProducts && <button onClick={handleUndoMerge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
+                      {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Найти варианты</button>}
                     </div>
                   )}
@@ -2158,7 +2178,9 @@ export default function CsvImportApp({
                   className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
                 >
                   <Sparkles className="h-4 w-4" />
-                  Обработать с ИИ
+                  {selectedForMerge.every((index) => (
+                    products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
+                  )) ? "Переобработать выбранные" : "Обработать с ИИ"}
                 </button>
                 <button
                   onClick={handleBulkApply}

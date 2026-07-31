@@ -304,7 +304,7 @@ async function syncCurrentRailsCatalogMappings() {
   }
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess'
 
 function catalogName(value: unknown, entityType: string, mappings: CatalogIdMapping[]) {
   const raw = String(value || '').trim()
@@ -339,6 +339,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const params: any[] = [batchId]
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'reprocess') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true AND variant_group_key IS NULL ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
@@ -382,7 +383,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
   const runId = crypto.randomUUID()
   let operationClaimed = false
   try {
-    const active = await scrapingQuery("SELECT id FROM batch_ai_runs WHERE batch_id=$1 AND status IN ('queued','running') LIMIT 1", [batchId])
+    const active = await scrapingQuery("SELECT id FROM batch_ai_runs WHERE batch_id=$1 AND status IN ('preparing','queued','running') LIMIT 1", [batchId])
     if (active.rows[0]) return { success: false, error: 'Для этой выгрузки уже выполняется AI-обработка' }
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
@@ -448,12 +449,17 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       supplierInstructions,
     }
     if (mode !== 'variants') {
-      await snapshotBatch(batchId, context.batch.stage || 'SCRAPED', `До AI · ${mode}`, snapshot)
+      await snapshotBatch(
+        batchId,
+        context.batch.stage || 'SCRAPED',
+        mode === 'reprocess' ? 'До повторной AI-обработки' : `До AI · ${mode}`,
+        snapshot,
+      )
     }
     await scrapingQuery(`
       INSERT INTO batch_ai_runs(id,batch_id,provider,mode,status,settings_snapshot,total_count,started_at)
-      VALUES($1,$2,$3,$4,$5,$6::jsonb,$7,NOW())
-    `, [runId, batchId, settings.provider, mode, settings.provider === 'cockpit' ? 'queued' : 'running', JSON.stringify(snapshot), context.products.length])
+      VALUES($1,$2,$3,$4,'preparing',$5::jsonb,$6,NOW())
+    `, [runId, batchId, settings.provider, mode, JSON.stringify(snapshot), context.products.length])
 
     const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
     const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
@@ -479,6 +485,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         photoUrls: mode === 'variants' ? [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
         photoEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true,
         fullSizeRefinementEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
+        preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
         brands: context.brands,
         categories: context.categories,
         subcategories: context.subcategories,
@@ -489,6 +496,25 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         priceReferenceUrls: mode === 'variants' ? [] : priceReferenceUrls,
       })])
     }
+
+    if (['reprocess', 'selection', 'retry'].includes(mode)) {
+      const targetIds = context.products.map((product: any) => Number(product.id)).filter(Number.isInteger)
+      if (targetIds.length > 0) {
+        await scrapingQuery(`
+          UPDATE products SET ai_processed=false,ai_error=NULL,updated_at=NOW()
+          WHERE batch_id=$1 AND id=ANY($2::int[])
+        `, [batchId, targetIds])
+        await scrapingQuery(`
+          UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW()
+          WHERE id=$1 AND stage IN ('AI_PROCESSED','PUSHED')
+        `, [batchId])
+      }
+    }
+
+    await scrapingQuery(
+      'UPDATE batch_ai_runs SET status=$2,updated_at=NOW() WHERE id=$1',
+      [runId, settings.provider === 'cockpit' ? 'queued' : 'running'],
+    )
 
     revalidatePath('/admin/batches')
     if (settings.provider !== 'cockpit') {
@@ -507,6 +533,10 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     }
     return { success: true, data: { runId, queued: context.products.length, provider: settings.provider } }
   } catch (error: any) {
+    await scrapingQuery(`
+      UPDATE batch_ai_runs SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1 AND status IN ('preparing','queued','running')
+    `, [runId, String(error.message || error).slice(0, 4000)]).catch(() => undefined)
     if (operationClaimed) await releaseBatchOperation(batchId, runId).catch(() => undefined)
     return { success: false, error: error.message }
   }
@@ -629,13 +659,18 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
 
 async function applyCompletedItem(item: any, normalized: any, context: any) {
   const product = normalized.product
-  const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
-  if (rule) {
-    product.price = Number(rule.price)
-    product.price_source = 'rule'
-  } else if (!Number(product.price) && Number(context.batch.default_price)) {
-    product.price = Number(context.batch.default_price)
-    product.price_source = 'default'
+  if (item.input_snapshot?.preserveExistingPrice) {
+    product.price = Number(item.input_snapshot.product?.price || 0)
+    product.price_source = item.input_snapshot.product?.price_source || 'legacy'
+  } else {
+    const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
+    if (rule) {
+      product.price = Number(rule.price)
+      product.price_source = 'rule'
+    } else if (!Number(product.price) && Number(context.batch.default_price)) {
+      product.price = Number(context.batch.default_price)
+      product.price_source = 'default'
+    }
   }
   const client = await getScrapingClient()
   try {
@@ -674,7 +709,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
 
 async function finalizeRun(runId: string) {
   const runState = await scrapingQuery('SELECT status FROM batch_ai_runs WHERE id=$1', [runId])
-  if (!runState.rows[0] || ['completed', 'failed', 'cancelled'].includes(runState.rows[0].status)) return
+  if (!runState.rows[0] || ['preparing', 'completed', 'failed', 'cancelled'].includes(runState.rows[0].status)) return
   const counts = await scrapingQuery(`
     SELECT COUNT(*)::int AS total,
            COUNT(*) FILTER(WHERE status='completed')::int AS completed,
@@ -814,7 +849,7 @@ export async function stopBatchAiRunAction(runId: string) {
       return { success: false, error: 'Запуск ИИ не найден' }
     }
     await client.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [run.rows[0].batch_id, runId])
-    if (['queued', 'running'].includes(run.rows[0].status)) {
+    if (['preparing', 'queued', 'running'].includes(run.rows[0].status)) {
       await client.query(`
         UPDATE batch_ai_items SET status='cancelled',lease_token=NULL,leased_at=NULL,
           completed_at=NOW(),updated_at=NOW()
