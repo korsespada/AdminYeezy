@@ -248,10 +248,11 @@ function chunkArray(items, size) {
 }
 
 async function fetchJsonWithRetry(url, init, label) {
+  const { timeoutMs = 45_000, ...requestInit } = init || {};
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(url, { ...init, signal: AbortSignal.timeout(45_000) });
+      const response = await fetch(url, { ...requestInit, signal: AbortSignal.timeout(timeoutMs) });
       const payload = await response.json().catch(() => ({}));
       if (response.ok) return payload;
       const error = new Error(payload.message || payload.error || `${label} failed with ${response.status}`);
@@ -441,8 +442,10 @@ async function postRailsImportBatch({ name, products }) {
     body: JSON.stringify({
       source: 'csv',
       name,
+      wait: true,
       csv_text: serializeProductsToCsv(products, RAILS_IMPORT_COLUMNS, ','),
     }),
+    timeoutMs: 120_000,
   }, 'Rails import');
 }
 
@@ -1287,18 +1290,25 @@ async function existingRailsProducts(externalIds, options = {}) {
   const existing = new Map();
   if (!ids.length) return existing;
   const token = await railsAdminToken();
+  const batches = chunkArray(ids, 50);
   let cursor = 0;
   let completed = 0;
-  const workers = Array.from({ length: Math.min(8, ids.length) }, async () => {
-    while (cursor < ids.length) {
-      const externalId = ids[cursor++];
+  const workers = Array.from({ length: Math.min(4, batches.length) }, async () => {
+    while (cursor < batches.length) {
+      const externalIdBatch = batches[cursor++];
       try {
-        const params = new URLSearchParams({ page: '1', per_page: '10', external_id: externalId });
+        const params = new URLSearchParams({
+          page: '1',
+          per_page: String(externalIdBatch.length),
+          external_ids: externalIdBatch.join(','),
+        });
         const payload = await fetchJsonWithRetry(railsApiUrl(`/admin/products?${params}`), {
           headers: { Authorization: `Bearer ${token}` },
         }, 'Rails external_id check');
-        if ((payload.products || []).some((product) => String(product.external_id || '').trim() === externalId)) {
-          let product = (payload.products || []).find((item) => String(item.external_id || '').trim() === externalId);
+        const requestedIds = new Set(externalIdBatch);
+        for (let product of payload.products || []) {
+          const externalId = String(product?.external_id || '').trim();
+          if (!externalId || !requestedIds.has(externalId)) continue;
           if (product && options.includeDetails && product.id && existingRailsPhotoMap(product).size === 0) {
             const detail = await fetchJsonWithRetry(
               railsApiUrl(`/admin/products/${encodeURIComponent(product.id)}`),
@@ -1310,7 +1320,7 @@ async function existingRailsProducts(externalIds, options = {}) {
           if (product) existing.set(externalId, product);
         }
       } finally {
-        completed += 1;
+        completed += externalIdBatch.length;
         if (options.onProgress) await options.onProgress({ current: completed, total: ids.length });
       }
     }
@@ -1583,7 +1593,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (newRowsTotal > 0 && onProgress) {
     await onProgress({ phase: 'publish', current: 0, total: newRowsTotal, success: 0, failed: 0 });
   }
-  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 200)).entries()) {
+  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 50)).entries()) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
       products: chunk,

@@ -109,15 +109,16 @@ describe('batch workflow CSV compatibility adapter', () => {
     process.env.RAILS_ADMIN_TOKEN = 'test-token'
     process.env.RAILS_API_URL = 'https://rails.example.test'
     const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
-      const externalId = new URL(String(input)).searchParams.get('external_id')
+      const externalIds = new URL(String(input)).searchParams.get('external_ids')?.split(',') || []
       return new Response(JSON.stringify({
-        products: externalId === 'exists' ? [{ external_id: 'exists' }] : [],
+        products: externalIds.includes('exists') ? [{ external_id: 'exists' }] : [],
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     })
     try {
       const existing = await workflow.existingRailsExternalIds(['exists', 'new', 'exists'])
       expect([...existing]).toEqual(['exists'])
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('external_ids')).toBe('exists,new')
     } finally {
       fetchMock.mockRestore()
       if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
@@ -151,6 +152,35 @@ describe('batch workflow CSV compatibility adapter', () => {
       const existing = await workflow.existingRailsProducts(['exists'], { includeDetails: true })
       expect(workflow.existingRailsPhotoMap(existing.get('exists')).size).toBe(1)
       expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      fetchMock.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
+    }
+  })
+
+  it('checks large external ID lists in batches and reports progress', async () => {
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    const ids = Array.from({ length: 120 }, (_, index) => `product-${index + 1}`)
+    const progress: number[] = []
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
+      const externalIds = new URL(String(input)).searchParams.get('external_ids')?.split(',') || []
+      return new Response(JSON.stringify({
+        products: externalIds.map((external_id) => ({ external_id })),
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      const existing = await workflow.existingRailsProducts(ids, {
+        onProgress: ({ current }: { current: number }) => progress.push(current),
+      })
+      expect(existing.size).toBe(120)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      expect(progress).toContain(120)
     } finally {
       fetchMock.mockRestore()
       if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
