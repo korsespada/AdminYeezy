@@ -605,13 +605,32 @@ export default function SupplierList({
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Мин. фото</label>
-                        <input type="number" name="min_photos" defaultValue={editingSupplier?.min_photos} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500" />
+                        <input
+                          type="number"
+                          name="min_photos"
+                          defaultValue={editingSupplier?.min_photos}
+                          disabled={editingSupplier?.szwego_parse_mode === 'all'}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        />
                       </div>
                       <div>
                         <label className="block text-xs text-slate-400 mb-1">Мин. символов опис.</label>
-                        <input type="number" name="min_desc_len" defaultValue={editingSupplier?.min_desc_len} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500" />
+                        <input
+                          type="number"
+                          name="min_desc_len"
+                          defaultValue={editingSupplier?.min_desc_len}
+                          disabled={editingSupplier?.szwego_parse_mode === 'all'}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        />
                       </div>
                     </div>
+                    {editingSupplier?.szwego_parse_mode === 'all' && (
+                      <>
+                        <input type="hidden" name="min_photos" value={editingSupplier.min_photos ?? 0} />
+                        <input type="hidden" name="min_desc_len" value={editingSupplier.min_desc_len ?? 0} />
+                        <p className="text-xs text-slate-500">В единой ленте эти ограничения не применяются.</p>
+                      </>
+                    )}
                   </div>
 
                   <div className="space-y-4">

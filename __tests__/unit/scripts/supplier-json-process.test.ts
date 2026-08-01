@@ -97,6 +97,163 @@ describe('supplier JSON post-process contract', () => {
     }
   })
 
+  it('keeps descriptions and size charts with their own model inside one MAN feed', async () => {
+    const timeline = [
+      {
+        external_id: 'header',
+        description: '•———• MAN•———• SS26',
+        photos: [],
+      },
+      {
+        external_id: 'sneaker-description',
+        description: 'Длинное описание кроссовок Nantucket Walk из замши для проверки привязки. Код модели: LP071',
+        photos: [],
+      },
+      {
+        external_id: 'sneaker-size',
+        description: 'The size grid LP071',
+        photos: ['sneaker-size.jpg'],
+      },
+      {
+        external_id: 'sneaker-price',
+        description: 'Price: 490¥ Sizes: 39-46 LP071',
+        photos: ['sneaker.jpg'],
+      },
+      {
+        external_id: 'sneaker-details',
+        description: 'Details',
+        photos: ['sneaker-detail.jpg'],
+      },
+      {
+        external_id: 'tshirt-description',
+        description: 'Длинное описание мужской футболки Zegna из хлопка для проверки привязки. Код модели: ZE019',
+        photos: [],
+      },
+      { external_id: 'mosaic', description: '', photos: ['mosaic.jpg'] },
+      {
+        external_id: 'tshirt-size',
+        description: 'The size grid ZE019',
+        photos: ['tshirt-size.jpg'],
+      },
+      {
+        external_id: 'tshirt-price',
+        description: 'Price: 310¥ Sizes: M•L•XL ZE019',
+        photos: ['tshirt.jpg'],
+      },
+      {
+        external_id: 'tshirt-details',
+        description: 'Details',
+        photos: ['tshirt-detail.jpg'],
+      },
+    ].map((product, source_position) => ({
+      ...product,
+      source_position,
+      attributes: { szwego_parse_mode: 'all' },
+    }))
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', timeline)
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toMatchObject({
+      external_id: 'sneaker-price',
+      description: timeline[1].description,
+      photos: ['sneaker-detail.jpg', 'sneaker.jpg', 'sneaker-size.jpg'],
+      attributes: {
+        description_source_id: 'sneaker-description',
+        size_chart_source_id: 'sneaker-size',
+      },
+    })
+    expect(result[1]).toMatchObject({
+      external_id: 'tshirt-price',
+      description: timeline[5].description,
+      photos: ['tshirt-detail.jpg', 'tshirt.jpg', 'tshirt-size.jpg'],
+      attributes: {
+        description_source_id: 'tshirt-description',
+        size_chart_source_id: 'tshirt-size',
+      },
+    })
+  })
+
+  it('matches model sources when the supplier inconsistently pads the model number', async () => {
+    const products = [
+      {
+        external_id: 'description',
+        description: 'Полное описание рубашки из натуральной шерсти. Код модели: BC105',
+        photos: [],
+      },
+      {
+        external_id: 'size',
+        description: 'The size grid BC0105',
+        photos: ['size.jpg'],
+      },
+      {
+        external_id: 'price',
+        description: 'Price: 470¥ Sizes: M•L•XL BC0105',
+        photos: ['price.jpg'],
+      },
+      {
+        external_id: 'details',
+        description: 'Details',
+        photos: ['details.jpg'],
+      },
+    ].map((product, source_position) => ({
+      ...product,
+      source_position,
+      attributes: { szwego_parse_mode: 'all' },
+    }))
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      description: products[0].description,
+      photos: ['details.jpg', 'price.jpg', 'size.jpg'],
+      attributes: {
+        model_code: 'BC0105',
+        description_source_id: 'description',
+        size_chart_source_id: 'size',
+      },
+    })
+  })
+
+  it('keeps the Price text when the supplier omitted this model description', async () => {
+    const products = [
+      {
+        external_id: 'other-description',
+        description: 'Полное описание соседней модели, которое нельзя копировать. Код модели: LP074',
+        photos: [],
+      },
+      {
+        external_id: 'size',
+        description: 'The size grid BC058',
+        photos: ['size.jpg'],
+      },
+      {
+        external_id: 'price',
+        description: 'Price: 430¥ Sizes: M•L•XL BC058',
+        photos: ['price.jpg'],
+      },
+      {
+        external_id: 'details',
+        description: 'Details',
+        photos: ['details.jpg'],
+      },
+    ].map((product, source_position) => ({
+      ...product,
+      source_position,
+      attributes: { szwego_parse_mode: 'all' },
+    }))
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      description: products[2].description,
+      photos: ['details.jpg', 'price.jpg', 'size.jpg'],
+    })
+    expect(result[0].attributes).not.toHaveProperty('description_source_id')
+  })
+
   it('pairs Details with the following Price row even though Details has no model code', async () => {
     const products = [
       {

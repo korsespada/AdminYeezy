@@ -63,6 +63,13 @@ def _model_code(*texts):
     return f"{match.group(1)}{match.group(2)}" if match else ""
 
 
+def _model_key(*texts):
+    """Normalize supplier typos such as BC0105 vs BC105 for source matching."""
+    code = _model_code(*texts)
+    match = re.match(r"^(BC|LP|ZE)(\d+)$", code)
+    return f"{match.group(1)}{int(match.group(2))}" if match else ""
+
+
 def _classify(product, context=""):
     text = f"{_text(product)} {context}"
     code = _model_code(text)
@@ -99,33 +106,60 @@ def _pair_rows(rows):
     return pairs
 
 
-def _full_description(rows):
-    candidates = []
-    for index, row in enumerate(rows):
-        text = _text(row)
-        if not text or _is_header(row) or _is_price(row) or _is_details(row) or _is_size_grid(row):
-            continue
-        if re.search(r"\bUNPACKING\b|\bVIDEO\b", text, re.IGNORECASE):
-            continue
-        candidates.append((len(text), index, text))
-    return max(candidates, default=(0, None, ""))
+def _is_model_description(product):
+    text = _text(product)
+    if len(text) < 40 or _photos(product):
+        return False
+    if _is_header(product) or _is_price(product) or _is_details(product) or _is_size_grid(product):
+        return False
+    return not re.search(r"\bUNPACKING\b|\bVIDEO\b|\bVIEW\s*360\b", text, re.IGNORECASE)
 
 
-def _process_all_block(rows):
-    pairs = _pair_rows(rows)
-    if not pairs:
-        return []
+def _nearest_model_source(candidates, target_index, model_code,
+                          exact_distance, anonymous_distance):
+    target_key = _model_key(model_code)
 
-    _, description_index, full_description = _full_description(rows)
-    size_indices = [index for index, row in enumerate(rows) if _is_size_grid(row)]
-    size_photos = _unique(url for index in size_indices for url in _photos(rows[index]))
+    if target_key:
+        exact = [(index, row) for index, row in candidates
+                 if _model_key(_text(row)) == target_key
+                 and abs(index - target_index) <= exact_distance]
+        if exact:
+            return min(exact, key=lambda item: abs(item[0] - target_index))
 
-    header = next((_text(row) for row in rows if _is_header(row)), "")
+    anonymous = [(index, row) for index, row in candidates
+                 if not _model_key(_text(row))
+                 and abs(index - target_index) <= anonymous_distance]
+    return min(anonymous, key=lambda item: abs(item[0] - target_index), default=(None, None))
+
+
+def _header_before(candidates, target_index):
+    candidates = [(index, row) for index, row in candidates if index <= target_index]
+    return candidates[-1] if candidates else (None, None)
+
+
+def _process_all(rows):
+    """Build products by model code instead of treating a whole MAN section as one model."""
+    descriptions = [(index, row) for index, row in enumerate(rows) if _is_model_description(row)]
+    size_grids = [(index, row) for index, row in enumerate(rows) if _is_size_grid(row)]
+    headers = [(index, row) for index, row in enumerate(rows) if _is_header(row)]
     result = []
-    for price_index, details_index in pairs:
+    for price_index, details_index in _pair_rows(rows):
         price_row = copy.deepcopy(rows[price_index])
         details_row = rows[details_index]
         price_text = _text(price_row)
+        price_code = _model_code(price_text)
+
+        _, description_row = _nearest_model_source(
+            descriptions, price_index, price_code, 100, 60
+        )
+        _, size_row = _nearest_model_source(
+            size_grids, price_index, price_code, 80, 60
+        )
+        _, header_row = _header_before(headers, price_index)
+
+        full_description = _text(description_row) if description_row else ""
+        size_photos = _photos(size_row) if size_row else []
+        header = _text(header_row) if header_row else ""
         code = _classify(price_row, full_description)
         price_row["description"] = full_description or price_text
         price_row["photos"] = _unique(
@@ -139,26 +173,13 @@ def _process_all_block(rows):
         if header:
             attributes["szwego_group_header"] = header
         if full_description:
-            attributes["description_source_id"] = rows[description_index].get("external_id")
+            attributes["description_source_id"] = description_row.get("external_id")
         attributes["details_source_id"] = details_row.get("external_id")
-        if size_indices:
-            attributes["size_chart_source_id"] = rows[size_indices[0]].get("external_id")
+        if size_row:
+            attributes["size_chart_source_id"] = size_row.get("external_id")
         price_row["attributes"] = attributes
         result.append(price_row)
     return result
-
-
-def _process_all(products):
-    blocks = []
-    current = []
-    for product in products:
-        if _is_header(product) and current:
-            blocks.append(current)
-            current = []
-        current.append(product)
-    if current:
-        blocks.append(current)
-    return [product for block in blocks for product in _process_all_block(block)]
 
 
 def _process_legacy(products):
