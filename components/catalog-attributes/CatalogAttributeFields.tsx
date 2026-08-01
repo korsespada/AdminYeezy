@@ -239,7 +239,7 @@ type MeasurementTable = {
   note?: string
 }
 
-function MeasurementsField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
+export function MeasurementsField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
   const table = normalizeMeasurementTable(value)
   const legacyText = typeof value === 'string' ? value.trim() : ''
 

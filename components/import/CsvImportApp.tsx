@@ -68,6 +68,7 @@ import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
+import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -2873,6 +2874,13 @@ function CsvProductDrawer({
     change("attributes", next);
   };
 
+  const updateMeasurements = (value: unknown) => {
+    const next = { ...attributes };
+    if (value === undefined || value === null || value === "") delete next.measurements;
+    else next.measurements = value as any;
+    change("attributes", next);
+  };
+
   const removePhoto = (i: number) =>
     change(
       "photos",
@@ -3070,6 +3078,10 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
+                <MeasurementsField
+                  value={attributes.measurements}
+                  onChange={updateMeasurements}
+                />
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs text-slate-500">Дополнительные атрибуты</label>
@@ -3083,13 +3095,13 @@ function CsvProductDrawer({
                     Добавить
                   </button>
                 </div>
-                {Object.entries(attributes).length === 0 ? (
+                {Object.entries(attributes).filter(([key]) => key !== "measurements").length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-700 p-3 text-xs text-slate-600">
-                    Атрибутов пока нет
+                    Других атрибутов пока нет
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {Object.entries(attributes).map(([key, value]) => (
+                    {Object.entries(attributes).filter(([key]) => key !== "measurements").map(([key, value]) => (
                       <div key={key} className="flex items-center gap-2">
                         <input
                           value={key}
