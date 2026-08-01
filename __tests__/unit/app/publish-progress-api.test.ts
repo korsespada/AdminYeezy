@@ -20,7 +20,7 @@ describe('batch publication progress API', () => {
 
   it('returns live progress without caching the response', async () => {
     mockedScrapingQuery.mockResolvedValue({
-      rows: [{ operation: 'publish|media|120|607', updated_at: new Date('2026-08-01T13:10:37Z') }],
+      rows: [{ operation: 'publish|media|120|607', updated_at: new Date() }],
     } as any)
 
     const response = await GET(new Request('https://admin.example.com/api/batches/publish-progress?batchId=batch-1'))

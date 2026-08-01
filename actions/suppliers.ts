@@ -22,6 +22,7 @@ import {
   deleteScrapingFileArtifactsForBatch,
 } from '@/lib/scraping-files'
 import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
+import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 
 // --- Suppliers CRUD ---
 
@@ -1141,14 +1142,14 @@ export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'u
             if (current !== 0 && current !== total && current - previous < 5) return
             lastReported.set(phase, current)
             progressWrite = progressWrite.then(async () => {
-              try {
-                await scrapingQuery(
-                  'UPDATE batch_operation_locks SET operation=$2,updated_at=NOW() WHERE batch_id=$1',
-                  [batchId, `publish|${phase}|${current}|${total}`],
-                )
-              } catch (progressError: any) {
-                console.warn('Could not persist batch publish progress:', progressError.message)
-              }
+              const persisted = await scrapingQuery(
+                `UPDATE batch_operation_locks
+                 SET operation=$2,updated_at=NOW()
+                 WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
+                 RETURNING operation`,
+                [batchId, `publish|${phase}|${current}|${total}`],
+              )
+              if (!persisted.rows[0]) throw new Error('Публикация остановлена пользователем')
             })
             await progressWrite
         })
@@ -1188,21 +1189,43 @@ export async function getBatchPublishProgressAction(batchId: string): Promise<Ac
           'SELECT operation,updated_at FROM batch_operation_locks WHERE batch_id=$1',
           [batchId],
         )
-        const operation = String(result.rows[0]?.operation || '')
-        if (!operation.startsWith('publish')) {
-          return { success: true, data: { running: false, phase: null, current: 0, total: 0 } }
+        return { success: true, data: parseBatchPublishProgress(result.rows[0]?.operation, result.rows[0]?.updated_at) }
+    } catch (err: any) {
+        return { success: false, error: err.message }
+    }
+}
+
+export async function stopBatchPublishAction(batchId: string): Promise<ActionResponse> {
+    try {
+        await requireAdmin()
+        const result = await scrapingQuery(
+          'SELECT operation,updated_at FROM batch_operation_locks WHERE batch_id=$1',
+          [batchId],
+        )
+        const row = result.rows[0]
+        const progress = parseBatchPublishProgress(row?.operation, row?.updated_at)
+        if (!row || (!progress.running && !progress.stale)) {
+          return { success: true, data: { released: true, message: 'Активной публикации нет' } }
         }
-        const [, phase = 'lookup', current = '0', total = '0'] = operation.split('|')
-        return {
-          success: true,
-          data: {
-            running: true,
-            phase,
-            current: Number(current) || 0,
-            total: Number(total) || 0,
-            updatedAt: result.rows[0]?.updated_at || null,
-          },
+
+        if (progress.stale) {
+          const released = await scrapingQuery(
+            'DELETE FROM batch_operation_locks WHERE batch_id=$1 AND updated_at < NOW() - ($2::int * INTERVAL \'1 millisecond\') RETURNING batch_id',
+            [batchId, BATCH_PUBLISH_STALE_MS],
+          )
+          return released.rows[0]
+            ? { success: true, data: { released: true, message: 'Зависшая операция сброшена' } }
+            : { success: false, error: 'Операция снова активна. Обновите страницу и повторите при необходимости.' }
         }
+
+        await scrapingQuery(
+          `UPDATE batch_operation_locks
+           SET operation=CASE WHEN operation LIKE 'cancel_requested|%' THEN operation ELSE 'cancel_requested|' || operation END,
+               updated_at=NOW()
+           WHERE batch_id=$1`,
+          [batchId],
+        )
+        return { success: true, data: { released: false, message: 'Запрошена остановка публикации' } }
     } catch (err: any) {
         return { success: false, error: err.message }
     }

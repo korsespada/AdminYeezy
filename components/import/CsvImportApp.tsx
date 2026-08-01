@@ -49,7 +49,8 @@ import {
   type CsvProduct,
   type Lookups,
 } from "@/actions/csv-import";
-import { pushBatchToCatalogAction } from "@/actions/suppliers";
+import { pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
+import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -415,6 +416,7 @@ export default function CsvImportApp({
   initialSupplierName = null,
   initialSupplierAvatar = null,
   initialSourceLabel = null,
+  backHref = null,
   onClose,
 }: {
   initialLocalPath?: string;
@@ -426,6 +428,7 @@ export default function CsvImportApp({
   initialSupplierName?: string | null;
   initialSupplierAvatar?: string | null;
   initialSourceLabel?: string | null;
+  backHref?: string | null;
   onClose?: () => void;
 }) {
   const [products, setProducts] = useState<CsvProduct[]>([]);
@@ -442,6 +445,8 @@ export default function CsvImportApp({
     current: number;
     total: number;
   } | null>(null);
+  const [publishOperation, setPublishOperation] = useState<BatchPublishProgress | null>(null);
+  const [isStoppingPublish, setIsStoppingPublish] = useState(false);
   const [result, setResult] = useState<{
     success: number;
     updated: number;
@@ -544,29 +549,33 @@ export default function CsvImportApp({
   }, []);
 
   useEffect(() => {
-    if (!isPushing || !batchId) return;
+    const progressBatchId = batchId || initialBatchId;
+    if (!progressBatchId) return;
     let cancelled = false;
     const poll = async () => {
-      const response = await fetch(`/api/batches/publish-progress?batchId=${encodeURIComponent(batchId)}`, {
+      const response = await fetch(`/api/batches/publish-progress?batchId=${encodeURIComponent(progressBatchId)}`, {
         cache: "no-store",
       }).then((result) => result.ok ? result.json() : null).catch(() => null);
-      if (cancelled || !response?.success || !response.data?.running) return;
-      const phase = ["lookup", "media", "publish"].includes(response.data.phase)
-        ? response.data.phase as "lookup" | "media" | "publish"
-        : "publish";
-      setPublishProgress({
-        phase,
-        current: Number(response.data.current || 0),
-        total: Number(response.data.total || products.length),
-      });
+      if (cancelled || !response?.success) return;
+      const operation = response.data as BatchPublishProgress;
+      setPublishOperation(operation);
+      if (operation.running || operation.stale) {
+        setPublishProgress({
+          phase: operation.phase || "publish",
+          current: Number(operation.current || 0),
+          total: Number(operation.total || products.length),
+        });
+      } else if (!isPushing) {
+        setPublishProgress(null);
+      }
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 800);
+    const timer = window.setInterval(() => void poll(), 1500);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isPushing, batchId, products.length]);
+  }, [isPushing, batchId, initialBatchId, products.length]);
 
 
   // Unique values for filters (derived from all products)
@@ -937,6 +946,24 @@ export default function CsvImportApp({
 
   };
 
+  const handleStopPublish = async () => {
+    const targetBatchId = batchId || initialBatchId;
+    if (!targetBatchId || isStoppingPublish) return;
+    setIsStoppingPublish(true);
+    try {
+      const response = await stopBatchPublishAction(targetBatchId);
+      setSaveMsg(response.success
+        ? `✓ ${response.data?.message || "Операция остановлена"}`
+        : `✗ ${response.error || "Не удалось остановить публикацию"}`);
+      if (response.success && response.data?.released) {
+        setPublishOperation(null);
+        setPublishProgress(null);
+      }
+    } finally {
+      setIsStoppingPublish(false);
+    }
+  };
+
   const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
@@ -1290,20 +1317,71 @@ export default function CsvImportApp({
           {saveMsg}
         </div>
       )}
-      <div className="mx-auto max-w-[1600px] p-3 sm:p-4">
-        {onClose && (
+      <div className="mx-auto max-w-[1800px] p-3 sm:p-4">
+        {(onClose || backHref) && (
           <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
             <div className="min-w-0">
               <h2 className="truncate text-base font-bold text-white">Товары выгрузки</h2>
-              <p className="truncate text-xs text-slate-500">{initialSupplierName || 'Поставщик не указан'}{batchId ? ` · ${products.length} товаров` : ''}</p>
+              <p className="truncate text-xs text-slate-500">{initialSupplierName || 'Поставщик не указан'}{products.length ? ` · ${products.length} товаров` : ''}{sourceLabel ? ` · ${sourceLabel}` : ''}</p>
             </div>
-            <button
-              onClick={onClose}
-              className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700"
-            >
-              <X size={18} />
-              Закрыть
-            </button>
+            {backHref ? (
+              <Link href={backHref} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700">
+                <X size={18} />
+                К истории
+              </Link>
+            ) : (
+              <button
+                onClick={onClose}
+                className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700"
+              >
+                <X size={18} />
+                Закрыть
+              </button>
+            )}
+          </div>
+        )}
+
+        {(publishOperation?.running || publishOperation?.stale) && publishProgress && (
+          <div className={`mb-4 rounded-xl border p-4 ${publishOperation.stale ? "border-amber-500/35 bg-amber-950/30" : "border-emerald-500/30 bg-emerald-950/25"}`}>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  {publishOperation.stale
+                    ? <AlertTriangle className="h-5 w-5 text-amber-300" />
+                    : <RefreshCw className={`h-5 w-5 text-emerald-300 ${publishOperation.cancelling ? "" : "animate-spin"}`} />}
+                  <span className="font-bold text-white">
+                    {publishOperation.stale
+                      ? "Публикация была прервана"
+                      : publishOperation.cancelling
+                        ? "Останавливаем публикацию"
+                        : publishProgress.phase === "lookup"
+                          ? "Проверяем товары в каталоге"
+                          : publishProgress.phase === "media"
+                            ? "Переносим фотографии"
+                            : "Публикуем товары"}
+                  </span>
+                  <span className="rounded-full bg-slate-950/60 px-2.5 py-1 text-sm font-bold text-slate-200">{publishProgress.current}/{publishProgress.total}</span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-950/70">
+                  <div
+                    className={`h-full rounded-full transition-all ${publishOperation.stale ? "bg-amber-400" : "bg-emerald-400"}`}
+                    style={{ width: `${publishProgress.total > 0 ? Math.min(100, (publishProgress.current / publishProgress.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-400">
+                  {publishOperation.stale
+                    ? "Процесс перестал обновляться. Сбросьте блокировку и безопасно запустите публикацию повторно."
+                    : "Можно закрыть страницу: состояние и счётчик сохраняются на сервере."}
+                </p>
+              </div>
+              <button
+                onClick={handleStopPublish}
+                disabled={isStoppingPublish || publishOperation.cancelling}
+                className={`shrink-0 rounded-lg border px-4 py-2 text-sm font-bold transition-colors disabled:opacity-50 ${publishOperation.stale ? "border-amber-400/40 text-amber-200 hover:bg-amber-500/10" : "border-red-400/40 text-red-200 hover:bg-red-500/10"}`}
+              >
+                {isStoppingPublish ? "Подождите…" : publishOperation.stale ? "Сбросить операцию" : publishOperation.cancelling ? "Остановка…" : "Остановить"}
+              </button>
+            </div>
           </div>
         )}
         
@@ -1440,11 +1518,11 @@ export default function CsvImportApp({
                   <div className="relative">
                     <button
                       onClick={() => setShowPublishMenu((value) => !value)}
-                      disabled={isPushing}
+                      disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
                       className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
                     >
-                      {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {isPushing && publishProgress
+                      {(isPushing || publishOperation?.running) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      {(isPushing || publishOperation?.running) && publishProgress
                         ? `${publishProgress.phase === "lookup" ? "Проверка" : publishProgress.phase === "media" ? "Фото" : "Публикация"} ${publishProgress.current}/${publishProgress.total}`
                         : "Публикация"}
                       <ChevronDown className="h-4 w-4" />

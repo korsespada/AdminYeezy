@@ -1435,7 +1435,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const operationOwnerId = crypto.randomUUID();
   const operation = await scrapingPool.query(`
     INSERT INTO batch_operation_locks(batch_id,operation,owner_id) VALUES($1,'publish',$2)
-    ON CONFLICT(batch_id) DO NOTHING RETURNING owner_id
+    ON CONFLICT(batch_id) DO UPDATE SET
+      operation='publish',owner_id=EXCLUDED.owner_id,created_at=NOW(),updated_at=NOW()
+    WHERE batch_operation_locks.updated_at < NOW() - INTERVAL '5 minutes'
+    RETURNING owner_id
   `, [batchId, operationOwnerId]);
   if (!operation.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
   try {

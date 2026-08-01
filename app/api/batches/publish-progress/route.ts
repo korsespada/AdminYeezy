@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAdminAuthError, requireAdmin } from '@/lib/admin-session'
 import { scrapingQuery } from '@/lib/db'
+import { parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,24 +21,9 @@ export async function GET(request: Request) {
       'SELECT operation,updated_at FROM batch_operation_locks WHERE batch_id=$1',
       [batchId],
     )
-    const operation = String(result.rows[0]?.operation || '')
-    if (!operation.startsWith('publish')) {
-      return NextResponse.json({
-        success: true,
-        data: { running: false, phase: null, current: 0, total: 0 },
-      }, { headers: noStoreHeaders })
-    }
-
-    const [, phase = 'lookup', current = '0', total = '0'] = operation.split('|')
     return NextResponse.json({
       success: true,
-      data: {
-        running: true,
-        phase,
-        current: Number(current) || 0,
-        total: Number(total) || 0,
-        updated_at: result.rows[0]?.updated_at || null,
-      },
+      data: parseBatchPublishProgress(result.rows[0]?.operation, result.rows[0]?.updated_at),
     }, { headers: noStoreHeaders })
   } catch (error: any) {
     if (isAdminAuthError(error)) {

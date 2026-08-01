@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   ArchiveX,
   Bot,
@@ -25,7 +26,6 @@ import {
   deleteExportBatchFromAdminAction,
   deleteExportFileFromAdminAction,
   getExportHistoryAction,
-  pushBatchToCatalogAction,
   type ExportHistoryBatch,
   type ExportHistoryFile,
 } from '@/actions/suppliers'
@@ -89,6 +89,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function ExportHistoryList({ initialData, initialFolders }: { initialData: ExportHistoryBatch[]; initialFolders: any[] }) {
+  const router = useRouter()
   const [batches, setBatches] = useState<ExportHistoryBatch[]>(initialData)
   const [folders, setFolders] = useState<any[]>(initialFolders)
   const [folderFilter, setFolderFilter] = useState<string>('all')
@@ -149,6 +150,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       alert('Исторический снимок этого этапа не сохранился. Текущие товары партии не будут показаны вместо него.')
       return
     }
+    if (!batch.isSynthetic && file.batch_id) {
+      const snapshot = file.snapshot_id ? `?snapshot=${encodeURIComponent(file.snapshot_id)}` : ''
+      router.push(`/admin/batches/${encodeURIComponent(file.batch_id)}${snapshot}`)
+      return
+    }
     setModalState({
       localPath: file.result_path || '',
       rawPath: batch.raw_path,
@@ -207,25 +213,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         .filter((item) => item.files.length > 0))
     } else {
       alert(`Ошибка при удалении файла: ${res.error}`)
-    }
-    setPendingAction(null)
-  }
-
-  const handlePushBatch = async (batch: ExportHistoryBatch, mode: 'add' | 'upsert') => {
-    if (batch.isSynthetic) return
-    if (!confirm(`Запушить товары выгрузки "${batch.name}" в каталог?`)) return
-
-    setPendingAction(`push-${batch.id}`)
-    const res = await pushBatchToCatalogAction(batch.id, mode)
-    if (res.success) {
-      const pushed = res.data?.success || 0
-      const failed = res.data?.failed || 0
-      const skipped = res.data?.skippedExisting || 0
-      const updated = res.data?.updated || 0
-      setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Запушено в БД' } : item))
-      alert(`Пуш завершен. Новых: ${pushed}, обновлено: ${updated}, пропущено: ${skipped}, ошибок: ${failed}`)
-    } else {
-      alert(`Ошибка пуша: ${res.error}`)
     }
     setPendingAction(null)
   }
@@ -481,14 +468,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             className="absolute right-14 top-12 z-20 w-64 overflow-hidden rounded-lg border border-slate-700 bg-slate-950 py-1 text-left shadow-2xl"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            {!batch.isSynthetic && canPublish && <>
-                              <button onClick={() => handlePushBatch(batch, 'upsert')} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
-                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Обновить и добавить</b><small className="text-slate-500">Совпавшие external_id обновить</small></span>
+                            {!batch.isSynthetic && canPublish && (
+                              <button onClick={() => router.push(`/admin/batches/${encodeURIComponent(batch.id)}`)} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
+                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Открыть для публикации</b><small className="text-slate-500">Выбрать режим и видеть ход операции</small></span>
                               </button>
-                              <button onClick={() => handlePushBatch(batch, 'add')} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
-                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Добавить только новые</b><small className="text-slate-500">Совпавшие external_id пропустить</small></span>
-                              </button>
-                            </>}
+                            )}
                             <button
                               onClick={() => rollback(batch)}
                               disabled={batch.isSynthetic}
