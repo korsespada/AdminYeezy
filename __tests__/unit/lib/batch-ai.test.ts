@@ -118,6 +118,64 @@ describe('batch AI normalization', () => {
     })
   })
 
+  it('keeps measurements and merges explicit clothing sizes omitted by the model', () => {
+    const measurements = {
+      unit: 'см',
+      columns: [{ key: 'waist', label: 'Талия' }],
+      rows: [
+        { size: 'M', values: { waist: '87.5' } },
+        { size: '3XL', values: { waist: '101.5' } },
+      ],
+    }
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothing',
+        catalog_attributes: {
+          sizes: ['M', 'L', 'XL', 'XXL'],
+          measurements,
+        },
+      },
+    }, {
+      product: {
+        category: 'clothing',
+        description: 'Размеры: M•L•XL•XXL•XXXL ▫️Цена: 530¥',
+        photos: [],
+        attributes: {},
+      },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'size_system', 'measurements']),
+    })
+
+    expect(result.product.attributes).toMatchObject({
+      sizes: ['M', 'L', 'XL', 'XXL', 'XXXL'],
+      size_system: 'International',
+      measurements: {
+        ...measurements,
+        rows: [
+          { size: 'M', values: { waist: '87.5' } },
+          { size: 'XXXL', values: { waist: '101.5' } },
+        ],
+      },
+    })
+  })
+
+  it('merges explicit numeric ranges only for clothing', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothing', catalog_attributes: { sizes: ['48'] } },
+    }, {
+      product: { category: 'clothing', description: 'Размеры: 46–50', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      categoryNames: new Map([['clothing', 'Одежда']]),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.attributes.sizes).toEqual(['46', '47', '48', '49', '50'])
+  })
+
   it('maps a known shoe construction suggestion to an existing broad subcategory', () => {
     const result = normalizeBatchAiOutput({
       product: { category: 'shoes', subcategory: 'generic-shoes' },

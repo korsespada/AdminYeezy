@@ -926,6 +926,80 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
   }
 }
 
+export async function rollbackBatchProductAiAction(batchId: string, productId: number) {
+  await requireAdmin()
+  const operationOwnerId = await claimBatchOperation(batchId, 'rollback')
+  if (!operationOwnerId) return { success: false, error: 'Выгрузка занята другой операцией' }
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const current = await client.query(
+      'SELECT * FROM products WHERE id=$1 AND batch_id=$2 FOR UPDATE',
+      [productId, batchId],
+    )
+    if (!current.rows[0]) {
+      await client.query('ROLLBACK')
+      return { success: false, error: 'Товар не найден' }
+    }
+    const item = await client.query(`
+      SELECT i.input_snapshot
+      FROM batch_ai_items i
+      JOIN batch_ai_runs r ON r.id=i.run_id
+      WHERE r.batch_id=$1
+        AND (i.product_id=$2 OR i.external_id=$3)
+        AND i.status='completed'
+        AND COALESCE(i.input_snapshot->>'variantScanOnly','false') <> 'true'
+      ORDER BY i.completed_at DESC NULLS LAST,i.created_at DESC
+      LIMIT 1
+    `, [batchId, productId, current.rows[0].external_id])
+    const source = item.rows[0]?.input_snapshot?.product
+    if (!source) {
+      await client.query('ROLLBACK')
+      return { success: false, error: 'Для этого товара нет состояния до ИИ' }
+    }
+    const mappingResult = await client.query(`
+      SELECT entity_type,legacy_id,canonical_id,name,canonical_parent_id
+      FROM catalog_id_mappings
+    `)
+    const restored = normalizeProductsCatalogReferences(
+      [source],
+      mappingResult.rows as CatalogIdMapping[],
+    )[0]
+    await client.query(`
+      UPDATE products SET
+        external_id=$3,name=$4,description=$5,h1=$6,seo_title=$7,seo_description=$8,
+        price=$9,status=$10,brand=$11,category=$12,subcategory=$13,gender=$14,
+        photos=$15::jsonb,attributes=$16::jsonb,ai_processed=false,ai_error=NULL,
+        ai_confidence=NULL,price_source=$17,variant_group_key=$18,source_position=$19,updated_at=NOW()
+      WHERE id=$1 AND batch_id=$2
+    `, [
+      productId, batchId, restored.external_id || current.rows[0].external_id,
+      restored.name || '', restored.description || '', restored.h1 || '',
+      restored.seo_title || '', restored.seo_description || '', Number(restored.price || 0),
+      restored.status || 'inactive', restored.brand || null, restored.category || null,
+      restored.subcategory || null, restored.gender || null, JSON.stringify(restored.photos || []),
+      JSON.stringify(restored.attributes || {}), restored.price_source || 'legacy',
+      restored.variant_group_key || null, restored.source_position ?? current.rows[0].source_position,
+    ])
+    await client.query(`
+      UPDATE scraping_batches SET
+        stage=CASE WHEN stage IN ('AI_PROCESSED','PUSHED') THEN 'SCRIPT_PROCESSED' ELSE stage END,
+        updated_at=NOW()
+      WHERE id=$1
+    `, [batchId])
+    await client.query('COMMIT')
+    revalidatePath('/admin/batches')
+    revalidatePath(`/admin/batches/${batchId}`)
+    return { success: true }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+    await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
+  }
+}
+
 export async function reviewBatchAiSuggestionAction(id: string, decision: 'approved' | 'rejected', editedPayload?: any) {
   try {
     return await reviewBatchAiSuggestion(id, decision, editedPayload)

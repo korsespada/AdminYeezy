@@ -58,6 +58,7 @@ import {
   getLatestBatchAiRunAction,
   getBatchSnapshotsAction,
   rollbackBatchAction,
+  rollbackBatchProductAiAction,
   startBatchAiAction,
   stopBatchAiRunAction,
 } from "@/actions/batch-ai";
@@ -1099,6 +1100,25 @@ export default function CsvImportApp({
       }
     } finally {
       setActiveAiRunId(null);
+      setIsProcessing(false);
+      setTimeout(() => setSaveMsg(null), 5000);
+    }
+  };
+
+  const handleRollbackProductAi = async (product: CsvProduct) => {
+    if (!batchId || !product.id || isProcessing) return;
+    if (!confirm(`Вернуть товар #${products.indexOf(product) + 1} к состоянию до ИИ?`)) return;
+    setIsProcessing(true);
+    setSaveMsg(`Откатываем ИИ для ${product.external_id || product.id}...`);
+    try {
+      const result = await rollbackBatchProductAiAction(batchId, Number(product.id));
+      if (!result.success) {
+        setSaveMsg(result.error || "Не удалось откатить товар");
+        return;
+      }
+      await handleLoadBatch(batchId);
+      setSaveMsg("✓ Товар возвращён к состоянию до ИИ");
+    } finally {
       setIsProcessing(false);
       setTimeout(() => setSaveMsg(null), 5000);
     }
@@ -2427,6 +2447,10 @@ export default function CsvImportApp({
         onClose={() => setSelectedIdx(null)}
         onUpdate={updateProduct}
         onRetryAi={batchId && selectedIdx !== null ? () => handleRetryProductAi(products[selectedIdx]) : undefined}
+        onRollbackAi={batchId && selectedIdx !== null && (products[selectedIdx].ai_processed === true || products[selectedIdx].ai_processed === "true")
+          ? () => handleRollbackProductAi(products[selectedIdx])
+          : undefined}
+        aiBusy={isProcessing}
       />
       {showAiSuggestions && batchId && (
         <BatchAiReviewDialog
@@ -2818,6 +2842,8 @@ interface CsvProductDrawerProps {
   onClose: () => void;
   onUpdate: (i: number, f: keyof CsvProduct, v: any) => void;
   onRetryAi?: () => void;
+  onRollbackAi?: () => void;
+  aiBusy?: boolean;
 }
 
 function CsvProductDrawer({
@@ -2828,6 +2854,8 @@ function CsvProductDrawer({
   onClose,
   onUpdate,
   onRetryAi,
+  onRollbackAi,
+  aiBusy = false,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -2911,8 +2939,18 @@ function CsvProductDrawer({
               </h2>
             </div>
             <div className="flex items-center gap-2">
+              {onRollbackAi && (
+                <button
+                  onClick={onRollbackAi}
+                  disabled={aiBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-50"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Откатить ИИ
+                </button>
+              )}
               {onRetryAi && (
-                <button onClick={onRetryAi} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
+                <button onClick={onRetryAi} disabled={aiBusy} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50">
                   {local.ai_processed || local.ai_error ? "Повторить ИИ" : "Обработать ИИ"}
                 </button>
               )}

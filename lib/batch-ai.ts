@@ -418,6 +418,31 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
+  if (attributes.measurements !== undefined) {
+    attributes.measurements = normalizeMeasurementRowSizes(attributes.measurements)
+  }
+  if (input.attributeCodes.has('sizes')) {
+    const sizeSourceText = [original.description, proposed.description].filter(Boolean).join('\n')
+    const categoryId = [proposed.category, original.category]
+      .map((value) => String(value || ''))
+      .find((value) => input.categoryIds.has(value)) || ''
+    const isClothing = String(input.categoryNames?.get(categoryId) || '')
+      .trim().toLowerCase().replace(/ё/g, 'е') === 'одежда'
+    const sizeValues = [
+      ...extractExplicitClothingSizes(sizeSourceText),
+      ...(isClothing ? extractExplicitNumericClothingSizes(sizeSourceText) : []),
+      ...attributeSizeValues(attributes.sizes),
+      ...measurementRowSizes(attributes.measurements),
+    ].map(canonicalClothingSize).filter(Boolean)
+    if (sizeValues.length > 0) attributes.sizes = [...new Set(sizeValues)]
+    if (
+      !attributes.size_system
+      && input.attributeCodes.has('size_system')
+      && sizeValues.some((size) => /^(?:X{0,6}[SML]|\d+XL)$/i.test(size))
+    ) {
+      attributes.size_system = 'International'
+    }
+  }
   const emptyAttributeValues = new Set([
     '', '-', '—', 'null', 'n/a', 'unknown', 'неизвестно', 'не известно',
     'не определено', 'не определен', 'не определён', 'не указано', 'нет данных',
@@ -572,6 +597,84 @@ export function normalizeBatchAiOutput(raw: any, input: {
     colorFamily: raw?.color_family || null,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },
   }
+}
+
+function attributeSizeValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(attributeSizeValues)
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>
+    return attributeSizeValues(item.values ?? item.value ?? item.display_values ?? [])
+  }
+  return value === undefined || value === null ? [] : [String(value)]
+}
+
+function measurementRowSizes(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  const rows = (value as Record<string, unknown>).rows
+  if (!Array.isArray(rows)) return []
+  return rows.flatMap((row) => (
+    row && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>).size
+      ? [String((row as Record<string, unknown>).size)]
+      : []
+  ))
+}
+
+function normalizeMeasurementRowSizes(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const table = value as Record<string, unknown>
+  if (!Array.isArray(table.rows)) return value
+  return {
+    ...table,
+    rows: table.rows.map((row) => (
+      row && typeof row === 'object' && !Array.isArray(row)
+        ? { ...row, size: canonicalClothingSize((row as Record<string, unknown>).size) }
+        : row
+    )),
+  }
+}
+
+function extractExplicitClothingSizes(value: unknown): string[] {
+  const text = String(value || '')
+  const result: string[] = []
+  for (const match of text.matchAll(/(?:размеры?|sizes?)\s*[:：-]\s*([A-Z0-9.,/|•·\s-]{1,100})/gi)) {
+    result.push(...String(match[1] || '').split(/[^A-Z0-9.]+/i).filter((item) => (
+      /^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL|[2-6]XL)$/i.test(item)
+    )))
+  }
+  return result
+}
+
+function extractExplicitNumericClothingSizes(value: unknown): string[] {
+  const text = String(value || '')
+  const result: string[] = []
+  for (const match of text.matchAll(/(?:размеры?|sizes?)\s*[:：-]\s*([0-9.,/|•·\s–—-]{1,100})/gi)) {
+    const raw = String(match[1] || '').trim()
+    const range = raw.match(/^(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)$/)
+    if (range) {
+      const from = Number(range[1].replace(',', '.'))
+      const to = Number(range[2].replace(',', '.'))
+      const step = Number.isInteger(from) && Number.isInteger(to) ? 1 : 0.5
+      const count = Math.floor((to - from) / step) + 1
+      if (to >= from && count <= 20) {
+        result.push(...Array.from({ length: count }, (_, index) => {
+          const size = from + index * step
+          return Number.isInteger(size) ? String(size) : size.toFixed(1)
+        }))
+      }
+      continue
+    }
+    result.push(...raw.split(/[^0-9.,]+/).map((item) => item.replace(',', '.')).filter((item) => (
+      /^\d{1,3}(?:\.5)?$/.test(item)
+    )))
+  }
+  return result
+}
+
+function canonicalClothingSize(value: unknown) {
+  const size = String(value || '').trim().toUpperCase().replace(/\s+/g, '').replace(',', '.')
+  const numericXl = size.match(/^([2-6])XL$/)
+  if (numericXl) return `${'X'.repeat(Number(numericXl[1]))}L`
+  return size
 }
 
 function scalarAttribute(value: any): string[] {

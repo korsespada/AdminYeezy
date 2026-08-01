@@ -1,4 +1,10 @@
-export type ProductAttributeValue = string | number | boolean | null | ProductAttributeValue[]
+export type ProductAttributeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ProductAttributeValue[]
+  | { [key: string]: ProductAttributeValue }
 
 export type ProductAttributes = Record<string, ProductAttributeValue>
 
@@ -31,11 +37,14 @@ export const CORE_PRODUCT_FIELDS = new Set([
   'updated_at',
 ])
 
-function isAttributeValue(value: unknown): value is ProductAttributeValue {
+function isAttributeValue(value: unknown, depth = 0): value is ProductAttributeValue {
+  if (depth > 8) return false
   if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return true
   }
-  return Array.isArray(value) && value.every(isAttributeValue)
+  if (Array.isArray(value)) return value.every((item) => isAttributeValue(item, depth + 1))
+  if (typeof value !== 'object') return false
+  return Object.values(value).every((item) => isAttributeValue(item, depth + 1))
 }
 
 export function normalizeProductAttributes(value: unknown): ProductAttributes {

@@ -7,7 +7,18 @@ describe('product attributes', () => {
     expect(normalizeProductAttributes('{"color":"black","sizes":["M","L"],"name":"ignored","nested":{"x":1}}')).toEqual({
       color: 'black',
       sizes: ['M', 'L'],
+      nested: { x: 1 },
     })
+  })
+
+  it('preserves a structured measurements table during batch load and save', () => {
+    const measurements = {
+      unit: 'см',
+      columns: [{ key: 'waist', label: 'Талия' }],
+      rows: [{ size: 'M', values: { waist: '87.5' } }],
+    }
+
+    expect(normalizeProductAttributes({ measurements })).toEqual({ measurements })
   })
 
   it('keeps unknown CSV fields as attributes', () => {
