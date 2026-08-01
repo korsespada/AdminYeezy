@@ -14,6 +14,7 @@ interface Supplier {
   id: number
   name: string
   album_id: string
+  szwego_parse_mode: 'images' | 'all'
   group_id: string
   tag_id: string
   default_category: string
@@ -227,6 +228,7 @@ export default function SupplierList({
         id: 0,
         name: '',
         album_id: '',
+        szwego_parse_mode: 'images',
         group_id: '',
         tag_id: '',
         default_category: '',
@@ -582,6 +584,19 @@ export default function SupplierList({
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Album ID (Szwego)</label>
                       <input name="album_id" defaultValue={editingSupplier?.album_id} required className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white font-mono text-sm outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1">Источник Szwego</label>
+                      <select
+                        name="szwego_parse_mode"
+                        value={editingSupplier?.szwego_parse_mode || 'images'}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, szwego_parse_mode: event.target.value as 'images' | 'all' })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm outline-none focus:border-emerald-500"
+                      >
+                        <option value="images">Альбомы / изображения (по умолчанию)</option>
+                        <option value="all">全部 / единая лента</option>
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">Единая лента сохраняет текстовые публикации, одиночные фото и размерные сетки для постобработки.</p>
                     </div>
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Avatar URL (опционально)</label>

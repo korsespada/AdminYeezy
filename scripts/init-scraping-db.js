@@ -27,6 +27,7 @@ async function init() {
         id SERIAL PRIMARY KEY,
         name TEXT,
         album_id TEXT,
+        szwego_parse_mode TEXT NOT NULL DEFAULT 'images',
         default_category TEXT,
         default_subcategory TEXT,
         default_brand TEXT,

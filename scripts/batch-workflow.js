@@ -914,6 +914,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
     '--output', outputPath,
     '--format', 'json',
   ];
+  args.push('--parse_mode', supplier.szwego_parse_mode === 'all' ? 'all' : 'images');
   if (endDate) args.push('--end_date', endDate);
 
   const finalGroup = overrideGroup || supplier.group_id;

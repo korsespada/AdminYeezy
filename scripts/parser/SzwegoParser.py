@@ -113,6 +113,12 @@ def main():
     parser = argparse.ArgumentParser(description="Szwego Parser")
     parser.add_argument("--album_id", required=True, help="Album ID")
     parser.add_argument("--cookie", required=True, help="Cookie string")
+    parser.add_argument(
+        "--parse_mode",
+        choices=("images", "all"),
+        default="images",
+        help="Szwego source: image albums (default) or the 全部 timeline",
+    )
     parser.add_argument("--end_date", help="Stop date (YYYY-MM-DD)")
     parser.add_argument("--group_id", default="", help="Group ID filter")
     parser.add_argument("--tag_id", default="", help="Tag ID filter")
@@ -183,7 +189,7 @@ def main():
     timestamp_val = int(time.time() * 1000)
     parsed_end_date = _parse_date_from_text(args.end_date) if args.end_date else None
 
-    print(f"Starting parse for Album: {args.album_id}")
+    print(f"Starting parse for Album: {args.album_id} (mode: {args.parse_mode})")
     if args.group_id: print(f"Group: {args.group_id}")
     if args.tag_id: print(f"Tag: {args.tag_id}")
 
@@ -202,7 +208,15 @@ def main():
                 "timestamp": timestamp_val,
             }
 
-            if args.group_id:
+            if args.parse_mode == "all":
+                r = request_with_retry(
+                    session,
+                    "GET",
+                    "https://www.szwego.com/album/personal/all",
+                    params=params,
+                    headers=headers,
+                )
+            elif args.group_id:
                 params["tagGroupId"] = args.group_id
                 r = request_with_retry(session, "POST", "https://www.szwego.com/album/personal/image", params=params, data={"tagList": "[]"}, headers=headers)
             elif args.tag_id:
@@ -239,7 +253,7 @@ def main():
                     item_date_debug = _parse_date_from_item_fields(item) or _parse_date_from_text(raw_text)
                     print(f"Debug [First Item]: ID={goods_id}, Date={item_date_debug}, DescLen={len(raw_text)}, Photos={len(item.get('imgsSrc', []) or item.get('imgs', []) or [])}")
 
-                if "集合图" in raw_text:
+                if args.parse_mode == "images" and "集合图" in raw_text:
                     skip_reasons["collection_image"] = skip_reasons.get("collection_image", 0) + 1
                     continue
 
@@ -264,14 +278,20 @@ def main():
                     if tags_list:
                         description += " " + " ".join(tags_list)
 
-                if len(description) < args.min_desc:
+                if args.parse_mode == "images" and len(description) < args.min_desc:
                     skip_reasons["short_description"] = skip_reasons.get("short_description", 0) + 1
                     continue
 
                 imgs_src = item.get("imgsSrc", []) or item.get("imgs", []) or []
                 photos = [u.strip() for u in imgs_src if u and u.strip()]
+                video_url = item.get("videoUrl", "") or item.get("videoURL", "") or ""
 
-                if len(photos) < args.min_photos:
+                # В ленте 全部 видео тоже имеют картинку-превью в imgsSrc. Это не
+                # фотография товара, но сама публикация нужна для сохранения порядка.
+                if args.parse_mode == "all" and video_url:
+                    photos = []
+
+                if args.parse_mode == "images" and len(photos) < args.min_photos:
                     skip_reasons["few_photos"] = skip_reasons.get("few_photos", 0) + 1
                     continue
 
@@ -286,17 +306,26 @@ def main():
                     skip_reasons["old_date"] = skip_reasons.get("old_date", 0) + 1
                     continue
 
-                if any(".mp4" in photo for photo in photos):
+                if args.parse_mode == "images" and (video_url or any(".mp4" in photo for photo in photos)):
                     skip_reasons["has_mp4"] = skip_reasons.get("has_mp4", 0) + 1
                     continue
 
                 # Photo dup check
                 photo_key = tuple(sorted(set(photos)))
-                if photo_key in seen_photo_keys:
-                    skip_reasons["dup_photo"] = skip_reasons.get("dup_photo", 0) + 1
-                    continue
+                if args.parse_mode == "images":
+                    if photo_key in seen_photo_keys:
+                        skip_reasons["dup_photo"] = skip_reasons.get("dup_photo", 0) + 1
+                        continue
 
-                row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False)]
+                attributes = {
+                    "szwego_parse_mode": args.parse_mode,
+                    "szwego_timestamp": item.get("time_stamp") or item.get("update_time") or item.get("new_send_time"),
+                }
+                if video_url:
+                    attributes["szwego_video_url"] = video_url
+                attributes = {key: value for key, value in attributes.items() if value not in (None, "")}
+
+                row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False), attributes]
                 
                 if goods_id in seen_by_goods_id:
                     old_info = seen_by_goods_id[goods_id]
@@ -307,7 +336,8 @@ def main():
 
                 all_rows.append(row)
                 page_saved += 1
-                seen_photo_keys[photo_key] = len(all_rows) - 1
+                if args.parse_mode == "images":
+                    seen_photo_keys[photo_key] = len(all_rows) - 1
                 seen_by_goods_id[goods_id] = {"idx": len(all_rows) - 1, "desc_len": len(description)}
 
             print(f"PROGRESS:{len(all_rows)}", flush=True)
@@ -332,6 +362,7 @@ def main():
                     {
                         **dict(zip(csv_header, row)),
                         "photos": json.loads(row[8]) if row[8] else [],
+                        "attributes": row[9] if len(row) > 9 else {},
                         "source_position": index,
                     }
                     for index, row in enumerate(all_rows)
@@ -341,7 +372,7 @@ def main():
                 writer = csv.writer(f, delimiter=";", lineterminator="\n")
                 writer.writerow(csv_header)
                 if all_rows:
-                    writer.writerows(all_rows)
+                    writer.writerows(row[:len(csv_header)] for row in all_rows)
         
         if all_rows:
             print(f"Final: Saved {len(all_rows)} items to {args.output}")

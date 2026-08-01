@@ -19,6 +19,7 @@ async function migrate() {
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
         album_id TEXT NOT NULL,
+        szwego_parse_mode TEXT NOT NULL DEFAULT 'images',
         cookie TEXT,
         group_id TEXT DEFAULT '',
         tag_id TEXT DEFAULT '',
@@ -61,6 +62,7 @@ async function migrate() {
 
     await pool.query(`
       ALTER TABLE suppliers
+        ADD COLUMN IF NOT EXISTS szwego_parse_mode TEXT NOT NULL DEFAULT 'images',
         ADD COLUMN IF NOT EXISTS cookie TEXT,
         ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '',
         ADD COLUMN IF NOT EXISTS tag_id TEXT DEFAULT '',
