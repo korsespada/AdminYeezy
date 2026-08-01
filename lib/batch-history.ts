@@ -10,3 +10,8 @@ export function currentBatchHistoryStatus(stage?: string | null) {
     PUSHED: 'Обработано ИИ',
   } as Record<string, string>)[String(stage || '')] || ''
 }
+
+export function effectiveBatchHistoryStage(stage?: string | null, allAiProcessed = false) {
+  if (stage === 'PUSHED' || stage === 'DELETED_FROM_DB') return stage
+  return allAiProcessed ? 'AI_PROCESSED' : stage || null
+}

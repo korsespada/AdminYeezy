@@ -21,7 +21,7 @@ import {
   deleteScrapingFileArtifactForTask,
   deleteScrapingFileArtifactsForBatch,
 } from '@/lib/scraping-files'
-import { currentBatchHistoryStatus } from '@/lib/batch-history'
+import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
 
 // --- Suppliers CRUD ---
 
@@ -678,7 +678,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         supplier_avatar: batch.supplier_avatar,
         items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
         stage: batch.stage,
-        status: normalizeBatchStatus(allAiProcessed ? 'AI_PROCESSED' : batch.stage, sortedFiles),
+        status: normalizeBatchStatus(effectiveBatchHistoryStage(batch.stage, allAiProcessed), sortedFiles),
         end_date: latestEndDate,
         created_at: batch.created_at,
         updated_at: latestFile?.updated_at || batch.updated_at,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { currentBatchHistoryStatus, shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
+import {
+  currentBatchHistoryStatus,
+  effectiveBatchHistoryStage,
+  shouldOpenBatchArtifactAsFile,
+} from '@/lib/batch-history'
 
 describe('batch history navigation', () => {
   it('opens JSONB batch artifacts as editable batches instead of local files', () => {
@@ -13,5 +17,11 @@ describe('batch history navigation', () => {
     expect(currentBatchHistoryStatus('SCRIPT_PROCESSED')).toBe('Обработан скриптом')
     expect(currentBatchHistoryStatus('AI_PROCESSED')).toBe('Обработано ИИ')
     expect(currentBatchHistoryStatus('PUSHED')).toBe('Обработано ИИ')
+  })
+
+  it('keeps terminal batch stages when every product was processed by AI', () => {
+    expect(effectiveBatchHistoryStage('PUSHED', true)).toBe('PUSHED')
+    expect(effectiveBatchHistoryStage('DELETED_FROM_DB', true)).toBe('DELETED_FROM_DB')
+    expect(effectiveBatchHistoryStage('SCRIPT_PROCESSED', true)).toBe('AI_PROCESSED')
   })
 })
