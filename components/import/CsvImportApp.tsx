@@ -492,6 +492,8 @@ export default function CsvImportApp({
   const [bulkPrice, setBulkPrice] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
+  const actionBarRef = useRef<HTMLDivElement | null>(null);
+  const [actionBarHeight, setActionBarHeight] = useState(72);
   const [activeSnapshotId, setActiveSnapshotId] = useState<string | null>(initialSnapshotId);
   const isBatchSource = Boolean(batchId);
   const isSnapshotSource = Boolean(activeSnapshotId);
@@ -552,6 +554,16 @@ export default function CsvImportApp({
       timers.clear();
     };
   }, []);
+
+  useEffect(() => {
+    const element = actionBarRef.current;
+    if (!element) return;
+    const updateHeight = () => setActionBarHeight(element.getBoundingClientRect().height);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [products.length]);
 
   useEffect(() => {
     const progressBatchId = batchId || initialBatchId;
@@ -1437,7 +1449,7 @@ export default function CsvImportApp({
         
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
-          <div className="sticky top-0 z-30 mb-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
+          <div ref={actionBarRef} className="sticky top-0 z-30 mb-2 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
             <div className="flex items-center gap-4">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Выбрано</span>
@@ -1974,7 +1986,10 @@ export default function CsvImportApp({
 
         {/* Filters */}
         {products.length > 0 && (
-            <div className="sticky top-[88px] z-20 mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-4 shadow-xl backdrop-blur-md">
+            <div
+              className="sticky z-20 mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-4 shadow-xl backdrop-blur-md"
+              style={{ top: actionBarHeight + 8 }}
+            >
               <div className="flex items-center gap-2 text-slate-500 mr-1">
                 <Filter className="w-4 h-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">
@@ -2253,8 +2268,6 @@ export default function CsvImportApp({
                     onToggleSelection={() => toggleMergeSelection(realIndex)}
                     onRemove={handleRemove}
                     onClick={() => setSelectedIdx(realIndex)}
-                    onAiProcess={() => handleRetryProductAi(product)}
-                    aiProcessing={isProcessing}
                   />
                 ) : isBatchSource ? (
                   <AdminProductCard
@@ -2268,9 +2281,6 @@ export default function CsvImportApp({
                     categories={(lookups?.categories || []) as any}
                     subcategories={(lookups?.subcategories || []) as any}
                     allowDuplicate={false}
-                    aiProcessed={product.ai_processed === true || product.ai_processed === "true"}
-                    aiProcessing={isProcessing}
-                    onAiProcess={() => handleRetryProductAi(product)}
                     onInlineUpdate={async (_current, patch) => {
                       if (patch.name !== undefined) updateProduct(realIndex, 'name', String(patch.name));
                       if (patch.price !== undefined) updateProduct(realIndex, 'price', Number(patch.price));
@@ -2288,7 +2298,6 @@ export default function CsvImportApp({
                     onUpdate={updateProduct}
                     onClick={() => setSelectedIdx(realIndex)}
                     localPath={localPath}
-                    onRetryAi={batchId ? () => handleRetryProductAi(product) : undefined}
                   />
                 )}
                 </React.Fragment>;
@@ -2451,8 +2460,6 @@ function CsvProductRow({
   onToggleSelection,
   onRemove,
   onClick,
-  onAiProcess,
-  aiProcessing,
 }: {
   product: CsvProduct;
   index: number;
@@ -2462,8 +2469,6 @@ function CsvProductRow({
   onToggleSelection: () => void;
   onRemove: (index: number) => void;
   onClick: () => void;
-  onAiProcess: () => void;
-  aiProcessing: boolean;
 }) {
   const photoCount = product.photos?.length || 0;
   const sourceNumber = (product.source_position ?? index) + 1;
@@ -2540,7 +2545,7 @@ function CsvProductRow({
         <p className="truncate text-[10px] text-slate-500">{subcategoryName || "Без подкатегории"}</p>
       </div>
 
-      <div className="flex flex-col items-start gap-1">
+      <div className="flex items-center">
         <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold ${
           product.ai_processed === true || product.ai_processed === "true"
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
@@ -2548,16 +2553,6 @@ function CsvProductRow({
         }`}>
           {product.ai_processed === true || product.ai_processed === "true" ? "ИИ готово" : "Сырой"}
         </span>
-        {!(product.ai_processed === true || product.ai_processed === "true") && (
-          <button
-            type="button"
-            disabled={aiProcessing}
-            onClick={(event) => { event.stopPropagation(); onAiProcess(); }}
-            className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold text-indigo-300 hover:text-indigo-200 disabled:opacity-50"
-          >
-            <Sparkles className="h-3 w-3" /> Обработать ИИ
-          </button>
-        )}
       </div>
 
       <button
