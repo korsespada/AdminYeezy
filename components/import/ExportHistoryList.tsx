@@ -386,7 +386,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 const productCount = Number(batch.product_count || batch.items_count || 0)
                 const hasAiRemaining = productCount > 0 && aiProductCount < productCount
                 const aiMode = aiProductCount > 0 ? 'full' : 'sample'
-                const canPublish = batch.stage === 'AI_PROCESSED' && productCount > 0 && aiProductCount === productCount
+                // A previously published batch may need a safe retry when the
+                // catalog import was interrupted after the stage was marked
+                // PUSHED. Both publication modes are idempotent by external_id.
+                const canPublish = ['AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
 
                 return (
                   <React.Fragment key={batch.id}>
