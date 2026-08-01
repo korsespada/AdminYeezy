@@ -49,7 +49,7 @@ import {
   type CsvProduct,
   type Lookups,
 } from "@/actions/csv-import";
-import { getBatchPublishProgressAction, pushBatchToCatalogAction } from "@/actions/suppliers";
+import { pushBatchToCatalogAction } from "@/actions/suppliers";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -547,8 +547,10 @@ export default function CsvImportApp({
     if (!isPushing || !batchId) return;
     let cancelled = false;
     const poll = async () => {
-      const response = await getBatchPublishProgressAction(batchId);
-      if (cancelled || !response.success || !response.data?.running) return;
+      const response = await fetch(`/api/batches/publish-progress?batchId=${encodeURIComponent(batchId)}`, {
+        cache: "no-store",
+      }).then((result) => result.ok ? result.json() : null).catch(() => null);
+      if (cancelled || !response?.success || !response.data?.running) return;
       const phase = ["lookup", "media", "publish"].includes(response.data.phase)
         ? response.data.phase as "lookup" | "media" | "publish"
         : "publish";
