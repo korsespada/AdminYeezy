@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Info, X } from 'lucide-react'
+import { Info, Plus, Trash2, X } from 'lucide-react'
 import {
   getCatalogAttributeDefinitionsForCategory,
   type CatalogAttributeDefinition,
@@ -120,6 +120,10 @@ function AttributeField({
   const [draft, setDraft] = useState(serialized)
   useEffect(() => setDraft(serialized), [serialized])
 
+  if (definition.code === 'measurements') {
+    return <MeasurementsField value={value} onChange={onChange} />
+  }
+
   const isList = definition.value_type === 'size' || definition.value_type === 'multi_enum'
   const datalistId = `attribute-values-${definition.code}`
   const fieldClass = 'mt-1 h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 text-xs text-slate-200 outline-none focus:border-indigo-500'
@@ -224,6 +228,214 @@ function formatAttributeValue(definition: CatalogAttributeDefinition, value: unk
     return formatAttributeObject(definition, item)
   }
   return formatAttributePart(definition, value)
+}
+
+type MeasurementColumn = { key: string; label: string }
+type MeasurementRow = { size: string; values: Record<string, string> }
+type MeasurementTable = {
+  unit: string
+  columns: MeasurementColumn[]
+  rows: MeasurementRow[]
+  note?: string
+}
+
+function MeasurementsField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
+  const table = normalizeMeasurementTable(value)
+  const legacyText = typeof value === 'string' ? value.trim() : ''
+
+  if (!table) {
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
+        <div className="text-[11px] font-semibold text-slate-300">Замеры</div>
+        {legacyText && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-400">{legacyText}</p>}
+        <button
+          type="button"
+          onClick={() => onChange(defaultMeasurementTable(legacyText))}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-200 hover:bg-indigo-500/20"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {legacyText ? 'Преобразовать в таблицу' : 'Добавить таблицу замеров'}
+        </button>
+      </div>
+    )
+  }
+
+  const update = (next: Partial<MeasurementTable>) => onChange({ ...table, ...next })
+  const updateColumn = (index: number, label: string) => {
+    const columns = table.columns.map((column, columnIndex) => columnIndex === index ? { ...column, label } : column)
+    update({ columns })
+  }
+  const addColumn = () => {
+    const key = nextMeasurementKey(table.columns)
+    update({
+      columns: [...table.columns, { key, label: 'Параметр' }],
+      rows: table.rows.map((row) => ({ ...row, values: { ...row.values, [key]: '' } })),
+    })
+  }
+  const removeColumn = (key: string) => update({
+    columns: table.columns.filter((column) => column.key !== key),
+    rows: table.rows.map((row) => ({
+      ...row,
+      values: Object.fromEntries(Object.entries(row.values).filter(([valueKey]) => valueKey !== key)),
+    })),
+  })
+  const updateRow = (index: number, nextRow: MeasurementRow) => update({
+    rows: table.rows.map((row, rowIndex) => rowIndex === index ? nextRow : row),
+  })
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold text-slate-300">Замеры</span>
+        <button type="button" onClick={() => onChange(undefined)} title="Удалить таблицу замеров" className="text-slate-500 hover:text-red-400">
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
+        <table className="min-w-full border-collapse text-xs">
+          <thead className="bg-slate-900 text-slate-300">
+            <tr>
+              <th className="min-w-24 border-r border-slate-800 p-2 text-left">Размер</th>
+              {table.columns.map((column, index) => (
+                <th key={column.key} className="min-w-32 border-r border-slate-800 p-1.5 last:border-r-0">
+                  <div className="flex items-center gap-1">
+                    <input
+                      value={column.label}
+                      onChange={(event) => updateColumn(index, event.target.value)}
+                      aria-label={`Название колонки ${index + 1}`}
+                      className="h-8 min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    />
+                    <button type="button" onClick={() => removeColumn(column.key)} title="Удалить колонку" className="text-slate-600 hover:text-red-400">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </th>
+              ))}
+              <th className="w-10 p-1.5">
+                <button type="button" onClick={addColumn} title="Добавить колонку" className="text-indigo-300 hover:text-indigo-200">
+                  <Plus className="h-4 w-4" />
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {table.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                <td className="border-r border-slate-800 p-1.5">
+                  <input
+                    value={row.size}
+                    onChange={(event) => updateRow(rowIndex, { ...row, size: event.target.value })}
+                    placeholder="M"
+                    aria-label={`Размер в строке ${rowIndex + 1}`}
+                    className="h-8 w-full rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                  />
+                </td>
+                {table.columns.map((column) => (
+                  <td key={column.key} className="border-r border-slate-800 p-1.5 last:border-r-0">
+                    <input
+                      value={row.values[column.key] || ''}
+                      onChange={(event) => updateRow(rowIndex, {
+                        ...row,
+                        values: { ...row.values, [column.key]: event.target.value },
+                      })}
+                      placeholder="—"
+                      aria-label={`${column.label}, размер ${row.size || rowIndex + 1}`}
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    />
+                  </td>
+                ))}
+                <td className="p-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => update({ rows: table.rows.filter((_, index) => index !== rowIndex) })}
+                    title="Удалить строку"
+                    className="text-slate-600 hover:text-red-400"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => update({ rows: [...table.rows, { size: '', values: {} }] })}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:border-indigo-500"
+        >
+          <Plus className="h-3.5 w-3.5" /> Строка размера
+        </button>
+        <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-500">
+          Единица
+          <input
+            value={table.unit}
+            onChange={(event) => update({ unit: event.target.value })}
+            className="h-8 w-14 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+          />
+        </label>
+      </div>
+      <textarea
+        value={table.note || ''}
+        onChange={(event) => update({ note: event.target.value })}
+        rows={2}
+        placeholder="Примечание к замерам (необязательно)"
+        className="mt-2 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+      />
+    </div>
+  )
+}
+
+function normalizeMeasurementTable(value: unknown): MeasurementTable | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const source = value as Record<string, unknown>
+  if (!Array.isArray(source.columns) || !Array.isArray(source.rows)) return null
+
+  const columns = source.columns.flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const item = entry as Record<string, unknown>
+    const key = String(item.key || `measurement_${index + 1}`).trim()
+    if (!key) return []
+    return [{ key, label: String(item.label || key).trim() }]
+  })
+  const rows = source.rows.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const item = entry as Record<string, unknown>
+    const values = item.values && typeof item.values === 'object' && !Array.isArray(item.values)
+      ? Object.fromEntries(Object.entries(item.values).map(([key, entryValue]) => [key, String(entryValue ?? '')]))
+      : {}
+    return [{ size: String(item.size || '').trim(), values }]
+  })
+
+  return {
+    unit: String(source.unit || 'см').trim() || 'см',
+    columns,
+    rows,
+    note: String(source.note || '').trim(),
+  }
+}
+
+function defaultMeasurementTable(note = ''): MeasurementTable {
+  return {
+    unit: 'см',
+    columns: [
+      { key: 'length', label: 'Длина' },
+      { key: 'chest', label: 'Обхват груди' },
+      { key: 'shoulders', label: 'Плечи' },
+      { key: 'sleeve', label: 'Рукав' },
+    ],
+    rows: [{ size: '', values: {} }],
+    note,
+  }
+}
+
+function nextMeasurementKey(columns: MeasurementColumn[]) {
+  let index = columns.length + 1
+  while (columns.some((column) => column.key === `measurement_${index}`)) index += 1
+  return `measurement_${index}`
 }
 
 function formatAttributePart(definition: CatalogAttributeDefinition, value: unknown): string {

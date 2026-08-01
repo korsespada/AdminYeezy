@@ -3,7 +3,7 @@
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Brand, type Category, type Product, type Subcategory } from '@/lib/types';
-import { Trash2, Copy } from 'lucide-react';
+import { Trash2, Copy, Sparkles } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
@@ -29,9 +29,12 @@ interface ProductCardProps {
     brands?: Brand[];
     onInlineUpdate?: (product: Product, patch: Partial<Product>) => Promise<void> | void;
     allowDuplicate?: boolean;
+    aiProcessed?: boolean;
+    aiProcessing?: boolean;
+    onAiProcess?: () => void;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -314,6 +317,19 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         </p>
                     )}
                 </div>
+
+                {!aiProcessed && onAiProcess && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        onClick={(event) => { event.stopPropagation(); onAiProcess(); }}
+                        disabled={aiProcessing}
+                        className="mb-2 h-8 w-full gap-1.5 bg-indigo-600 text-xs font-semibold text-white hover:bg-indigo-500"
+                    >
+                        <Sparkles className={`h-3.5 w-3.5 ${aiProcessing ? 'animate-pulse' : ''}`} />
+                        Обработать ИИ
+                    </Button>
+                )}
 
                 <div className="mt-auto flex items-center justify-between border-t border-slate-700 pt-2">
                     {/* Editable Price */}

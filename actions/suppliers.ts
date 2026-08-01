@@ -162,6 +162,13 @@ async function canonicalizeSupplierIdList(entityType: 'brand' | 'category' | 'su
   return [...new Set(ids.map((id) => canonicalById.get(id) || id))]
 }
 
+function mergeSupplierPhotoInstructions(mainInstructions: unknown, photoInstructions: unknown) {
+  const main = String(mainInstructions || '').trim()
+  const photo = String(photoInstructions || '').trim()
+  if (!photo || main.includes(photo)) return main
+  return [main, `Особенности фотографий:\n${photo}`].filter(Boolean).join('\n\n')
+}
+
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -197,7 +204,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const post_process_script = formData.get('post_process_script') as string || null
     const post_process_enabled = formData.get('post_process_enabled') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
-    const ai_photo_instructions = formData.get('ai_photo_instructions') as string || ''
+    const ai_photo_instructions = ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
@@ -244,14 +251,21 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const ai_resize_enabled = formData.get('ai_resize_enabled') === 'on'
     const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
     const ai_cache_enabled = formData.get('ai_cache_enabled') === 'on'
-    const ai_instructions = formData.get('ai_instructions') as string || ''
+    const currentInstructions = await scrapingQuery(
+      'SELECT ai_photo_instructions FROM suppliers WHERE id=$1',
+      [id],
+    )
+    const ai_instructions = mergeSupplierPhotoInstructions(
+      formData.get('ai_instructions'),
+      currentInstructions.rows[0]?.ai_photo_instructions,
+    )
 
     const avatar_url = formData.get('avatar_url') as string || null
     const cookie = formData.get('cookie') as string || null
     const post_process_script = formData.get('post_process_script') as string || null
     const post_process_enabled = formData.get('post_process_enabled') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
-    const ai_photo_instructions = formData.get('ai_photo_instructions') as string || ''
+    const ai_photo_instructions = ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
@@ -400,6 +414,7 @@ export interface ExportHistoryBatch {
   ai_failed_count?: number
   product_count?: number
   ai_product_count?: number
+  active_operation?: string | null
 }
 
 function normalizeTaskStatus(status: string | null, resultPath: string | null) {
@@ -521,7 +536,8 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai.failed_count as ai_failed_count,
         pc.product_count,
         pc.ai_product_count,
-        pc.ai_updated_at
+        pc.ai_updated_at,
+        op.operation as active_operation
       FROM scraping_tasks t
       LEFT JOIN suppliers s ON t.supplier_id = s.id
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
@@ -536,6 +552,8 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
                MAX(updated_at) FILTER (WHERE COALESCE(ai_processed, false)) AS ai_updated_at
         FROM products WHERE batch_id=b.id
       ) pc ON TRUE
+      LEFT JOIN batch_operation_locks op
+        ON op.batch_id=b.id AND op.updated_at > NOW() - INTERVAL '2 minutes'
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
       ORDER BY COALESCE(b.created_at, t.created_at) DESC, t.created_at DESC
       LIMIT 500
@@ -583,6 +601,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             product_count: Number(row.product_count || 0),
             ai_product_count: Number(row.ai_product_count || 0),
             ai_updated_at: row.ai_updated_at || null,
+            active_operation: row.active_operation || null,
           },
           files: [],
         })
@@ -696,6 +715,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai_failed_count: batch.ai_failed_count,
         product_count: batch.product_count,
         ai_product_count: batch.ai_product_count,
+        active_operation: batch.active_operation,
       }
     })
 

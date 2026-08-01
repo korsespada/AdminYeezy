@@ -1394,6 +1394,38 @@ function railsUpdatePayload(product) {
   };
 }
 
+function stableJson(value) {
+  if (Array.isArray(value)) return value.map(stableJson);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, stableJson(value[key])]),
+  );
+}
+
+function publicationPayloadHash(product) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(stableJson(railsUpdatePayload(product).product)))
+    .digest('hex');
+}
+
+async function ensurePublicationPayloadHashes() {
+  await scrapingPool.query(
+    'ALTER TABLE batch_publications ADD COLUMN IF NOT EXISTS payload_hash TEXT',
+  );
+}
+
+async function batchPublicationHashes(batchId, externalIds) {
+  const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const result = await scrapingPool.query(`
+    SELECT external_id,payload_hash
+    FROM batch_publications
+    WHERE batch_id=$1 AND external_id=ANY($2::text[])
+  `, [batchId, ids]);
+  return new Map(result.rows.map((row) => [String(row.external_id), row.payload_hash || null]));
+}
+
 async function updateRailsProduct(id, product) {
   await fetchJsonWithRetry(railsApiUrl(`/admin/products/${encodeURIComponent(id)}`), {
     method: 'PATCH',
@@ -1405,7 +1437,7 @@ async function updateRailsProduct(id, product) {
   }, 'Rails update');
 }
 
-async function recordBatchPublications(batchId, externalIds) {
+async function recordBatchPublications(batchId, externalIds, payloadHashes = new Map()) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
   if (!ids.length) return;
   const publishedProducts = await existingRailsProducts(ids);
@@ -1413,19 +1445,25 @@ async function recordBatchPublications(batchId, externalIds) {
     const railsProduct = publishedProducts.get(externalId);
     if (!railsProduct) continue;
     await scrapingPool.query(`
-      INSERT INTO batch_publications(batch_id,external_id,rails_product_id,published_at)
-      VALUES($1,$2,$3,NOW())
-      ON CONFLICT(batch_id,external_id) DO UPDATE SET rails_product_id=EXCLUDED.rails_product_id,published_at=NOW()
-    `, [batchId, externalId, railsProduct.id ? String(railsProduct.id) : null]);
+      INSERT INTO batch_publications(batch_id,external_id,rails_product_id,payload_hash,published_at)
+      VALUES($1,$2,$3,$4,NOW())
+      ON CONFLICT(batch_id,external_id) DO UPDATE SET
+        rails_product_id=EXCLUDED.rails_product_id,
+        payload_hash=EXCLUDED.payload_hash,
+        published_at=NOW()
+    `, [batchId, externalId, railsProduct.id ? String(railsProduct.id) : null, payloadHashes.get(externalId) || null]);
   }
 }
 
-async function recordBatchPublication(batchId, externalId, railsProductId) {
+async function recordBatchPublication(batchId, externalId, railsProductId, payloadHash) {
   await scrapingPool.query(`
-    INSERT INTO batch_publications(batch_id,external_id,rails_product_id,published_at)
-    VALUES($1,$2,$3,NOW())
-    ON CONFLICT(batch_id,external_id) DO UPDATE SET rails_product_id=EXCLUDED.rails_product_id,published_at=NOW()
-  `, [batchId, externalId, railsProductId ? String(railsProductId) : null]);
+    INSERT INTO batch_publications(batch_id,external_id,rails_product_id,payload_hash,published_at)
+    VALUES($1,$2,$3,$4,NOW())
+    ON CONFLICT(batch_id,external_id) DO UPDATE SET
+      rails_product_id=EXCLUDED.rails_product_id,
+      payload_hash=EXCLUDED.payload_hash,
+      published_at=NOW()
+  `, [batchId, externalId, railsProductId ? String(railsProductId) : null, payloadHash || null]);
 }
 
 async function pushBatchToCatalog(batchId, options = {}, onProgress) {
@@ -1475,6 +1513,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
 
   const lookups = await loadLegacyLookupMaps();
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
+  await ensurePublicationPayloadHashes();
   if (onProgress) await onProgress({ phase: 'lookup', current: 0, total: products.length, success: 0, failed: 0 });
   const existingProducts = await existingRailsProducts(
     products.map((product) => product.external_id),
@@ -1486,14 +1525,26 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     },
   );
   const existingExternalIds = new Set(existingProducts.keys());
+  const previousPayloadHashes = mode === 'upsert'
+    ? await batchPublicationHashes(batchId, products.map((product) => product.external_id))
+    : new Map();
+  const changedExistingExternalIds = new Set(products.flatMap((product) => {
+    const externalId = String(product.external_id || '').trim();
+    if (!existingExternalIds.has(externalId)) return [];
+    return previousPayloadHashes.get(externalId) === publicationPayloadHash(product) ? [] : [externalId];
+  }));
   const candidates = products
     .map((product, index) => ({ product, index }))
-    .filter(({ product }) => mode === 'upsert' || !existingExternalIds.has(String(product.external_id || '').trim()));
+    .filter(({ product }) => {
+      const externalId = String(product.external_id || '').trim();
+      return !existingExternalIds.has(externalId) || (mode === 'upsert' && changedExistingExternalIds.has(externalId));
+    });
   const updatedProducts = products.map((product) => ({ ...product }));
   const errors = [];
   let prepared = 0;
   let imported = 0;
   let updated = 0;
+  const skippedUnchanged = mode === 'upsert' ? existingExternalIds.size - changedExistingExternalIds.size : 0;
   let batchProductsChanged = false;
 
   if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0 });
@@ -1552,8 +1603,14 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
 
+  const payloadHashes = new Map(updatedProducts.map((product) => [
+    String(product.external_id || '').trim(),
+    publicationPayloadHash(product),
+  ]));
+
   if (mode === 'upsert') {
-    const existingEntries = [...existingProducts.entries()];
+    const existingEntries = [...existingProducts.entries()]
+      .filter(([externalId]) => changedExistingExternalIds.has(externalId));
     const productsByExternalId = new Map(updatedProducts.map((product) => [String(product.external_id || '').trim(), product]));
     let updateCursor = 0;
     let updateCompleted = 0;
@@ -1566,7 +1623,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
           if (product) {
             await updateRailsProduct(railsProduct.id, product);
             updated += 1;
-            await recordBatchPublication(batchId, externalId, railsProduct.id);
+            await recordBatchPublication(batchId, externalId, railsProduct.id, payloadHashes.get(externalId));
           }
         } catch (error) {
           errors.push(`${externalId}: ${error.message}`);
@@ -1606,7 +1663,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     imported += Number(payload.result?.products_imported || 0);
     // Коммитим владение сразу после каждого успешно принятого Rails-чанка.
     // Если следующий чанк упадет, повторный запуск не потеряет уже опубликованное.
-    await recordBatchPublications(batchId, chunk.map((row) => row.external_id));
+    await recordBatchPublications(batchId, chunk.map((row) => row.external_id), payloadHashes);
     if (payload.result?.products_failed) {
       for (const error of payload.result.errors || []) errors.push(`Rails line ${error.line}: ${error.error}`);
     }
@@ -1638,6 +1695,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     errors,
     total: products.length,
     skippedExisting: mode === 'add' ? existingExternalIds.size : 0,
+    skippedUnchanged,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
   } finally {
@@ -1662,6 +1720,7 @@ module.exports = {
   isAlreadyHosted,
   lookupName,
   parseCsvObjects,
+  publicationPayloadHash,
   listAllSuppliers,
   listFavoriteSuppliers,
   normalizeProductCatalogReferences,

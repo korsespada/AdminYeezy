@@ -71,6 +71,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   }),
   definition('measurements', 'Замеры', 'Одежда', 'text', 70, {
     aliases: ['clothing_measurements', 'замеры одежды', 'замеры'],
+    rules: [
+      'Таблица замеров по размерам: размер, длина, обхват груди, плечи, рукав',
+      'Не смешивать замеры разных товаров и не вычислять отсутствующие значения',
+    ],
   }),
   definition('upper_material', 'Материал верха', 'Обувь', 'multi_enum', 80, {
     filter: true,

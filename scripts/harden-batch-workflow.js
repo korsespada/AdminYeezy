@@ -25,6 +25,7 @@ async function migrate() {
         PRIMARY KEY(batch_id, external_id)
       )
     `)
+    await client.query('ALTER TABLE batch_publications ADD COLUMN IF NOT EXISTS payload_hash TEXT')
     await client.query('CREATE INDEX IF NOT EXISTS batch_publications_external_idx ON batch_publications(external_id, published_at DESC)')
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS batch_ai_runs_one_active_per_batch_idx

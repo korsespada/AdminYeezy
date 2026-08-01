@@ -53,4 +53,33 @@ describe('CatalogAttributeFields', () => {
     expect(screen.getByDisplayValue('Чёрный')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Хлопок')).toBeInTheDocument()
   })
+
+  it('edits structured clothing measurements without flattening the table', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{
+          measurements: {
+            unit: 'см',
+            columns: [{ key: 'length', label: 'Длина' }],
+            rows: [{ size: 'M', values: { length: '65,5' } }],
+            note: '',
+          },
+        }}
+        onChange={onChange}
+        categoryName="Одежда"
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Длина, размер M'), { target: { value: '66' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      measurements: {
+        unit: 'см',
+        columns: [{ key: 'length', label: 'Длина' }],
+        rows: [{ size: 'M', values: { length: '66' } }],
+        note: '',
+      },
+    })
+  })
 })

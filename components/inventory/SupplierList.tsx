@@ -46,7 +46,6 @@ interface Supplier {
   post_process_script?: string | null
   post_process_enabled: boolean
   ai_photo_models?: string | null
-  ai_photo_instructions?: string | null
   ai_parallel_enabled: boolean
   ai_parallel_count: number
   parse_tags_enabled: boolean
@@ -250,7 +249,6 @@ export default function SupplierList({
         ai_resize_enabled: true,
         ai_instructions: '',
         ai_photo_models: '',
-        ai_photo_instructions: '',
         ai_parallel_enabled: false,
         ai_parallel_count: 5,
         parse_tags_enabled: false,
@@ -872,15 +870,6 @@ export default function SupplierList({
                           defaultValue={editingSupplier?.ai_photo_models || ''} 
                           placeholder="Например: Classic Flap, Chanel 22, Boy Chanel"
                           className="w-full min-h-[80px] bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500 custom-scrollbar resize-y"
-                        />
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-400 mb-2">Особенности фотографий этого поставщика</p>
-                        <textarea 
-                          name="ai_photo_instructions" 
-                          defaultValue={editingSupplier?.ai_photo_instructions || ''} 
-                          placeholder="Например: логотип часто находится на внутренней бирке; рекламные заставки имеют красную рамку."
-                          className="w-full min-h-[100px] bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500 custom-scrollbar resize-y"
                         />
                       </div>
                     </div>

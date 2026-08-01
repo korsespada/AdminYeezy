@@ -35,6 +35,7 @@ import {
   Users,
   MoreHorizontal,
   ChevronDown,
+  Undo2,
 } from "lucide-react";
 import {
   fetchLookupsAction,
@@ -55,6 +56,8 @@ import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
   getLatestBatchAiRunAction,
+  getBatchSnapshotsAction,
+  rollbackBatchAction,
   startBatchAiAction,
   stopBatchAiRunAction,
 } from "@/actions/batch-ai";
@@ -494,6 +497,7 @@ export default function CsvImportApp({
   const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isRollingBackAiSample, setIsRollingBackAiSample] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number, failed: number} | null>(null);
@@ -647,6 +651,10 @@ export default function CsvImportApp({
     [products],
   );
   const aiRemainingCount = products.length - aiReadyCount;
+  const aiSampleCount = useMemo(
+    () => products.filter((product) => product.ai_sampled === true).length,
+    [products],
+  );
   const aiErrorProducts = useMemo(
     () => products.filter((product) => !(product.ai_processed === true || product.ai_processed === "true") && Boolean(product.ai_error)),
     [products],
@@ -926,11 +934,11 @@ export default function CsvImportApp({
           setResult({
             success: Number(pushResult.data?.success || 0),
             updated: Number(pushResult.data?.updated || 0),
-            skipped: Number(pushResult.data?.skippedExisting || 0),
+            skipped: Number(pushResult.data?.skippedExisting || 0) + Number(pushResult.data?.skippedUnchanged || 0),
             failed: Number(pushResult.data?.failed || 0),
             errors: pushResult.data?.errors || [],
           });
-          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, пропущено: ${Number(pushResult.data?.skippedExisting || 0)}`);
+          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}`);
           setBatchStage("PUSHED");
         } else {
           setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
@@ -1054,26 +1062,33 @@ export default function CsvImportApp({
   };
 
   const handleRetryProductAi = async (product: CsvProduct) => {
-    if (!batchId || !product.id) return;
-    setSaveMsg(`Повторная обработка ${product.external_id || product.id}...`);
-    const result = await startBatchAiAction(batchId, "retry", Number(product.id));
-    if (result.success) {
-      const data: any = result.data;
-      if (data?.runId) {
-        setActiveAiRunId(String(data.runId));
-        for (let attempt = 0; attempt < 200; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          const run = await getBatchAiRunAction(data.runId);
-          if (!run.success || ["completed", "failed", "cancelled"].includes(run.data?.status)) break;
+    if (!batchId || !product.id || isProcessing) return;
+    const alreadyProcessed = product.ai_processed === true || product.ai_processed === "true";
+    setIsProcessing(true);
+    setSaveMsg(`${alreadyProcessed ? "Повторная обработка" : "Обработка ИИ"} ${product.external_id || product.id}...`);
+    try {
+      const result = await startBatchAiAction(batchId, "retry", Number(product.id));
+      if (result.success) {
+        const data: any = result.data;
+        if (data?.runId) {
+          setActiveAiRunId(String(data.runId));
+          for (let attempt = 0; attempt < 200; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            const run = await getBatchAiRunAction(data.runId);
+            if (!run.success || ["completed", "failed", "cancelled"].includes(run.data?.status)) break;
+          }
+          setActiveAiRunId(null);
         }
-        setActiveAiRunId(null);
+        await handleLoadBatch(batchId);
+        setSaveMsg(alreadyProcessed ? "✓ Товар обработан повторно" : "✓ Товар обработан ИИ");
+      } else {
+        setSaveMsg(result.error || "Ошибка обработки ИИ");
       }
-      await handleLoadBatch(batchId);
-      setSaveMsg("✓ Товар обработан повторно");
-    } else {
-      setSaveMsg(result.error || "Ошибка повторной обработки");
+    } finally {
+      setActiveAiRunId(null);
+      setIsProcessing(false);
+      setTimeout(() => setSaveMsg(null), 5000);
     }
-    setTimeout(() => setSaveMsg(null), 5000);
   };
 
   const handleCustomScriptProcess = async () => {
@@ -1220,6 +1235,40 @@ export default function CsvImportApp({
     )) return;
     setShowMoreActions(false);
     await handleAiProcess("reprocess");
+  };
+
+  const handleRollbackAiSample = async () => {
+    const targetBatchId = batchId || initialBatchId;
+    if (!targetBatchId || isRollingBackAiSample) return;
+    if (!window.confirm(
+      `Отменить тестовую AI-обработку ${aiSampleCount || 10} товаров?\n\n` +
+      "Партия вернётся к снимку перед последним тестом ИИ. Ручные изменения, сделанные после теста, тоже будут отменены.",
+    )) return;
+
+    setIsRollingBackAiSample(true);
+    try {
+      const snapshotsResult = await getBatchSnapshotsAction(targetBatchId);
+      const snapshot = snapshotsResult.success
+        ? snapshotsResult.data?.find((item: any) => item.label === "До AI · sample")
+        : null;
+      if (!snapshot) {
+        setSaveMsg("Не найден снимок перед тестом ИИ. Используйте откат из истории выгрузки.");
+        return;
+      }
+
+      const rollbackResult = await rollbackBatchAction(targetBatchId, snapshot.id);
+      if (!rollbackResult.success) {
+        setSaveMsg(`Ошибка отката: ${rollbackResult.error}`);
+        return;
+      }
+
+      await handleLoadBatch(targetBatchId);
+      setSaveMsg("✓ Тестовая AI-обработка отменена, партия восстановлена из снимка.");
+    } catch (error: any) {
+      setSaveMsg(`Ошибка отката: ${error?.message || "не удалось восстановить снимок"}`);
+    } finally {
+      setIsRollingBackAiSample(false);
+    }
   };
 
   const handleBulkApply = () => {
@@ -1387,7 +1436,7 @@ export default function CsvImportApp({
         
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
-          <div className="mb-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
+          <div className="sticky top-0 z-30 mb-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
             <div className="flex items-center gap-4">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Выбрано</span>
@@ -1467,8 +1516,29 @@ export default function CsvImportApp({
                 </button>
               )}
 
+              {!isSnapshotSource && isBatchSource && aiSampleCount > 0 && batchStage !== "PUSHED" && !isProcessing && (
+                <button
+                  onClick={handleRollbackAiSample}
+                  disabled={isRollingBackAiSample}
+                  className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/20 disabled:opacity-50"
+                  title="Вернуть партию к снимку перед последним тестом ИИ"
+                >
+                  {isRollingBackAiSample ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+                  Отменить тест ИИ · {aiSampleCount}
+                </button>
+              )}
+
               {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handlePush("upsert")}
+                    disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
+                    title="Отправить в каталог только товары, изменённые после предыдущей публикации"
+                  >
+                    {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Обновить изменённые
+                  </button>
                   <button
                     onClick={handleReprocessAll}
                     disabled={isProcessing}
@@ -1903,7 +1973,7 @@ export default function CsvImportApp({
 
         {/* Filters */}
         {products.length > 0 && (
-            <div className="mb-6 flex flex-wrap items-center gap-3 p-4 bg-slate-800/50 rounded-xl border border-slate-700/50">
+            <div className="sticky top-[88px] z-20 mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-4 shadow-xl backdrop-blur-md">
               <div className="flex items-center gap-2 text-slate-500 mr-1">
                 <Filter className="w-4 h-4" />
                 <span className="text-xs font-medium uppercase tracking-wider">
@@ -2133,7 +2203,7 @@ export default function CsvImportApp({
               : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
             }>
               {viewMode === "rows" && (
-                <div className="grid min-w-[1120px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_96px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="grid min-w-[1160px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <div>Китайский исходный текст</div>
                   <div>№</div>
                   <div>Фото</div>
@@ -2182,6 +2252,8 @@ export default function CsvImportApp({
                     onToggleSelection={() => toggleMergeSelection(realIndex)}
                     onRemove={handleRemove}
                     onClick={() => setSelectedIdx(realIndex)}
+                    onAiProcess={() => handleRetryProductAi(product)}
+                    aiProcessing={isProcessing}
                   />
                 ) : isBatchSource ? (
                   <AdminProductCard
@@ -2195,6 +2267,9 @@ export default function CsvImportApp({
                     categories={(lookups?.categories || []) as any}
                     subcategories={(lookups?.subcategories || []) as any}
                     allowDuplicate={false}
+                    aiProcessed={product.ai_processed === true || product.ai_processed === "true"}
+                    aiProcessing={isProcessing}
+                    onAiProcess={() => handleRetryProductAi(product)}
                     onInlineUpdate={async (_current, patch) => {
                       if (patch.name !== undefined) updateProduct(realIndex, 'name', String(patch.name));
                       if (patch.price !== undefined) updateProduct(realIndex, 'price', Number(patch.price));
@@ -2375,6 +2450,8 @@ function CsvProductRow({
   onToggleSelection,
   onRemove,
   onClick,
+  onAiProcess,
+  aiProcessing,
 }: {
   product: CsvProduct;
   index: number;
@@ -2384,6 +2461,8 @@ function CsvProductRow({
   onToggleSelection: () => void;
   onRemove: (index: number) => void;
   onClick: () => void;
+  onAiProcess: () => void;
+  aiProcessing: boolean;
 }) {
   const photoCount = product.photos?.length || 0;
   const sourceNumber = (product.source_position ?? index) + 1;
@@ -2394,7 +2473,7 @@ function CsvProductRow({
 
   return (
     <div
-      className={`grid min-h-[68px] min-w-[1120px] cursor-pointer grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_96px_42px] items-center gap-3 border-b border-slate-800 px-3 py-2 transition-colors last:border-b-0 ${
+      className={`grid min-h-[68px] min-w-[1160px] cursor-pointer grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-800 px-3 py-2 transition-colors last:border-b-0 ${
         isSelected ? "bg-indigo-500/10 hover:bg-indigo-500/15" : "hover:bg-slate-800/70"
       }`}
       onClick={onClick}
@@ -2460,7 +2539,7 @@ function CsvProductRow({
         <p className="truncate text-[10px] text-slate-500">{subcategoryName || "Без подкатегории"}</p>
       </div>
 
-      <div>
+      <div className="flex flex-col items-start gap-1">
         <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold ${
           product.ai_processed === true || product.ai_processed === "true"
             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
@@ -2468,6 +2547,16 @@ function CsvProductRow({
         }`}>
           {product.ai_processed === true || product.ai_processed === "true" ? "ИИ готово" : "Сырой"}
         </span>
+        {!(product.ai_processed === true || product.ai_processed === "true") && (
+          <button
+            type="button"
+            disabled={aiProcessing}
+            onClick={(event) => { event.stopPropagation(); onAiProcess(); }}
+            className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold text-indigo-300 hover:text-indigo-200 disabled:opacity-50"
+          >
+            <Sparkles className="h-3 w-3" /> Обработать ИИ
+          </button>
+        )}
       </div>
 
       <button
@@ -2639,9 +2728,9 @@ function CsvProductCard({
             {product.ai_error}
           </div>
         )}
-        {onRetryAi && (product.ai_processed || product.ai_error) && (
+        {onRetryAi && (
           <button onClick={(event) => { event.stopPropagation(); onRetryAi(); }} className="mb-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
-            Повторить ИИ
+            {product.ai_processed || product.ai_error ? "Повторить ИИ" : "Обработать ИИ"}
           </button>
         )}
         <div className="flex items-center justify-between mb-2">
@@ -2819,9 +2908,9 @@ function CsvProductDrawer({
               </h2>
             </div>
             <div className="flex items-center gap-2">
-              {onRetryAi && (local.ai_processed || local.ai_error) && (
+              {onRetryAi && (
                 <button onClick={onRetryAi} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
-                  Повторить ИИ
+                  {local.ai_processed || local.ai_error ? "Повторить ИИ" : "Обработать ИИ"}
                 </button>
               )}
               <button

@@ -189,4 +189,29 @@ describe('batch workflow CSV compatibility adapter', () => {
       else process.env.RAILS_API_URL = previousUrl
     }
   })
+
+  it('uses a stable publication hash and changes it only when catalog payload changes', () => {
+    const product = {
+      external_id: 'item-1',
+      name: 'Футболка',
+      description: 'Хлопок',
+      price: 21000,
+      status: 'active',
+      brand: 'brand-1',
+      category: 'category-1',
+      subcategory: '',
+      gender: 'male',
+      photos: ['https://static.example/item-1.jpg'],
+      attributes: { color: 'синий', sizes: ['M', 'L'] },
+    }
+    const reorderedAttributes = {
+      ...product,
+      attributes: { sizes: ['M', 'L'], color: 'синий' },
+    }
+
+    expect(workflow.publicationPayloadHash(reorderedAttributes))
+      .toBe(workflow.publicationPayloadHash(product))
+    expect(workflow.publicationPayloadHash({ ...product, price: 24000 }))
+      .not.toBe(workflow.publicationPayloadHash(product))
+  })
 })

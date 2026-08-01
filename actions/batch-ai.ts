@@ -330,7 +330,7 @@ function productAttributeDefinitions(product: any, context: any) {
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
   await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
-    SELECT b.*, s.ai_instructions, s.ai_photo_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
+    SELECT b.*, s.ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
            s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
   `, [batchId])
@@ -434,7 +434,6 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     if (!operationClaimed) return { success: false, error: 'Для этой выгрузки уже выполняется другое действие' }
     const rawSupplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
       context.batch.ai_instructions,
-      context.batch.ai_photo_enabled && context.batch.ai_photo_instructions ? `Особенности фото: ${context.batch.ai_photo_instructions}` : '',
       context.batch.ai_photo_enabled && context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
     ].filter(Boolean).join('\n')
     const supplierInstructions = sanitizeSupplierAiInstructions(

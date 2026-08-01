@@ -63,6 +63,8 @@ const statusStyles: Record<string, string> = {
   'Обработано ИИ': 'bg-violet-500/10 text-violet-300 border-violet-500/20',
   'Запушено в БД': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
   'Запущено': 'bg-sky-500/10 text-sky-300 border-sky-500/20',
+  'Обработка ИИ': 'bg-violet-500/10 text-violet-300 border-violet-500/20',
+  'Публикация в БД': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
   'Удалено из БД': 'bg-rose-500/10 text-rose-300 border-rose-500/20',
   failed: 'bg-red-500/10 text-red-300 border-red-500/20',
 }
@@ -80,9 +82,10 @@ function fileName(filePath?: string | null) {
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, loading = false }: { status: string; loading?: boolean }) {
   return (
-    <span className={`inline-flex min-w-0 items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
+    <span className={`inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
+      {loading && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
       {status === 'failed' ? 'Ошибка' : status}
     </span>
   )
@@ -113,7 +116,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   }
 
   useEffect(() => {
-    const hasRunning = batches.some((batch) => batch.status === 'Запущено' || ['queued', 'running'].includes(batch.ai_run_status || '') || batch.files.some((file) => file.status === 'Запущено'))
+    const hasRunning = batches.some((batch) => batch.status === 'Запущено' || ['queued', 'running'].includes(batch.ai_run_status || '') || Boolean(batch.active_operation?.includes('publish')) || batch.files.some((file) => file.status === 'Запущено'))
     if (!hasRunning) return
     const interval = setInterval(refresh, 3000)
     return () => clearInterval(interval)
@@ -377,6 +380,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 // catalog import was interrupted after the stage was marked
                 // PUSHED. Both publication modes are idempotent by external_id.
                 const canPublish = ['AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
+                const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
+                const publishing = Boolean(batch.active_operation?.includes('publish'))
+                const parsing = batch.status === 'Запущено'
+                const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
 
                 return (
                   <React.Fragment key={batch.id}>
@@ -409,7 +416,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{formatDate(batch.created_at)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
-                      <td className="px-4 py-3"><StatusBadge status={batch.status} /></td>
+                      <td className="px-4 py-3"><StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} /></td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
                         <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           {batch.end_date && <Calendar className="h-3.5 w-3.5 text-slate-500" />}
@@ -520,7 +527,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-400">{formatDate(file.created_at)}</td>
                         <td className="px-6 py-4 text-sm font-semibold text-slate-300">{file.items_count || 0} шт.</td>
-                        <td className="px-6 py-4"><StatusBadge status={file.status} /></td>
+                        <td className="px-6 py-4"><StatusBadge status={file.status} loading={file.status === 'Запущено'} /></td>
                         <td className="px-6 py-4 text-sm text-slate-400">{file.end_date || '—'}</td>
                         <td className="px-6 py-4 text-right">
                           {!file.is_virtual && <button

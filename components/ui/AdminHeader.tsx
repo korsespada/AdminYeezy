@@ -2,6 +2,7 @@
 
 import React from 'react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
@@ -12,8 +13,11 @@ interface AdminHeaderProps {
 }
 
 export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
+  const pathname = usePathname()
+  const sticky = !/^\/admin\/batches\/[^/]+/.test(pathname || '')
+
   return (
-    <header className="sticky top-0 z-30 flex min-w-0 items-center gap-2 border-b border-slate-700 bg-slate-800 px-2 py-3 shadow-sm sm:px-4 xl:px-6">
+    <header className={`${sticky ? 'sticky top-0 z-30' : 'relative'} flex min-w-0 items-center gap-2 border-b border-slate-700 bg-slate-800 px-2 py-3 shadow-sm sm:px-4 xl:px-6`}>
       <div className="flex shrink-0 items-center gap-4">
         {onMenuClick && (
           <Button
