@@ -292,12 +292,18 @@ describe('batch AI normalization', () => {
       product: { category: 'accessories' },
       categories: [{ id: 'accessories', name: 'Аксессуары' }],
     })
+    const clothingPrompt = buildBatchAiUserPrompt({
+      ...base,
+      product: { category: 'clothes' },
+      categories: [{ id: 'clothes', name: 'Одежда' }],
+    })
 
     expect(shoePrompt).toContain('Автоматические правила категории «Обувь»')
     expect(shoePrompt).toContain('мюли на каблуке остаются')
     expect(accessoryPrompt).toContain('Автоматические правила категории «Аксессуары»')
     expect(accessoryPrompt).toContain('Кепки и бейсболки')
     expect(accessoryPrompt).not.toContain('Правила классификации категории «Обувь»')
+    expect(clothingPrompt).toContain('Никогда не заполняй subcategory_suggestion для одежды')
   })
 
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
@@ -346,6 +352,25 @@ describe('batch AI normalization', () => {
     })
 
     expect(result.product.subcategory).toBe('tees')
+    expect(result.subcategorySuggestion).toBeNull()
+  })
+
+  it('drops unknown clothing subcategory suggestions instead of creating taxonomy proposals', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: '' },
+      subcategory_suggestion: { name: 'Экспериментальная одежда', parent_category_id: 'clothes' },
+    }, {
+      product: { name: 'Неопределённая модель', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['tees']),
+      subcategoryParents: new Map([['tees', 'clothes']]),
+      subcategoryNames: new Map([['tees', 'Футболки и майки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('')
     expect(result.subcategorySuggestion).toBeNull()
   })
 

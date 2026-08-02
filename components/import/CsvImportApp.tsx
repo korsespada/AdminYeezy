@@ -7,6 +7,7 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   Upload,
   FileSpreadsheet,
@@ -37,6 +38,9 @@ import {
   ChevronDown,
   Undo2,
   Palette,
+  Link2,
+  Search,
+  Unlink,
 } from "lucide-react";
 import {
   fetchLookupsAction,
@@ -45,6 +49,8 @@ import {
   getBatchProductsAction,
   saveBatchProductsAction,
   updateBatchProductAction,
+  assignBatchVariantFamilyAction,
+  detachBatchVariantProductAction,
   deleteBatchProductAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
@@ -69,6 +75,7 @@ import { imagePresets, resizeImageUrl } from "@/lib/image";
 import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
+import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
 
@@ -2499,7 +2506,13 @@ export default function CsvImportApp({
           ? () => handleRollbackProductAi(products[selectedIdx])
           : undefined}
         aiBusy={isProcessing}
+        allProducts={products}
+        batchId={batchId}
         variants={selectedIdx !== null ? variantGroups.get(approvedVariantGroupKey(products[selectedIdx])) || [] : []}
+        onVariantsChanged={(productIds, groupKey) => {
+          const changedIds = new Set(productIds);
+          setProducts((current) => current.map((item) => changedIds.has(Number(item.id)) ? { ...item, variant_group_key: groupKey } : item));
+        }}
         onOpenVariant={(variant) => {
           const nextIndex = products.indexOf(variant);
           if (nextIndex >= 0) setSelectedIdx(nextIndex);
@@ -2897,7 +2910,10 @@ interface CsvProductDrawerProps {
   onRetryAi?: () => void;
   onRollbackAi?: () => void;
   aiBusy?: boolean;
+  allProducts: CsvProduct[];
+  batchId?: string | null;
   variants: CsvProduct[];
+  onVariantsChanged: (productIds: number[], groupKey: string | null) => void;
   onOpenVariant: (product: CsvProduct) => void;
 }
 
@@ -2911,11 +2927,13 @@ function CsvProductDrawer({
   onRetryAi,
   onRollbackAi,
   aiBusy = false,
+  allProducts,
+  batchId,
   variants,
+  onVariantsChanged,
   onOpenVariant,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
 
   useEffect(() => {
     setLocal(product ? { ...product } : null);
@@ -2936,6 +2954,8 @@ function CsvProductDrawer({
   };
 
   const attributes = local.attributes || {};
+  const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
+  const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
   const updateAttribute = (oldKey: string, nextKey: string, nextValue: string) => {
     const next = { ...attributes };
     if (oldKey !== nextKey) delete next[oldKey];
@@ -2973,17 +2993,6 @@ function CsvProductDrawer({
       "photos",
       local.photos.filter((_, j) => j !== i),
     );
-
-  const onDragOver = (e: React.DragEvent, i: number) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === i) return;
-    const arr = [...local.photos];
-    const dragged = arr[dragIdx];
-    arr.splice(dragIdx, 1);
-    arr.splice(i, 0, dragged);
-    change("photos", arr);
-    setDragIdx(i);
-  };
 
   return (
     <>
@@ -3043,50 +3052,29 @@ function CsvProductDrawer({
                   </button>
                 )}
               </div>
-              {local.photos.length > 0 ? (
-                <div className="grid grid-cols-3 gap-3">
-                  {local.photos.map((url, i) => (
-                    <div
-                      key={i}
-                      draggable
-                      onDragStart={() => setDragIdx(i)}
-                      onDragOver={(e) => onDragOver(e, i)}
-                      onDragEnd={() => setDragIdx(null)}
-                      className={`relative aspect-square rounded-xl overflow-hidden border-2 group cursor-move transition-all ${dragIdx === i ? "border-indigo-500 opacity-50" : "border-slate-800 hover:border-slate-600"}`}
-                    >
-                      <Image
-                        src={resizeImageUrl(url, imagePresets.productForm)}
-                        alt=""
-                        fill
-                        className="object-cover"
-                        unoptimized
-                      />
-                      <button
-                        onClick={() => removePhoto(i)}
-                        className="absolute top-1 right-1 p-1 bg-red-500 text-white rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/60 text-white text-[10px] rounded">
-                        {i + 1}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 text-center text-slate-500 border border-dashed border-slate-700 rounded-lg">
-                  Нет фото
-                </div>
-              )}
+              <ProductPhotoGallery
+                photos={local.photos}
+                onChange={(photos) => change("photos", photos)}
+                onRemove={removePhoto}
+              />
             </section>
 
-            {variants.length > 1 && (
-              <section className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Palette className="h-4 w-4 text-violet-300" />
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Цветовые варианты ({variants.length})</h3>
+            <section className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Palette className="h-4 w-4 text-violet-300" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Цветовые варианты ({variants.length > 1 ? variants.length : 0})</h3>
+                  </div>
+                  {batchId && local.id != null && (
+                    <VariantFamilyManager
+                      product={local}
+                      products={allProducts}
+                      batchId={batchId}
+                      onChanged={onVariantsChanged}
+                    />
+                  )}
                 </div>
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
+                {variants.length > 1 ? <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
                   {variants.map((variant) => {
                     const active = String(variant.id || variant.external_id) === String(local.id || local.external_id);
                     const colors = attributeValuesForDisplay(variant.attributes?.colors ?? variant.attributes?.color);
@@ -3104,9 +3092,12 @@ function CsvProductDrawer({
                       </button>
                     );
                   })}
-                </div>
+                </div> : (
+                  <div className="rounded-lg border border-dashed border-slate-700 px-3 py-4 text-center text-xs text-slate-500">
+                    Товар пока не привязан к цветовой семье
+                  </div>
+                )}
               </section>
-            )}
 
             {/* Fields */}
             <section className="space-y-4">
@@ -3203,10 +3194,10 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
-                <MeasurementsField
+                {isClothing && <MeasurementsField
                   value={attributes.measurements}
                   onChange={updateMeasurements}
-                />
+                />}
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs text-slate-500">Дополнительные атрибуты</label>
@@ -3257,6 +3248,198 @@ function CsvProductDrawer({
           </div>
         </div>
       </div>
+    </>
+  );
+}
+
+function VariantFamilyManager({
+  product,
+  products,
+  batchId,
+  onChanged,
+}: {
+  product: CsvProduct;
+  products: CsvProduct[];
+  batchId: string;
+  onChanged: (productIds: number[], groupKey: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const productId = Number(product.id);
+  const currentFamily = approvedVariantGroupKey(product);
+
+  const familySizes = useMemo(() => {
+    const sizes = new Map<string, number>();
+    products.forEach((candidate) => {
+      const key = approvedVariantGroupKey(candidate);
+      if (key) sizes.set(key, (sizes.get(key) || 0) + 1);
+    });
+    return sizes;
+  }, [products]);
+
+  const candidates = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("ru-RU");
+    return products
+      .filter((candidate) => {
+        const candidateId = Number(candidate.id);
+        const family = approvedVariantGroupKey(candidate);
+        if (!Number.isInteger(candidateId) || candidateId === productId || (currentFamily && family === currentFamily)) return false;
+        if (!needle) return true;
+        const colors = attributeValuesForDisplay(candidate.attributes?.colors ?? candidate.attributes?.color);
+        return [candidate.name, candidate.external_id, candidate.attributes?.model_code, ...colors]
+          .some((value) => String(value || "").toLocaleLowerCase("ru-RU").includes(needle));
+      })
+      .sort((left, right) => {
+        const leftScore = Number(left.brand === product.brand) + Number(left.category === product.category) + Number(left.subcategory === product.subcategory);
+        const rightScore = Number(right.brand === product.brand) + Number(right.category === product.category) + Number(right.subcategory === product.subcategory);
+        return rightScore - leftScore;
+      })
+      .slice(0, 100);
+  }, [currentFamily, product.brand, product.category, product.subcategory, productId, products, query]);
+
+  const selectedProducts = candidates.filter((candidate) => selectedIds.has(Number(candidate.id)));
+  const selectedExistingFamily = selectedProducts.find((candidate) => approvedVariantGroupKey(candidate));
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  const toggleCandidate = (candidate: CsvProduct) => {
+    const id = Number(candidate.id);
+    const candidateFamily = approvedVariantGroupKey(candidate);
+    setError("");
+    setSelectedIds((previous) => {
+      if (candidateFamily) return previous.has(id) && previous.size === 1 ? new Set() : new Set([id]);
+      const next = new Set([...previous].filter((selectedId) => {
+        const selected = products.find((item) => Number(item.id) === selectedId);
+        return selected && !approvedVariantGroupKey(selected);
+      }));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const applySelection = async () => {
+    if (!Number.isInteger(productId) || !selectedProducts.length) return;
+    setBusy(true);
+    setError("");
+    const result = selectedExistingFamily
+      ? await assignBatchVariantFamilyAction(batchId, [productId], Number(selectedExistingFamily.id))
+      : currentFamily
+        ? await assignBatchVariantFamilyAction(batchId, selectedProducts.map((candidate) => Number(candidate.id)), productId)
+        : await assignBatchVariantFamilyAction(batchId, [productId, ...selectedProducts.map((candidate) => Number(candidate.id))]);
+    if (!result.success) {
+      setError(result.error || "Не удалось изменить цветовую семью");
+      setBusy(false);
+      return;
+    }
+    const affectedIds = selectedExistingFamily
+      ? [productId]
+      : currentFamily
+        ? selectedProducts.map((candidate) => Number(candidate.id))
+        : [productId, ...selectedProducts.map((candidate) => Number(candidate.id))];
+    const nextGroupKey = result.data?.groupKey || currentFamily || (selectedExistingFamily ? approvedVariantGroupKey(selectedExistingFamily) : "");
+    onChanged(affectedIds, nextGroupKey);
+    setBusy(false);
+    setSelectedIds(new Set());
+    setOpen(false);
+  };
+
+  const detach = async () => {
+    if (!Number.isInteger(productId)) return;
+    setBusy(true);
+    setError("");
+    const result = await detachBatchVariantProductAction(batchId, productId);
+    if (!result.success) {
+      setError(result.error || "Не удалось отвязать товар");
+      setBusy(false);
+      return;
+    }
+    onChanged([productId], null);
+    setBusy(false);
+    setOpen(false);
+  };
+
+  const actionLabel = selectedExistingFamily
+    ? "Привязать к выбранной семье"
+    : currentFamily
+      ? "Добавить в текущую семью"
+      : "Создать цветовую семью";
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => { setOpen(true); setError(""); }}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-300 hover:bg-violet-500/20"
+      >
+        <Link2 className="h-3.5 w-3.5" />
+        Управлять
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={() => setOpen(false)}>
+          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Управление цветовыми вариантами">
+            <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+              <div>
+                <h2 className="font-semibold text-white">Цветовые варианты товара</h2>
+                <p className="mt-1 text-xs text-slate-400">Выберите товары без семьи или один товар из уже существующей семьи.</p>
+              </div>
+              <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="border-b border-slate-800 px-5 py-3">
+              <label className="relative block">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} autoFocus placeholder="Название, артикул, модель или цвет" className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-violet-500" />
+              </label>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+              {candidates.length ? (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                  {candidates.map((candidate) => {
+                    const id = Number(candidate.id);
+                    const selected = selectedIds.has(id);
+                    const family = approvedVariantGroupKey(candidate);
+                    const colors = attributeValuesForDisplay(candidate.attributes?.colors ?? candidate.attributes?.color);
+                    return (
+                      <button type="button" key={id} onClick={() => toggleCandidate(candidate)} className={`flex min-w-0 gap-3 rounded-xl border p-2 text-left transition ${selected ? "border-violet-400 bg-violet-500/15 ring-1 ring-violet-400/30" : "border-slate-700 bg-slate-800 hover:border-slate-500"}`}>
+                        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-slate-950">
+                          {candidate.photos?.[0] ? <Image src={resizeImageUrl(candidate.photos[0], imagePresets.productGrid)} alt="" fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-[10px] text-slate-600">Нет фото</div>}
+                        </div>
+                        <div className="min-w-0 flex-1 py-0.5">
+                          <div className="line-clamp-2 text-xs font-semibold text-white">{candidate.name || "Без названия"}</div>
+                          <div className="mt-1 truncate text-[11px] text-violet-300">{colors.join(", ") || "Цвет не указан"}</div>
+                          <div className="mt-1 truncate text-[10px] text-slate-500">{candidate.external_id}</div>
+                          {family && <div className="mt-1 inline-flex rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">Семья: {familySizes.get(family) || 1}</div>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <div className="py-12 text-center text-sm text-slate-500">Подходящие товары не найдены</div>}
+            </div>
+            <div className="border-t border-slate-700 bg-slate-900 px-5 py-4">
+              {error && <div className="mb-3 text-sm text-red-300">{error}</div>}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>{currentFamily && <button type="button" onClick={detach} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-50"><Unlink className="h-3.5 w-3.5" />Отвязать текущий товар</button>}</div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setOpen(false)} className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:text-white">Отмена</button>
+                  <button type="button" onClick={applySelection} disabled={busy || !selectedProducts.length} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-40">{busy ? "Сохраняем…" : actionLabel}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </>
   );
 }

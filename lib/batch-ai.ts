@@ -583,8 +583,10 @@ export function normalizeBatchAiOutput(raw: any, input: {
       : undefined
     if (canonicalEntry) {
       subcategory = canonicalEntry[0]
-      if (canonicalClothingSubcategoryName(subcategorySuggestion?.name)) subcategorySuggestion = null
     }
+    // Таксономия одежды закрыта: известные синонимы нормализованы выше,
+    // неизвестные типы остаются без подкатегории для ручной классификации.
+    subcategorySuggestion = null
   }
   if (normalizedName(input.categoryNames?.get(category)) === 'обувь') {
     const canonicalFromSelection = canonicalShoeSubcategoryName(input.subcategoryNames?.get(subcategory))

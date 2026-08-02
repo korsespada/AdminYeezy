@@ -198,4 +198,39 @@ describe('batch product server actions', () => {
     expect(res.data?.content).toContain('attributes')
     expect(res.data?.content).toContain('color')
   })
+
+  it('creates a manual color family for selected batch products', async () => {
+    const { assignBatchVariantFamilyAction } = await import('@/actions/csv-import')
+    mocks.scrapingQuery.mockResolvedValueOnce({ rows: [] })
+    mocks.client.query
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ rowCount: 2, rows: [{ id: 10 }, { id: 11 }] })
+      .mockResolvedValueOnce({ rowCount: 2 })
+      .mockResolvedValueOnce({})
+
+    const res = await assignBatchVariantFamilyAction('batch-1', [10, 11])
+
+    expect(res.success).toBe(true)
+    expect(res.data?.groupKey).toMatch(/^[0-9a-f]{32}$/)
+    expect(mocks.client.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE products SET variant_group_key=$1'),
+      [res.data?.groupKey, 'batch-1', [10, 11]],
+    )
+    expect(mocks.client.query).toHaveBeenLastCalledWith('COMMIT')
+  })
+
+  it('detaches one batch product from its color family', async () => {
+    const { detachBatchVariantProductAction } = await import('@/actions/csv-import')
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rowCount: 1 })
+
+    const res = await detachBatchVariantProductAction('batch-1', 10)
+
+    expect(res.success).toBe(true)
+    expect(mocks.scrapingQuery).toHaveBeenLastCalledWith(
+      'UPDATE products SET variant_group_key=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
+      ['batch-1', 10],
+    )
+  })
 })

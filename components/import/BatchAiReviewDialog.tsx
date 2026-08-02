@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, CheckCheck, Eye, RefreshCw, X } from 'lucide-react'
 import {
   getBatchAiRunAction,
@@ -8,6 +9,7 @@ import {
   reviewBatchAiSuggestionAction,
   startBatchAiAction,
 } from '@/actions/batch-ai'
+import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
 
 export default function BatchAiReviewDialog({
   batchId,
@@ -170,7 +172,10 @@ export default function BatchAiReviewDialog({
           {items.length === 0 && <p className="py-16 text-center text-slate-500">Новых подкатегорий, атрибутов или цветовых семейств нет.</p>}
         </div>
       </div>
-      {previewProduct && <ProductPreview product={previewProduct} onClose={() => setPreviewProduct(null)} />}
+      {previewProduct && createPortal(
+        <ProductPreview product={previewProduct} onClose={() => setPreviewProduct(null)} />,
+        document.body,
+      )}
     </div>
   )
 }
@@ -294,7 +299,6 @@ function ColorFamilyPreview({
 
 function ProductPreview({ product, onClose }: { product: any; onClose: () => void }) {
   const photos = Array.isArray(product.photos) ? product.photos.map(String).filter(Boolean) : []
-  const [selectedPhoto, setSelectedPhoto] = useState(0)
   const attributes = product.attributes && typeof product.attributes === 'object' ? product.attributes : {}
   return (
     <div className="fixed inset-0 z-[140] flex justify-end bg-slate-950/80 backdrop-blur-sm" onClick={onClose} onWheel={(event) => event.stopPropagation()}>
@@ -307,12 +311,7 @@ function ProductPreview({ product, onClose }: { product: any; onClose: () => voi
           <button type="button" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
         </header>
         <div className="space-y-6 p-5">
-          {photos.length > 0 ? <>
-            <div className="aspect-square w-full rounded-xl border border-slate-700 bg-slate-950 bg-contain bg-center bg-no-repeat" style={{ backgroundImage: `url("${photos[selectedPhoto]}")` }} />
-            {photos.length > 1 && <div className="grid grid-cols-5 gap-2 sm:grid-cols-7">
-              {photos.map((photo: string, index: number) => <button type="button" key={`${photo}-${index}`} onClick={() => setSelectedPhoto(index)} className={`aspect-square rounded-lg border bg-slate-950 bg-cover bg-center ${selectedPhoto === index ? 'border-indigo-400 ring-2 ring-indigo-400/20' : 'border-slate-700 hover:border-slate-500'}`} style={{ backgroundImage: `url("${photo}")` }} aria-label={`Фото ${index + 1}`} />)}
-            </div>}
-          </> : <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm text-slate-500">Фотографий нет</div>}
+          <ProductPhotoGallery photos={photos} emptyText="Фотографий нет" />
           <div className="grid gap-3 sm:grid-cols-2">
             <PreviewField label="Цвет" value={valueList(attributes.colors).join(', ')} />
             <PreviewField label="Внутренний артикул" value={attributes.model_code || product.variant_group_key} />

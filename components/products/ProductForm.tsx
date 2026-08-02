@@ -1,10 +1,9 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
-import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
-import { Download, ExternalLink, GripVertical, Settings2, Trash2, Upload } from 'lucide-react'
+import { Download, ExternalLink, Settings2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -20,7 +19,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
-import { imagePresets, resizeImageUrl } from '@/lib/image'
+import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
@@ -78,7 +77,6 @@ export default function ProductForm({
   const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
 
   const selectedCategoryName = useMemo(
     () => categories.find((item) => item.id === category)?.name || '',
@@ -251,28 +249,6 @@ export default function ProductForm({
 
   const removeExistingPhoto = (index: number) => {
     setExistingPhotos((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  // Drag and drop handlers for existing photos
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index)
-  }
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault()
-    if (draggedIndex === null || draggedIndex === index) return
-
-    const newPhotos = [...existingPhotos]
-    const draggedPhoto = newPhotos[draggedIndex]
-    newPhotos.splice(draggedIndex, 1)
-    newPhotos.splice(index, 0, draggedPhoto)
-
-    setExistingPhotos(newPhotos)
-    setDraggedIndex(index)
-  }
-
-  const handleDragEnd = () => {
-    setDraggedIndex(null)
   }
 
   const buildMediaPayload = () => {
@@ -522,59 +498,12 @@ export default function ProductForm({
               {existingPhotos.length > 0 && (
                 <div className="mb-2">
                   <p className="mb-1.5 text-xs text-gray-500">Перетащите фото, чтобы изменить порядок:</p>
-                  <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-5">
-                    {existingPhotos.map((url, index) => (
-                      <div
-                        key={index}
-                        draggable
-                        onDragStart={() => handleDragStart(index)}
-                        onDragOver={(e) => handleDragOver(e, index)}
-                        onDragEnd={handleDragEnd}
-                        className={`group relative aspect-[4/3] cursor-move ${draggedIndex === index ? 'opacity-50' : ''
-                          }`}
-                      >
-                        <Image
-                          src={resizeImageUrl(url, imagePresets.productForm)}
-                          alt={`Photo ${index + 1}`}
-                          fill
-                          sizes="(max-width: 640px) 25vw, 130px"
-                          loading={index < 5 ? 'eager' : 'lazy'}
-                          className="object-cover rounded-lg border-2 border-gray-300 dark:border-gray-600 shadow-sm"
-                          unoptimized
-                        />
-                        <div className="absolute left-1 top-1 rounded bg-gray-800/70 p-0.5 text-white">
-                          <GripVertical size={12} />
-                        </div>
-                        <div className="absolute top-1 right-1 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="icon"
-                            onClick={() => removeExistingPhoto(index)}
-                            className="h-6 w-6 rounded-full shadow"
-                            title="Удалить"
-                          >
-                            <Trash2 size={12} />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleDownload(url, index);
-                            }}
-                            className="h-6 w-6 rounded-full shadow"
-                            title="Скачать исходное фото"
-                          >
-                            <Download size={12} />
-                          </Button>
-                        </div>
-                        <div className="absolute bottom-1 right-1 rounded bg-gray-800/70 px-1.5 py-0.5 text-[10px] text-white">
-                          {index + 1}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <ProductPhotoGallery
+                    photos={existingPhotos}
+                    onChange={setExistingPhotos}
+                    onRemove={removeExistingPhoto}
+                    onDownload={handleDownload}
+                  />
                 </div>
               )}
 

@@ -1,5 +1,6 @@
 'use server'
 
+import crypto from 'node:crypto'
 import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { uploadToS3 } from '@/lib/s3'
@@ -994,5 +995,67 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     return { success: false, error: err.message };
   } finally {
     if (batchId && operationOwnerId) await releaseBatchOperation(batchId, operationOwnerId).catch(() => undefined)
+  }
+}
+
+export async function assignBatchVariantFamilyAction(
+  batchId: string,
+  productIds: number[],
+  targetProductId?: number | null,
+) {
+  await requireAdmin()
+  if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя менять варианты во время обработки выгрузки' }
+  const ids = [...new Set(productIds.map(Number).filter(Number.isInteger))]
+  if (!ids.length) return { success: false, error: 'Выберите товары' }
+  if (!targetProductId && ids.length < 2) return { success: false, error: 'Для новой семьи выберите минимум два товара' }
+
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const selected = await client.query(
+      'SELECT id FROM products WHERE batch_id=$1 AND id=ANY($2::int[]) FOR UPDATE',
+      [batchId, ids],
+    )
+    if (selected.rowCount !== ids.length) throw new Error('Часть выбранных товаров не найдена в этой выгрузке')
+
+    let groupKey = ''
+    if (targetProductId) {
+      const target = await client.query(
+        'SELECT variant_group_key FROM products WHERE batch_id=$1 AND id=$2 FOR UPDATE',
+        [batchId, Number(targetProductId)],
+      )
+      groupKey = String(target.rows[0]?.variant_group_key || '').trim()
+      if (!/^[0-9a-f]{32}$/i.test(groupKey)) throw new Error('У выбранного товара нет подтверждённой цветовой семьи')
+    } else {
+      groupKey = crypto.randomBytes(16).toString('hex')
+    }
+
+    await client.query(
+      'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE batch_id=$2 AND id=ANY($3::int[])',
+      [groupKey, batchId, ids],
+    )
+    await client.query('COMMIT')
+    revalidatePath('/admin/batches')
+    return { success: true, data: { groupKey } }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
+}
+
+export async function detachBatchVariantProductAction(batchId: string, productId: number) {
+  try {
+    await requireAdmin()
+    if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя менять варианты во время обработки выгрузки' }
+    await scrapingQuery(
+      'UPDATE products SET variant_group_key=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
+      [batchId, Number(productId)],
+    )
+    revalidatePath('/admin/batches')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message }
   }
 }

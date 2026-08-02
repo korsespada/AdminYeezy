@@ -756,6 +756,12 @@ export async function reconcileKnownAttributeSuggestions(
 
 export async function reconcileBatchSubcategorySuggestions(client: QueryClient, batchId: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('batch-ai-suggestions:' || $1))", [batchId])
+  const closedClothingCategories = await client.query(`
+    SELECT canonical_id
+    FROM catalog_id_mappings
+    WHERE entity_type='category' AND lower(replace(name,'ё','е'))='одежда'
+  `)
+  const clothingCategoryIds = new Set(closedClothingCategories.rows.map((row) => String(row.canonical_id)))
   const result = await client.query(`
     SELECT s.* FROM batch_ai_suggestions s
     JOIN batch_ai_runs r ON r.id=s.run_id
@@ -779,6 +785,10 @@ export async function reconcileBatchSubcategorySuggestions(client: QueryClient, 
         row.affected_product_ids.map(Number),
       ])
       await client.query("UPDATE batch_ai_suggestions SET status='approved',reviewed_at=NOW() WHERE id=$1", [row.id])
+      continue
+    }
+    if (clothingCategoryIds.has(parentId)) {
+      await client.query("UPDATE batch_ai_suggestions SET status='rejected',reviewed_at=NOW() WHERE id=$1", [row.id])
       continue
     }
     if (redirectsToShoulderBags(payload.name || payload.code || row.canonical_key)) {
