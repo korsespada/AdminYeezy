@@ -34,7 +34,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 
 const TASK_LABELS: Record<string, string> = {
-  catalog_product_enricher: 'Карточка товара: Cockpit Tools',
+  catalog_product_enricher: 'Карточка товара: BYESU',
   product_text: 'Товар: текстовый анализ',
   product_vision: 'Товар: фото-анализ',
   product_writer: 'Товар: финальный writer',
@@ -445,7 +445,18 @@ export default function SeoAiStudio({ initialSettings, initialDrafts, initialBat
                   <CardTitle className="text-white">{TASK_LABELS[setting.task_key] || setting.task_key}</CardTitle>
                   <CardDescription className="font-mono">{setting.task_key}</CardDescription>
                 </CardHeader>
-                <CardContent className="grid gap-4 lg:grid-cols-[260px_140px_140px_1fr]">
+                <CardContent className="grid gap-4 lg:grid-cols-[160px_260px_140px_140px_1fr]">
+                  <div className="space-y-2">
+                    <Label>Провайдер</Label>
+                    <Select value={setting.provider || 'byesu'} onValueChange={(provider) => updateSetting(setting.task_key, { provider: provider as SeoAiSetting['provider'] })}>
+                      <SelectTrigger className="bg-slate-900"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="byesu">BYESU</SelectItem>
+                        <SelectItem value="cockpit">Cockpit</SelectItem>
+                        <SelectItem value="openrouter">OpenRouter</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <div className="space-y-2">
                     <Label>Model</Label>
                     <Input value={setting.model} onChange={(event) => updateSetting(setting.task_key, { model: event.target.value })} className="bg-slate-900 font-mono text-xs" />

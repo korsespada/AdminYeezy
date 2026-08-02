@@ -86,7 +86,7 @@ POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
 
 | URL | Назначение | Источник |
 |---|---|---|
-| `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + local Cockpit Tools worker |
+| `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + worker (BYESU по умолчанию, также OpenRouter/Cockpit) |
 | `/admin/ai-rules` | Глобальные настройки batch AI: OpenRouter/Cockpit, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` + Cockpit heartbeat |
 | `/admin/analytics` | Операционные метрики | AdminYeezy analytics |
 

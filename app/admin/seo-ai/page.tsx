@@ -21,7 +21,7 @@ export default async function SeoAiPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-white">AI-каталог</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-              Названия, описания, SEO, гендер, характеристики и предложения подкатегорий для опубликованных товаров. Задания выполняет локальный Cockpit Tools worker, изменения сначала попадают в сравнение.
+              Названия, описания, SEO, гендер, характеристики и распределение по существующим подкатегориям для опубликованных товаров. По умолчанию используется BYESU, изменения сначала попадают в сравнение.
             </p>
           </div>
           <SeoAiStudio

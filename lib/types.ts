@@ -151,6 +151,7 @@ export interface ActionResponse {
 export interface SeoAiSetting {
   id?: string
   task_key: string
+  provider: 'byesu' | 'openrouter' | 'cockpit'
   model: string
   temperature: number
   max_tokens: number

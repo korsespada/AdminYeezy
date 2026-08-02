@@ -6,9 +6,11 @@ const { catalogQualityIssues, sanitizeCatalogOutput } = require('./lib/catalog-o
 
 const RAILS_API_URL = trimTrailingSlash(requiredEnv('RAILS_API_URL'))
 const WORKER_TOKEN = requiredEnv('AI_CATALOG_WORKER_TOKEN')
-const COCKPIT_API_URL = requiredEnv('COCKPIT_API_URL')
-const COCKPIT_API_KEY = requiredEnv('COCKPIT_API_KEY')
+const COCKPIT_API_URL = String(process.env.COCKPIT_API_URL || '').trim()
+const COCKPIT_API_KEY = String(process.env.COCKPIT_API_KEY || '').trim()
 const COCKPIT_MODEL = process.env.COCKPIT_MODEL || 'gpt-5.6-luna'
+const BYESU_API_URL = process.env.BYESU_API_URL || 'https://byesu.com/v1/chat/completions'
+const OPENROUTER_API_URL = process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1/chat/completions'
 const POLL_MS = integerEnv('AI_CATALOG_WORKER_POLL_MS', 5000, 1000, 60000)
 const MAX_IMAGES = integerEnv('AI_CATALOG_WORKER_MAX_IMAGES', 9, 1, 9)
 const CONCURRENCY = integerEnv('AI_CATALOG_WORKER_CONCURRENCY', 10, 1, 10)
@@ -27,7 +29,7 @@ main().catch((error) => {
 })
 
 async function main() {
-  console.log(`[ai-catalog-worker] ready: ${COCKPIT_MODEL}, concurrency cap: ${CONCURRENCY}`)
+  console.log(`[ai-catalog-worker] ready: provider from generation snapshot, fallback BYESU/${defaultModelFor('byesu')}, concurrency cap: ${CONCURRENCY}`)
 
   if (ONCE) {
     const claimed = await claimJob()
@@ -117,8 +119,8 @@ async function processJob({ generation, lease_token: leaseToken }) {
           vision_result: firstOutput,
           text_result: {},
           model_snapshot: {
-            provider: 'cockpit_tools',
-            model: COCKPIT_MODEL,
+            provider: aiProvider(generation),
+            model: generation.model_snapshot?.model || defaultModelFor(aiProvider(generation)),
             contact_sheet: Boolean(contactSheet),
             detail_images: detailNumbers,
             quality_review: qualityIssues.length > 0,
@@ -184,7 +186,9 @@ async function generateDraft(generation, contactSheet) {
     content.push({ type: 'image_url', image_url: { url: contactSheet } })
   }
 
-  return cockpitJson({
+  return aiJson({
+    provider: aiProvider(generation),
+    model: generation.model_snapshot?.model,
     systemPrompt: generation.prompt_snapshot?.system_prompt || 'Верни только JSON.',
     content,
     temperature: generation.model_snapshot?.temperature,
@@ -208,7 +212,9 @@ async function refineDraft(generation, firstOutput, detailImages) {
     content.push({ type: 'image_url', image_url: { url: image.dataUrl } })
   }
 
-  return cockpitJson({
+  return aiJson({
+    provider: aiProvider(generation),
+    model: generation.model_snapshot?.model,
     systemPrompt: generation.prompt_snapshot?.system_prompt || 'Верни только JSON.',
     content,
     temperature: generation.model_snapshot?.temperature,
@@ -217,7 +223,9 @@ async function refineDraft(generation, firstOutput, detailImages) {
 }
 
 async function auditDraft(generation, draft, issues) {
-  return cockpitJson({
+  return aiJson({
+    provider: aiProvider(generation),
+    model: generation.model_snapshot?.model,
     systemPrompt: generation.prompt_snapshot?.system_prompt || 'Верни только JSON.',
     content: [{
       type: 'text',
@@ -235,7 +243,86 @@ async function auditDraft(generation, draft, issues) {
   })
 }
 
-async function cockpitJson({ systemPrompt, content, temperature, maxTokens }) {
+function aiProvider(generation) {
+  const provider = String(generation.model_snapshot?.provider || process.env.AI_CATALOG_PROVIDER || 'byesu').trim().toLowerCase()
+  if (provider === 'cockpit' || provider === 'cockpit_tools') return 'cockpit_tools'
+  if (provider === 'openrouter') return 'openrouter'
+  return 'byesu'
+}
+
+function defaultModelFor(provider) {
+  if (provider === 'cockpit_tools') return COCKPIT_MODEL
+  if (provider === 'openrouter') return process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash'
+  return process.env.BYESU_MODEL || 'gemini-3.1-flash-lite'
+}
+
+async function aiJson({ provider, model, systemPrompt, content, temperature, maxTokens }) {
+  if (provider === 'cockpit_tools') {
+    return cockpitJson({ systemPrompt, content, temperature, maxTokens, model: model || COCKPIT_MODEL })
+  }
+  if (provider === 'openrouter') {
+    return openRouterJson({ systemPrompt, content, temperature, maxTokens, model: model || defaultModelFor('openrouter') })
+  }
+  return byesuJson({ systemPrompt, content, temperature, maxTokens, model: model || defaultModelFor('byesu') })
+}
+
+async function openRouterJson({ systemPrompt, content, temperature, maxTokens, model }) {
+  const apiKey = String(process.env.OPENROUTER_API_KEY || '').trim()
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY не задан')
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || 'https://admin.yeezyunique.ru',
+      'X-Title': 'YeezyUnique SEO AI Studio',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content }],
+      temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.1,
+      max_tokens: Number(maxTokens) || 2400,
+      response_format: { type: 'json_object' },
+    }),
+    signal: AbortSignal.timeout(120000),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter HTTP ${response.status}`)
+  const raw = payload?.choices?.[0]?.message?.content
+  if (!raw) throw new Error('OpenRouter вернул пустой ответ')
+  return parseJsonObject(String(raw))
+}
+
+async function byesuJson({ systemPrompt, content, temperature, maxTokens, model }) {
+  const normalizedModel = String(model || defaultModelFor('byesu')).trim()
+  const group = normalizedModel.toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
+  const directKey = process.env[group === 'gemini' ? 'BYESU_GEMINI_API_KEY' : 'BYESU_OPENAI_API_KEY']?.trim()
+  const legacyKey = process.env.BYESU_API_KEY?.trim()
+  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
+  const apiKey = directKey || (legacyGroup === group ? legacyKey : '')
+  if (!apiKey) throw new Error(`BYESU_${group === 'gemini' ? 'GEMINI' : 'OPENAI'}_API_KEY не задан`)
+
+  const response = await fetch(BYESU_API_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: normalizedModel,
+      messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content }],
+      temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.1,
+      max_tokens: Number(maxTokens) || 2400,
+      response_format: { type: 'json_object' },
+    }),
+    signal: AbortSignal.timeout(120000),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload?.error?.message || `BYESU HTTP ${response.status}`)
+  const raw = payload?.choices?.[0]?.message?.content
+  if (!raw) throw new Error('BYESU вернул пустой ответ')
+  return parseJsonObject(String(raw))
+}
+
+async function cockpitJson({ systemPrompt, content, temperature, maxTokens, model }) {
+  if (!COCKPIT_API_URL || !COCKPIT_API_KEY) throw new Error('COCKPIT_API_URL и COCKPIT_API_KEY обязательны для провайдера Cockpit')
   const response = await fetch(COCKPIT_API_URL, {
     method: 'POST',
     headers: {
@@ -243,7 +330,7 @@ async function cockpitJson({ systemPrompt, content, temperature, maxTokens }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: COCKPIT_MODEL,
+      model: model || COCKPIT_MODEL,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content },
@@ -345,7 +432,7 @@ function parseJsonObject(value) {
   const clean = value.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
   try { return JSON.parse(clean) } catch {
     const match = clean.match(/\{[\s\S]*\}/)
-    if (!match) throw new Error('Cockpit Tools response is not valid JSON')
+    if (!match) throw new Error('AI provider response is not valid JSON')
     return JSON.parse(match[0])
   }
 }
