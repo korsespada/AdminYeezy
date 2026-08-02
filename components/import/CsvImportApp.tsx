@@ -36,6 +36,7 @@ import {
   MoreHorizontal,
   ChevronDown,
   Undo2,
+  Palette,
 } from "lucide-react";
 import {
   fetchLookupsAction,
@@ -90,6 +91,16 @@ const DEFAULT_PRODUCT_COLUMNS = [
 ];
 
 const CSV_CORE_KEYS = new Set(DEFAULT_PRODUCT_COLUMNS.map((column) => column.key));
+
+function attributeValuesForDisplay(value: unknown) {
+  const values = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
+  return values.map((item) => String(item).trim()).filter(Boolean);
+}
+
+function approvedVariantGroupKey(product: CsvProduct) {
+  const key = String(product.variant_group_key || "").trim();
+  return /^[0-9a-f]{32}$/i.test(key) ? key : "";
+}
 
 // ─── CSV Parsing ───────────────────────────────────────────────────────
 
@@ -485,6 +496,7 @@ export default function CsvImportApp({
   const [filterPrice, setFilterPrice] = useState("");
   const [filterModel, setFilterModel] = useState("");
   const [filterColor, setFilterColor] = useState("");
+  const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
   const [bulkBrand, setBulkBrand] = useState("");
@@ -658,6 +670,22 @@ export default function CsvImportApp({
     const values = attributeValues(product.attributes?.colors ?? product.attributes?.color);
     return values.length ? values : [""];
   })), [products, attributeValues, countBy]);
+  const variantGroups = useMemo(() => {
+    const groups = new Map<string, CsvProduct[]>();
+    for (const product of products) {
+      const key = approvedVariantGroupKey(product);
+      if (!key) continue;
+      groups.set(key, [...(groups.get(key) || []), product]);
+    }
+    for (const [key, group] of groups) {
+      if (group.length < 2) groups.delete(key);
+    }
+    return groups;
+  }, [products]);
+  const productsWithVariantsCount = useMemo(
+    () => products.filter((product) => variantGroups.has(approvedVariantGroupKey(product))).length,
+    [products, variantGroups],
+  );
   const priceCounts = useMemo(() => countBy(products.map((product) => String(Number(product.price) || 0))), [products, countBy]);
 
   const aiReadyCount = useMemo(
@@ -730,13 +758,16 @@ export default function CsvImportApp({
       if (filterModel === "__EMPTY__" ? models.length > 0 : filterModel && !models.includes(filterModel)) return false;
       const colors = attributeValues(p.attributes?.colors ?? p.attributes?.color);
       if (filterColor === "__EMPTY__" ? colors.length > 0 : filterColor && !colors.includes(filterColor)) return false;
+      const hasVariants = variantGroups.has(approvedVariantGroupKey(p));
+      if (filterVariants === "with" && !hasVariants) return false;
+      if (filterVariants === "without" && hasVariants) return false;
       const aiReady = p.ai_processed === true || p.ai_processed === "true";
       if (filterAiStatus === "raw" && aiReady) return false;
       if (filterAiStatus === "ready" && !aiReady) return false;
       if (filterAiStatus === "error" && (aiReady || !p.ai_error)) return false;
       return true;
     });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterAiStatus, attributeValues]);
+  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterVariants, filterAiStatus, attributeValues, variantGroups]);
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -2129,6 +2160,16 @@ export default function CsvImportApp({
                 ))}
               </select>
 
+              <select
+                value={filterVariants}
+                onChange={(e) => setFilterVariants(e.target.value as "" | "with" | "without")}
+                className="min-w-[170px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все варианты ({products.length})</option>
+                <option value="with">Есть варианты ({productsWithVariantsCount})</option>
+                <option value="without">Без вариантов ({products.length - productsWithVariantsCount})</option>
+              </select>
+
               {(filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
@@ -2136,6 +2177,7 @@ export default function CsvImportApp({
                 filterAiStatus ||
                 filterModel ||
                 filterColor ||
+                filterVariants ||
                 filterPrice !== "") && (
                   <button
                     onClick={() => {
@@ -2147,6 +2189,7 @@ export default function CsvImportApp({
                       setFilterPrice("");
                       setFilterModel("");
                       setFilterColor("");
+                      setFilterVariants("");
                     }}
                     className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
                   >
@@ -2161,6 +2204,7 @@ export default function CsvImportApp({
                 filterAiStatus ||
                 filterModel ||
                 filterColor ||
+                filterVariants ||
                 filterPrice !== "") && (
                   <span className="text-xs text-slate-500 ml-auto">
                     Показано{" "}
@@ -2269,6 +2313,8 @@ export default function CsvImportApp({
                   metadata: {},
                   created: '', updated: '', collectionId: '', collectionName: 'products',
                 } as any;
+                const variants = variantGroups.get(approvedVariantGroupKey(product)) || [];
+                const variantColors = [...new Set(variants.flatMap((variant) => attributeValues(variant.attributes?.colors ?? variant.attributes?.color)))];
                 return <React.Fragment key={`${product.external_id}-${realIndex}`}>
                   {sampleProducts.length > 0 && displayedIndex === 0 && (
                     <div className={`${viewMode === "rows" ? "min-w-[1120px] rounded-none border-x-0" : "col-span-full rounded-xl"} flex items-center justify-between border border-indigo-500/30 bg-indigo-500/10 px-4 py-3`}>
@@ -2301,6 +2347,8 @@ export default function CsvImportApp({
                     categories={(lookups?.categories || []) as any}
                     subcategories={(lookups?.subcategories || []) as any}
                     allowDuplicate={false}
+                    variantCount={variants.length}
+                    variantColors={variantColors}
                     onInlineUpdate={async (_current, patch) => {
                       if (patch.name !== undefined) updateProduct(realIndex, 'name', String(patch.name));
                       if (patch.price !== undefined) updateProduct(realIndex, 'price', Number(patch.price));
@@ -2451,6 +2499,11 @@ export default function CsvImportApp({
           ? () => handleRollbackProductAi(products[selectedIdx])
           : undefined}
         aiBusy={isProcessing}
+        variants={selectedIdx !== null ? variantGroups.get(approvedVariantGroupKey(products[selectedIdx])) || [] : []}
+        onOpenVariant={(variant) => {
+          const nextIndex = products.indexOf(variant);
+          if (nextIndex >= 0) setSelectedIdx(nextIndex);
+        }}
       />
       {showAiSuggestions && batchId && (
         <BatchAiReviewDialog
@@ -2844,6 +2897,8 @@ interface CsvProductDrawerProps {
   onRetryAi?: () => void;
   onRollbackAi?: () => void;
   aiBusy?: boolean;
+  variants: CsvProduct[];
+  onOpenVariant: (product: CsvProduct) => void;
 }
 
 function CsvProductDrawer({
@@ -2856,6 +2911,8 @@ function CsvProductDrawer({
   onRetryAi,
   onRollbackAi,
   aiBusy = false,
+  variants,
+  onOpenVariant,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -2863,6 +2920,13 @@ function CsvProductDrawer({
   useEffect(() => {
     setLocal(product ? { ...product } : null);
   }, [product, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [isOpen]);
 
   if (!isOpen || !local) return null;
 
@@ -2927,7 +2991,7 @@ function CsvProductDrawer({
         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         onClick={onClose}
       />
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl bg-slate-900 shadow-2xl overflow-y-auto border-l border-slate-700">
+      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl overflow-y-auto overscroll-contain border-l border-slate-700 bg-slate-900 shadow-2xl">
         <div className="h-full flex flex-col">
           <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between bg-slate-800 sticky top-0 z-10">
             <div className="flex items-center gap-3">
@@ -3015,6 +3079,34 @@ function CsvProductDrawer({
                 </div>
               )}
             </section>
+
+            {variants.length > 1 && (
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Palette className="h-4 w-4 text-violet-300" />
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Цветовые варианты ({variants.length})</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {variants.map((variant) => {
+                    const active = String(variant.id || variant.external_id) === String(local.id || local.external_id);
+                    const colors = attributeValuesForDisplay(variant.attributes?.colors ?? variant.attributes?.color);
+                    return (
+                      <button
+                        type="button"
+                        key={String(variant.id || variant.external_id)}
+                        onClick={() => onOpenVariant(variant)}
+                        className={`overflow-hidden rounded-xl border text-left transition ${active ? "border-violet-400 bg-violet-500/10 ring-2 ring-violet-400/20" : "border-slate-700 bg-slate-800 hover:border-slate-500"}`}
+                      >
+                        <div className="relative aspect-square bg-slate-950">
+                          {variant.photos?.[0] ? <Image src={resizeImageUrl(variant.photos[0], imagePresets.productGrid)} alt={colors.join(", ")} fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-xs text-slate-600">Нет фото</div>}
+                        </div>
+                        <div className="px-3 py-2"><div className="truncate text-sm font-semibold text-white">{colors.join(", ") || "Цвет не указан"}</div>{active && <div className="mt-0.5 text-[10px] font-medium text-violet-300">Открыт сейчас</div>}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             {/* Fields */}
             <section className="space-y-4">

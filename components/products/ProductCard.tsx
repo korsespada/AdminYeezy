@@ -3,7 +3,7 @@
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Brand, type Category, type Product, type Subcategory } from '@/lib/types';
-import { Trash2, Copy, Sparkles } from 'lucide-react';
+import { Trash2, Copy, Palette, Sparkles } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
@@ -32,9 +32,11 @@ interface ProductCardProps {
     aiProcessed?: boolean;
     aiProcessing?: boolean;
     onAiProcess?: () => void;
+    variantCount?: number;
+    variantColors?: string[];
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [] }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -311,6 +313,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
 
                 <div className="flex-1">
                     <ProductAttributeSummary product={product} compact />
+                    {variantCount > 1 && (
+                        <button type="button" onClick={() => onEdit(product)} className="mb-2 mt-1 flex w-full items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/10 px-2.5 py-2 text-left hover:bg-violet-500/15">
+                            <Palette className="h-4 w-4 shrink-0 text-violet-300" />
+                            <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-violet-200">{variantCount} цветовых вариантов</span><span className="block truncate text-[10px] text-slate-400">{variantColors.join(', ')}</span></span>
+                        </button>
+                    )}
                     {product.description && (
                         <p className="mb-2 mt-1 line-clamp-2 text-xs leading-snug text-slate-400">
                             <ProductDescription text={product.description} />
