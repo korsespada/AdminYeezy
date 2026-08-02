@@ -21,8 +21,6 @@ type Props = {
       byesuGemini?: boolean
       byesuOpenai?: boolean
       byesuLegacy?: boolean
-      seekai?: boolean
-      stepfun?: boolean
     }
   }
 }
@@ -32,18 +30,11 @@ const BYESU_MODELS = [
   { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', group: 'OpenAI Codex' },
 ] as const
 
-const SEEKAI_MODELS = [
-  { value: 'gpt-5-6-luna', label: 'GPT-5.6 Luna' },
-  { value: 'gemini-3-flash', label: 'Gemini 3 Flash' },
-] as const
-
 export default function AIRulesEditor({ initialSettings }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
     provider: initialSettings.provider,
     openrouterModel: initialSettings.openrouterModel,
     byesuModel: initialSettings.byesuModel,
-    seekaiModel: initialSettings.seekaiModel,
-    stepfunModel: initialSettings.stepfunModel,
     temperature: initialSettings.temperature,
     maxTokens: initialSettings.maxTokens,
     concurrency: initialSettings.concurrency,
@@ -71,11 +62,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
           text: `Настройки сохранены. Новые тесты используют ${
             settings.provider === 'byesu'
               ? settings.byesuModel
-              : settings.provider === 'seekai'
-                ? settings.seekaiModel
-                : settings.provider === 'stepfun'
-                  ? settings.stepfunModel
-                : settings.provider === 'openrouter'
+              : settings.provider === 'openrouter'
                 ? settings.openrouterModel
                 : worker?.model || 'модель Cockpit worker'
           }; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
@@ -111,7 +98,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         <div className="grid gap-5 p-6 lg:grid-cols-2">
           <div className="space-y-3">
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдер</span>
-            <div className="grid gap-3 sm:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-3">
               <ProviderButton
                 active={settings.provider === 'byesu'}
                 title="BYESU API"
@@ -123,18 +110,6 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 title="OpenRouter"
                 description={credentials?.openrouter ? 'Ключ подключён' : 'Ключ не задан'}
                 onClick={() => update('provider', 'openrouter')}
-              />
-              <ProviderButton
-                active={settings.provider === 'seekai'}
-                title="SeekAI"
-                description={credentials?.seekai ? 'Резервный ключ подключён' : 'Ключ не задан'}
-                onClick={() => update('provider', 'seekai')}
-              />
-              <ProviderButton
-                active={settings.provider === 'stepfun'}
-                title="StepFun"
-                description={credentials?.stepfun ? 'Резервный ключ подключён' : 'Ключ не задан'}
-                onClick={() => update('provider', 'stepfun')}
               />
               <ProviderButton
                 active={settings.provider === 'cockpit'}
@@ -199,48 +174,6 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               </>
             )}
 
-            {settings.provider === 'seekai' && (
-              <>
-                <label htmlFor="batch-ai-seekai-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                  Модель SeekAI
-                </label>
-                <select
-                  id="batch-ai-seekai-model"
-                  value={settings.seekaiModel}
-                  onChange={(event) => update('seekaiModel', event.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
-                >
-                  {!SEEKAI_MODELS.some((model) => model.value === settings.seekaiModel) && (
-                    <option value={settings.seekaiModel}>{settings.seekaiModel}</option>
-                  )}
-                  {SEEKAI_MODELS.map((model) => (
-                    <option key={model.value} value={model.value}>{model.label}</option>
-                  ))}
-                </select>
-                <p className="text-xs leading-relaxed text-slate-500">
-                  Резервный OpenAI-совместимый поставщик. Ключ задаётся глобально в окружении как SEEKAI_API_KEY.
-                </p>
-              </>
-            )}
-
-            {settings.provider === 'stepfun' && (
-              <>
-                <label htmlFor="batch-ai-stepfun-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                  Модель StepFun
-                </label>
-                <input
-                  id="batch-ai-stepfun-model"
-                  value={settings.stepfunModel}
-                  onChange={(event) => update('stepfunModel', event.target.value)}
-                  placeholder="step-3.7-flash"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
-                />
-                <p className="text-xs leading-relaxed text-slate-500">
-                  Резервный OpenAI-совместимый поставщик. Ключ задаётся глобально в окружении как STEPFUN_API_KEY.
-                </p>
-              </>
-            )}
-
             {settings.provider === 'cockpit' && (
               <div className={`rounded-xl border p-3 text-sm ${
                 worker?.available
@@ -290,7 +223,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               onChange={(event) => update('concurrency', Number(event.target.value))}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
             />
-            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter, BYESU, SeekAI, StepFun и Cockpit. Поставщик может запретить параллельную обработку.</span>
+            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter, BYESU и Cockpit. Поставщик может запретить параллельную обработку.</span>
           </label>
         </div>
       </section>

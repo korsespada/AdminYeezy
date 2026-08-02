@@ -1,8 +1,6 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
-import { seekaiChatCompletion } from '@/lib/seekai'
-import { stepfunChatCompletion } from '@/lib/stepfun'
 import { extractExplicitShoeAttributes } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
@@ -11,14 +9,12 @@ import {
 } from '@/lib/shoe-taxonomy'
 import { batchAiCategoryRuleFor } from '@/lib/batch-ai-category-rules'
 
-export type BatchAiProvider = 'openrouter' | 'byesu' | 'seekai' | 'stepfun' | 'cockpit'
+export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
 export type BatchAiSettings = {
   provider: BatchAiProvider
   openrouterModel: string
   byesuModel: string
-  seekaiModel: string
-  stepfunModel: string
   temperature: number
   maxTokens: number
   concurrency: number
@@ -265,21 +261,9 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const completion = input.settings.provider === 'byesu'
-    ? byesuChatCompletion
-    : input.settings.provider === 'seekai'
-      ? seekaiChatCompletion
-      : input.settings.provider === 'stepfun'
-        ? stepfunChatCompletion
-      : openRouterChatCompletion
+  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
   const payload = await completion({
-    model: input.settings.provider === 'byesu'
-      ? input.settings.byesuModel
-      : input.settings.provider === 'seekai'
-        ? input.settings.seekaiModel
-        : input.settings.provider === 'stepfun'
-          ? input.settings.stepfunModel
-        : input.settings.openrouterModel,
+    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
     messages: [
       { role: 'system', content: input.systemPrompt },
       { role: 'user', content },
@@ -325,21 +309,9 @@ export async function runBatchAiOpenRouterRefinement(input: {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const completion = input.settings.provider === 'byesu'
-    ? byesuChatCompletion
-    : input.settings.provider === 'seekai'
-      ? seekaiChatCompletion
-      : input.settings.provider === 'stepfun'
-        ? stepfunChatCompletion
-      : openRouterChatCompletion
+  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
   const payload = await completion({
-    model: input.settings.provider === 'byesu'
-      ? input.settings.byesuModel
-      : input.settings.provider === 'seekai'
-        ? input.settings.seekaiModel
-        : input.settings.provider === 'stepfun'
-          ? input.settings.stepfunModel
-        : input.settings.openrouterModel,
+    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
     messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
     temperature: input.settings.temperature,
     max_tokens: input.settings.maxTokens,

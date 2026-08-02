@@ -50,15 +50,11 @@ import {
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup } from '@/lib/byesu'
-import { seekaiApiKeyStatus } from '@/lib/seekai'
-import { stepfunApiKeyStatus } from '@/lib/stepfun'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
   'batch_ai_openrouter_model',
   'batch_ai_byesu_model',
-  'batch_ai_seekai_model',
-  'batch_ai_stepfun_model',
   'batch_ai_temperature',
   'batch_ai_max_tokens',
   'batch_ai_concurrency',
@@ -74,7 +70,7 @@ export async function getBatchAiSettingsAction() {
   await requireAdmin()
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
-  const provider: BatchAiProvider = ['openrouter', 'byesu', 'seekai', 'stepfun', 'cockpit'].includes(values.batch_ai_provider)
+  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider)
     ? values.batch_ai_provider as BatchAiProvider
     : 'openrouter'
   const worker = await scrapingQuery(`
@@ -91,8 +87,6 @@ export async function getBatchAiSettingsAction() {
       provider,
       openrouterModel: values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
       byesuModel: values.batch_ai_byesu_model || 'gemini-3.1-flash-lite',
-      seekaiModel: values.batch_ai_seekai_model || 'gemini-3-flash',
-      stepfunModel: values.batch_ai_stepfun_model || 'step-3.7-flash',
       temperature: finiteNumber(values.batch_ai_temperature, 0.1),
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
@@ -103,8 +97,6 @@ export async function getBatchAiSettingsAction() {
         byesuGemini: byesuKeys.gemini,
         byesuOpenai: byesuKeys.openai,
         byesuLegacy: byesuKeys.legacy,
-        seekai: seekaiApiKeyStatus(),
-        stepfun: stepfunApiKeyStatus(),
       },
     },
   }
@@ -112,15 +104,13 @@ export async function getBatchAiSettingsAction() {
 
 export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
   await requireAdmin()
-  const provider: BatchAiProvider = ['openrouter', 'byesu', 'seekai', 'stepfun', 'cockpit'].includes(settings.provider)
+  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(settings.provider)
     ? settings.provider
     : 'openrouter'
   const values: Record<string, string> = {
     batch_ai_provider: provider,
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
     batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gemini-3.1-flash-lite',
-    batch_ai_seekai_model: String(settings.seekaiModel || '').trim() || 'gemini-3-flash',
-    batch_ai_stepfun_model: String(settings.stepfunModel || '').trim() || 'step-3.7-flash',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
     batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
     batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
@@ -443,12 +433,6 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     }
     if (needsAiProvider && settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
       return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }
-    }
-    if (needsAiProvider && settings.provider === 'seekai' && !seekaiApiKeyStatus()) {
-      return { success: false, error: 'SEEKAI_API_KEY не задан в окружении AdminYeezy' }
-    }
-    if (needsAiProvider && settings.provider === 'stepfun' && !stepfunApiKeyStatus()) {
-      return { success: false, error: 'STEPFUN_API_KEY не задан в окружении AdminYeezy' }
     }
 
     if (mode === 'full') {
