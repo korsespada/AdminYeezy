@@ -286,13 +286,18 @@ function priceRuleHints(rules: any[]) {
 async function syncCurrentRailsCatalogMappings() {
   try {
     const catalog = await getRailsCatalogLookups()
+    const currentSubcategoryName = (name: unknown) => ({
+      'Пальто': 'Пальто и плащи',
+      'Худи': 'Худи и толстовки',
+      'Головные уборы': 'Шапки',
+    }[String(name || '').trim()] || String(name || ''))
     const rows = [
       ...catalog.brands.map((item: any) => ({ entity_type: 'brand', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
       ...catalog.categories.map((item: any) => ({ entity_type: 'category', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
       ...catalog.subcategories.map((item: any) => ({
         entity_type: 'subcategory',
         id: String(item.id),
-        name: String(item.name || ''),
+        name: currentSubcategoryName(item.name),
         parent_id: String(item.category || item.parent_id || ''),
       })),
     ]

@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { canonicalBatchSuggestionKey } from '@/lib/batch-ai'
+import { canonicalClothingSubcategoryName } from '@/lib/clothing-taxonomy'
 
 type QueryClient = {
   query: (text: string, params?: any[]) => Promise<{ rows: any[] }>
@@ -768,6 +769,18 @@ export async function reconcileBatchSubcategorySuggestions(client: QueryClient, 
     const familyKey = subcategoryFamilyKey(payload.name || payload.code || row.canonical_key)
     const parentId = String(payload.parent_category_id || '')
     const mappings = await catalogSubcategories(client, parentId)
+    const clothingName = canonicalClothingSubcategoryName(payload.name || payload.code || row.canonical_key)
+    const clothingMapping = clothingName
+      ? mappings.find((mapping) => canonicalClothingSubcategoryName(mapping.name) === clothingName)
+      : null
+    if (clothingMapping) {
+      await client.query('UPDATE products SET subcategory=$1,updated_at=NOW() WHERE id=ANY($2::int[])', [
+        String(clothingMapping.canonical_id),
+        row.affected_product_ids.map(Number),
+      ])
+      await client.query("UPDATE batch_ai_suggestions SET status='approved',reviewed_at=NOW() WHERE id=$1", [row.id])
+      continue
+    }
     if (redirectsToShoulderBags(payload.name || payload.code || row.canonical_key)) {
       const shoulderBags = shoulderBagsMapping(mappings)
       if (shoulderBags) {

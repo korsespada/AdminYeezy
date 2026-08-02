@@ -295,7 +295,8 @@ describe('batch AI normalization', () => {
 
     expect(shoePrompt).toContain('Автоматические правила категории «Обувь»')
     expect(shoePrompt).toContain('мюли на каблуке остаются')
-    expect(accessoryPrompt).toContain('дополнительные автоматические правила пока не заданы')
+    expect(accessoryPrompt).toContain('Автоматические правила категории «Аксессуары»')
+    expect(accessoryPrompt).toContain('Кепки и бейсболки')
     expect(accessoryPrompt).not.toContain('Правила классификации категории «Обувь»')
   })
 
@@ -327,6 +328,25 @@ describe('batch AI normalization', () => {
 
     expect(result.product.category).toBe('accessories')
     expect(result.product.subcategory).toBe('passport-holders')
+  })
+
+  it('maps clothing aliases to existing global subcategories without a suggestion', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: '' },
+      subcategory_suggestion: { name: 'Поло', parent_category_id: 'clothes' },
+    }, {
+      product: { name: 'Loro Piana поло', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['tees', 'shorts']),
+      subcategoryParents: new Map([['tees', 'clothes'], ['shorts', 'clothes']]),
+      subcategoryNames: new Map([['tees', 'Футболки и майки'], ['shorts', 'Шорты']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('tees')
+    expect(result.subcategorySuggestion).toBeNull()
   })
 
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {

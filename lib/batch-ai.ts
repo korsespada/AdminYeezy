@@ -7,6 +7,10 @@ import {
   inferGenericShoeSubcategoryName,
   isGenericShoeSubcategory,
 } from '@/lib/shoe-taxonomy'
+import {
+  canonicalClothingSubcategoryName,
+  inferClothingSubcategoryName,
+} from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleFor } from '@/lib/batch-ai-category-rules'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
@@ -559,6 +563,29 @@ export function normalizeBatchAiOutput(raw: any, input: {
   let subcategorySuggestion = typeof raw?.subcategory_suggestion === 'string'
     ? { name: raw.subcategory_suggestion }
     : raw?.subcategory_suggestion || null
+  if (normalizedName(input.categoryNames?.get(category)) === 'одежда') {
+    const canonicalName = canonicalClothingSubcategoryName(subcategorySuggestion?.name)
+      || canonicalClothingSubcategoryName(input.subcategoryNames?.get(subcategory))
+      || inferClothingSubcategoryName([
+        proposed.name,
+        proposed.description,
+        proposed.h1,
+        proposed.seo_title,
+        proposed.seo_description,
+        original.name,
+        original.description,
+      ].filter(Boolean).join('\n'))
+    const canonicalEntry = canonicalName
+      ? [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
+        canonicalClothingSubcategoryName(name) === canonicalName
+        && (!input.subcategoryParents?.get(id) || input.subcategoryParents.get(id) === category)
+      ))
+      : undefined
+    if (canonicalEntry) {
+      subcategory = canonicalEntry[0]
+      if (canonicalClothingSubcategoryName(subcategorySuggestion?.name)) subcategorySuggestion = null
+    }
+  }
   if (normalizedName(input.categoryNames?.get(category)) === 'обувь') {
     const canonicalFromSelection = canonicalShoeSubcategoryName(input.subcategoryNames?.get(subcategory))
     const canonicalFromSuggestion = canonicalShoeSubcategoryName(subcategorySuggestion?.name)

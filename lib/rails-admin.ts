@@ -1466,6 +1466,17 @@ export async function createRailsCatalogSubcategory(input: { name: string; paren
   return result.category
 }
 
+export async function updateRailsCatalogSubcategory(id: string, name: string) {
+  const result = await railsFetch<{ category: any }>(
+    `/admin/catalog_taxonomy/subcategories/${encodeURIComponent(id)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ subcategory: { name } }),
+    },
+  )
+  return result.category
+}
+
 export async function updateRailsCatalogAttributeDefinition(code: string, definition: Record<string, unknown>) {
   const result = await railsFetch<{ definition: any }>(
     `/admin/catalog_attribute_registry/definitions/${encodeURIComponent(code)}`,
