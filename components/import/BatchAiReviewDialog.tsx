@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
-import { Check, RefreshCw, X } from 'lucide-react'
+import { Check, CheckCheck, RefreshCw, X } from 'lucide-react'
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -25,6 +25,7 @@ export default function BatchAiReviewDialog({
   const [selectedProductIds, setSelectedProductIds] = useState<Record<string, number[]>>({})
   const [productColors, setProductColors] = useState<Record<string, Record<string, string>>>({})
   const [rebuilding, setRebuilding] = useState(false)
+  const [acceptingAll, setAcceptingAll] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const loadSuggestions = useCallback(async () => {
@@ -84,10 +85,46 @@ export default function BatchAiReviewDialog({
     }
   }
 
+  const acceptAll = async () => {
+    const pendingItems = items.filter((item) => item.status === 'pending')
+    if (!pendingItems.length) return
+    if (!window.confirm(`Применить все ожидающие предложения (${pendingItems.length})? Конфликтные семьи останутся на ручную проверку.`)) return
+    setAcceptingAll(true)
+    let approved = 0
+    const failures: string[] = []
+    try {
+      for (const item of pendingItems) {
+        let payload = item.payload
+        try {
+          payload = JSON.parse(payloads[item.id])
+        } catch {
+          failures.push(`${suggestionTitle(item)}: некорректный JSON`)
+          continue
+        }
+        const result = await reviewBatchAiSuggestionAction(
+          item.id,
+          'approved',
+          payload,
+          item.kind === 'color_family' ? selectedProductIds[item.id] : undefined,
+          item.kind === 'color_family' ? productColors[item.id] : undefined,
+        )
+        if (result.success) approved += 1
+        else failures.push(`${suggestionTitle(item)}: ${result.error}`)
+      }
+      await loadSuggestions()
+      await onReviewed?.()
+      if (failures.length) {
+        alert(`Принято: ${approved}. Осталось проверить: ${failures.length}.\n\n${failures.slice(0, 8).join('\n')}${failures.length > 8 ? '\n…' : ''}`)
+      }
+    } finally {
+      setAcceptingAll(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-[125] overflow-y-auto bg-slate-950/90 p-4 backdrop-blur-sm">
       <div className="mx-auto max-w-5xl rounded-xl border border-slate-700 bg-slate-900">
-        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2"><button onClick={rebuild} disabled={rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-slate-800"><X className="h-5 w-5" /></button></div></header>
+        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2">{items.some((item) => item.status === 'pending') && <button onClick={acceptAll} disabled={acceptingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCheck className={`h-4 w-4 ${acceptingAll ? 'animate-pulse' : ''}`} />{acceptingAll ? 'Принимаем…' : 'Принять всё'}</button>}<button onClick={rebuild} disabled={rebuilding || acceptingAll || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={onClose} disabled={acceptingAll} className="rounded p-2 text-slate-400 hover:bg-slate-800 disabled:opacity-50"><X className="h-5 w-5" /></button></div></header>
         <div className="space-y-4 p-5">
           {items.map((item) => (
             <article key={item.id} className="rounded-lg border border-slate-700 bg-slate-950 p-4">
@@ -119,7 +156,7 @@ export default function BatchAiReviewDialog({
                 <summary className="cursor-pointer select-none text-xs text-slate-500 hover:text-slate-300">Технические данные</summary>
                 <textarea value={payloads[item.id] || ''} onChange={(event) => setPayloads((current) => ({ ...current, [item.id]: event.target.value }))} disabled={item.status !== 'pending'} className="mt-2 min-h-48 w-full rounded border border-slate-800 bg-slate-900 p-3 font-mono text-xs text-slate-300 disabled:opacity-60" />
               </details>
-              {item.status === 'pending' && <div className="mt-3 flex gap-2"><button onClick={() => review(item, 'approved')} disabled={pending} className="inline-flex items-center gap-2 rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white"><Check className="h-4 w-4" /> Одобрить и применить</button><button onClick={() => review(item, 'rejected')} disabled={pending} className="inline-flex items-center gap-2 rounded border border-red-500/30 px-3 py-2 text-sm text-red-300"><X className="h-4 w-4" /> Отклонить</button></div>}
+              {item.status === 'pending' && <div className="mt-3 flex gap-2"><button onClick={() => review(item, 'approved')} disabled={pending || acceptingAll} className="inline-flex items-center gap-2 rounded bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><Check className="h-4 w-4" /> Одобрить и применить</button><button onClick={() => review(item, 'rejected')} disabled={pending || acceptingAll} className="inline-flex items-center gap-2 rounded border border-red-500/30 px-3 py-2 text-sm text-red-300 disabled:opacity-50"><X className="h-4 w-4" /> Отклонить</button></div>}
             </article>
           ))}
           {items.length === 0 && <p className="py-16 text-center text-slate-500">Новых подкатегорий, атрибутов или цветовых семейств нет.</p>}

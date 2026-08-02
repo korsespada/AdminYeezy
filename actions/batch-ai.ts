@@ -404,9 +404,19 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         WHERE r.batch_id=$1 AND s.kind='color_family' AND s.status='approved'
       `, [batchId])
       const approvedIds = new Set(approved.rows.map((row) => Number(row.product_id)))
-      variantPlan = colorFamilyRebuildPlan(
-        context.products.filter((product: any) => !approvedIds.has(Number(product.id))),
-      )
+      const completePlan = colorFamilyRebuildPlan(context.products)
+      // Уже принятые товары остаются якорями семьи. Иначе частично принятое
+      // семейство невозможно дополнить пропущенными цветами при пересборке.
+      const needsRebuild = (family: { products: any[] }) => {
+        if (family.products.some((product: any) => !approvedIds.has(Number(product.id)))) return true
+        const appliedKeys = new Set(family.products.map((product: any) => String(product.variant_group_key || '')).filter(Boolean))
+        return appliedKeys.size !== 1
+      }
+      variantPlan = {
+        deterministicFamilies: completePlan.deterministicFamilies.filter(needsRebuild),
+        visualCandidates: completePlan.visualCandidates.filter(needsRebuild),
+        shadeCandidates: completePlan.shadeCandidates.filter(needsRebuild),
+      }
     }
     if (context.products.length === 0) {
       return {
@@ -807,6 +817,8 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
           source: 'visual_comparison',
           confidence: family.confidence,
           matchingEvidence: family.matchingEvidence,
+          duplicateProducts: family.duplicateProducts,
+          suggestedColors: family.suggestedColors,
         })
       }
     } else {

@@ -78,6 +78,17 @@ describe('canonicalProductColorFamilyKey', () => {
     expect(canonicalProductColorFamilyKey(cotton)).toBe(canonicalProductColorFamilyKey(knit))
   })
 
+  it('ignores a missing subcategory when the internal model code is exact', () => {
+    const classified = {
+      name: 'Loro Piana плавательные шорты', brand: 'lp', category: 'clothes', subcategory: 'swimwear',
+      variant_group_key: 'LP063', attributes: { colors: ['Синий'] },
+    }
+    const unclassified = {
+      ...classified, subcategory: null, attributes: { colors: ['Серый'] },
+    }
+    expect(canonicalProductColorFamilyKey(classified)).toBe(canonicalProductColorFamilyKey(unclassified))
+  })
+
   it('does not merge different product types that reuse the same source code', () => {
     const polo = { name: 'Brunello Cucinelli поло', brand: 'bc', category: 'clothes', variant_group_key: '116', attributes: {} }
     const trousers = { ...polo, name: 'Brunello Cucinelli брюки' }
@@ -143,5 +154,24 @@ describe('normalizeVisualFamilyScanOutput', () => {
     ] }, candidates)
     expect(result).toHaveLength(1)
     expect(result[0].products.map((product: any) => product.id)).toEqual([1, 3])
+  })
+
+  it('keeps visually distinct shades that originally had the same color name', () => {
+    const candidates = [
+      { id: 1, name: 'Шарф', attributes: { colors: ['Серый'] } },
+      { id: 2, name: 'Шарф', attributes: { colors: ['Серый'] } },
+      { id: 3, name: 'Шарф', attributes: { colors: ['Синий'] } },
+    ]
+    const result = normalizeVisualFamilyScanOutput({ families: [{
+      confidence: 0.96,
+      variants: [
+        { product_index: 1, color: 'Светло-серый', base_color: 'Серый', confidence: 0.95 },
+        { product_index: 2, color: 'Графитовый', base_color: 'Серый', confidence: 0.94 },
+        { product_index: 3, color: 'Темно-синий', base_color: 'Синий', confidence: 0.96 },
+      ],
+    }] }, candidates)
+    expect(result[0].products.map((product: any) => product.id)).toEqual([1, 2, 3])
+    expect(result[0].suggestedColors['1'].color).toBe('Светло-серый')
+    expect(result[0].suggestedColors['2'].color).toBe('Графитовый')
   })
 })
