@@ -1458,7 +1458,7 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
     )]
     const affectedProducts = affectedProductIds.length
       ? await client.query(`
-          SELECT id,name,external_id,photos,attributes
+          SELECT id,name,external_id,description,brand,category,subcategory,gender,price,photos,attributes,variant_group_key,source_position
           FROM products
           WHERE id=ANY($1::int[])
         `, [affectedProductIds])

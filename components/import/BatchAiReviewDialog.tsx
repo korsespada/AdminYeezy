@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
-import { Check, CheckCheck, RefreshCw, X } from 'lucide-react'
+import { Check, CheckCheck, Eye, RefreshCw, X } from 'lucide-react'
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
@@ -24,6 +24,7 @@ export default function BatchAiReviewDialog({
   const [payloads, setPayloads] = useState<Record<string, string>>({})
   const [selectedProductIds, setSelectedProductIds] = useState<Record<string, number[]>>({})
   const [productColors, setProductColors] = useState<Record<string, Record<string, string>>>({})
+  const [previewProduct, setPreviewProduct] = useState<any | null>(null)
   const [rebuilding, setRebuilding] = useState(false)
   const [acceptingAll, setAcceptingAll] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -151,6 +152,7 @@ export default function BatchAiReviewDialog({
                   ...current,
                   [item.id]: { ...(current[item.id] || {}), [String(productId)]: color },
                 }))}
+                onOpenProduct={setPreviewProduct}
               />}
               <details className="mt-3">
                 <summary className="cursor-pointer select-none text-xs text-slate-500 hover:text-slate-300">Технические данные</summary>
@@ -162,6 +164,7 @@ export default function BatchAiReviewDialog({
           {items.length === 0 && <p className="py-16 text-center text-slate-500">Новых подкатегорий, атрибутов или цветовых семейств нет.</p>}
         </div>
       </div>
+      {previewProduct && <ProductPreview product={previewProduct} onClose={() => setPreviewProduct(null)} />}
     </div>
   )
 }
@@ -202,6 +205,7 @@ function ColorFamilyPreview({
   colorValues,
   onToggle,
   onColorChange,
+  onOpenProduct,
 }: {
   item: any
   selectedIds: number[]
@@ -209,6 +213,7 @@ function ColorFamilyPreview({
   colorValues: Record<string, string>
   onToggle: (productId: number) => void
   onColorChange: (productId: number, color: string) => void
+  onOpenProduct: (product: any) => void
 }) {
   const observedColors = valueList(item.payload?.observed_colors)
   const excludedCount = valueList(item.payload?.excluded_duplicate_product_ids).length
@@ -243,11 +248,23 @@ function ColorFamilyPreview({
             >
               <span className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border ${selected ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-slate-600 bg-slate-900'}`}>{selected && <Check className="h-3.5 w-3.5" />}</span>
               <div
-                className="h-16 w-16 shrink-0 rounded-md bg-slate-800 bg-cover bg-center"
+                role="button"
+                tabIndex={0}
+                title="Открыть товар"
+                onClick={(event) => { event.stopPropagation(); onOpenProduct(product) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.stopPropagation()
+                    onOpenProduct(product)
+                  }
+                }}
+                className="group/photo relative h-16 w-16 shrink-0 cursor-zoom-in rounded-md bg-slate-800 bg-cover bg-center"
                 style={photo ? { backgroundImage: `url("${photo}")` } : undefined}
-              />
+              >
+                <span className="absolute inset-0 flex items-center justify-center rounded-md bg-slate-950/55 opacity-0 transition group-hover/photo:opacity-100"><Eye className="h-5 w-5 text-white" /></span>
+              </div>
               <div className="min-w-0 py-0.5">
-                <p className="truncate text-sm font-medium text-white">{product.name || `Товар #${product.id}`}</p>
+                <button type="button" onClick={(event) => { event.stopPropagation(); onOpenProduct(product) }} className="block max-w-full truncate text-left text-sm font-medium text-white hover:text-indigo-300 hover:underline">{product.name || `Товар #${product.id}`}</button>
                 {suggestedDuplicate && <p className="mt-1 text-[11px] font-medium text-amber-300">Возможный дубль по мнению ИИ</p>}
                 <input
                   value={colorValues[String(product.id)] ?? productColors[0] ?? ''}
@@ -267,4 +284,44 @@ function ColorFamilyPreview({
       {!disabled && <p className="mt-2 text-xs text-slate-500">Разным оттенкам задайте разные названия. Нажмите на карточку, чтобы исключить только настоящий дубль.</p>}
     </div>
   )
+}
+
+function ProductPreview({ product, onClose }: { product: any; onClose: () => void }) {
+  const photos = Array.isArray(product.photos) ? product.photos.map(String).filter(Boolean) : []
+  const [selectedPhoto, setSelectedPhoto] = useState(0)
+  const attributes = product.attributes && typeof product.attributes === 'object' ? product.attributes : {}
+  return (
+    <div className="fixed inset-0 z-[140] flex justify-end bg-slate-950/80 backdrop-blur-sm" onClick={onClose}>
+      <aside className="h-full w-full max-w-3xl overflow-y-auto border-l border-slate-700 bg-slate-900 shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-slate-700 bg-slate-900/95 px-5 py-4 backdrop-blur">
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-semibold text-white">{product.name || `Товар #${product.id}`}</h3>
+            <p className="mt-0.5 truncate text-xs text-slate-500">#{product.source_position != null ? Number(product.source_position) + 1 : product.id} · {product.external_id}</p>
+          </div>
+          <button type="button" onClick={onClose} className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
+        </header>
+        <div className="space-y-6 p-5">
+          {photos.length > 0 ? <>
+            <div className="aspect-square w-full rounded-xl border border-slate-700 bg-slate-950 bg-contain bg-center bg-no-repeat" style={{ backgroundImage: `url("${photos[selectedPhoto]}")` }} />
+            {photos.length > 1 && <div className="grid grid-cols-5 gap-2 sm:grid-cols-7">
+              {photos.map((photo: string, index: number) => <button type="button" key={`${photo}-${index}`} onClick={() => setSelectedPhoto(index)} className={`aspect-square rounded-lg border bg-slate-950 bg-cover bg-center ${selectedPhoto === index ? 'border-indigo-400 ring-2 ring-indigo-400/20' : 'border-slate-700 hover:border-slate-500'}`} style={{ backgroundImage: `url("${photo}")` }} aria-label={`Фото ${index + 1}`} />)}
+            </div>}
+          </> : <div className="flex aspect-video items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm text-slate-500">Фотографий нет</div>}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <PreviewField label="Цвет" value={valueList(attributes.colors).join(', ')} />
+            <PreviewField label="Внутренний артикул" value={attributes.model_code || product.variant_group_key} />
+            <PreviewField label="Размеры" value={valueList(attributes.sizes).join(', ')} />
+            <PreviewField label="Материал" value={valueList(attributes.materials).join(', ')} />
+          </div>
+          {product.description && <section><h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Описание</h4><p className="whitespace-pre-wrap text-sm leading-6 text-slate-300">{product.description}</p></section>}
+        </div>
+      </aside>
+    </div>
+  )
+}
+
+function PreviewField({ label, value }: { label: string; value: unknown }) {
+  const text = String(value || '').trim()
+  if (!text) return null
+  return <div className="rounded-lg border border-slate-800 bg-slate-950 px-3 py-2"><div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</div><div className="mt-1 text-sm text-slate-200">{text}</div></div>
 }
