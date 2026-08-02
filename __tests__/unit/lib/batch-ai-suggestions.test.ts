@@ -3,6 +3,8 @@ import {
   canonicalColorFamilyKey,
   canonicalProductColorFamilyKey,
   colorFamilyRebuildPlan,
+  inferBaseColor,
+  normalizeShadeScanOutput,
   normalizeVisualFamilyScanOutput,
   sameSubcategoryFamily,
   subcategoryFamilyKey,
@@ -84,7 +86,7 @@ describe('canonicalProductColorFamilyKey', () => {
 })
 
 describe('colorFamilyRebuildPlan', () => {
-  it('builds one coded family and keeps only the most complete product of each color', () => {
+  it('keeps same-named colors visible and sends them to shade comparison', () => {
     const base = { name: 'Brunello Cucinelli поло', brand: 'bc', category: 'clothes', variant_group_key: 'BC116', description: '' }
     const plan = colorFamilyRebuildPlan([
       { ...base, id: 1, photos: ['1'], attributes: { colors: ['Серый'], materials: ['Хлопок'] } },
@@ -92,8 +94,10 @@ describe('colorFamilyRebuildPlan', () => {
       { ...base, id: 3, photos: ['1'], attributes: { colors: ['Синий'], materials: ['Хлопок'] } },
     ])
     expect(plan.deterministicFamilies).toHaveLength(1)
-    expect(plan.deterministicFamilies[0].products.map((product) => product.id).sort()).toEqual([2, 3])
-    expect(plan.deterministicFamilies[0].duplicateProducts.map((product) => product.id)).toEqual([1])
+    expect(plan.deterministicFamilies[0].products.map((product) => product.id).sort()).toEqual([1, 2, 3])
+    expect(plan.deterministicFamilies[0].duplicateProducts).toEqual([])
+    expect(plan.deterministicFamilies[0].colorConflicts).toEqual([{ color: 'серый', productIds: [1, 2] }])
+    expect(plan.shadeCandidates).toHaveLength(1)
   })
 
   it('sends uncoded products with several colors to visual comparison', () => {
@@ -104,6 +108,25 @@ describe('colorFamilyRebuildPlan', () => {
     ])
     expect(plan.visualCandidates).toHaveLength(1)
     expect(plan.deterministicFamilies).toHaveLength(0)
+  })
+})
+
+describe('normalizeShadeScanOutput', () => {
+  it('keeps distinct shades and only suggests high-confidence true duplicates', () => {
+    const candidates = [
+      { id: 1, attributes: { colors: ['Серый'] } },
+      { id: 2, attributes: { colors: ['Серый'] } },
+      { id: 3, attributes: { colors: ['Серый'] } },
+    ]
+    const result = normalizeShadeScanOutput({ variants: [
+      { product_index: 1, color: 'Светло-серый', base_color: 'Серый', confidence: 0.96 },
+      { product_index: 2, color: 'Графитовый', base_color: 'Серый', confidence: 0.94 },
+      { product_index: 3, color: 'Светло-серый', base_color: 'Серый', duplicate_of_index: 1, confidence: 0.92 },
+    ] }, candidates)
+    expect(result.map((variant: any) => variant.color)).toEqual(['Светло-серый', 'Графитовый', 'Светло-серый'])
+    expect(result[2].duplicateOfProductId).toBe(1)
+    expect(inferBaseColor('Графитовый')).toBe('Серый')
+    expect(inferBaseColor('Песочный')).toBe('Бежевый')
   })
 })
 

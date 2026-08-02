@@ -200,6 +200,26 @@ export function buildBatchAiVisualFamilyPrompt(products: any[]) {
   ].join('\n\n')
 }
 
+export function buildBatchAiShadePrompt(products: any[]) {
+  const candidates = products.map((product, index) => ({
+    index: index + 1,
+    id: product.id,
+    current_color: product.attributes?.colors || [],
+    name: product.name,
+  }))
+  return [
+    'Это один товар с одинаковым внутренним артикулом. Сравни только его цветовые варианты по первым фотографиям.',
+    'Номер товара совпадает с номером фотографии на contact sheet.',
+    'Если два товара имеют одинаковое общее название цвета, но визуально отличаются оттенком, сохрани оба и дай им разные точные русские названия: например «Светло-серый» и «Графитовый», «Светло-бежевый» и «Песочный».',
+    'base_color — общий цвет для фильтра каталога: «Серый», «Бежевый», «Синий» и т. п.',
+    'duplicate_of_index указывай только если это действительно повторная публикация визуально одинакового цвета. Разные оттенки дублями не являются.',
+    'Если различие оттенков неуверенное, оставь duplicate_of_index пустым: система покажет оба товара человеку.',
+    'Верни каждый переданный товар ровно один раз.',
+    'Верни строго JSON вида {"variants":[{"product_index":1,"color":"Графитовый","base_color":"Серый","duplicate_of_index":null,"confidence":0.95}]}.',
+    `Товары: ${JSON.stringify(candidates)}`,
+  ].join('\n\n')
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[]) {
   const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {

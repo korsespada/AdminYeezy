@@ -15,6 +15,7 @@ import {
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
   buildBatchAiUserPrompt,
+  buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
   matchingPriceRule,
   normalizeBatchAiOutput,
@@ -39,8 +40,11 @@ import {
 } from '@/lib/catalog-reference-normalizer'
 import { uploadToS3 } from '@/lib/s3'
 import {
+  applyShadeVariantsToSuggestion,
   canonicalColorFamilyKey,
   colorFamilyRebuildPlan,
+  inferBaseColor,
+  normalizeShadeScanOutput,
   normalizeVisualFamilyScanOutput,
   normalizedColorFamilyValue,
   reconcileBatchColorFamilySuggestions,
@@ -414,10 +418,12 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     }
     if (mode === 'variants' && variantPlan
       && variantPlan.deterministicFamilies.length === 0
-      && variantPlan.visualCandidates.length === 0) {
+      && variantPlan.visualCandidates.length === 0
+      && variantPlan.shadeCandidates.length === 0) {
       return { success: false, error: 'Нет новых кандидатов для цветовых семейств' }
     }
-    const needsAiProvider = mode !== 'variants' || Boolean(variantPlan?.visualCandidates.length)
+    const needsAiProvider = mode !== 'variants'
+      || Boolean((variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0))
 
     if (needsAiProvider && settings.provider === 'byesu') {
       const group = byesuModelGroup(settings.byesuModel)
@@ -487,7 +493,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       settings.provider,
       mode,
       JSON.stringify(snapshot),
-      mode === 'variants' ? variantPlan?.visualCandidates.length || 0 : context.products.length,
+      mode === 'variants'
+        ? (variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0)
+        : context.products.length,
     ])
 
     const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
@@ -510,6 +518,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             confidence: 1,
             matchingEvidence: `Совпали внутренний артикул ${family.sourceCode}, бренд и тип товара.`,
             duplicateProducts: family.duplicateProducts,
+            colorConflicts: family.colorConflicts,
           })
         }
         for (const [index, candidate] of variantPlan.visualCandidates.entries()) {
@@ -525,6 +534,25 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             variantScanOnly: true,
             visualFamilyScan: true,
             photoUrls: candidate.products.map((product: any) => product.photos[0]),
+            photoEnabled: true,
+            fullSizeRefinementEnabled: false,
+            priceReferenceUrls: [],
+          })])
+        }
+        for (const [index, candidate] of variantPlan.shadeCandidates.entries()) {
+          const first = candidate.products[0]
+          await client.query(`
+            INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
+            VALUES($1,$2,$3,$4,$5::jsonb)
+          `, [crypto.randomUUID(), runId, first.id, `shade-family-${index + 1}`, JSON.stringify({
+            product: first,
+            candidateProducts: candidate.products,
+            familyIdentityKey: candidate.identityKey,
+            userPrompt: buildBatchAiShadePrompt(candidate.products),
+            systemPrompt: snapshot.systemPrompt,
+            variantScanOnly: true,
+            shadeFamilyScan: true,
+            photoUrls: candidate.products.map((product: any) => `${product.photos[0]}#shade-${product.id}`),
             photoEnabled: true,
             fullSizeRefinementEnabled: false,
             priceReferenceUrls: [],
@@ -585,7 +613,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     }
 
-    const queuedCount = mode === 'variants' ? variantPlan?.visualCandidates.length || 0 : context.products.length
+    const queuedCount = mode === 'variants'
+      ? (variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0)
+      : context.products.length
     if (mode === 'variants' && queuedCount === 0) {
       await scrapingQuery(`
         UPDATE batch_ai_runs SET status='completed',completed_at=NOW(),updated_at=NOW()
@@ -726,6 +756,18 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
 
 function variantScanResult(raw: any, input: any) {
   const product = input.product
+  if (input.shadeFamilyScan) {
+    const candidates = Array.isArray(input.candidateProducts) ? input.candidateProducts : []
+    return {
+      product,
+      shadeVariants: normalizeShadeScanOutput(raw, candidates),
+      familyIdentityKey: String(input.familyIdentityKey || ''),
+      suggestions: [],
+      subcategorySuggestion: null,
+      colorFamily: null,
+      mediaDecision: { discard: [], sizeCharts: [] },
+    }
+  }
   if (input.visualFamilyScan) {
     const candidates = Array.isArray(input.candidateProducts) ? input.candidateProducts : []
     const colorFamilies = normalizeVisualFamilyScanOutput(raw, candidates)
@@ -754,7 +796,9 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
         completed_at=NOW(),updated_at=NOW()
       WHERE id=$1
     `, [item.id, JSON.stringify(normalized)])
-    if (Array.isArray(normalized.colorFamilies)) {
+    if (Array.isArray(normalized.shadeVariants)) {
+      await applyShadeVariantsToSuggestion(client, item.run_id, normalized)
+    } else if (Array.isArray(normalized.colorFamilies)) {
       for (const family of normalized.colorFamilies) {
         const ids = family.products.map((product: any) => Number(product.id)).sort((a: number, b: number) => a - b)
         await savePreparedColorFamilySuggestion(client, item.run_id, {
@@ -1126,9 +1170,10 @@ export async function reviewBatchAiSuggestionAction(
   decision: 'approved' | 'rejected',
   editedPayload?: any,
   selectedProductIds?: number[],
+  colorOverrides?: Record<string, string>,
 ) {
   try {
-    return await reviewBatchAiSuggestion(id, decision, editedPayload, selectedProductIds)
+    return await reviewBatchAiSuggestion(id, decision, editedPayload, selectedProductIds, colorOverrides)
   } catch (error: any) {
     console.error('Failed to review batch AI suggestion', { id, decision, error })
     return { success: false, error: error?.message || 'Не удалось применить предложение ИИ' }
@@ -1140,6 +1185,7 @@ async function reviewBatchAiSuggestion(
   decision: 'approved' | 'rejected',
   editedPayload?: any,
   selectedProductIds?: number[],
+  colorOverrides?: Record<string, string>,
 ) {
   await requireAdmin()
   const suggestion = await scrapingQuery('SELECT * FROM batch_ai_suggestions WHERE id=$1', [id])
@@ -1170,11 +1216,31 @@ async function reviewBatchAiSuggestion(
       'SELECT id,attributes FROM products WHERE id=ANY($1::int[])',
       [row.affected_product_ids.map(Number)],
     )
-    const actualColors = familyProducts.rows.map((product) => normalizedColorFamilyValue(product.attributes?.colors))
+    const resolvedColors = familyProducts.rows.map((product) => {
+      const override = String(colorOverrides?.[String(product.id)] || '').trim().slice(0, 80)
+      const current = Array.isArray(product.attributes?.colors) ? String(product.attributes.colors[0] || '').trim() : ''
+      return { product, color: override || current }
+    })
+    const actualColors = resolvedColors.map(({ color }) => normalizedColorFamilyValue(color))
     if (actualColors.some((color) => !color) || new Set(actualColors).size !== actualColors.length) {
-      return { success: false, error: 'В семье есть товары без цвета или несколько товаров одного цвета. Уберите конфликтующие карточки.' }
+      return { success: false, error: 'Укажите разные названия оттенков или исключите настоящие дубли.' }
     }
-    row.payload = { ...row.payload, observed_colors: [...new Set(actualColors)].sort() }
+    for (const { product, color } of resolvedColors) {
+      const baseColor = inferBaseColor(color)
+      await scrapingQuery(`
+        UPDATE products SET attributes=jsonb_set(
+          jsonb_set(COALESCE(attributes,'{}'::jsonb),'{colors}',$2::jsonb,true),
+          '{base_colors}',$3::jsonb,true
+        ),updated_at=NOW()
+        WHERE id=$1
+      `, [Number(product.id), JSON.stringify([color]), JSON.stringify(baseColor ? [baseColor] : [])])
+    }
+    row.payload = {
+      ...row.payload,
+      observed_colors: resolvedColors.map(({ color }) => color).sort(),
+      base_colors: [...new Set(resolvedColors.map(({ color }) => inferBaseColor(color)).filter(Boolean))].sort(),
+      color_conflicts: [],
+    }
     const familyKey = String(row.payload?.product_identity_key || canonicalColorFamilyKey(row.payload))
     const key = crypto.createHash('sha256').update(familyKey || row.canonical_key).digest('hex').slice(0, 32)
     const sourceModelCode = String(row.payload?.source_model_code || '').trim()
@@ -1365,7 +1431,10 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
           OR s.status <> 'pending'
           OR (
             jsonb_array_length(s.affected_product_ids) >= 2
-            AND COALESCE(jsonb_array_length(s.payload->'observed_colors'),0) >= 2
+            AND (
+              COALESCE(jsonb_array_length(s.payload->'observed_colors'),0) >= 2
+              OR COALESCE(jsonb_array_length(s.payload->'color_conflicts'),0) >= 1
+            )
           )
         )
       ORDER BY CASE WHEN s.status='pending' THEN 0 ELSE 1 END,s.created_at DESC

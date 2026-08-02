@@ -102,6 +102,26 @@ export function normalizedColorFamilyValue(value: unknown) {
   return [...new Set(normalizedColorTokens(value))].sort().join(' ')
 }
 
+const BASE_COLOR_PATTERNS: Array<[RegExp, string]> = [
+  [/(графит|сер|silver|grey|gray)/i, 'Серый'],
+  [/(молоч|крем|айвори|слонов|бел|white|ivory)/i, 'Белый'],
+  [/(песоч|карамел|беж|beige|camel)/i, 'Бежевый'],
+  [/(голуб|лазур|бирюз|син|navy|blue)/i, 'Синий'],
+  [/(черн|black)/i, 'Чёрный'],
+  [/(корич|шоколад|кофе|brown)/i, 'Коричневый'],
+  [/(бордов|винн|красн|red|burgundy)/i, 'Красный'],
+  [/(хаки|олив|зелен|зелён|green)/i, 'Зелёный'],
+  [/(розов|pink)/i, 'Розовый'],
+  [/(фиолет|сирен|purple)/i, 'Фиолетовый'],
+  [/(желт|жёлт|yellow)/i, 'Жёлтый'],
+  [/(оранж|orange)/i, 'Оранжевый'],
+]
+
+export function inferBaseColor(value: unknown) {
+  const text = Array.isArray(value) ? value.join(' ') : String(value || '')
+  return BASE_COLOR_PATTERNS.find(([pattern]) => pattern.test(text))?.[1] || text.trim()
+}
+
 const MATERIAL_CONSTRUCTION_TOKENS = new Set([
   'трикотаж', 'трикотажный', 'трикотажная', 'трикотажное', 'вязка', 'вязаный', 'вязаная',
   'knit', 'knitted', 'jersey',
@@ -181,13 +201,6 @@ function normalizedProductName(product: any) {
     .join('_')
 }
 
-function productCompletenessScore(product: any) {
-  const attributes = product?.attributes || {}
-  return (Array.isArray(product?.photos) ? product.photos.length * 100 : 0)
-    + String(product?.description || '').length
-    + (attributes.measurements ? 50 : 0)
-}
-
 export function colorFamilyRebuildPlan(products: any[]) {
   const coded = new Map<string, any[]>()
   const visual = new Map<string, any[]>()
@@ -217,18 +230,27 @@ export function colorFamilyRebuildPlan(products: any[]) {
       if (!color) continue
       byColor.set(color, [...(byColor.get(color) || []), product])
     }
-    const selected = [...byColor.values()].map((sameColor) => (
-      [...sameColor].sort((left, right) => productCompletenessScore(right) - productCompletenessScore(left))[0]
-    ))
-    if (selected.length < 2) return []
-    const selectedIds = new Set(selected.map((product) => Number(product.id)))
+    if (family.length < 2) return []
     return [{
       identityKey,
-      sourceCode: sourceVariantCode(selected[0]),
-      products: selected,
-      duplicateProducts: family.filter((product) => !selectedIds.has(Number(product.id))),
+      sourceCode: sourceVariantCode(family[0]),
+      products: family,
+      duplicateProducts: [],
+      colorConflicts: [...byColor.entries()].flatMap(([color, sameColor]) => (
+        sameColor.length > 1 ? [{ color, productIds: sameColor.map((product) => Number(product.id)) }] : []
+      )),
       colors: [...byColor.keys()].sort(),
     }]
+  })
+
+  const shadeCandidates = deterministicFamilies.flatMap((family) => {
+    if (!family.colorConflicts.length || family.products.length > 12) return []
+    const products = family.products.filter((product) => Array.isArray(product?.photos) && product.photos[0])
+    return products.length >= 2 ? [{
+      identityKey: family.identityKey,
+      sourceCode: family.sourceCode,
+      products,
+    }] : []
   })
 
   const visualCandidates = [...visual.entries()].flatMap(([candidateKey, family]) => {
@@ -240,12 +262,38 @@ export function colorFamilyRebuildPlan(products: any[]) {
       return true
     })
     const colors = new Set(withPhotos.flatMap((product) => normalizedColorTokens(product?.attributes?.colors)))
-    return withPhotos.length >= 2 && withPhotos.length <= 12 && colors.size >= 2
+    return withPhotos.length >= 2 && withPhotos.length <= 12 && colors.size >= 1
       ? [{ candidateKey, products: withPhotos }]
       : []
   })
 
-  return { deterministicFamilies, visualCandidates }
+  return { deterministicFamilies, visualCandidates, shadeCandidates }
+}
+
+export function normalizeShadeScanOutput(raw: any, candidates: any[]) {
+  const seenIndexes = new Set<number>()
+  return (Array.isArray(raw?.variants) ? raw.variants : []).flatMap((variant: any) => {
+    const index = Number(variant?.product_index)
+    const confidence = Number(variant?.confidence || 0)
+    if (!Number.isInteger(index) || index < 1 || index > candidates.length || seenIndexes.has(index) || confidence < 0.8) return []
+    seenIndexes.add(index)
+    const color = String(variant?.color || '').trim()
+    if (!color) return []
+    const duplicateOfIndex = Number(variant?.duplicate_of_index || 0)
+    return [{
+      product: candidates[index - 1],
+      color,
+      baseColor: String(variant?.base_color || inferBaseColor(color)).trim(),
+      duplicateOfProductId: confidence >= 0.9
+        && Number.isInteger(duplicateOfIndex)
+        && duplicateOfIndex > 0
+        && duplicateOfIndex <= candidates.length
+        && duplicateOfIndex !== index
+        ? Number(candidates[duplicateOfIndex - 1]?.id)
+        : null,
+      confidence,
+    }]
+  })
 }
 
 export function normalizeVisualFamilyScanOutput(raw: any, candidates: any[]) {
@@ -450,12 +498,13 @@ export async function savePreparedColorFamilySuggestion(
     confidence: number
     matchingEvidence: string
     duplicateProducts?: any[]
+    colorConflicts?: Array<{ color: string; productIds: number[] }>
   },
 ) {
   const affectedProductIds = input.products.map((product) => Number(product.id)).filter(Number.isInteger)
   if (affectedProductIds.length < 2) return
   const colors = [...new Set(input.products.flatMap((product) => normalizedColorTokens(product?.attributes?.colors)))].sort()
-  if (colors.length < 2) return
+  if (colors.length < 2 && !(input.colorConflicts || []).length) return
   const canonicalKey = crypto.createHash('sha256').update(input.identityKey).digest('hex')
   const first = input.products[0]
   const payload = {
@@ -471,6 +520,7 @@ export async function savePreparedColorFamilySuggestion(
     source_model_code: input.sourceCode || '',
     product_identity_key: input.identityKey,
     excluded_duplicate_product_ids: (input.duplicateProducts || []).map((product) => Number(product.id)).filter(Number.isInteger),
+    color_conflicts: input.colorConflicts || [],
   }
   await client.query(`
     INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)
@@ -481,6 +531,68 @@ export async function savePreparedColorFamilySuggestion(
       status='pending',
       reviewed_at=NULL
   `, [crypto.randomUUID(), runId, canonicalKey, JSON.stringify(payload), JSON.stringify(affectedProductIds)])
+}
+
+export async function applyShadeVariantsToSuggestion(client: QueryClient, runId: string, normalized: any) {
+  const variants = Array.isArray(normalized.shadeVariants) ? normalized.shadeVariants : []
+  const identityKey = String(normalized.familyIdentityKey || '')
+  if (!variants.length || !identityKey) return
+  const canonicalKey = crypto.createHash('sha256').update(identityKey).digest('hex')
+  const suggestion = await client.query(`
+    SELECT id,payload,affected_product_ids
+    FROM batch_ai_suggestions
+    WHERE run_id=$1 AND kind='color_family' AND canonical_key=$2
+    LIMIT 1
+  `, [runId, canonicalKey])
+  const row = suggestion.rows[0]
+  if (!row) return
+
+  const duplicateIds = new Set<number>()
+  for (const variant of variants) {
+    if (variant.duplicateOfProductId) duplicateIds.add(Number(variant.product.id))
+  }
+  const affectedIds = (row.affected_product_ids || []).map(Number)
+  const products = affectedIds.length
+    ? await client.query('SELECT id,attributes FROM products WHERE id=ANY($1::int[])', [affectedIds])
+    : { rows: [] }
+  const variantsByProductId = new Map(variants.map((variant: any) => [Number(variant.product?.id), variant]))
+  const suggestedColors: Record<string, { color: string; base_color: string; confidence: number }> = {}
+  const byColor = new Map<string, number[]>()
+  for (const product of products.rows) {
+    const productId = Number(product.id)
+    const variant: any = variantsByProductId.get(productId)
+    const originalColor = Array.isArray(product.attributes?.colors) ? String(product.attributes.colors[0] || '') : ''
+    const suggestedColor = !duplicateIds.has(productId) && variant?.color
+      ? String(variant.color).trim().slice(0, 80)
+      : originalColor
+    const baseColor = String(variant?.baseColor || inferBaseColor(suggestedColor)).trim().slice(0, 80)
+    if (suggestedColor) {
+      suggestedColors[String(productId)] = {
+        color: suggestedColor,
+        base_color: baseColor,
+        confidence: Number(variant?.confidence || 0),
+      }
+    }
+    const normalizedColor = normalizedColorFamilyValue(suggestedColor)
+    if (!normalizedColor) continue
+    byColor.set(normalizedColor, [...(byColor.get(normalizedColor) || []), productId])
+  }
+  const payload = {
+    ...(row.payload || {}),
+    observed_colors: Object.values(suggestedColors).map((item) => item.color),
+    base_colors: [...new Set(Object.values(suggestedColors).map((item) => item.base_color).filter(Boolean))].sort(),
+    suggested_colors: suggestedColors,
+    color_conflicts: [...byColor.entries()].flatMap(([color, productIds]) => (
+      productIds.length > 1 ? [{ color, productIds }] : []
+    )),
+    suggested_duplicate_product_ids: [...duplicateIds],
+    shade_comparison: 'completed',
+  }
+  await client.query(`
+    UPDATE batch_ai_suggestions
+    SET payload=$2::jsonb,affected_product_ids=$3::jsonb
+    WHERE id=$1
+  `, [row.id, JSON.stringify(payload), JSON.stringify(affectedIds)])
 }
 
 export async function reconcileBatchColorFamilySuggestions(client: QueryClient, batchId: string) {

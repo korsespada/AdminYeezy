@@ -5,6 +5,8 @@ import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
 import {
+  applyShadeVariantsToSuggestion,
+  normalizeShadeScanOutput,
   normalizeVisualFamilyScanOutput,
   saveBatchAiSuggestions,
   savePreparedColorFamilySuggestion,
@@ -89,7 +91,15 @@ async function complete(body: any) {
   const item = itemResult.rows[0]
   if (!item) return NextResponse.json({ error: 'lease_not_found' }, { status: 409 })
   const input = item.input_snapshot
-  const normalized: any = input.visualFamilyScan ? {
+  const normalized: any = input.shadeFamilyScan ? {
+    product: input.product,
+    suggestions: [],
+    subcategorySuggestion: null,
+    colorFamily: null,
+    shadeVariants: normalizeShadeScanOutput(body.output, input.candidateProducts || []),
+    familyIdentityKey: String(input.familyIdentityKey || ''),
+    mediaDecision: { discard: [], sizeCharts: [] },
+  } : input.visualFamilyScan ? {
     product: input.product,
     suggestions: [],
     subcategorySuggestion: null,
@@ -163,7 +173,9 @@ async function complete(body: any) {
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    if (Array.isArray(normalized.colorFamilies)) {
+    if (Array.isArray(normalized.shadeVariants)) {
+      await applyShadeVariantsToSuggestion(client, item.run_id, normalized)
+    } else if (Array.isArray(normalized.colorFamilies)) {
       for (const family of normalized.colorFamilies) {
         const ids = family.products.map((candidate: any) => Number(candidate.id)).sort((a: number, b: number) => a - b)
         await savePreparedColorFamilySuggestion(client, item.run_id, {

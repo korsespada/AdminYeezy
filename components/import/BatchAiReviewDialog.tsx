@@ -23,6 +23,7 @@ export default function BatchAiReviewDialog({
   const [items, setItems] = useState<any[]>([])
   const [payloads, setPayloads] = useState<Record<string, string>>({})
   const [selectedProductIds, setSelectedProductIds] = useState<Record<string, number[]>>({})
+  const [productColors, setProductColors] = useState<Record<string, Record<string, string>>>({})
   const [rebuilding, setRebuilding] = useState(false)
   const [pending, startTransition] = useTransition()
 
@@ -34,6 +35,13 @@ export default function BatchAiReviewDialog({
     setSelectedProductIds(Object.fromEntries(suggestions.map((item: any) => [
       item.id,
       (item.affected_product_ids || []).map(Number),
+    ])))
+    setProductColors(Object.fromEntries(suggestions.map((item: any) => [
+      item.id,
+      Object.fromEntries((item.affected_products || []).map((product: any) => [
+        String(product.id),
+        String(item.payload?.suggested_colors?.[String(product.id)]?.color || valueList(product.attributes?.colors)[0] || ''),
+      ])),
     ])))
   }, [batchId])
 
@@ -47,6 +55,7 @@ export default function BatchAiReviewDialog({
       decision,
       payload,
       item.kind === 'color_family' ? selectedProductIds[item.id] : undefined,
+      item.kind === 'color_family' ? productColors[item.id] : undefined,
     )
     if (result.success) {
       setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: decision, payload } : entry))
@@ -94,12 +103,17 @@ export default function BatchAiReviewDialog({
                 item={item}
                 selectedIds={selectedProductIds[item.id] || []}
                 disabled={item.status !== 'pending'}
+                colorValues={productColors[item.id] || {}}
                 onToggle={(productId) => setSelectedProductIds((current) => {
                   const selected = new Set(current[item.id] || [])
                   if (selected.has(productId)) selected.delete(productId)
                   else selected.add(productId)
                   return { ...current, [item.id]: [...selected] }
                 })}
+                onColorChange={(productId, color) => setProductColors((current) => ({
+                  ...current,
+                  [item.id]: { ...(current[item.id] || {}), [String(productId)]: color },
+                }))}
               />}
               <details className="mt-3">
                 <summary className="cursor-pointer select-none text-xs text-slate-500 hover:text-slate-300">Технические данные</summary>
@@ -148,15 +162,21 @@ function ColorFamilyPreview({
   item,
   selectedIds,
   disabled,
+  colorValues,
   onToggle,
+  onColorChange,
 }: {
   item: any
   selectedIds: number[]
   disabled: boolean
+  colorValues: Record<string, string>
   onToggle: (productId: number) => void
+  onColorChange: (productId: number, color: string) => void
 }) {
-  const colors = valueList(item.payload?.observed_colors)
+  const observedColors = valueList(item.payload?.observed_colors)
   const excludedCount = valueList(item.payload?.excluded_duplicate_product_ids).length
+  const suggestedDuplicateIds = new Set(valueList(item.payload?.suggested_duplicate_product_ids).map(Number))
+  const conflictCount = Array.isArray(item.payload?.color_conflicts) ? item.payload.color_conflicts.length : 0
   const source = item.payload?.source === 'internal_code'
     ? 'Совпадение по внутреннему артикулу'
     : item.payload?.source === 'visual_comparison'
@@ -166,21 +186,23 @@ function ColorFamilyPreview({
     <div className="mt-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-400">Объединить как варианты по цвету:</span>
-        {colors.map((color) => <span key={color} className="rounded-full border border-indigo-400/25 bg-indigo-400/10 px-2 py-0.5 text-xs text-indigo-200">{color}</span>)}
+        {observedColors.map((color) => <span key={color} className="rounded-full border border-indigo-400/25 bg-indigo-400/10 px-2 py-0.5 text-xs text-indigo-200">{color}</span>)}
       </div>
-      {(source || excludedCount > 0) && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className="text-emerald-300">{source}</span>{excludedCount > 0 && <span className="text-amber-300">Исключено повторов одного цвета: {excludedCount}</span>}</div>}
+      {(source || excludedCount > 0 || suggestedDuplicateIds.size > 0 || conflictCount > 0) && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className="text-emerald-300">{source}</span>{excludedCount > 0 && <span className="text-slate-400">Ранее исключённых дублей: {excludedCount}</span>}{suggestedDuplicateIds.size > 0 && <span className="text-amber-300">ИИ предполагает дублей: {suggestedDuplicateIds.size} — проверьте вручную</span>}{conflictCount > 0 && <span className="text-amber-300">Уточните одинаково названные оттенки</span>}</div>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {(item.affected_products || []).map((product: any) => {
           const photo = Array.isArray(product.photos) ? product.photos[0] : null
           const productColors = valueList(product.attributes?.colors)
           const selected = selectedIds.includes(Number(product.id))
+          const suggestedDuplicate = suggestedDuplicateIds.has(Number(product.id))
           return (
-            <button
-              type="button"
+            <div
+              role="button"
+              tabIndex={disabled ? -1 : 0}
               key={product.id}
-              disabled={disabled}
-              onClick={() => onToggle(Number(product.id))}
-              className={`relative flex min-w-0 gap-3 rounded-lg border p-2 text-left transition ${selected ? 'border-indigo-400/50 bg-slate-900' : 'border-slate-800 bg-slate-950 opacity-45'} disabled:cursor-default`}
+              onClick={() => { if (!disabled) onToggle(Number(product.id)) }}
+              onKeyDown={(event) => { if (!disabled && (event.key === 'Enter' || event.key === ' ')) onToggle(Number(product.id)) }}
+              className={`relative flex min-w-0 gap-3 rounded-lg border p-2 text-left transition ${selected ? 'border-indigo-400/50 bg-slate-900' : 'border-slate-800 bg-slate-950 opacity-45'} ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
             >
               <span className={`absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded border ${selected ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-slate-600 bg-slate-900'}`}>{selected && <Check className="h-3.5 w-3.5" />}</span>
               <div
@@ -189,14 +211,23 @@ function ColorFamilyPreview({
               />
               <div className="min-w-0 py-0.5">
                 <p className="truncate text-sm font-medium text-white">{product.name || `Товар #${product.id}`}</p>
-                <p className="mt-1 truncate text-xs text-indigo-300">{productColors.join(', ') || 'Цвет не указан'}</p>
+                {suggestedDuplicate && <p className="mt-1 text-[11px] font-medium text-amber-300">Возможный дубль по мнению ИИ</p>}
+                <input
+                  value={colorValues[String(product.id)] ?? productColors[0] ?? ''}
+                  disabled={disabled || !selected}
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onChange={(event) => onColorChange(Number(product.id), event.target.value)}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-indigo-200 outline-none focus:border-indigo-400 disabled:opacity-60"
+                  placeholder="Название оттенка"
+                />
                 <p className="mt-1 truncate text-xs text-slate-500">{product.attributes?.dimensions || product.external_id}</p>
               </div>
-            </button>
+            </div>
           )
         })}
       </div>
-      {!disabled && <p className="mt-2 text-xs text-slate-500">Нажмите на карточку, чтобы исключить спорный товар перед одобрением.</p>}
+      {!disabled && <p className="mt-2 text-xs text-slate-500">Разным оттенкам задайте разные названия. Нажмите на карточку, чтобы исключить только настоящий дубль.</p>}
     </div>
   )
 }
