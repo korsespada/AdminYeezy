@@ -1,0 +1,6 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+
+# Keep delegated work bounded in this repository. The project AGENTS.md still
+# allows a read-only subagent when it provides a measurable benefit.
+[agents]
+max_concurrent_threads_per_session = 1

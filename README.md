@@ -24,7 +24,7 @@ AdminYeezy -> yeezy_scraping
 
 ```powershell
 Copy-Item .env.example .env.local
-npm install
+npm ci
 npm run dev
 ```
 
@@ -39,6 +39,19 @@ npm run dev
 - [Runbook деплоя и проверок](./docs/deployment-runbook.md)
 - [NocoDB](./docs/nocodb.md)
 - [Post-process скрипты](./docs/postprocess-scripts.md)
+- [Codex workflow](./docs/CODEX_WORKFLOW.md)
+- [Текущие решения проекта](./docs/PROJECT_DECISIONS.md)
+
+## Проверка
+
+После законченного блока изменений:
+
+```powershell
+npm run check
+```
+
+Команда запускает lint, unit-тесты и production build. Полный smoke-check
+выполняется только после деплоя по [deployment runbook](./docs/deployment-runbook.md).
 
 ## Важное ограничение
 

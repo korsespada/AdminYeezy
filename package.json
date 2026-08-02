@@ -23,7 +23,8 @@
     "ai:batch-worker": "node scripts/batch-ai-worker.js",
     "lint": "eslint .",
     "test": "vitest",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "check": "npm run lint && npm test -- --run && npm run build"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1068.0",
