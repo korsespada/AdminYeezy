@@ -1013,7 +1013,7 @@ export default function CsvImportApp({
           if (data?.runId) {
             setActiveAiRunId(String(data.runId));
             setSaveMsg(mode === "variants"
-              ? `Поиск вариантов: в очереди ${data.queued} товаров…`
+              ? `Пересборка цветовых семейств: визуальных групп ${data.queued}, по артикулам ${data.deterministic || 0}…`
               : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -1029,7 +1029,7 @@ export default function CsvImportApp({
               });
               setAiQueue(finalRun.queue_items || []);
               setSaveMsg(mode === "variants"
-                ? `Поиск вариантов: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
+                ? `Пересборка семейств: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
@@ -1040,7 +1040,7 @@ export default function CsvImportApp({
               ? "AI-обработка остановлена. Готовые товары сохранены."
               : finalRun?.status === "completed"
               ? mode === "variants"
-                ? `✓ Проверено на варианты: ${finalRun.completed_count || 0}`
+                ? `✓ Цветовые семейства пересобраны: по артикулам ${data.deterministic || 0}, визуально ${finalRun.completed_count || 0}`
                 : `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
               : "ИИ не завершил обработку вовремя. Статус сохранён в истории.");
           }
@@ -1657,7 +1657,7 @@ export default function CsvImportApp({
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
                       {previousProducts && <button onClick={handleUndoMerge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
-                      {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Найти варианты</button>}
+                      {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Пересобрать цветовые семьи</button>}
                     </div>
                   )}
                 </div>

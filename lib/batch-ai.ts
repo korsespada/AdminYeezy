@@ -176,6 +176,30 @@ export function buildBatchAiVariantPrompt(product: any) {
   ].join('\n\n')
 }
 
+export function buildBatchAiVisualFamilyPrompt(products: any[]) {
+  const candidates = products.map((product, index) => ({
+    index: index + 1,
+    id: product.id,
+    name: product.name,
+    brand: product.brand,
+    category: product.category,
+    subcategory: product.subcategory,
+    color: product.attributes?.colors || [],
+    model_name: product.attributes?.model_name || '',
+    materials: product.attributes?.materials || [],
+  }))
+  return [
+    'Сравни товары между собой по первым фотографиям. Номер товара совпадает с номером фотографии на contact sheet.',
+    'Создай цветовую семью только когда это одна и та же физическая модель и конструкция, отличающаяся цветом.',
+    'Сверяй силуэт, рисунок и плотность вязки, воротник, края, швы, фурнитуру, пропорции и расположение деталей.',
+    'Одинаковый бренд и общее название товара сами по себе недостаточны.',
+    'В каждой семье оставляй не больше одного товара каждого цвета. Повторную публикацию того же цвета укажи в duplicate_indexes и не включай в product_indexes.',
+    'Не включай семьи с одним товаром, одним цветом или уверенностью ниже 0.9. При сомнении не объединяй.',
+    'Верни строго JSON вида {"families":[{"label":"","product_indexes":[1,2],"duplicate_indexes":[],"matching_evidence":"","confidence":0.95}]}.',
+    `Кандидаты: ${JSON.stringify(candidates)}`,
+  ].join('\n\n')
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[]) {
   const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {

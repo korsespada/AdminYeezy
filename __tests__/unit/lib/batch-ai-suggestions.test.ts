@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   canonicalColorFamilyKey,
   canonicalProductColorFamilyKey,
+  colorFamilyRebuildPlan,
+  normalizeVisualFamilyScanOutput,
   sameSubcategoryFamily,
   subcategoryFamilyKey,
 } from '@/lib/batch-ai-suggestions'
@@ -60,5 +62,63 @@ describe('canonicalProductColorFamilyKey', () => {
     const small = { name: 'Chanel Hobo', attributes: { model_name: 'Hobo', dimensions: '20 × 22 × 12 см' } }
     const large = { name: 'Chanel Hobo', attributes: { model_name: 'Hobo', dimensions: '30 × 26 × 14 см' } }
     expect(canonicalProductColorFamilyKey(small)).not.toBe(canonicalProductColorFamilyKey(large))
+  })
+
+  it('uses the internal model code before inconsistent material wording', () => {
+    const cotton = {
+      name: 'Brunello Cucinelli поло', brand: 'bc', category: 'clothes', variant_group_key: 'BC116',
+      attributes: { colors: ['Серый'], materials: ['Хлопок'] },
+    }
+    const knit = {
+      ...cotton,
+      attributes: { colors: ['Бежевый'], materials: ['Хлопок', 'Трикотаж'] },
+    }
+    expect(canonicalProductColorFamilyKey(cotton)).toBe(canonicalProductColorFamilyKey(knit))
+  })
+
+  it('does not merge different product types that reuse the same source code', () => {
+    const polo = { name: 'Brunello Cucinelli поло', brand: 'bc', category: 'clothes', variant_group_key: '116', attributes: {} }
+    const trousers = { ...polo, name: 'Brunello Cucinelli брюки' }
+    expect(canonicalProductColorFamilyKey(polo)).not.toBe(canonicalProductColorFamilyKey(trousers))
+  })
+})
+
+describe('colorFamilyRebuildPlan', () => {
+  it('builds one coded family and keeps only the most complete product of each color', () => {
+    const base = { name: 'Brunello Cucinelli поло', brand: 'bc', category: 'clothes', variant_group_key: 'BC116', description: '' }
+    const plan = colorFamilyRebuildPlan([
+      { ...base, id: 1, photos: ['1'], attributes: { colors: ['Серый'], materials: ['Хлопок'] } },
+      { ...base, id: 2, photos: ['1', '2'], attributes: { colors: ['Серый'], materials: ['Хлопок', 'Трикотаж'] } },
+      { ...base, id: 3, photos: ['1'], attributes: { colors: ['Синий'], materials: ['Хлопок'] } },
+    ])
+    expect(plan.deterministicFamilies).toHaveLength(1)
+    expect(plan.deterministicFamilies[0].products.map((product) => product.id).sort()).toEqual([2, 3])
+    expect(plan.deterministicFamilies[0].duplicateProducts.map((product) => product.id)).toEqual([1])
+  })
+
+  it('sends uncoded products with several colors to visual comparison', () => {
+    const base = { name: 'Loro Piana Шарф', brand: 'lp', category: 'accessories', subcategory: 'scarves' }
+    const plan = colorFamilyRebuildPlan([
+      { ...base, id: 1, photos: ['photo-1'], attributes: { colors: ['Синий'], materials: ['Шерсть'] } },
+      { ...base, id: 2, photos: ['photo-2'], attributes: { colors: ['Серый'], materials: ['Шерсть'] } },
+    ])
+    expect(plan.visualCandidates).toHaveLength(1)
+    expect(plan.deterministicFamilies).toHaveLength(0)
+  })
+})
+
+describe('normalizeVisualFamilyScanOutput', () => {
+  it('keeps one product per color and rejects low-confidence families', () => {
+    const candidates = [
+      { id: 1, name: 'Шарф', attributes: { colors: ['Синий'] } },
+      { id: 2, name: 'Шарф', attributes: { colors: ['Синий'] } },
+      { id: 3, name: 'Шарф', attributes: { colors: ['Серый'] } },
+    ]
+    const result = normalizeVisualFamilyScanOutput({ families: [
+      { product_indexes: [1, 2, 3], confidence: 0.95, matching_evidence: 'Одинаковая вязка' },
+      { product_indexes: [1, 3], confidence: 0.7 },
+    ] }, candidates)
+    expect(result).toHaveLength(1)
+    expect(result[0].products.map((product: any) => product.id)).toEqual([1, 3])
   })
 })

@@ -15,7 +15,7 @@ import {
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
   buildBatchAiUserPrompt,
-  buildBatchAiVariantPrompt,
+  buildBatchAiVisualFamilyPrompt,
   matchingPriceRule,
   normalizeBatchAiOutput,
   runBatchAiOpenRouter,
@@ -40,10 +40,14 @@ import {
 import { uploadToS3 } from '@/lib/s3'
 import {
   canonicalColorFamilyKey,
+  colorFamilyRebuildPlan,
+  normalizeVisualFamilyScanOutput,
+  normalizedColorFamilyValue,
   reconcileBatchColorFamilySuggestions,
   reconcileKnownAttributeSuggestions,
   reconcileBatchSubcategorySuggestions,
   saveBatchAiSuggestions,
+  savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup } from '@/lib/byesu'
 
@@ -340,7 +344,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'reprocess') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
-  if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true AND variant_group_key IS NULL ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
     params.push(productIds)
@@ -387,6 +391,19 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     if (active.rows[0]) return { success: false, error: 'Для этой выгрузки уже выполняется AI-обработка' }
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
+    let variantPlan: ReturnType<typeof colorFamilyRebuildPlan> | null = null
+    if (mode === 'variants') {
+      const approved = await scrapingQuery(`
+        SELECT DISTINCT jsonb_array_elements_text(s.affected_product_ids)::int AS product_id
+        FROM batch_ai_suggestions s
+        JOIN batch_ai_runs r ON r.id=s.run_id
+        WHERE r.batch_id=$1 AND s.kind='color_family' AND s.status='approved'
+      `, [batchId])
+      const approvedIds = new Set(approved.rows.map((row) => Number(row.product_id)))
+      variantPlan = colorFamilyRebuildPlan(
+        context.products.filter((product: any) => !approvedIds.has(Number(product.id))),
+      )
+    }
     if (context.products.length === 0) {
       return {
         success: false,
@@ -395,8 +412,14 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           : 'Нет товаров для обработки',
       }
     }
+    if (mode === 'variants' && variantPlan
+      && variantPlan.deterministicFamilies.length === 0
+      && variantPlan.visualCandidates.length === 0) {
+      return { success: false, error: 'Нет новых кандидатов для цветовых семейств' }
+    }
+    const needsAiProvider = mode !== 'variants' || Boolean(variantPlan?.visualCandidates.length)
 
-    if (settings.provider === 'byesu') {
+    if (needsAiProvider && settings.provider === 'byesu') {
       const group = byesuModelGroup(settings.byesuModel)
       const keys = byesuApiKeyStatus()
       if (!keys[group]) {
@@ -408,7 +431,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         }
       }
     }
-    if (settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
+    if (needsAiProvider && settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
       return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }
     }
 
@@ -421,7 +444,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       if (sample.rows[0]?.settings_snapshot) settings = sample.rows[0].settings_snapshot
     }
 
-    if (settings.provider === 'cockpit') {
+    if (needsAiProvider && settings.provider === 'cockpit') {
       const worker = await scrapingQuery(`
         SELECT * FROM batch_ai_worker_state
         WHERE provider='cockpit' AND heartbeat_at > NOW() - INTERVAL '30 seconds'
@@ -443,7 +466,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     const snapshot = {
       ...settings,
       systemPrompt: mode === 'variants'
-        ? 'Ты проверяешь товары каталога на принадлежность к одному цветовому семейству. Работаешь только с текстом, не изменяешь товар и возвращаешь строго запрошенный JSON.'
+        ? 'Ты сравниваешь фотографии товаров и находишь только точные цветовые варианты одной физической модели. Не изменяй товары. Не объединяй по одному бренду или общему названию. Верни строго запрошенный JSON.'
         : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
     }
@@ -458,42 +481,94 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     await scrapingQuery(`
       INSERT INTO batch_ai_runs(id,batch_id,provider,mode,status,settings_snapshot,total_count,started_at)
       VALUES($1,$2,$3,$4,'preparing',$5::jsonb,$6,NOW())
-    `, [runId, batchId, settings.provider, mode, JSON.stringify(snapshot), context.products.length])
+    `, [
+      runId,
+      batchId,
+      settings.provider,
+      mode,
+      JSON.stringify(snapshot),
+      mode === 'variants' ? variantPlan?.visualCandidates.length || 0 : context.products.length,
+    ])
 
     const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
     const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
-    for (const product of context.products) {
-      const attributeDefinitions = mode === 'variants' ? [] : productAttributeDefinitions(product, context)
-      const userPrompt = mode === 'variants'
-        ? buildBatchAiVariantPrompt(product)
-        : buildBatchAiUserPrompt({
-            product,
-            supplierInstructions,
-            brands: context.brands,
-            categories: context.categories,
-            subcategories: context.subcategories,
-            attributes: attributeDefinitions,
-            priceRules,
+    if (mode === 'variants' && variantPlan) {
+      const client = await getScrapingClient()
+      try {
+        await client.query('BEGIN')
+        await client.query(`
+          DELETE FROM batch_ai_suggestions s
+          USING batch_ai_runs r
+          WHERE s.run_id=r.id AND r.batch_id=$1 AND s.kind='color_family' AND s.status='pending'
+        `, [batchId])
+        for (const family of variantPlan.deterministicFamilies) {
+          await savePreparedColorFamilySuggestion(client, runId, {
+            identityKey: family.identityKey,
+            products: family.products,
+            source: 'internal_code',
+            sourceCode: family.sourceCode,
+            confidence: 1,
+            matchingEvidence: `Совпали внутренний артикул ${family.sourceCode}, бренд и тип товара.`,
+            duplicateProducts: family.duplicateProducts,
           })
-      await scrapingQuery(`
-        INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
-        VALUES($1,$2,$3,$4,$5::jsonb)
-      `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
-        product, userPrompt, systemPrompt: snapshot.systemPrompt,
-        variantScanOnly: mode === 'variants',
-        photoUrls: mode === 'variants' ? [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
-        photoEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true,
-        fullSizeRefinementEnabled: mode === 'variants' ? false : context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
-        preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
-        brands: context.brands,
-        categories: context.categories,
-        subcategories: context.subcategories,
-        attributeCodes: attributeDefinitions.map((item: any) => item.code),
-        knownAttributeCodes: context.definitions.map((item: any) => item.code),
-        attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
-        priceRules,
-        priceReferenceUrls: mode === 'variants' ? [] : priceReferenceUrls,
-      })])
+        }
+        for (const [index, candidate] of variantPlan.visualCandidates.entries()) {
+          const first = candidate.products[0]
+          await client.query(`
+            INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
+            VALUES($1,$2,$3,$4,$5::jsonb)
+          `, [crypto.randomUUID(), runId, first.id, `visual-family-${index + 1}`, JSON.stringify({
+            product: first,
+            candidateProducts: candidate.products,
+            userPrompt: buildBatchAiVisualFamilyPrompt(candidate.products),
+            systemPrompt: snapshot.systemPrompt,
+            variantScanOnly: true,
+            visualFamilyScan: true,
+            photoUrls: candidate.products.map((product: any) => product.photos[0]),
+            photoEnabled: true,
+            fullSizeRefinementEnabled: false,
+            priceReferenceUrls: [],
+          })])
+        }
+        await client.query('COMMIT')
+      } catch (error) {
+        await client.query('ROLLBACK')
+        throw error
+      } finally {
+        client.release()
+      }
+    } else {
+      for (const product of context.products) {
+        const attributeDefinitions = productAttributeDefinitions(product, context)
+        const userPrompt = buildBatchAiUserPrompt({
+          product,
+          supplierInstructions,
+          brands: context.brands,
+          categories: context.categories,
+          subcategories: context.subcategories,
+          attributes: attributeDefinitions,
+          priceRules,
+        })
+        await scrapingQuery(`
+          INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
+          VALUES($1,$2,$3,$4,$5::jsonb)
+        `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
+          product, userPrompt, systemPrompt: snapshot.systemPrompt,
+          variantScanOnly: false,
+          photoUrls: context.batch.ai_photo_enabled ? product.photos || [] : [],
+          photoEnabled: context.batch.ai_photo_enabled === true,
+          fullSizeRefinementEnabled: context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
+          preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
+          brands: context.brands,
+          categories: context.categories,
+          subcategories: context.subcategories,
+          attributeCodes: attributeDefinitions.map((item: any) => item.code),
+          knownAttributeCodes: context.definitions.map((item: any) => item.code),
+          attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
+          priceRules,
+          priceReferenceUrls,
+        })])
+      }
     }
 
     if (['reprocess', 'selection', 'retry'].includes(mode)) {
@@ -507,6 +582,25 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           UPDATE scraping_batches SET stage='SCRIPT_PROCESSED',updated_at=NOW()
           WHERE id=$1 AND stage IN ('AI_PROCESSED','PUSHED')
         `, [batchId])
+      }
+    }
+
+    const queuedCount = mode === 'variants' ? variantPlan?.visualCandidates.length || 0 : context.products.length
+    if (mode === 'variants' && queuedCount === 0) {
+      await scrapingQuery(`
+        UPDATE batch_ai_runs SET status='completed',completed_at=NOW(),updated_at=NOW()
+        WHERE id=$1
+      `, [runId])
+      await releaseBatchOperation(batchId, runId)
+      revalidatePath('/admin/batches')
+      return {
+        success: true,
+        data: {
+          runId,
+          queued: 0,
+          deterministic: variantPlan?.deterministicFamilies.length || 0,
+          provider: settings.provider,
+        },
       }
     }
 
@@ -530,7 +624,15 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         }
       })
     }
-    return { success: true, data: { runId, queued: context.products.length, provider: settings.provider } }
+    return {
+      success: true,
+      data: {
+        runId,
+        queued: queuedCount,
+        deterministic: variantPlan?.deterministicFamilies.length || 0,
+        provider: settings.provider,
+      },
+    }
   } catch (error: any) {
     await scrapingQuery(`
       UPDATE batch_ai_runs SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
@@ -591,7 +693,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       rawOutput = raw
     }
     const normalized = input.variantScanOnly
-      ? variantScanResult(raw, input.product)
+      ? variantScanResult(raw, input)
       : normalizeBatchAiOutput(raw, {
       product: input.product,
       brandIds: new Set(context.brands.map((row: any) => String(row.id))),
@@ -622,7 +724,13 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
   }
 }
 
-function variantScanResult(raw: any, product: any) {
+function variantScanResult(raw: any, input: any) {
+  const product = input.product
+  if (input.visualFamilyScan) {
+    const candidates = Array.isArray(input.candidateProducts) ? input.candidateProducts : []
+    const colorFamilies = normalizeVisualFamilyScanOutput(raw, candidates)
+    return { product, colorFamilies, suggestions: [], subcategorySuggestion: null, colorFamily: null, mediaDecision: { discard: [], sizeCharts: [] } }
+  }
   return {
     product,
     suggestions: [],
@@ -646,7 +754,20 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
         completed_at=NOW(),updated_at=NOW()
       WHERE id=$1
     `, [item.id, JSON.stringify(normalized)])
-    await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
+    if (Array.isArray(normalized.colorFamilies)) {
+      for (const family of normalized.colorFamilies) {
+        const ids = family.products.map((product: any) => Number(product.id)).sort((a: number, b: number) => a - b)
+        await savePreparedColorFamilySuggestion(client, item.run_id, {
+          identityKey: `visual|${crypto.createHash('sha256').update(ids.join(':')).digest('hex')}`,
+          products: family.products,
+          source: 'visual_comparison',
+          confidence: family.confidence,
+          matchingEvidence: family.matchingEvidence,
+        })
+      }
+    } else {
+      await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
+    }
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1000,16 +1121,26 @@ export async function rollbackBatchProductAiAction(batchId: string, productId: n
   }
 }
 
-export async function reviewBatchAiSuggestionAction(id: string, decision: 'approved' | 'rejected', editedPayload?: any) {
+export async function reviewBatchAiSuggestionAction(
+  id: string,
+  decision: 'approved' | 'rejected',
+  editedPayload?: any,
+  selectedProductIds?: number[],
+) {
   try {
-    return await reviewBatchAiSuggestion(id, decision, editedPayload)
+    return await reviewBatchAiSuggestion(id, decision, editedPayload, selectedProductIds)
   } catch (error: any) {
     console.error('Failed to review batch AI suggestion', { id, decision, error })
     return { success: false, error: error?.message || 'Не удалось применить предложение ИИ' }
   }
 }
 
-async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejected', editedPayload?: any) {
+async function reviewBatchAiSuggestion(
+  id: string,
+  decision: 'approved' | 'rejected',
+  editedPayload?: any,
+  selectedProductIds?: number[],
+) {
   await requireAdmin()
   const suggestion = await scrapingQuery('SELECT * FROM batch_ai_suggestions WHERE id=$1', [id])
   const row = suggestion.rows[0]
@@ -1025,17 +1156,42 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
     row.payload = editedPayload
     await scrapingQuery('UPDATE batch_ai_suggestions SET payload=$2::jsonb WHERE id=$1', [id, JSON.stringify(editedPayload)])
   }
+  if (decision === 'approved' && row.kind === 'color_family' && Array.isArray(selectedProductIds)) {
+    const allowed = new Set((row.affected_product_ids || []).map(Number))
+    const selected = [...new Set(selectedProductIds.map(Number).filter((id) => allowed.has(id)))]
+    if (selected.length < 2) return { success: false, error: 'Выберите минимум два товара разных цветов' }
+    row.affected_product_ids = selected
+  }
   if (decision === 'approved' && row.kind === 'color_family') {
-    const colors = Array.isArray(row.payload?.observed_colors) ? row.payload.observed_colors : []
-    if (row.affected_product_ids.length < 2 || colors.length < 2) {
+    if (row.affected_product_ids.length < 2) {
       return { success: false, error: 'Для цветового семейства нужны минимум два товара разных цветов' }
     }
+    const familyProducts = await scrapingQuery(
+      'SELECT id,attributes FROM products WHERE id=ANY($1::int[])',
+      [row.affected_product_ids.map(Number)],
+    )
+    const actualColors = familyProducts.rows.map((product) => normalizedColorFamilyValue(product.attributes?.colors))
+    if (actualColors.some((color) => !color) || new Set(actualColors).size !== actualColors.length) {
+      return { success: false, error: 'В семье есть товары без цвета или несколько товаров одного цвета. Уберите конфликтующие карточки.' }
+    }
+    row.payload = { ...row.payload, observed_colors: [...new Set(actualColors)].sort() }
     const familyKey = String(row.payload?.product_identity_key || canonicalColorFamilyKey(row.payload))
     const key = crypto.createHash('sha256').update(familyKey || row.canonical_key).digest('hex').slice(0, 32)
-    await scrapingQuery(
-      'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE id=ANY($2::int[])',
-      [key, row.affected_product_ids.map(Number)],
-    )
+    const sourceModelCode = String(row.payload?.source_model_code || '').trim()
+    if (sourceModelCode) {
+      await scrapingQuery(`
+        UPDATE products SET
+          variant_group_key=$1,
+          attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),'{model_code}',$3::jsonb,true),
+          updated_at=NOW()
+        WHERE id=ANY($2::int[])
+      `, [key, row.affected_product_ids.map(Number), JSON.stringify(sourceModelCode)])
+    } else {
+      await scrapingQuery(
+        'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE id=ANY($2::int[])',
+        [key, row.affected_product_ids.map(Number)],
+      )
+    }
   }
   if (decision === 'approved' && row.kind === 'subcategory') {
     const reconcileClient = await getScrapingClient()
@@ -1134,7 +1290,11 @@ async function reviewBatchAiSuggestion(id: string, decision: 'approved' | 'rejec
       client.release()
     }
   }
-  await scrapingQuery('UPDATE batch_ai_suggestions SET status=$2,reviewed_at=NOW() WHERE id=$1', [id, decision])
+  await scrapingQuery(`
+    UPDATE batch_ai_suggestions
+    SET status=$2,affected_product_ids=$3::jsonb,payload=$4::jsonb,reviewed_at=NOW()
+    WHERE id=$1
+  `, [id, decision, JSON.stringify(row.affected_product_ids || []), JSON.stringify(row.payload || {})])
   revalidatePath('/admin/batches')
   return { success: true }
 }

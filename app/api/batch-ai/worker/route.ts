@@ -4,7 +4,11 @@ import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
-import { saveBatchAiSuggestions } from '@/lib/batch-ai-suggestions'
+import {
+  normalizeVisualFamilyScanOutput,
+  saveBatchAiSuggestions,
+  savePreparedColorFamilySuggestion,
+} from '@/lib/batch-ai-suggestions'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,7 +89,14 @@ async function complete(body: any) {
   const item = itemResult.rows[0]
   if (!item) return NextResponse.json({ error: 'lease_not_found' }, { status: 409 })
   const input = item.input_snapshot
-  const normalized = input.variantScanOnly ? {
+  const normalized: any = input.visualFamilyScan ? {
+    product: input.product,
+    suggestions: [],
+    subcategorySuggestion: null,
+    colorFamily: null,
+    colorFamilies: normalizeVisualFamilyScanOutput(body.output, input.candidateProducts || []),
+    mediaDecision: { discard: [], sizeCharts: [] },
+  } : input.variantScanOnly ? {
     product: input.product,
     suggestions: [],
     subcategorySuggestion: null,
@@ -152,7 +163,20 @@ async function complete(body: any) {
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
+    if (Array.isArray(normalized.colorFamilies)) {
+      for (const family of normalized.colorFamilies) {
+        const ids = family.products.map((candidate: any) => Number(candidate.id)).sort((a: number, b: number) => a - b)
+        await savePreparedColorFamilySuggestion(client, item.run_id, {
+          identityKey: `visual|${crypto.createHash('sha256').update(ids.join(':')).digest('hex')}`,
+          products: family.products,
+          source: 'visual_comparison',
+          confidence: family.confidence,
+          matchingEvidence: family.matchingEvidence,
+        })
+      }
+    } else {
+      await saveBatchAiSuggestions(client, item.run_id, item.product_id, normalized)
+    }
     await updateRunCounts(client, item.run_id)
     await touchRunLock(client, item.run_id)
     await client.query('COMMIT')

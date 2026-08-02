@@ -98,6 +98,23 @@ function normalizedColorTokens(value: unknown) {
   return normalizedTokens(value).map((token) => COLOR_TOKEN_ALIASES[token] || token)
 }
 
+export function normalizedColorFamilyValue(value: unknown) {
+  return [...new Set(normalizedColorTokens(value))].sort().join(' ')
+}
+
+const MATERIAL_CONSTRUCTION_TOKENS = new Set([
+  'трикотаж', 'трикотажный', 'трикотажная', 'трикотажное', 'вязка', 'вязаный', 'вязаная',
+  'knit', 'knitted', 'jersey',
+])
+
+function normalizedMaterialTokens(value: unknown) {
+  return normalizedTokens(value).filter((token) => !MATERIAL_CONSTRUCTION_TOKENS.has(token))
+}
+
+export function sourceVariantCode(product: any) {
+  return String(product?.attributes?.model_code || product?.variant_group_key || '').trim()
+}
+
 export function canonicalColorFamilyKey(suggestion: any) {
   const signatureTokens = normalizedTokens(suggestion?.group_signature || suggestion?.code)
   const colorTokens = new Set([
@@ -134,6 +151,17 @@ export function canonicalProductColorFamilyKey(product: any, suggestion: any = {
   const dimensions = attributes.dimensions
     || ([attributes.bag_width_cm, attributes.bag_height_cm].filter(Boolean).join('x'))
     || suggestion?.bag_size
+  const sourceCode = sourceVariantCode(product)
+  if (sourceCode) {
+    return [
+      'source',
+      stableField(product?.brand),
+      stableField(product?.category),
+      stableField(product?.subcategory),
+      normalizedProductName(product),
+      stableField(sourceCode),
+    ].join('|')
+  }
   return [
     stableField(product?.brand),
     stableField(product?.category),
@@ -141,9 +169,111 @@ export function canonicalProductColorFamilyKey(product: any, suggestion: any = {
     name,
     stableField(attributes.model_name || suggestion?.model_name),
     stableDimensions(dimensions),
-    stableField(attributes.materials || suggestion?.materials),
+    [...new Set(normalizedMaterialTokens(attributes.materials || suggestion?.materials))].sort().join('_'),
     stableField(attributes.hardware_color || suggestion?.hardware),
   ].join('|')
+}
+
+function normalizedProductName(product: any) {
+  const colors = new Set(normalizedColorTokens(product?.attributes?.colors))
+  return normalizedTokens(product?.name)
+    .filter((token) => !colors.has(COLOR_TOKEN_ALIASES[token] || token))
+    .join('_')
+}
+
+function productCompletenessScore(product: any) {
+  const attributes = product?.attributes || {}
+  return (Array.isArray(product?.photos) ? product.photos.length * 100 : 0)
+    + String(product?.description || '').length
+    + (attributes.measurements ? 50 : 0)
+}
+
+export function colorFamilyRebuildPlan(products: any[]) {
+  const coded = new Map<string, any[]>()
+  const visual = new Map<string, any[]>()
+  for (const product of products) {
+    const sourceCode = sourceVariantCode(product)
+    if (sourceCode) {
+      const key = canonicalProductColorFamilyKey(product)
+      coded.set(key, [...(coded.get(key) || []), product])
+      continue
+    }
+    const key = [
+      stableField(product?.brand),
+      stableField(product?.category),
+      stableField(product?.subcategory),
+      normalizedProductName(product),
+      stableField(product?.attributes?.model_name),
+      [...new Set(normalizedMaterialTokens(product?.attributes?.materials))].sort().join('_'),
+    ].join('|')
+    if (!normalizedProductName(product)) continue
+    visual.set(key, [...(visual.get(key) || []), product])
+  }
+
+  const deterministicFamilies = [...coded.entries()].flatMap(([identityKey, family]) => {
+    const byColor = new Map<string, any[]>()
+    for (const product of family) {
+      const color = normalizedColorTokens(product?.attributes?.colors).join(' ')
+      if (!color) continue
+      byColor.set(color, [...(byColor.get(color) || []), product])
+    }
+    const selected = [...byColor.values()].map((sameColor) => (
+      [...sameColor].sort((left, right) => productCompletenessScore(right) - productCompletenessScore(left))[0]
+    ))
+    if (selected.length < 2) return []
+    const selectedIds = new Set(selected.map((product) => Number(product.id)))
+    return [{
+      identityKey,
+      sourceCode: sourceVariantCode(selected[0]),
+      products: selected,
+      duplicateProducts: family.filter((product) => !selectedIds.has(Number(product.id))),
+      colors: [...byColor.keys()].sort(),
+    }]
+  })
+
+  const visualCandidates = [...visual.entries()].flatMap(([candidateKey, family]) => {
+    const seenPhotos = new Set<string>()
+    const withPhotos = family.filter((product) => {
+      const photo = Array.isArray(product?.photos) ? String(product.photos[0] || '') : ''
+      if (!photo || seenPhotos.has(photo)) return false
+      seenPhotos.add(photo)
+      return true
+    })
+    const colors = new Set(withPhotos.flatMap((product) => normalizedColorTokens(product?.attributes?.colors)))
+    return withPhotos.length >= 2 && withPhotos.length <= 12 && colors.size >= 2
+      ? [{ candidateKey, products: withPhotos }]
+      : []
+  })
+
+  return { deterministicFamilies, visualCandidates }
+}
+
+export function normalizeVisualFamilyScanOutput(raw: any, candidates: any[]) {
+  const used = new Set<number>()
+  return (Array.isArray(raw?.families) ? raw.families : []).flatMap((family: any) => {
+    const confidence = Number(family?.confidence || 0)
+    if (confidence < 0.9) return []
+    const seenColors = new Set<string>()
+    const selectedIndexes: number[] = []
+    const indexes = [...new Set<number>((family?.product_indexes || []).map((value: unknown) => Number(value)))]
+    const products = indexes.flatMap((index: number) => {
+      if (!Number.isInteger(index) || index < 1 || index > candidates.length || used.has(index)) return []
+      const candidate = candidates[index - 1]
+      const color = normalizedColorTokens(candidate?.attributes?.colors).join(' ')
+      if (!color || seenColors.has(color)) return []
+      seenColors.add(color)
+      selectedIndexes.push(index)
+      return [candidate]
+    })
+    if (products.length < 2 || seenColors.size < 2) return []
+    selectedIndexes.forEach((index) => used.add(index))
+    return [{
+      products,
+      label: String(family?.label || products[0]?.name || 'Цветовые варианты').trim(),
+      confidence,
+      matchingEvidence: String(family?.matching_evidence || 'Совпадение подтверждено сравнением фотографий.').trim(),
+    }]
+  })
 }
 
 function observedColors(payload: any, nextColor?: unknown) {
@@ -262,7 +392,7 @@ export async function saveBatchAiSuggestions(
         && row.payload?.product_identity_key === identityKey
       ))) continue
       const pending = await client.query(`
-        SELECT s.id,s.payload,p.name,p.brand,p.category,p.subcategory,p.attributes
+        SELECT s.id,s.payload,p.name,p.brand,p.category,p.subcategory,p.attributes,p.variant_group_key
         FROM batch_ai_suggestions s
         JOIN batch_ai_runs r ON r.id=s.run_id
         LEFT JOIN products p ON p.id=(s.affected_product_ids->>0)::int
@@ -309,10 +439,54 @@ export async function saveBatchAiSuggestions(
   }
 }
 
+export async function savePreparedColorFamilySuggestion(
+  client: QueryClient,
+  runId: string,
+  input: {
+    identityKey: string
+    products: any[]
+    source: 'internal_code' | 'visual_comparison'
+    sourceCode?: string
+    confidence: number
+    matchingEvidence: string
+    duplicateProducts?: any[]
+  },
+) {
+  const affectedProductIds = input.products.map((product) => Number(product.id)).filter(Number.isInteger)
+  if (affectedProductIds.length < 2) return
+  const colors = [...new Set(input.products.flatMap((product) => normalizedColorTokens(product?.attributes?.colors)))].sort()
+  if (colors.length < 2) return
+  const canonicalKey = crypto.createHash('sha256').update(input.identityKey).digest('hex')
+  const first = input.products[0]
+  const payload = {
+    kind: 'color_family',
+    code: input.sourceCode || input.identityKey,
+    group_signature: input.sourceCode || first?.attributes?.model_name || first?.name || 'Цветовые варианты',
+    model_name: input.sourceCode || first?.attributes?.model_name || '',
+    color: normalizedColorTokens(first?.attributes?.colors).join(' '),
+    observed_colors: colors,
+    matching_evidence: input.matchingEvidence,
+    confidence: input.confidence,
+    source: input.source,
+    source_model_code: input.sourceCode || '',
+    product_identity_key: input.identityKey,
+    excluded_duplicate_product_ids: (input.duplicateProducts || []).map((product) => Number(product.id)).filter(Number.isInteger),
+  }
+  await client.query(`
+    INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)
+    VALUES($1,$2,'color_family',$3,$4::jsonb,$5::jsonb)
+    ON CONFLICT(run_id,kind,canonical_key) DO UPDATE SET
+      payload=EXCLUDED.payload,
+      affected_product_ids=EXCLUDED.affected_product_ids,
+      status='pending',
+      reviewed_at=NULL
+  `, [crypto.randomUUID(), runId, canonicalKey, JSON.stringify(payload), JSON.stringify(affectedProductIds)])
+}
+
 export async function reconcileBatchColorFamilySuggestions(client: QueryClient, batchId: string) {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('batch-ai-suggestions:' || $1))", [batchId])
   const result = await client.query(`
-    SELECT s.*,p.name,p.brand,p.category,p.subcategory,p.attributes
+    SELECT s.*,p.name,p.brand,p.category,p.subcategory,p.attributes,p.variant_group_key
     FROM batch_ai_suggestions s
     JOIN batch_ai_runs r ON r.id=s.run_id
     LEFT JOIN products p ON p.id=(s.affected_product_ids->>0)::int
@@ -324,7 +498,7 @@ export async function reconcileBatchColorFamilySuggestions(client: QueryClient, 
     const affectedIds = Array.isArray(row.affected_product_ids) ? row.affected_product_ids.map(Number) : []
     const affectedProducts = affectedIds.length
       ? await client.query(`
-          SELECT id,name,brand,category,subcategory,attributes
+          SELECT id,name,brand,category,subcategory,attributes,variant_group_key
           FROM products WHERE id=ANY($1::int[])
           ORDER BY array_position($1::int[],id)
         `, [affectedIds])
@@ -334,11 +508,16 @@ export async function reconcileBatchColorFamilySuggestions(client: QueryClient, 
       await client.query("UPDATE batch_ai_suggestions SET status='rejected',reviewed_at=NOW() WHERE id=$1", [row.id])
       continue
     }
-    const familyKey = canonicalProductColorFamilyKey(firstProduct, row.payload)
+    const prepared = ['internal_code', 'visual_comparison'].includes(String(row.payload?.source || ''))
+    const familyKey = prepared
+      ? String(row.payload?.product_identity_key || '')
+      : canonicalProductColorFamilyKey(firstProduct, row.payload)
     if (!familyKey) continue
-    const matchingProducts = affectedProducts.rows.filter((product) => (
-      canonicalProductColorFamilyKey(product, row.payload) === familyKey
-    ))
+    const matchingProducts = prepared
+      ? affectedProducts.rows
+      : affectedProducts.rows.filter((product) => (
+          canonicalProductColorFamilyKey(product, row.payload) === familyKey
+        ))
     const productColors = matchingProducts.flatMap((product) => normalizedColorTokens(product.attributes?.colors))
     const cleanedPayload = {
       ...row.payload,
@@ -357,6 +536,7 @@ export async function reconcileBatchColorFamilySuggestions(client: QueryClient, 
     row.category = firstProduct.category
     row.subcategory = firstProduct.subcategory
     row.attributes = firstProduct.attributes
+    row.variant_group_key = firstProduct.variant_group_key
     const duplicate = firstByFamily.get(familyKey)
     if (!duplicate) {
       firstByFamily.set(familyKey, row)
