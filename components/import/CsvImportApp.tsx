@@ -3086,7 +3086,7 @@ function CsvProductDrawer({
                   <Palette className="h-4 w-4 text-violet-300" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Цветовые варианты ({variants.length})</h3>
                 </div>
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
                   {variants.map((variant) => {
                     const active = String(variant.id || variant.external_id) === String(local.id || local.external_id);
                     const colors = attributeValuesForDisplay(variant.attributes?.colors ?? variant.attributes?.color);
@@ -3095,12 +3095,12 @@ function CsvProductDrawer({
                         type="button"
                         key={String(variant.id || variant.external_id)}
                         onClick={() => onOpenVariant(variant)}
-                        className={`overflow-hidden rounded-xl border text-left transition ${active ? "border-violet-400 bg-violet-500/10 ring-2 ring-violet-400/20" : "border-slate-700 bg-slate-800 hover:border-slate-500"}`}
+                        className={`min-w-0 overflow-hidden rounded-lg border text-left transition ${active ? "border-violet-400 bg-violet-500/10 ring-1 ring-violet-400/30" : "border-slate-700 bg-slate-800 hover:border-slate-500"}`}
                       >
                         <div className="relative aspect-square bg-slate-950">
                           {variant.photos?.[0] ? <Image src={resizeImageUrl(variant.photos[0], imagePresets.productGrid)} alt={colors.join(", ")} fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-xs text-slate-600">Нет фото</div>}
                         </div>
-                        <div className="px-3 py-2"><div className="truncate text-sm font-semibold text-white">{colors.join(", ") || "Цвет не указан"}</div>{active && <div className="mt-0.5 text-[10px] font-medium text-violet-300">Открыт сейчас</div>}</div>
+                        <div className="px-2 py-1.5"><div className="truncate text-[11px] font-semibold leading-tight text-white" title={colors.join(", ")}>{colors.join(", ") || "Цвет не указан"}</div>{active && <div className="mt-0.5 truncate text-[9px] font-medium leading-tight text-violet-300">Открыт</div>}</div>
                       </button>
                     );
                   })}
