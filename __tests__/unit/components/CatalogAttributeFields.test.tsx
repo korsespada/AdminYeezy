@@ -14,6 +14,7 @@ describe('CatalogAttributeFields', () => {
 
     expect(screen.getByText('Материал верха')).toBeInTheDocument()
     expect(screen.getByText('Размеры')).toBeInTheDocument()
+    expect(screen.getByText('Замеры')).toBeInTheDocument()
     expect(screen.queryByText('Механизм часов')).not.toBeInTheDocument()
     expect(screen.getByText(/Размеры рекомендуются, но не блокируют публикацию/)).toBeInTheDocument()
   })
@@ -78,6 +79,35 @@ describe('CatalogAttributeFields', () => {
         unit: 'см',
         columns: [{ key: 'length', label: 'Длина' }],
         rows: [{ size: 'M', values: { length: '66' } }],
+        note: '',
+      },
+    })
+  })
+
+  it('edits structured shoe measurements in the same table format', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{
+          measurements: {
+            unit: 'см',
+            columns: [{ key: 'insole_length', label: 'Длина стельки' }],
+            rows: [{ size: '40', values: { insole_length: '26' } }],
+            note: '',
+          },
+        }}
+        onChange={onChange}
+        categoryName="Обувь"
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('Длина стельки, размер 40'), { target: { value: '26.5' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      measurements: {
+        unit: 'см',
+        columns: [{ key: 'insole_length', label: 'Длина стельки' }],
+        rows: [{ size: '40', values: { insole_length: '26.5' } }],
         note: '',
       },
     })

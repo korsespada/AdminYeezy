@@ -174,6 +174,68 @@ describe('supplier JSON post-process contract', () => {
     })
   })
 
+  it('keeps shoe Price cards when the supplier omits Details and lists individual sizes', async () => {
+    const timeline = [
+      {
+        external_id: 'header',
+        description: '•———• MAN•———• SS26',
+        photos: [],
+      },
+      {
+        external_id: 'shoe-description',
+        description: 'Культовые замшевые лоферы для мужчин. Мягкая конструкция, лёгкая подошва и премиальная отделка. Размеры 39 40 41 42 43 44. LP2539',
+        photos: [],
+      },
+      {
+        external_id: 'shoe-size',
+        description: 'The size grid',
+        photos: ['shoe-size.jpg'],
+      },
+      {
+        external_id: 'shoe-video',
+        description: 'Video of the original of shoes',
+        photos: [],
+      },
+      {
+        external_id: 'shoe-price-1',
+        description: 'Price: 450¥ / 550¥ Sizes: 39 40 41 42 43 44 LP2539',
+        photos: ['shoe-1.jpg'],
+      },
+      {
+        external_id: 'shoe-price-2',
+        description: 'Price: 450¥ / 550¥ Sizes: 39~46 LP2539',
+        photos: ['shoe-2.jpg'],
+      },
+    ].map((product, source_position) => ({
+      ...product,
+      source_position,
+      attributes: { szwego_parse_mode: 'all' },
+    }))
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', timeline)
+
+    expect(result).toHaveLength(2)
+    expect(result).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        external_id: 'shoe-price-1',
+        category: 'nzg3vsvajpiv1e8',
+        description: timeline[1].description,
+        photos: ['shoe-1.jpg', 'shoe-size.jpg'],
+        attributes: expect.objectContaining({
+          shoe_without_details: true,
+          description_source_id: 'shoe-description',
+          size_chart_source_id: 'shoe-size',
+        }),
+      }),
+      expect.objectContaining({
+        external_id: 'shoe-price-2',
+        category: 'nzg3vsvajpiv1e8',
+        description: timeline[1].description,
+        photos: ['shoe-2.jpg', 'shoe-size.jpg'],
+      }),
+    ]))
+  })
+
   it('matches model sources when the supplier inconsistently pads the model number', async () => {
     const products = [
       {

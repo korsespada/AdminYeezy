@@ -38,6 +38,7 @@ describe('catalog attribute schema', () => {
 
   it('uses category attributes automatically until a supplier overrides them', () => {
     expect(resolveSupplierAttributeCodes([], 'Обувь')).toContain('upper_material')
+    expect(resolveSupplierAttributeCodes([], 'Обувь')).toContain('measurements')
     expect(resolveSupplierAttributeCodes(['colors'], 'Обувь')).toEqual(['colors'])
   })
 

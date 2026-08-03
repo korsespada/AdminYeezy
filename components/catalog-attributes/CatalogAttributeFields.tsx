@@ -83,6 +83,7 @@ export default function CatalogAttributeFields({
             definition={definition}
             value={value?.[definition.code]}
             onChange={(nextValue) => update(definition.code, nextValue)}
+            shoeMeasurements={isShoeCategory(categoryName)}
           />
         ))}
       </div>
@@ -111,17 +112,19 @@ function AttributeField({
   definition,
   value,
   onChange,
+  shoeMeasurements = false,
 }: {
   definition: CatalogAttributeDefinition
   value: unknown
   onChange: (value: unknown) => void
+  shoeMeasurements?: boolean
 }) {
   const serialized = formatAttributeValue(definition, value)
   const [draft, setDraft] = useState(serialized)
   useEffect(() => setDraft(serialized), [serialized])
 
   if (definition.code === 'measurements') {
-    return <MeasurementsField value={value} onChange={onChange} />
+    return <MeasurementsField value={value} onChange={onChange} shoe={shoeMeasurements} />
   }
 
   const isList = definition.value_type === 'size' || definition.value_type === 'multi_enum'
@@ -239,7 +242,7 @@ type MeasurementTable = {
   note?: string
 }
 
-export function MeasurementsField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
+export function MeasurementsField({ value, onChange, shoe = false }: { value: unknown; onChange: (value: unknown) => void; shoe?: boolean }) {
   const table = normalizeMeasurementTable(value)
   const legacyText = typeof value === 'string' ? value.trim() : ''
 
@@ -250,7 +253,7 @@ export function MeasurementsField({ value, onChange }: { value: unknown; onChang
         {legacyText && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-400">{legacyText}</p>}
         <button
           type="button"
-          onClick={() => onChange(defaultMeasurementTable(legacyText))}
+          onClick={() => onChange(defaultMeasurementTable(legacyText, shoe))}
           className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-200 hover:bg-indigo-500/20"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -418,15 +421,17 @@ function normalizeMeasurementTable(value: unknown): MeasurementTable | null {
   }
 }
 
-function defaultMeasurementTable(note = ''): MeasurementTable {
+function defaultMeasurementTable(note = '', shoe = false): MeasurementTable {
   return {
     unit: 'см',
-    columns: [
-      { key: 'length', label: 'Длина' },
-      { key: 'chest', label: 'Обхват груди' },
-      { key: 'shoulders', label: 'Плечи' },
-      { key: 'sleeve', label: 'Рукав' },
-    ],
+    columns: shoe
+      ? [{ key: 'insole_length', label: 'Длина стельки' }, { key: 'foot_length', label: 'Длина стопы' }, { key: 'width', label: 'Ширина' }]
+      : [
+          { key: 'length', label: 'Длина' },
+          { key: 'chest', label: 'Обхват груди' },
+          { key: 'shoulders', label: 'Плечи' },
+          { key: 'sleeve', label: 'Рукав' },
+        ],
     rows: [{ size: '', values: {} }],
     note,
   }
@@ -481,4 +486,8 @@ const TECHNICAL_VALUE_LABELS: Record<string, string> = {
 
 function empty(value: unknown) {
   return value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)
+}
+
+function isShoeCategory(categoryName?: string | null) {
+  return String(categoryName || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е') === 'обувь'
 }

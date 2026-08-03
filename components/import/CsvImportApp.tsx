@@ -2956,6 +2956,7 @@ function CsvProductDrawer({
   const attributes = local.attributes || {};
   const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
   const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
+  const isShoe = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "обувь";
   const updateAttribute = (oldKey: string, nextKey: string, nextValue: string) => {
     const next = { ...attributes };
     if (oldKey !== nextKey) delete next[oldKey];
@@ -3194,9 +3195,10 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
-                {isClothing && <MeasurementsField
+                {(isClothing || isShoe) && <MeasurementsField
                   value={attributes.measurements}
                   onChange={updateMeasurements}
+                  shoe={isShoe}
                 />}
                 <div className="flex items-center justify-between">
                   <div>

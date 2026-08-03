@@ -14,6 +14,12 @@ BRANDS = {
 CLOTHING_CATEGORY_ID = "lrg3k8cd5bgw3jv"
 SHOES_CATEGORY_ID = "nzg3vsvajpiv1e8"
 
+SHOE_KEYWORDS = (
+    "лофер", "мокасин", "кроссов", "обув", "кед", "сникер",
+    "loafer", "moccasin", "sneaker", "trainer", "shoe", "shoes",
+    "乐福鞋", "运动鞋", "休闲鞋", "板鞋", "德训鞋", "老爹鞋", "鞋",
+)
+
 
 def _text(product):
     return " ".join(str(product.get("description") or "").replace("\r", " ").replace("\n", " ").split())
@@ -57,6 +63,34 @@ def _is_header(product):
     return not _photos(product) and "MAN" in text and bool(re.search(r"\b(?:SS|FW|AW)\s*\d{2}\b", text))
 
 
+def _has_clothing_sizes(text):
+    compact = re.sub(r"\s+", "", str(text or "").upper())
+    return bool(re.search(
+        r"(?:^|[•,;/])(?:XS|S|M|L|XL|XXL|XXXL|2XL|3XL)(?:[•,;/]|$)",
+        compact,
+    ))
+
+
+def _has_shoe_sizes(text):
+    value = str(text or "")
+    # Szwego uses all of these separators: 39-46, 39~46, 39～46 and 39至46.
+    if re.search(r"(?<!\d)(?:3[5-9]|4[0-7])\s*[-–—~～至]\s*(?:3[5-9]|4[0-7])(?!\d)", value):
+        return True
+
+    # Some cards list sizes separately: 39 40 41 42 43 44.
+    sizes = re.findall(r"(?<!\d)(?:3[5-9]|4[0-7])(?!\d)", value)
+    return len(set(sizes)) >= 2
+
+
+def _looks_like_shoe(text):
+    value = str(text or "")
+    if _has_shoe_sizes(value):
+        return True
+    # Clothing descriptions sometimes mention loafers as a styling suggestion.
+    # Do not turn those clothing cards into shoes when a clothing size run is present.
+    return bool(re.search("|".join(re.escape(keyword) for keyword in SHOE_KEYWORDS), value, re.IGNORECASE)) and not _has_clothing_sizes(value)
+
+
 def _model_code(*texts):
     joined = " ".join(str(value or "") for value in texts).upper()
     match = re.search(r"(?<![A-Z0-9])(BC|LP|ZE)\s*[-_]?\s*(\d{2,})\b", joined)
@@ -79,11 +113,10 @@ def _classify(product, context=""):
         product["brand"] = brand_id
         product["name"] = brand_name
 
-    compact = re.sub(r"\s+", "", text.upper())
-    if re.search(r"(?:^|[•,;/])(?:M|L|XL|XXL|XXXL|2XL|3XL)(?:[•,;/]|$)", compact):
-        product["category"] = CLOTHING_CATEGORY_ID
-    elif re.search(r"\b\d{2}\s*[-–—]\s*\d{2}\b", text):
+    if _looks_like_shoe(text):
         product["category"] = SHOES_CATEGORY_ID
+    elif _has_clothing_sizes(text):
+        product["category"] = CLOTHING_CATEGORY_ID
     return code
 
 
@@ -138,11 +171,17 @@ def _header_before(candidates, target_index):
 
 
 def _process_all(rows):
-    """Build products by model code instead of treating a whole MAN section as one model."""
+    """Build products by model code instead of treating a whole MAN section as one model.
+
+    Clothing cards in this feed use Price + Details pairs. Shoe cards often omit
+    Details and put the product photos directly on Price, so they need a separate
+    fallback path below.
+    """
     descriptions = [(index, row) for index, row in enumerate(rows) if _is_model_description(row)]
     size_grids = [(index, row) for index, row in enumerate(rows) if _is_size_grid(row)]
     headers = [(index, row) for index, row in enumerate(rows) if _is_header(row)]
     result = []
+    result_external_ids = set()
     for price_index, details_index in _pair_rows(rows):
         price_row = copy.deepcopy(rows[price_index])
         details_row = rows[details_index]
@@ -179,6 +218,60 @@ def _process_all(rows):
             attributes["size_chart_source_id"] = size_row.get("external_id")
         price_row["attributes"] = attributes
         result.append(price_row)
+
+        if price_row.get("external_id"):
+            result_external_ids.add(str(price_row["external_id"]))
+
+    # Shoes in the MAN timeline usually have no Details row. Keep every real
+    # Price card that has product photos, the shared model description and its
+    # nearest size grid. Video-only Price rows are intentionally ignored.
+    for price_index, source_price in enumerate(rows):
+        if not _is_price(source_price):
+            continue
+        external_id = str(source_price.get("external_id") or "")
+        if not external_id or external_id in result_external_ids:
+            continue
+
+        price_text = _text(source_price)
+        price_code = _model_code(price_text)
+        _, description_row = _nearest_model_source(
+            descriptions, price_index, price_code, 100, 60
+        )
+        _, size_row = _nearest_model_source(
+            size_grids, price_index, price_code, 80, 60
+        )
+        full_description = _text(description_row) if description_row else ""
+        size_text = _text(size_row) if size_row else ""
+        if not _looks_like_shoe(f"{price_text} {full_description} {size_text}"):
+            continue
+
+        product_photos = _photos(source_price)
+        if not product_photos:
+            continue
+
+        price_row = copy.deepcopy(source_price)
+        header_row = _header_before(headers, price_index)[1]
+        header = _text(header_row) if header_row else ""
+        code = _classify(price_row, f"{full_description} {size_text}")
+        price_row["description"] = full_description or price_text
+        price_row["photos"] = _unique(product_photos + (_photos(size_row) if size_row else []))
+        price_row["variant_group_key"] = price_row.get("variant_group_key") or code or None
+
+        attributes = dict(price_row.get("attributes") or {})
+        if code:
+            attributes["model_code"] = code
+        if header:
+            attributes["szwego_group_header"] = header
+        if full_description:
+            attributes["description_source_id"] = description_row.get("external_id")
+        if size_row:
+            attributes["size_chart_source_id"] = size_row.get("external_id")
+        attributes["shoe_without_details"] = True
+        price_row["attributes"] = attributes
+        result.append(price_row)
+        result_external_ids.add(external_id)
+
+    result.sort(key=lambda product: product.get("source_position", 0))
     return result
 
 

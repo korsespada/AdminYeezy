@@ -69,10 +69,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     aliases: ['крой', 'посадка'],
     values: ['Облегающая', 'Обычная', 'Свободная', 'Oversize'],
   }),
-  definition('measurements', 'Замеры', 'Одежда', 'text', 70, {
-    aliases: ['clothing_measurements', 'замеры одежды', 'замеры'],
+  definition('measurements', 'Замеры', 'Одежда и обувь', 'text', 70, {
+    aliases: ['clothing_measurements', 'shoe_measurements', 'замеры одежды', 'замеры обуви', 'замеры'],
     rules: [
-      'Таблица замеров по размерам: размер, длина, обхват груди, плечи, рукав',
+      'Таблица замеров по размерам: для одежды — длина, обхват груди, плечи, рукав; для обуви — длина стельки, длина стопы, ширина или другие явно указанные параметры',
       'Не смешивать замеры разных товаров и не вычислять отсутствующие значения',
     ],
   }),
@@ -219,7 +219,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Обувь',
-    attributes: ['sizes', 'size_system', 'upper_material', 'lining_material', 'sole_material', 'heel_height'],
+    attributes: ['sizes', 'size_system', 'measurements', 'upper_material', 'lining_material', 'sole_material', 'heel_height'],
   },
   {
     category: 'Сумки',
