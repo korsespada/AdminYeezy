@@ -123,6 +123,66 @@ export function inferBaseColor(value: unknown) {
   return BASE_COLOR_PATTERNS.find(([pattern]) => pattern.test(text))?.[1] || text.trim()
 }
 
+const AUTO_SHADE_LABELS: Record<string, string[]> = {
+  серый: ['Светло-серый', 'Серый', 'Графитовый', 'Антрацитовый', 'Серо-коричневый', 'Серо-синий'],
+  белый: ['Белый', 'Молочный', 'Айвори', 'Кремовый', 'Слоновая кость'],
+  бежевый: ['Светло-бежевый', 'Бежевый', 'Песочный', 'Тауп', 'Карамельный'],
+  синий: ['Светло-синий', 'Синий', 'Темно-синий', 'Чернильно-синий', 'Джинсовый', 'Сине-серый'],
+  черный: ['Чёрный', 'Угольный', 'Глубокий чёрный', 'Графитово-чёрный'],
+  коричневый: ['Светло-коричневый', 'Коричневый', 'Шоколадный', 'Кофейный', 'Коньячный'],
+  красный: ['Красный', 'Бордовый', 'Винный', 'Терракотовый'],
+  зеленый: ['Светло-зелёный', 'Зелёный', 'Оливковый', 'Хаки'],
+  розовый: ['Светло-розовый', 'Розовый', 'Пудровый', 'Пыльно-розовый'],
+  фиолетовый: ['Светло-фиолетовый', 'Фиолетовый', 'Сливовый', 'Сиреневый'],
+  желтый: ['Светло-жёлтый', 'Жёлтый', 'Горчичный', 'Золотистый'],
+  оранжевый: ['Светло-оранжевый', 'Оранжевый', 'Медный', 'Терракотовый'],
+  разноцветный: ['Разноцветный', 'Мультиколор', 'Контрастный мультиколор', 'Многоцветный'],
+}
+
+export function ensureUniqueFamilyColors(products: any[], suggestedColors: Record<string, { color?: string; base_color?: string; confidence?: number }> = {}) {
+  const used = new Set<string>()
+  const nextByBase = new Map<string, number>()
+  const result: Record<string, { color: string; base_color: string; confidence: number }> = {}
+  for (const product of products) {
+    const productId = String(product.id)
+    const suggestion = suggestedColors[productId] || {}
+    const current = Array.isArray(product.attributes?.colors) ? String(product.attributes.colors[0] || '') : ''
+    const baseColor = String(suggestion.base_color || inferBaseColor(suggestion.color || current)).trim().slice(0, 80)
+    let color = String(suggestion.color || current).trim().slice(0, 80)
+    const normalized = normalizedColorFamilyValue(color)
+    const baseKey = String(baseColor || inferBaseColor(color)).trim().toLowerCase().replace(/ё/g, 'е')
+    if (!color || (normalized && !used.has(normalized))) {
+      if (normalized) used.add(normalized)
+    } else {
+      const labels = AUTO_SHADE_LABELS[baseKey] || [`${baseColor} светлый`, baseColor, `${baseColor} тёмный`, `${baseColor} глубокий`]
+      let cursor = nextByBase.get(baseKey) || 0
+      let candidate = ''
+      while (cursor < labels.length) {
+        const next = labels[cursor++]
+        if (!used.has(normalizedColorFamilyValue(next))) {
+          candidate = next
+          break
+        }
+      }
+      if (!candidate) {
+        let suffix = 2
+        do { candidate = `${baseColor} ${suffix++}` } while (used.has(normalizedColorFamilyValue(candidate)))
+      }
+      nextByBase.set(baseKey, cursor)
+      color = candidate
+      used.add(normalizedColorFamilyValue(color))
+    }
+    if (color) {
+      result[productId] = {
+        color,
+        base_color: baseColor || inferBaseColor(color),
+        confidence: Number(suggestion.confidence || 0),
+      }
+    }
+  }
+  return result
+}
+
 const MATERIAL_CONSTRUCTION_TOKENS = new Set([
   'трикотаж', 'трикотажный', 'трикотажная', 'трикотажное', 'вязка', 'вязаный', 'вязаная',
   'knit', 'knitted', 'jersey',
@@ -544,7 +604,7 @@ export async function savePreparedColorFamilySuggestion(
 ) {
   const affectedProductIds = input.products.map((product) => Number(product.id)).filter(Number.isInteger)
   if (affectedProductIds.length < 2) return
-  const suggestedColors = input.suggestedColors || {}
+  const suggestedColors = ensureUniqueFamilyColors(input.products, input.suggestedColors || {})
   const colors = [...new Set(input.products.flatMap((product) => {
     const suggested = suggestedColors[String(product.id)]?.color
     return normalizedColorTokens(suggested || product?.attributes?.colors)
@@ -554,9 +614,9 @@ export async function savePreparedColorFamilySuggestion(
     const color = normalizedColorFamilyValue(suggestedColors[String(product.id)]?.color || product?.attributes?.colors)
     if (color) byColor.set(color, [...(byColor.get(color) || []), Number(product.id)])
   }
-  const colorConflicts = (input.colorConflicts?.length ? input.colorConflicts : [...byColor.entries()].flatMap(([color, productIds]) => (
+  const colorConflicts = [...byColor.entries()].flatMap(([color, productIds]) => (
     productIds.length > 1 ? [{ color, productIds }] : []
-  )))
+  ))
   if (colors.length < 2 && !colorConflicts.length) return
   const canonicalKey = crypto.createHash('sha256').update(input.identityKey).digest('hex')
   const first = input.products[0]
@@ -613,7 +673,6 @@ export async function applyShadeVariantsToSuggestion(client: QueryClient, runId:
     : { rows: [] }
   const variantsByProductId = new Map(variants.map((variant: any) => [Number(variant.product?.id), variant]))
   const suggestedColors: Record<string, { color: string; base_color: string; confidence: number }> = {}
-  const byColor = new Map<string, number[]>()
   for (const product of products.rows) {
     const productId = Number(product.id)
     const variant: any = variantsByProductId.get(productId)
@@ -629,16 +688,18 @@ export async function applyShadeVariantsToSuggestion(client: QueryClient, runId:
         confidence: Number(variant?.confidence || 0),
       }
     }
-    const normalizedColor = normalizedColorFamilyValue(suggestedColor)
-    if (!normalizedColor) continue
-    byColor.set(normalizedColor, [...(byColor.get(normalizedColor) || []), productId])
   }
+  const uniqueSuggestedColors = ensureUniqueFamilyColors(products.rows, suggestedColors)
   const payload = {
     ...(row.payload || {}),
-    observed_colors: Object.values(suggestedColors).map((item) => item.color),
-    base_colors: [...new Set(Object.values(suggestedColors).map((item) => item.base_color).filter(Boolean))].sort(),
-    suggested_colors: suggestedColors,
-    color_conflicts: [...byColor.entries()].flatMap(([color, productIds]) => (
+    observed_colors: Object.values(uniqueSuggestedColors).map((item) => item.color),
+    base_colors: [...new Set(Object.values(uniqueSuggestedColors).map((item) => item.base_color).filter(Boolean))].sort(),
+    suggested_colors: uniqueSuggestedColors,
+    color_conflicts: [...Object.entries(uniqueSuggestedColors).reduce((map, [productId, item]) => {
+      const color = normalizedColorFamilyValue(item.color)
+      if (color) map.set(color, [...(map.get(color) || []), Number(productId)])
+      return map
+    }, new Map<string, number[]>()).entries()].flatMap(([color, productIds]) => (
       productIds.length > 1 ? [{ color, productIds }] : []
     )),
     suggested_duplicate_product_ids: [...duplicateIds],

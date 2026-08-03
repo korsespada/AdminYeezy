@@ -3,12 +3,29 @@ import {
   canonicalColorFamilyKey,
   canonicalProductColorFamilyKey,
   colorFamilyRebuildPlan,
+  ensureUniqueFamilyColors,
   inferBaseColor,
   normalizeShadeScanOutput,
   normalizeVisualFamilyScanOutput,
   sameSubcategoryFamily,
   subcategoryFamilyKey,
 } from '@/lib/batch-ai-suggestions'
+
+describe('automatic family shade naming', () => {
+  it('automatically gives repeated AI colors distinct public shade names', () => {
+    const result = ensureUniqueFamilyColors([
+      { id: 1, attributes: { colors: ['Серый'] } },
+      { id: 2, attributes: { colors: ['Серый'] } },
+      { id: 3, attributes: { colors: ['Серый'] } },
+    ], {
+      '1': { color: 'Серый', base_color: 'Серый' },
+      '2': { color: 'Серый', base_color: 'Серый' },
+      '3': { color: 'Серый', base_color: 'Серый' },
+    })
+
+    expect(Object.values(result).map((item) => item.color)).toEqual(['Серый', 'Светло-серый', 'Графитовый'])
+  })
+})
 
 describe('subcategoryFamilyKey', () => {
   it('merges punctuation, number and harmless wording variants', () => {

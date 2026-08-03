@@ -45,6 +45,7 @@ import {
   applyShadeVariantsToSuggestion,
   canonicalColorFamilyKey,
   colorFamilyRebuildPlan,
+  ensureUniqueFamilyColors,
   inferBaseColor,
   normalizeShadeScanOutput,
   normalizeVisualFamilyScanOutput,
@@ -1280,14 +1281,26 @@ async function reviewBatchAiSuggestion(
     )
     const resolvedColors = familyProducts.rows.map((product) => {
       const override = String(colorOverrides?.[String(product.id)] || '').trim().slice(0, 80)
+      const suggested = String(row.payload?.suggested_colors?.[String(product.id)]?.color || '').trim().slice(0, 80)
       const current = Array.isArray(product.attributes?.colors) ? String(product.attributes.colors[0] || '').trim() : ''
-      return { product, color: override || current }
+      return { product, color: override || suggested || current }
     })
     const actualColors = resolvedColors.map(({ color }) => normalizedColorFamilyValue(color))
-    if (actualColors.some((color) => !color) || new Set(actualColors).size !== actualColors.length) {
+    const uniqueColors = new Set(actualColors.filter(Boolean))
+    const finalResolvedColors = actualColors.some((color) => !color) || uniqueColors.size !== actualColors.length
+      ? (() => {
+          const unique = ensureUniqueFamilyColors(
+            resolvedColors.map(({ product, color }) => ({ ...product, attributes: { ...(product.attributes || {}), colors: [color] } })),
+            Object.fromEntries(resolvedColors.map(({ product, color }) => [String(product.id), { color }])),
+          )
+          return resolvedColors.map(({ product }) => ({ product, color: unique[String(product.id)]?.color || '' }))
+        })()
+      : resolvedColors
+    const finalActualColors = finalResolvedColors.map(({ color }) => normalizedColorFamilyValue(color))
+    if (finalActualColors.some((color) => !color) || new Set(finalActualColors).size !== finalActualColors.length) {
       return { success: false, error: 'Укажите разные названия оттенков или исключите настоящие дубли.' }
     }
-    for (const { product, color } of resolvedColors) {
+    for (const { product, color } of finalResolvedColors) {
       const baseColor = inferBaseColor(color)
       await scrapingQuery(`
         UPDATE products SET attributes=jsonb_set(
@@ -1299,8 +1312,8 @@ async function reviewBatchAiSuggestion(
     }
     row.payload = {
       ...row.payload,
-      observed_colors: resolvedColors.map(({ color }) => color).sort(),
-      base_colors: [...new Set(resolvedColors.map(({ color }) => inferBaseColor(color)).filter(Boolean))].sort(),
+      observed_colors: finalResolvedColors.map(({ color }) => color).sort(),
+      base_colors: [...new Set(finalResolvedColors.map(({ color }) => inferBaseColor(color)).filter(Boolean))].sort(),
       color_conflicts: [],
     }
     const familyKey = String(row.payload?.product_identity_key || canonicalColorFamilyKey(row.payload))
