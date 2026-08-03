@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiShadePrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 
 describe('batch AI normalization', () => {
   it('keeps unknown taxonomy out of the applied product and removes rejected media', () => {
@@ -337,6 +337,17 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('photo_decision_fields')
     expect(prompt).toContain('«Светло-серый», «Серый», «Графитовый»')
     expect(prompt).toContain('Разные оттенки дублями не являются')
+  })
+
+  it('builds an automatic shade repair prompt instead of requiring manual renaming', () => {
+    const prompt = buildBatchAiShadeRepairPrompt(
+      [{ id: 1, external_id: 'A-1', attributes: { colors: ['Серый'] } }],
+      [{ product: { id: 1 }, color: 'Серый' }],
+    )
+
+    expect(prompt).toContain('Пользователь не будет переименовывать товары вручную')
+    expect(prompt).toContain('Не используй номера')
+    expect(prompt).toContain('preliminary_color')
   })
 
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {

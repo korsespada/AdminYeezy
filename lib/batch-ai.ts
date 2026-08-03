@@ -275,6 +275,26 @@ export function buildBatchAiShadePrompt(
   ].join('\n\n')
 }
 
+export function buildBatchAiShadeRepairPrompt(products: any[], variants: any[]) {
+  const candidates = products.map((product, index) => ({
+    index: index + 1,
+    id: product.id,
+    external_id: product.external_id || '',
+    model_code: product.attributes?.model_code || '',
+    current_color: product.attributes?.colors || [],
+    preliminary_color: variants.find((variant) => Number(variant.product?.id) === Number(product.id))?.color || '',
+  }))
+  return [
+    'Это автоматическое уточнение цветовой семьи обуви. Пользователь не будет переименовывать товары вручную.',
+    'Снова сравни все пары на contact sheet. Предварительный ответ мог дать одинаковые общие слова, например «Серый», «Синий», «Белый».',
+    'Для визуально разных НЕ дублей обязательно придумай разные короткие естественные русские названия оттенков: учитывай светлоту и подтон. Используй «Светло-серый», «Серый», «Графитовый»; «Синий», «Темно-синий», «Чернильно-синий»; «Белый», «Молочный», «Айвори»; «Бежевый», «Песочный», «Тауп».',
+    'Не используй номера, слова «вариант», «оттенок 1» и не оставляй одинаковые color у визуально разных товаров.',
+    'duplicate_of_index указывай только для визуально одинаковой пары или повторной публикации одного цвета. Разные оттенки дублями не являются.',
+    'Верни каждый товар ровно один раз, сохрани product_index и верни строго JSON вида {"variants":[{"product_index":1,"color":"Графитовый","base_color":"Серый","duplicate_of_index":null,"confidence":0.95}]}.',
+    `Товары и предварительные названия: ${JSON.stringify(candidates)}`,
+  ].join('\n\n')
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[]) {
   const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {

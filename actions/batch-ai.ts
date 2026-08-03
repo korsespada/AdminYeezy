@@ -15,6 +15,7 @@ import {
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
   buildBatchAiFamilyDefinition,
+  buildBatchAiShadeRepairPrompt,
   buildBatchAiUserPrompt,
   buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
@@ -756,7 +757,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       })
       rawOutput = raw
     }
-    const normalized = input.variantScanOnly
+    let normalized: any = input.variantScanOnly
       ? variantScanResult(raw, input)
       : normalizeBatchAiOutput(raw, {
       product: input.product,
@@ -771,6 +772,20 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       attributeDictionaryValues: input.attributeDictionaryValues || [],
       priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
     })
+    if (input.shadeFamilyScan && shadeScanHasColorConflicts(normalized.shadeVariants)) {
+      const repairedRaw = await runBatchAiOpenRouter({
+        settings,
+        systemPrompt: input.systemPrompt,
+        userPrompt: buildBatchAiShadeRepairPrompt(input.candidateProducts || [], normalized.shadeVariants || []),
+        contactSheets: sheets,
+      })
+      const repaired = variantScanResult(repairedRaw, input)
+      if (repaired.shadeVariants.length === (input.candidateProducts || []).length
+        && !shadeScanHasColorConflicts(repaired.shadeVariants)) {
+        normalized = repaired
+        rawOutput = repairedRaw
+      }
+    }
     if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
     else await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
@@ -814,6 +829,16 @@ function variantScanResult(raw: any, input: any) {
     colorFamily: raw?.color_family || null,
     mediaDecision: { discard: [], sizeCharts: [] },
   }
+}
+
+function shadeScanHasColorConflicts(variants: any[]) {
+  const counts = new Map<string, number>()
+  for (const variant of Array.isArray(variants) ? variants : []) {
+    if (variant?.duplicateOfProductId) continue
+    const color = normalizedColorFamilyValue(variant?.color)
+    if (color) counts.set(color, (counts.get(color) || 0) + 1)
+  }
+  return [...counts.values()].some((count) => count > 1)
 }
 
 async function applyCompletedVariantScan(item: any, normalized: any) {
