@@ -25,6 +25,30 @@ function chunk(array, size) {
   return result;
 }
 
+async function fetchWithRetry(url, init, label) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      if (attempt === 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+      continue;
+    }
+
+    if (response.ok || (![429, 500, 502, 503, 504].includes(response.status)) || attempt === 5) {
+      return response;
+    }
+
+    const retryAfter = Number(response.headers.get('retry-after'));
+    const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 60_000)
+      : Math.min(attempt * 5_000, 60_000);
+    console.log(`${label}: ${response.status}, повтор через ${Math.ceil(delayMs / 1000)} сек. (попытка ${attempt + 1}/5)`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
 function jsonProducts(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === 'object' && Array.isArray(value.products)) return value.products;
@@ -104,13 +128,15 @@ async function main() {
       return;
     }
 
-    if (!env.RAILS_ADMIN_EMAIL || !env.RAILS_ADMIN_PASSWORD) {
-      throw new Error('Для --apply нужны RAILS_ADMIN_EMAIL и RAILS_ADMIN_PASSWORD');
+    const adminEmail = env.RAILS_ADMIN_EMAIL || env.LOCAL_ADMIN_EMAIL;
+    const adminPassword = env.RAILS_ADMIN_PASSWORD || env.LOCAL_ADMIN_PASSWORD;
+    if (!adminEmail || !adminPassword) {
+      throw new Error('Для --apply нужны RAILS_ADMIN_EMAIL/RAILS_ADMIN_PASSWORD или LOCAL_ADMIN_EMAIL/LOCAL_ADMIN_PASSWORD');
     }
-    const login = await fetch(`${railsBase}/admin/auth/login`, {
+    const login = await fetchWithRetry(`${railsBase}/admin/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: env.RAILS_ADMIN_EMAIL, password: env.RAILS_ADMIN_PASSWORD }),
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
     });
     const loginPayload = await login.json().catch(() => ({}));
     if (!login.ok || !loginPayload.token) throw new Error(`Rails login failed: ${login.status}`);
@@ -118,13 +144,14 @@ async function main() {
     const railsProducts = new Map();
     for (const ids of chunk([...byExternalId.keys()], 50)) {
       const params = new URLSearchParams({ page: '1', per_page: String(ids.length), external_ids: ids.join(',') });
-      const response = await fetch(`${railsBase}/admin/products?${params}`, { headers });
+      const response = await fetchWithRetry(`${railsBase}/admin/products?${params}`, { headers }, 'Rails lookup');
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(`Rails lookup failed: ${response.status}`);
       for (const product of payload.products || []) railsProducts.set(String(product.external_id), product);
     }
 
     let updated = 0;
+    let skipped = 0;
     let missing = 0;
     const publishedAt = new Date().toISOString();
     for (const [externalId, target] of byExternalId) {
@@ -134,7 +161,15 @@ async function main() {
         continue;
       }
       const metadata = product.metadata && typeof product.metadata === 'object' ? product.metadata : {};
-      const response = await fetch(`${railsBase}/admin/products/${encodeURIComponent(product.id)}`, {
+      if (
+        (product.supplier?.name === target.supplierName || metadata.source_supplier_name === target.supplierName) &&
+        metadata.source_batch_id === target.batchId &&
+        metadata.source_published_at
+      ) {
+        skipped += 1;
+        continue;
+      }
+      const response = await fetchWithRetry(`${railsBase}/admin/products/${encodeURIComponent(product.id)}`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({
@@ -151,7 +186,7 @@ async function main() {
             },
           },
         }),
-      });
+      }, `PATCH ${externalId}`);
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
         throw new Error(`${externalId}: ${response.status} ${payload.message || payload.error || ''}`.trim());
@@ -159,7 +194,7 @@ async function main() {
       updated += 1;
       if (updated % 50 === 0) console.log(`Обновлено: ${updated}`);
     }
-    console.log(JSON.stringify({ updated, missing }, null, 2));
+    console.log(JSON.stringify({ updated, skipped, missing }, null, 2));
   } finally {
     await scrapingPool.end();
   }
