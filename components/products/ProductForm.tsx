@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
+import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
 import { Download, ExternalLink, Settings2, Upload } from 'lucide-react'
@@ -654,6 +655,22 @@ export default function ProductForm({
                 registryDefinitions={attributeDefinitions}
               />
             </div>
+
+            {product?.supplier && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Поставщик</p>
+                  <p className="mt-1 text-sm font-medium text-slate-200">{product.supplier.name}</p>
+                </div>
+                {product.supplier.avatar_url ? (
+                  <Image src={product.supplier.avatar_url} alt="" width={36} height={36} unoptimized className="h-9 w-9 rounded-full border border-slate-600 object-cover" />
+                ) : (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-700 text-sm font-bold text-slate-300">
+                    {product.supplier.name.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+              </div>
+            )}
 
             <details className="rounded-lg border border-slate-700 bg-slate-900/40">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-300">

@@ -15,6 +15,7 @@ type AdminSearchParams = {
   priceMin?: string
   priceMax?: string
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
   gender?: string
@@ -40,6 +41,7 @@ export default async function AdminPage({
   const priceMin = params.priceMin || ''
   const priceMax = params.priceMax || ''
   const brandFilter = params.brand || ''
+  const supplierFilter = params.supplier || ''
   const categoryFilter = params.category || ''
   const subcategoryFilter = params.subcategory || ''
   const genderFilter = params.gender || ''
@@ -51,6 +53,7 @@ export default async function AdminPage({
     || priceMin
     || priceMax
     || brandFilter
+    || supplierFilter
     || categoryFilter
     || subcategoryFilter
     || genderFilter
@@ -66,6 +69,7 @@ export default async function AdminPage({
     if (priceMin) params.set('priceMin', priceMin)
     if (priceMax) params.set('priceMax', priceMax)
     if (brandFilter) params.set('brand', brandFilter)
+    if (supplierFilter) params.set('supplier', supplierFilter)
     if (categoryFilter) params.set('category', categoryFilter)
     if (subcategoryFilter) params.set('subcategory', subcategoryFilter)
     if (genderFilter) params.set('gender', genderFilter)
@@ -96,6 +100,7 @@ export default async function AdminPage({
       priceMin,
       priceMax,
       brand: brandSlug,
+      supplier: supplierFilter,
       category: categorySlug,
       subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
       gender: genderFilter === '__none__' ? '' : genderParam,
@@ -115,6 +120,7 @@ export default async function AdminPage({
         priceMin,
         priceMax,
         brand: brandSlug,
+        supplier: supplierFilter,
         category: categorySlug,
         subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
         gender: genderFilter === '__none__' ? '' : genderParam,
@@ -140,6 +146,7 @@ export default async function AdminPage({
       priceMin,
       priceMax,
       brandFilter,
+      supplierFilter,
       categoryFilter,
       subcategoryFilter,
       genderFilter,

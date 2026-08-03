@@ -55,6 +55,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const [attributeValueValue, setAttributeValueValue] = useState(searchParams.get('attributeValue') || '')
 
     const currentBrand = searchParams.get('brand') || ''
+    const currentSupplier = searchParams.get('supplier') || ''
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
     const currentGender = searchParams.get('gender') || ''
@@ -65,7 +66,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const currentAttributeKey = searchParams.get('attributeKey') || ''
     const currentAttributeValue = searchParams.get('attributeValue') || ''
     const hasActiveFilters = Boolean(
-        currentBrand || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
+        currentBrand || currentSupplier || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
     )
 
     const navigate = useCallback((url: string) => {
@@ -554,6 +555,30 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     </Button>
                                 ))}
                             </div>
+                        </div>
+
+                        {/* Brand Filter with Search */}
+                        <div>
+                            <Label className="mb-2 block text-slate-300">Поставщик</Label>
+                            <Select
+                                value={currentSupplier || '__all__'}
+                                onValueChange={(value) => applyFilter('supplier', value === '__all__' ? null : value)}
+                            >
+                                <SelectTrigger aria-label="Поставщик" className="bg-slate-700 text-slate-200">
+                                    <SelectValue placeholder="Все поставщики" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__all__">Все поставщики</SelectItem>
+                                    {(filterFacets?.supplierFacets || [])
+                                        .slice()
+                                        .sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug), 'ru'))
+                                        .map((supplier) => (
+                                            <SelectItem key={supplier.slug} value={supplier.slug}>
+                                                {supplier.name || supplier.slug} ({supplier.count})
+                                            </SelectItem>
+                                        ))}
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Brand Filter with Search */}

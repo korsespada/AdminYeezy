@@ -174,12 +174,20 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const handleDeleteFromDb = async (batch: ExportHistoryBatch) => {
     if (batch.isSynthetic) return
     if (!confirm(`Удалить товары и фотографии S3 для выгрузки "${batch.name}"? История этапов останется в админке.`)) return
+    const replaceShared = window.confirm(
+      'Удалить также совпадающие товары из основного каталога?\n\n' +
+      'Да — это замена старой версии: новая выгрузка потом создаст товары заново.\n' +
+      'Нет — общие товары будут сохранены.',
+    )
 
     setPendingAction(`db-${batch.id}`)
-    const res = await deleteBatchAction(batch.id)
+    const res = await deleteBatchAction(batch.id, { replaceShared })
     if (res.success) {
       setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Удалено из БД' } : item))
-      alert(`Удалено продуктов: ${res.deletedCount || 0}`)
+      const catalogMessage = res.catalogDeletedCount !== undefined
+        ? `Из каталога: ${res.catalogDeletedCount}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
+        : 'Из каталога: не проверено'
+      alert(`Локально удалено: ${res.deletedCount || 0}\n${catalogMessage}`)
     } else {
       alert(`Ошибка при удалении из БД: ${res.error}`)
     }
@@ -490,11 +498,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             </button>
                             <button
                               onClick={() => handleDeleteFromDb(batch)}
-                              disabled={batch.isSynthetic || batch.status === 'Удалено из БД'}
+                              disabled={batch.isSynthetic}
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600"
                             >
                               <Database className="h-4 w-4" />
-                              Удалить выгрузку из БД
+                              {batch.status === 'Удалено из БД' ? 'Повторить очистку каталога' : 'Удалить выгрузку из БД'}
                             </button>
                             <button
                               onClick={() => handleDeleteBatchFromAdmin(batch)}

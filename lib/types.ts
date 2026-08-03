@@ -54,6 +54,7 @@ export interface CatalogValueFacet {
 
 export interface ProductFilterFacets {
   brandFacets: CatalogSlugFacet[]
+  supplierFacets?: CatalogSlugFacet[]
   categoryFacets: CatalogSlugFacet[]
   subcategoryFacets: CatalogSlugFacet[]
   genderFacets: CatalogValueFacet[]
@@ -68,6 +69,12 @@ export interface ProductMedia {
   alt_text?: string
   sort_order: number
   processing_status: 'pending' | 'processed' | 'failed'
+}
+
+export interface ProductSupplier {
+  id: string
+  name: string
+  avatar_url?: string | null
 }
 
 /**
@@ -92,6 +99,7 @@ export interface Product {
   subcategory: string // Subcategory ID
   photos: string[] // Array of photo filenames
   media?: ProductMedia[]
+  supplier?: ProductSupplier | null
   photos_processed: boolean
   gender: string
   thumb: string

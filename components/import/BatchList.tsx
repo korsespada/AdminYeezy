@@ -54,12 +54,20 @@ export default function BatchList({ initialData }: { initialData: Batch[] }) {
     if (!confirm(`Вы уверены, что хотите удалить партию "${name}"? Все товары, принадлежащие этой партии, будут удалены из базы данных! Это действие нельзя отменить.`)) {
       return
     }
+    const replaceShared = window.confirm(
+      'Удалить также совпадающие товары из основного каталога?\n\n' +
+      'Да — это замена старой версии: новая выгрузка потом создаст товары заново.\n' +
+      'Нет — общие товары будут сохранены.',
+    )
 
     setDeletingId(id)
-    const res = await deleteBatchAction(id)
+    const res = await deleteBatchAction(id, { replaceShared })
     if (res.success) {
       setBatches(prev => prev.filter(b => b.id !== id))
-      alert(`Удалено продуктов: ${res.deletedCount}`)
+      const catalogMessage = res.catalogDeletedCount !== undefined
+        ? `Из каталога: ${res.catalogDeletedCount}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
+        : 'Из каталога: не проверено'
+      alert(`Локально удалено: ${res.deletedCount || 0}\n${catalogMessage}`)
     } else {
       alert(`Ошибка при удалении: ${res.error}`)
     }

@@ -1277,7 +1277,7 @@ export async function getBatchesAction() {
 /**
  * Удаление партии и всех связанных с ней товаров
  */
-export async function deleteBatchAction(batchId: string) {
+export async function deleteBatchAction(batchId: string, options: { replaceShared?: boolean } = {}) {
     let operationOwnerId: string | null = null
     try {
         await requireAdmin()
@@ -1296,10 +1296,73 @@ export async function deleteBatchAction(batchId: string) {
           FROM batch_publications bp
           WHERE bp.batch_id=$1
         `, [batchId])
-        const externalIds = publications.rows.filter((row) => !row.shared).map((row) => String(row.external_id)).filter(Boolean)
+        const publicationExternalIds = publications.rows
+          .filter((row) => !row.shared)
+          .map((row) => String(row.external_id))
+          .filter(Boolean)
+
+        // Старые PUSHED-партии могли быть опубликованы до появления
+        // batch_publications. В этом случае восстанавливаем кандидатов из
+        // самой партии, но не трогаем external_id, который встречается в
+        // другой технической партии.
+        const batchProducts = await scrapingQuery(`
+          SELECT p.external_id
+          FROM products p
+          WHERE p.batch_id=$1 AND p.external_id IS NOT NULL AND BTRIM(p.external_id) <> ''
+        `, [batchId])
+        const snapshotResult = await scrapingQuery(`
+          SELECT products
+          FROM batch_snapshots
+          WHERE batch_id=$1
+          ORDER BY CASE
+            WHEN label='Обработано ИИ' THEN 0
+            WHEN label='Обработан скриптом' THEN 1
+            WHEN label='Сырой товар' THEN 2
+            ELSE 3
+          END, created_at DESC
+          LIMIT 1
+        `, [batchId])
+        const snapshotProducts = Array.isArray(snapshotResult.rows[0]?.products)
+          ? snapshotResult.rows[0].products
+          : []
+        const legacyCandidates = [...new Set([
+          ...batchProducts.rows.map((row) => String(row.external_id).trim()),
+          ...snapshotProducts.map((product: any) => String(product?.external_id || '').trim()),
+        ].filter(Boolean))]
+        const legacyShared = legacyCandidates.length > 0
+          ? await scrapingQuery(`
+              SELECT p.external_id
+              FROM products p
+              WHERE p.external_id = ANY($1::text[]) AND p.batch_id <> $2
+              GROUP BY p.external_id
+              UNION
+              SELECT snapshot_product->>'external_id' AS external_id
+              FROM batch_snapshots snapshot
+              CROSS JOIN LATERAL jsonb_array_elements(snapshot.products) AS snapshot_product
+              WHERE snapshot.batch_id <> $2
+                AND snapshot_product->>'external_id' = ANY($1::text[])
+              GROUP BY snapshot_product->>'external_id'
+            `, [legacyCandidates, batchId])
+          : { rows: [] }
+        const legacySharedIds = new Set(legacyShared.rows.map((row) => String(row.external_id).trim()))
+        const legacyExternalIds = legacyCandidates.filter((externalId) => !legacySharedIds.has(externalId))
+        const protectedExternalIds = new Set([
+          ...legacySharedIds,
+          ...publications.rows.filter((row) => row.shared).map((row) => String(row.external_id).trim()),
+        ])
+        const externalIds = options.replaceShared
+          ? [...new Set([
+              ...publications.rows.map((row) => String(row.external_id).trim()),
+              ...legacyCandidates,
+            ].filter(Boolean))]
+          : [...new Set([...publicationExternalIds, ...legacyExternalIds])]
 
         // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
         let catalogDeletedCount = 0
+        const requiresCatalogDeletion = batchStage === 'PUSHED' || publications.rows.length > 0 || legacyCandidates.length > 0
+        if (requiresCatalogDeletion && !process.env.RAILS_API_URL) {
+          throw new Error('Нельзя удалить опубликованную партию: не настроен RAILS_API_URL')
+        }
         if (externalIds.length > 0 && process.env.RAILS_API_URL) {
           const result = await deleteRailsAdminProductsByExternalIds(externalIds)
           catalogDeletedCount = result.deleted
@@ -1311,7 +1374,7 @@ export async function deleteBatchAction(batchId: string) {
         // ссылаться на фотографии этой партии — весь префикс удалять небезопасно.
         const canDeleteS3 = publications.rows.length > 0
           ? publications.rows.every((row) => !row.shared)
-          : batchStage !== 'PUSHED'
+          : batchStage !== 'PUSHED' && protectedExternalIds.size === 0
         if (canDeleteS3) {
           try {
             await deleteS3Folder(`batches/${batchId}/`)
@@ -1337,7 +1400,14 @@ export async function deleteBatchAction(batchId: string) {
         revalidatePath('/admin/batches')
         revalidatePath('/admin/scraping')
 
-        return { success: true, deletedCount, catalogDeletedCount }
+        return {
+          success: true,
+          deletedCount,
+          catalogDeletedCount,
+          catalogRequestedCount: externalIds.length,
+          catalogProtectedCount: options.replaceShared ? 0 : protectedExternalIds.size,
+          replaceShared: Boolean(options.replaceShared),
+        }
     } catch (err: any) {
         return { success: false, error: err.message }
     } finally {

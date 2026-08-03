@@ -553,6 +553,13 @@ export function mapRailsProduct(product: any): Product {
     subcategory: subcategoryId,
     photos,
     media,
+    supplier: product.supplier
+      ? {
+        id: String(product.supplier.id),
+        name: String(product.supplier.name || ''),
+        avatar_url: product.supplier.avatar_url || null,
+      }
+      : null,
     photos_processed: true,
     gender: mapRailsGenderToUi(product.gender || metadata.gender || ''),
     thumb: product.image_url || photos[0] || '',
@@ -638,6 +645,7 @@ export async function listRailsAdminProducts(options: {
   priceMin?: string | number
   priceMax?: string | number
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
   gender?: string
@@ -689,6 +697,7 @@ async function listRailsCatalogProducts(options: {
   priceMin?: string | number
   priceMax?: string | number
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
   gender?: string
@@ -1576,6 +1585,7 @@ export function buildRailsAdminProductsParams(options: {
   priceMin?: string | number
   priceMax?: string | number
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
   gender?: string
@@ -1600,6 +1610,7 @@ export function buildRailsAdminProductsParams(options: {
   if (priceMin) params.set('price_min', priceMin)
   if (priceMax) params.set('price_max', priceMax)
   if (options.brand) params.set('brand', options.brand)
+  if (options.supplier) params.set('supplier', options.supplier)
   if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
   if (options.genderMissing || options.noGender) {
     params.set('gender_missing', 'true')
@@ -1664,6 +1675,7 @@ type ProductFacetFilters = {
   priceMin?: string | number
   priceMax?: string | number
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
   gender?: string
@@ -1676,6 +1688,7 @@ type ProductFacetFilters = {
 type RailsProductFacetPayload = {
   facets?: {
     brands?: CatalogSlugFacet[]
+    suppliers?: CatalogSlugFacet[]
     categories?: CatalogSlugFacet[]
     genders?: CatalogValueFacet[]
     [key: string]: CatalogSlugFacet[] | CatalogValueFacet[] | undefined
@@ -1727,6 +1740,7 @@ export async function getRailsCatalogLookupFacets(filters: Pick<
 
   return {
     brandFacets: brandPayload.facets?.brands || [],
+    supplierFacets: brandPayload.facets?.suppliers || [],
     categoryFacets: categoryPayload.facets?.categories || [],
     subcategoryFacets: subcategoryPayload.facets?.categories || [],
     genderFacets: [],
@@ -1742,6 +1756,7 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     priceMax: filters.priceMax,
     attributeKey: filters.attributeKey,
     attributeValue: filters.attributeValue,
+    supplier: filters.supplier,
   }
 
   const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload, attributePayload] = await Promise.all([
@@ -1802,6 +1817,7 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
 
   return {
     brandFacets: brandPayload.facets?.brands || [],
+    supplierFacets: brandPayload.facets?.suppliers || [],
     categoryFacets: categoryPayload.facets?.categories || [],
     subcategoryFacets: subcategoryPayload.facets?.categories || [],
     genderFacets,
