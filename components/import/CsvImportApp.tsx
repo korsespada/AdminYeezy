@@ -863,6 +863,13 @@ export default function CsvImportApp({
     setIsLoadingPath(false);
   };
 
+  const handleOpenCurrentBatch = async () => {
+    if (!initialBatchId || !isSnapshotSource) return;
+    setBatchId(initialBatchId);
+    setActiveSnapshotId(null);
+    await handleLoadBatch(initialBatchId);
+  };
+
   useEffect(() => {
     if (!batchId || isSnapshotSource) return;
     let requestInFlight = false;
@@ -1444,20 +1451,30 @@ export default function CsvImportApp({
               <h2 className="truncate text-base font-bold text-white">Товары выгрузки</h2>
               <p className="truncate text-xs text-slate-500">{initialSupplierName || 'Поставщик не указан'}{products.length ? ` · ${products.length} товаров` : ''}{sourceLabel ? ` · ${sourceLabel}` : ''}</p>
             </div>
-            {backHref ? (
-              <Link href={backHref} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700">
-                <X size={18} />
-                К истории
-              </Link>
-            ) : (
-              <button
-                onClick={onClose}
-                className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700"
-              >
-                <X size={18} />
-                Закрыть
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {isSnapshotSource && initialBatchId && (
+                <button
+                  onClick={handleOpenCurrentBatch}
+                  className="rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-3 py-2 text-sm font-semibold text-indigo-200 transition-colors hover:bg-indigo-500/20"
+                >
+                  Редактировать текущую версию
+                </button>
+              )}
+              {backHref ? (
+                <Link href={backHref} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700">
+                  <X size={18} />
+                  К истории
+                </Link>
+              ) : (
+                <button
+                  onClick={onClose}
+                  className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700"
+                >
+                  <X size={18} />
+                  Закрыть
+                </button>
+              )}
+            </div>
           </div>
         )}
 
