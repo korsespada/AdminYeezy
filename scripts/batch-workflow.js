@@ -1495,7 +1495,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const products = await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
   const batch = await getBatch(batchId);
-  if (!['AI_PROCESSED', 'PUSHED'].includes(String(batch?.stage || ''))) {
+  if (!['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch?.stage || ''))) {
     throw new Error('Публикация доступна только после полной AI-обработки партии');
   }
   const unfinished = products.filter((product) => !product.ai_processed);

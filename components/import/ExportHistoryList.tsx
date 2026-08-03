@@ -387,7 +387,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 // A previously published batch may need a safe retry when the
                 // catalog import was interrupted after the stage was marked
                 // PUSHED. Both publication modes are idempotent by external_id.
-                const canPublish = ['AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
+                const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
                 const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'

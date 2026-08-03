@@ -716,7 +716,7 @@ export default function CsvImportApp({
     }
     return [...groups.entries()].sort((left, right) => right[1] - left[1]);
   }, [aiErrorProducts]);
-  const canPublish = isBatchSource && batchStage === "AI_PROCESSED" && products.length > 0 && aiRemainingCount === 0;
+  const canPublish = isBatchSource && ["SCRIPT_PROCESSED", "AI_PROCESSED"].includes(batchStage) && products.length > 0 && aiRemainingCount === 0;
   const pendingAiSuggestions = useMemo(
     () => aiSuggestions.filter((item) => item.status === "pending"),
     [aiSuggestions],
