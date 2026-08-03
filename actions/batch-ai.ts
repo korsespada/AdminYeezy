@@ -375,24 +375,58 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
         OR label LIKE 'До AI%'
         OR stage='SCRIPT_PROCESSED'
       )
-      ORDER BY CASE WHEN label='Обработан скриптом' THEN 0 ELSE 1 END, created_at ASC
+      ORDER BY CASE WHEN label='Обработан скриптом' THEN 0 ELSE 1 END, created_at DESC
+      LIMIT 1
+    `, [batchId])
+    const rawSnapshot = await scrapingQuery(`
+      SELECT products
+      FROM batch_snapshots
+      WHERE batch_id=$1 AND stage='SCRAPED'
+      ORDER BY created_at ASC
       LIMIT 1
     `, [batchId])
     const sourceProducts = Array.isArray(sourceSnapshot.rows[0]?.products)
       ? sourceSnapshot.rows[0].products
       : []
+    const rawProducts = Array.isArray(rawSnapshot.rows[0]?.products)
+      ? rawSnapshot.rows[0].products
+      : []
     const sourceByExternalId = new Map<string, any>(sourceProducts.map((product: any) => [String(product?.external_id || '').trim(), product]))
-    selectedProducts = products.rows.flatMap((product: any) => {
+    const rawByExternalId = new Map<string, any>(rawProducts.map((product: any) => [String(product?.external_id || '').trim(), product]))
+    const recoveryGroups = new Map<string, { product: any, targetIds: number[], photoUrls: string[] }>()
+    for (const product of products.rows) {
       const source = sourceByExternalId.get(String(product.external_id || '').trim())
       const sourceAttributes = source?.attributes && typeof source.attributes === 'object' ? source.attributes : {}
-      const hasSizeChart = Boolean(sourceAttributes.size_chart_source_id || sourceAttributes.size_chart_source_ids)
-      if (!source || !hasSizeChart) return []
-      return [{
-        ...product,
-        photos: Array.isArray(source.photos) && source.photos.length > 0 ? source.photos : product.photos,
-        attributes: { ...(product.attributes || {}), ...sourceAttributes },
-      }]
-    })
+      const chartIds = [...new Set([
+        ...(Array.isArray(sourceAttributes.size_chart_source_ids) ? sourceAttributes.size_chart_source_ids : []),
+        ...(sourceAttributes.size_chart_source_id ? [sourceAttributes.size_chart_source_id] : []),
+      ].map((value) => String(value || '').trim()).filter(Boolean))].sort()
+      if (!source || chartIds.length === 0) continue
+      const photoUrls = [...new Set(chartIds.flatMap((chartId) => {
+        const chart = rawByExternalId.get(chartId)
+        return Array.isArray(chart?.photos) ? chart.photos.map(String).filter(Boolean) : []
+      }))]
+      if (photoUrls.length === 0) continue
+      const groupKey = chartIds.join('|')
+      const group = recoveryGroups.get(groupKey)
+      if (group) {
+        group.targetIds.push(Number(product.id))
+        continue
+      }
+      recoveryGroups.set(groupKey, {
+        product: {
+          ...product,
+          attributes: { ...(product.attributes || {}), ...sourceAttributes },
+        },
+        targetIds: [Number(product.id)],
+        photoUrls,
+      })
+    }
+    selectedProducts = [...recoveryGroups.values()].map((group) => ({
+      ...group.product,
+      __measurementTargetProductIds: group.targetIds,
+      __measurementPhotoUrls: group.photoUrls,
+    }))
   }
   const mappings = await scrapingQuery(`
     SELECT entity_type, legacy_id, canonical_id, canonical_id AS id, name,
@@ -632,10 +666,26 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     } else {
       for (const product of context.products) {
+        const measurementTargetProductIds = mode === 'recover_measurements'
+          ? product.__measurementTargetProductIds || []
+          : undefined
+        const measurementPhotoUrls = mode === 'recover_measurements'
+          ? product.__measurementPhotoUrls || []
+          : undefined
+        const promptProduct = mode === 'recover_measurements'
+          ? (() => {
+              const clean = Object.fromEntries(Object.entries(product).filter(([key]) => !key.startsWith('__measurement'))) as any
+              clean.attributes = { ...(clean.attributes || {}) }
+              delete clean.attributes.measurements
+              return clean
+            })()
+          : product
         const attributeDefinitions = productAttributeDefinitions(product, context)
         const userPrompt = buildBatchAiUserPrompt({
-          product,
-          supplierInstructions,
+          product: promptProduct,
+          supplierInstructions: mode === 'recover_measurements'
+            ? `${supplierInstructions}\nРЕЖИМ ВОССТАНОВЛЕНИЯ ЗАМЕРОВ: на приложенных фото находится таблица размеров именно для этого товара. Распознай её и заполни catalog_attributes.measurements. Не меняй название, описание, цену, классификацию, цвет, материалы и публичную галерею.`.trim()
+            : supplierInstructions,
           brands: context.brands,
           categories: context.categories,
           subcategories: context.subcategories,
@@ -646,9 +696,11 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
           VALUES($1,$2,$3,$4,$5::jsonb)
         `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
-          product, userPrompt, systemPrompt: snapshot.systemPrompt,
+          product: promptProduct, userPrompt, systemPrompt: snapshot.systemPrompt,
           variantScanOnly: false,
-          photoUrls: mode === 'recover_measurements' || context.batch.ai_photo_enabled ? product.photos || [] : [],
+          measurementRecoveryOnly: mode === 'recover_measurements',
+          measurementTargetProductIds,
+          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : context.batch.ai_photo_enabled ? product.photos || [] : [],
           photoEnabled: mode === 'recover_measurements' || context.batch.ai_photo_enabled === true,
           fullSizeRefinementEnabled: mode === 'recover_measurements' || (context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
@@ -664,7 +716,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     }
 
-    if (['reprocess', 'selection', 'retry', 'recover_measurements'].includes(mode)) {
+    if (['reprocess', 'selection', 'retry'].includes(mode)) {
       const targetIds = context.products.map((product: any) => Number(product.id)).filter(Number.isInteger)
       if (targetIds.length > 0) {
         await scrapingQuery(`
@@ -825,7 +877,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
       RETURNING i.product_id
     `, [item.id, String(error.message || error).slice(0, 4000), JSON.stringify(rawOutput ?? null)])
-    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly) {
+    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
   } finally {
@@ -915,6 +967,11 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
 
 async function applyCompletedItem(item: any, normalized: any, context: any) {
   const product = normalized.product
+  const measurementRecoveryOnly = item.input_snapshot?.measurementRecoveryOnly === true
+  const recoveredMeasurements = product?.attributes?.measurements
+  if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
+    throw new Error('ИИ не распознал таблицу замеров')
+  }
   if (item.input_snapshot?.preserveExistingPrice) {
     product.price = Number(item.input_snapshot.product?.price || 0)
     product.price_source = item.input_snapshot.product?.price_source || 'legacy'
@@ -934,6 +991,24 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
     const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
     if (!run.rows[0] || run.rows[0].status === 'cancelled') {
       await client.query('ROLLBACK')
+      return
+    }
+    if (measurementRecoveryOnly) {
+      const targetIds = [...new Set((item.input_snapshot?.measurementTargetProductIds || [])
+        .map(Number)
+        .filter(Number.isInteger))]
+      if (targetIds.length === 0) throw new Error('Не найдены товары для привязки таблицы замеров')
+      await client.query(`
+        UPDATE products SET
+          attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),'{measurements}',$2::jsonb,true),
+          updated_at=NOW()
+        WHERE batch_id=$1 AND id=ANY($3::int[])
+      `, [context.batch.id, JSON.stringify(recoveredMeasurements), targetIds])
+      await client.query(`
+        UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
+        WHERE id=$1
+      `, [item.id, JSON.stringify(normalized)])
+      await client.query('COMMIT')
       return
     }
     await client.query(`
@@ -984,6 +1059,10 @@ async function finalizeRun(runId: string) {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
     const currentRun = run.rows[0]
     try {
+      if (currentRun?.mode === 'recover_measurements') {
+        await snapshotBatch(currentRun.batch_id, 'PUSHED', 'Замеры восстановлены', currentRun.settings_snapshot)
+        return
+      }
       let promoteBatch = false
       if (currentRun?.mode !== 'variants') {
         const remaining = await scrapingQuery(`

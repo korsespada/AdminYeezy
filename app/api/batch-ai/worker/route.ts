@@ -137,6 +137,11 @@ async function complete(body: any) {
     priceRuleKeys: new Set(priceRules.map((row: any) => String(row.rule_key))),
   })
   const product = normalized.product
+  const measurementRecoveryOnly = input.measurementRecoveryOnly === true
+  const recoveredMeasurements = product?.attributes?.measurements
+  if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
+    throw new Error('ИИ не распознал таблицу замеров')
+  }
   if (!input.variantScanOnly && input.preserveExistingPrice) {
     product.price = Number(input.product?.price || 0)
     product.price_source = input.product?.price_source || 'legacy'
@@ -158,7 +163,18 @@ async function complete(body: any) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'run_cancelled' }, { status: 409 })
     }
-    if (!input.variantScanOnly) {
+    if (measurementRecoveryOnly) {
+      const targetIds = [...new Set((input.measurementTargetProductIds || [])
+        .map(Number)
+        .filter(Number.isInteger))]
+      if (targetIds.length === 0) throw new Error('Не найдены товары для привязки таблицы замеров')
+      await client.query(`
+        UPDATE products SET
+          attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),'{measurements}',$2::jsonb,true),
+          updated_at=NOW()
+        WHERE batch_id=$1 AND id=ANY($3::int[])
+      `, [item.batch_id, JSON.stringify(recoveredMeasurements), targetIds])
+    } else if (!input.variantScanOnly) {
       await client.query(`
         UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
           brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,attributes=$12::jsonb,
@@ -173,7 +189,9 @@ async function complete(body: any) {
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    if (Array.isArray(normalized.shadeVariants)) {
+    if (measurementRecoveryOnly) {
+      // В режиме восстановления меняется только таблица замеров товара.
+    } else if (Array.isArray(normalized.shadeVariants)) {
       await applyShadeVariantsToSuggestion(client, item.run_id, normalized)
     } else if (Array.isArray(normalized.colorFamilies)) {
       for (const family of normalized.colorFamilies) {
@@ -212,7 +230,7 @@ async function fail(body: any) {
       UPDATE batch_ai_items SET status='failed',error_message=$3,lease_token=NULL,completed_at=NOW(),updated_at=NOW()
       WHERE id=$1 AND lease_token=$2 RETURNING run_id,product_id,input_snapshot
     `, [body.item_id, body.lease_token, String(body.error || 'Cockpit error').slice(0, 4000)])
-    if (result.rows[0] && !result.rows[0].input_snapshot?.variantScanOnly) {
+    if (result.rows[0] && !result.rows[0].input_snapshot?.variantScanOnly && !result.rows[0].input_snapshot?.measurementRecoveryOnly) {
       await client.query('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [result.rows[0].product_id, String(body.error || '').slice(0, 4000)])
     }
     if (result.rows[0]) {
@@ -239,6 +257,12 @@ async function finalizeCockpitRun(runId: string) {
     return
   }
   try {
+    if (run.mode === 'recover_measurements') {
+      const label = `Замеры восстановлены · ${run.id.slice(0, 8)}`
+      const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
+      if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, 'PUSHED', label, run.settings_snapshot)
+      return
+    }
     let promoteBatch = false
     if (run.mode !== 'variants') {
       const remaining = await scrapingQuery(`
