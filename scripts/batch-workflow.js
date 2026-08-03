@@ -1242,10 +1242,14 @@ async function uploadPhotoAttempt(url, key) {
   if (isAlreadyHosted(url)) {
     const existingKey = ownedS3Key(url);
     if (!existingKey) throw new Error(`не удалось определить S3 key для ${url}`);
-    await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: existingKey }));
-    return url;
+    const storedUrl = await findStoredS3Photo(existingKey);
+    if (!storedUrl) throw new Error(`файл не найден в S3: ${existingKey}`);
+    return storedUrl;
   }
   try {
+    const storedUrl = await findStoredS3Photo(key);
+    if (storedUrl) return storedUrl;
+
     const parsed = new URL(String(url));
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('разрешены только HTTP(S) ссылки');
     const response = await fetch(parsed, { signal: AbortSignal.timeout(30_000) });
@@ -1268,6 +1272,20 @@ async function uploadPhotoAttempt(url, key) {
     return hostedUrl;
   } catch (error) {
     throw new Error(`не удалось перенести ${url} в S3: ${error.message}`);
+  }
+}
+
+async function findStoredS3Photo(key) {
+  try {
+    await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
+    const storedUrl = getS3PublicUrl(key);
+    if (!isAlreadyHosted(storedUrl)) throw new Error('полученная ссылка не относится к настроенному S3');
+    return storedUrl;
+  } catch (error) {
+    const status = error?.$metadata?.httpStatusCode || error?.statusCode;
+    const code = error?.name || error?.Code || error?.code;
+    if (status === 404 || code === 'NotFound' || code === 'NoSuchKey') return null;
+    throw error;
   }
 }
 
