@@ -2138,20 +2138,19 @@ export async function deleteRailsAdminProduct(id: string) {
 export async function deleteRailsAdminProductsByExternalIds(externalIds: string[]) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))]
   let deleted = 0
+  let archived = 0
+  const failed: any[] = []
 
-  for (const externalId of ids) {
-    const params = new URLSearchParams({
-      page: '1',
-      per_page: '10',
-      external_id: externalId,
+  for (let index = 0; index < ids.length; index += 50) {
+    const chunk = ids.slice(index, index + 50)
+    const result = await railsFetch<{ deleted?: number; archived?: number; failed?: any[] }>(`/admin/products/bulk_destroy`, {
+      method: 'DELETE',
+      body: JSON.stringify({ external_ids: chunk }),
     })
-    const result = await railsFetch<{ products: any[] }>(`/admin/products?${params}`)
-    const matches = (result.products || []).filter((product) => String(product.external_id || '').trim() === externalId)
-    for (const product of matches) {
-      await deleteRailsAdminProduct(String(product.id))
-      deleted += 1
-    }
+    deleted += Number(result.deleted || 0)
+    archived += Number(result.archived || 0)
+    failed.push(...(result.failed || []))
   }
 
-  return { requested: ids.length, deleted }
+  return { requested: ids.length, deleted, archived, failed }
 }

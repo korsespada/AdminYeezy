@@ -1359,6 +1359,8 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
 
         // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
         let catalogDeletedCount = 0
+        let catalogArchivedCount = 0
+        let catalogFailedCount = 0
         const requiresCatalogDeletion = batchStage === 'PUSHED' || publications.rows.length > 0 || legacyCandidates.length > 0
         if (requiresCatalogDeletion && !process.env.RAILS_API_URL) {
           throw new Error('Нельзя удалить опубликованную партию: не настроен RAILS_API_URL')
@@ -1366,6 +1368,8 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
         if (externalIds.length > 0 && process.env.RAILS_API_URL) {
           const result = await deleteRailsAdminProductsByExternalIds(externalIds)
           catalogDeletedCount = result.deleted
+          catalogArchivedCount = result.archived
+          catalogFailedCount = result.failed.length
         }
 
         await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
@@ -1404,6 +1408,8 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           success: true,
           deletedCount,
           catalogDeletedCount,
+          catalogArchivedCount,
+          catalogFailedCount,
           catalogRequestedCount: externalIds.length,
           catalogProtectedCount: options.replaceShared ? 0 : protectedExternalIds.size,
           replaceShared: Boolean(options.replaceShared),

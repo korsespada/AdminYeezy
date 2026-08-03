@@ -185,7 +185,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     if (res.success) {
       setBatches((prev) => prev.map((item) => item.id === batch.id ? { ...item, status: 'Удалено из БД' } : item))
       const catalogMessage = res.catalogDeletedCount !== undefined
-        ? `Из каталога: ${res.catalogDeletedCount}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
+        ? `Из каталога удалено: ${res.catalogDeletedCount}, архивировано: ${res.catalogArchivedCount || 0}, ошибок: ${res.catalogFailedCount || 0}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
         : 'Из каталога: не проверено'
       alert(`Локально удалено: ${res.deletedCount || 0}\n${catalogMessage}`)
     } else {

@@ -65,7 +65,7 @@ export default function BatchList({ initialData }: { initialData: Batch[] }) {
     if (res.success) {
       setBatches(prev => prev.filter(b => b.id !== id))
       const catalogMessage = res.catalogDeletedCount !== undefined
-        ? `Из каталога: ${res.catalogDeletedCount}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
+        ? `Из каталога удалено: ${res.catalogDeletedCount}, архивировано: ${res.catalogArchivedCount || 0}, ошибок: ${res.catalogFailedCount || 0}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
         : 'Из каталога: не проверено'
       alert(`Локально удалено: ${res.deletedCount || 0}\n${catalogMessage}`)
     } else {
