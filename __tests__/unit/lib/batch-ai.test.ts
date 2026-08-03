@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiShadePrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 
 describe('batch AI normalization', () => {
   it('keeps unknown taxonomy out of the applied product and removes rejected media', () => {
@@ -324,6 +324,19 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('"rule_key":"lp_shoes_all"')
     expect(prompt).toContain('"price":25000')
     expect(prompt).toContain('Цена будет применена сервером')
+  })
+
+  it('requires unique public shade names while allowing shared base colors', () => {
+    const prompt = buildBatchAiShadePrompt([
+      { id: 1, external_id: 'A-1', name: 'Brunello Cucinelli кроссовки', attributes: { colors: ['Серый'] } },
+      { id: 2, external_id: 'A-2', name: 'Brunello Cucinelli кроссовки', attributes: { colors: ['Серый'] } },
+    ])
+
+    expect(prompt).toContain('color — публичное точное название конкретного оттенка и обязано быть уникальным')
+    expect(prompt).toContain('attributes.model_code')
+    expect(prompt).toContain('photo_decision_fields')
+    expect(prompt).toContain('«Светло-серый», «Серый», «Графитовый»')
+    expect(prompt).toContain('Разные оттенки дублями не являются')
   })
 
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {

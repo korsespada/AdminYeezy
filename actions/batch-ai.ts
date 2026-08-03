@@ -14,6 +14,7 @@ import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
+  buildBatchAiFamilyDefinition,
   buildBatchAiUserPrompt,
   buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
@@ -547,17 +548,20 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             matchingEvidence: `Совпали внутренний артикул ${family.sourceCode}, бренд и тип товара.`,
             duplicateProducts: family.duplicateProducts,
             colorConflicts: family.colorConflicts,
+            familyDefinition: buildBatchAiFamilyDefinition('internal_code'),
           })
         }
         for (const [index, candidate] of variantPlan.visualCandidates.entries()) {
           const first = candidate.products[0]
+          const familyDefinition = buildBatchAiFamilyDefinition('visual_comparison')
           await client.query(`
             INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
             VALUES($1,$2,$3,$4,$5::jsonb)
           `, [crypto.randomUUID(), runId, first.id, `visual-family-${index + 1}`, JSON.stringify({
             product: first,
             candidateProducts: candidate.products,
-            userPrompt: buildBatchAiVisualFamilyPrompt(candidate.products),
+            familyDefinition,
+            userPrompt: buildBatchAiVisualFamilyPrompt(candidate.products, familyDefinition),
             systemPrompt: snapshot.systemPrompt,
             variantScanOnly: true,
             visualFamilyScan: true,
@@ -569,6 +573,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         }
         for (const [index, candidate] of variantPlan.shadeCandidates.entries()) {
           const first = candidate.products[0]
+          const familyDefinition = buildBatchAiFamilyDefinition('internal_code')
           await client.query(`
             INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
             VALUES($1,$2,$3,$4,$5::jsonb)
@@ -576,7 +581,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             product: first,
             candidateProducts: candidate.products,
             familyIdentityKey: candidate.identityKey,
-            userPrompt: buildBatchAiShadePrompt(candidate.products),
+            familyDefinition,
+            userPrompt: buildBatchAiShadePrompt(candidate.products, familyDefinition),
             systemPrompt: snapshot.systemPrompt,
             variantScanOnly: true,
             shadeFamilyScan: true,
@@ -837,6 +843,7 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
           matchingEvidence: family.matchingEvidence,
           duplicateProducts: family.duplicateProducts,
           suggestedColors: family.suggestedColors,
+          familyDefinition: item.input_snapshot?.familyDefinition,
         })
       }
     } else {

@@ -36,10 +36,15 @@ export default function BatchAiReviewDialog({
     const suggestions = result.data || []
     setItems(suggestions)
     setPayloads(Object.fromEntries(suggestions.map((item: any) => [item.id, JSON.stringify(item.payload, null, 2)])))
-    setSelectedProductIds(Object.fromEntries(suggestions.map((item: any) => [
-      item.id,
-      (item.affected_product_ids || []).map(Number),
-    ])))
+    setSelectedProductIds(Object.fromEntries(suggestions.map((item: any) => {
+      const suggestedDuplicates = new Set(
+        valueList(item.payload?.suggested_duplicate_product_ids).map(Number).filter(Number.isInteger),
+      )
+      return [
+        item.id,
+        (item.affected_product_ids || []).map(Number).filter((id: number) => !suggestedDuplicates.has(id)),
+      ]
+    })))
     setProductColors(Object.fromEntries(suggestions.map((item: any) => [
       item.id,
       Object.fromEntries((item.affected_products || []).map((product: any) => [
@@ -235,12 +240,16 @@ function ColorFamilyPreview({
     : item.payload?.source === 'visual_comparison'
       ? `Сверено по фотографиям · ${Math.round(Number(item.payload?.confidence || 0) * 100)}%`
       : ''
+  const familyDefinition = item.payload?.family_definition
+  const groupingFields = valueList(familyDefinition?.grouping_fields)
+  const photoDecisionFields = valueList(familyDefinition?.photo_decision_fields)
   return (
     <div className="mt-4 rounded-lg border border-indigo-500/20 bg-indigo-500/5 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-400">Объединить как варианты по цвету:</span>
         {observedColors.map((color) => <span key={color} className="rounded-full border border-indigo-400/25 bg-indigo-400/10 px-2 py-0.5 text-xs text-indigo-200">{color}</span>)}
       </div>
+      {familyDefinition && <div className="mt-2 rounded-md border border-indigo-400/15 bg-slate-950/40 px-2.5 py-2 text-xs text-slate-400"><span className="font-medium text-indigo-200">Критерии ИИ:</span>{' '}{groupingFields.length > 0 && <span>группа по {groupingFields.join(', ')}</span>}{photoDecisionFields.length > 0 && <span>{groupingFields.length > 0 ? '; ' : ''}по фото: {photoDecisionFields.join(', ')}</span>}</div>}
       {(source || excludedCount > 0 || suggestedDuplicateIds.size > 0 || conflictCount > 0) && <div className="mt-2 flex flex-wrap gap-2 text-xs"><span className="text-emerald-300">{source}</span>{excludedCount > 0 && <span className="text-slate-400">Ранее исключённых дублей: {excludedCount}</span>}{suggestedDuplicateIds.size > 0 && <span className="text-amber-300">ИИ предполагает дублей: {suggestedDuplicateIds.size} — проверьте вручную</span>}{conflictCount > 0 && <span className="text-amber-300">Уточните одинаково названные оттенки</span>}</div>}
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {(item.affected_products || []).map((product: any) => {

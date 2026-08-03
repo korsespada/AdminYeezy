@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import { canonicalBatchSuggestionKey } from '@/lib/batch-ai'
+import { canonicalBatchSuggestionKey, type BatchAiFamilyDefinition } from '@/lib/batch-ai'
 import { canonicalClothingSubcategoryName } from '@/lib/clothing-taxonomy'
 
 type QueryClient = {
@@ -539,6 +539,7 @@ export async function savePreparedColorFamilySuggestion(
     duplicateProducts?: any[]
     colorConflicts?: Array<{ color: string; productIds: number[] }>
     suggestedColors?: Record<string, { color: string; base_color?: string; confidence?: number }>
+    familyDefinition?: BatchAiFamilyDefinition
   },
 ) {
   const affectedProductIds = input.products.map((product) => Number(product.id)).filter(Number.isInteger)
@@ -575,6 +576,7 @@ export async function savePreparedColorFamilySuggestion(
     color_conflicts: colorConflicts,
     suggested_colors: suggestedColors,
     suggested_duplicate_product_ids: (input.duplicateProducts || []).map((product) => Number(product.id)).filter(Number.isInteger),
+    family_definition: input.familyDefinition || null,
   }
   await client.query(`
     INSERT INTO batch_ai_suggestions(id,run_id,kind,canonical_key,payload,affected_product_ids)

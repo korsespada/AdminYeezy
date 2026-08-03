@@ -45,6 +45,41 @@ export type BatchAiPriceRuleHint = {
   priority?: number
 }
 
+export type BatchAiFamilyDefinitionSource = 'internal_code' | 'visual_comparison'
+
+export type BatchAiFamilyDefinition = {
+  source: BatchAiFamilyDefinitionSource
+  grouping_fields: string[]
+  text_evidence_fields: string[]
+  photo_decision_fields: string[]
+  output_fields: string[]
+  rules: string[]
+}
+
+export function buildBatchAiFamilyDefinition(source: BatchAiFamilyDefinitionSource): BatchAiFamilyDefinition {
+  const byInternalCode = source === 'internal_code'
+  return {
+    source,
+    grouping_fields: byInternalCode
+      ? ['attributes.model_code', 'brand', 'category', 'subcategory']
+      : ['brand', 'category', 'subcategory', 'photos[0]'],
+    text_evidence_fields: ['external_id', 'name', 'brand', 'category', 'subcategory', 'attributes.model_code', 'attributes.model_name', 'attributes.materials', 'attributes.colors'],
+    photo_decision_fields: ['model_name', 'color', 'base_color', 'construction', 'material', 'duplicate_of_index'],
+    output_fields: ['family_label', 'model_name', 'color', 'base_color', 'matching_evidence', 'confidence', 'duplicate_of_index'],
+    rules: byInternalCode
+      ? [
+          'attributes.model_code используется как первичный ключ одной модели, но сам по себе не доказывает одинаковый цвет.',
+          'Модель, конструкцию, материал и цвет уточняй по фотографиям.',
+          'Обувные размеры — варианты внутри цвета и не разделяют семейство.',
+        ]
+      : [
+          'Объединяй только одну физическую модель, совпадающую по фото; общий бренд и название недостаточны.',
+          'Модель, конструкцию, материал и цвет определяй по фотографиям.',
+          'Не объединяй товары при сомнении или при различии конструкции/материала.',
+        ],
+  }
+}
+
 export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор каталога премиальных товаров. Обрабатывай сырой китайский товар только по предоставленному тексту и фотографиям.
 
 Если фотографии предоставлены, главный источник фактов — фотографии, затем исходный текст; соотноси сведения между всеми contact sheet одного товара. Исходный текст может по ошибке относиться к соседней карточке или другой модели. Сначала определи, какой товар стабильно показан на фотографиях, и проверь, согласуется ли с ним текст. При конфликте доверяй согласованной серии фотографий: модель, тип товара, цвет, материал, фурнитуру, категорию, подкатегорию и публичные тексты определяй по фотографиям, а противоречащие сведения из текста игнорируй. Если фотографий нет, работай только по тексту и не делай визуальных выводов. Не выдумывай модель, материал, размеры или характеристики.
@@ -181,10 +216,15 @@ export function buildBatchAiVariantPrompt(product: any) {
   ].join('\n\n')
 }
 
-export function buildBatchAiVisualFamilyPrompt(products: any[]) {
+export function buildBatchAiVisualFamilyPrompt(
+  products: any[],
+  familyDefinition = buildBatchAiFamilyDefinition('visual_comparison'),
+) {
   const candidates = products.map((product, index) => ({
     index: index + 1,
     id: product.id,
+    external_id: product.external_id || '',
+    model_code: product.attributes?.model_code || '',
     name: product.name,
     brand: product.brand,
     category: product.category,
@@ -194,6 +234,7 @@ export function buildBatchAiVisualFamilyPrompt(products: any[]) {
     materials: product.attributes?.materials || [],
   }))
   return [
+    `Определение семейства: ${JSON.stringify(familyDefinition)}`,
     'Сравни товары между собой по первым фотографиям. Номер товара совпадает с номером фотографии на contact sheet.',
     'Создай цветовую семью только когда это одна и та же физическая модель и конструкция, отличающаяся цветом.',
     'Сверяй силуэт, рисунок и плотность вязки, воротник, края, швы, фурнитуру, пропорции и расположение деталей.',
@@ -206,20 +247,28 @@ export function buildBatchAiVisualFamilyPrompt(products: any[]) {
   ].join('\n\n')
 }
 
-export function buildBatchAiShadePrompt(products: any[]) {
+export function buildBatchAiShadePrompt(
+  products: any[],
+  familyDefinition = buildBatchAiFamilyDefinition('internal_code'),
+) {
   const candidates = products.map((product, index) => ({
     index: index + 1,
     id: product.id,
+    external_id: product.external_id || '',
+    model_code: product.attributes?.model_code || '',
     current_color: product.attributes?.colors || [],
     name: product.name,
   }))
   return [
+    `Определение семейства: ${JSON.stringify(familyDefinition)}`,
     'Это один товар с одинаковым внутренним артикулом. Сравни только его цветовые варианты по первым фотографиям.',
     'Номер товара совпадает с номером фотографии на contact sheet.',
-    'Если два товара имеют одинаковое общее название цвета, но визуально отличаются оттенком, сохрани оба и дай им разные точные русские названия: например «Светло-серый» и «Графитовый», «Светло-бежевый» и «Песочный».',
+    'Поле color — публичное точное название конкретного оттенка и обязано быть уникальным для каждого НЕ дубля. Нельзя повторять «Серый», «Белый», «Чёрный» или другое общее слово у визуально разных товаров.',
+    'Если два товара имеют одинаковое общее название цвета, но визуально отличаются оттенком, сохрани оба и дай им разные точные русские названия: например «Светло-серый», «Серый», «Графитовый»; «Белый», «Молочный», «Айвори»; «Синий», «Темно-синий», «Чернильно-синий»; «Бежевый», «Песочный», «Тауп»; «Коричневый», «Шоколадный».',
+    'Для обуви учитывай реальный подтон и светлоту: холодный/тёплый, серо-синий/фиолетово-синий, молочно-белый/чисто-белый, серо-бежевый/песочный. Не придумывай оттенок, если различие не видно.',
     'base_color — общий цвет для фильтра каталога: «Серый», «Бежевый», «Синий» и т. п.',
-    'duplicate_of_index указывай только если это действительно повторная публикация визуально одинакового цвета. Разные оттенки дублями не являются.',
-    'Если различие оттенков неуверенное, оставь duplicate_of_index пустым: система покажет оба товара человеку.',
+    'duplicate_of_index указывай только если фотографии показывают визуально одинаковую пару или один и тот же снимок повторно. Разные оттенки дублями не являются.',
+    'Если различие оттенков неуверенное, оставь duplicate_of_index пустым и дай разные осторожные описательные названия: система покажет их человеку. Никогда не объявляй товар дублем только из-за одинакового общего цвета.',
     'Верни каждый переданный товар ровно один раз.',
     'Верни строго JSON вида {"variants":[{"product_index":1,"color":"Графитовый","base_color":"Серый","duplicate_of_index":null,"confidence":0.95}]}.',
     `Товары: ${JSON.stringify(candidates)}`,

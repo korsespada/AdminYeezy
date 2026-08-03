@@ -184,6 +184,8 @@ async function complete(body: any) {
           source: 'visual_comparison',
           confidence: family.confidence,
           matchingEvidence: family.matchingEvidence,
+          suggestedColors: family.suggestedColors,
+          familyDefinition: input.familyDefinition,
         })
       }
     } else {
