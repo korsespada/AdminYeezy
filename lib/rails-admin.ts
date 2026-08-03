@@ -575,6 +575,7 @@ export function mapRailsProduct(product: any): Product {
     seo_description: product.seo_description || '',
     h1: product.h1 || '',
     canonical_url: product.canonical_url || '',
+    published_at: product.published_at || null,
     metadata,
     catalog_attributes: catalogAttributes,
     attributes: catalogAttributes,

@@ -81,6 +81,7 @@ async function main() {
           externalId,
           batchId: batch.id,
           batchName: batch.name,
+          supplierId: batch.supplier_id,
           supplierName: batch.supplier_name,
           supplierAvatar: batch.avatar_url,
         };
@@ -125,6 +126,7 @@ async function main() {
 
     let updated = 0;
     let missing = 0;
+    const publishedAt = new Date().toISOString();
     for (const [externalId, target] of byExternalId) {
       const product = railsProducts.get(externalId);
       if (!product?.id) {
@@ -139,10 +141,13 @@ async function main() {
           product: {
             primary_supplier_name: target.supplierName,
             primary_supplier_avatar: target.supplierAvatar || null,
+            published_at: publishedAt,
             metadata: {
               ...metadata,
               source_batch_id: target.batchId,
               source_supplier_name: target.supplierName,
+              source_supplier_id: target.supplierId,
+              source_published_at: publishedAt,
             },
           },
         }),

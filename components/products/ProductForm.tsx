@@ -37,6 +37,11 @@ interface ProductFormProps {
   onSave?: (updatedProduct: Product) => void
 }
 
+function formatPublishedAt(value: unknown) {
+  const date = new Date(String(value || ''))
+  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date)
+}
+
 export default function ProductForm({
   product,
   brands,
@@ -702,6 +707,17 @@ export default function ProductForm({
                   />
                   <p className="text-[10px] text-slate-600">Системный идентификатор. Изменение запрещено.</p>
                 </div>
+                {(product?.published_at || product?.metadata?.source_published_at) && <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-400">Последний пуш</label>
+                  <input
+                    type="text"
+                    value={formatPublishedAt(product.published_at || product.metadata?.source_published_at)}
+                    readOnly
+                    aria-label="Последний пуш"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                  />
+                  <p className="text-[10px] text-slate-600">Время последней публикации товара в каталог.</p>
+                </div>}
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-slate-400">SKU</label>
                   <input

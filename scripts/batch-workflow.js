@@ -434,7 +434,7 @@ function normalizeProductCatalogReferences(product, mappings) {
   };
 }
 
-async function postRailsImportBatch({ name, products, supplierName, supplierAvatar }) {
+async function postRailsImportBatch({ name, products, supplierId, supplierName, supplierAvatar, publishedAt }) {
   return fetchJsonWithRetry(railsApiUrl('/admin/import_batches'), {
     method: 'POST',
     headers: {
@@ -446,6 +446,8 @@ async function postRailsImportBatch({ name, products, supplierName, supplierAvat
       name,
       supplier_name: supplierName || null,
       supplier_avatar: supplierAvatar || null,
+      source_supplier_id: supplierId || null,
+      published_at: publishedAt || null,
       wait: true,
       csv_text: serializeProductsToCsv(products, RAILS_IMPORT_COLUMNS, ','),
     }),
@@ -1376,10 +1378,13 @@ function railsUpdatePayload(product) {
       status: product.status === 'inactive' ? 'hidden' : 'active',
       primary_supplier_name: product.supplier_name || null,
       primary_supplier_avatar: product.supplier_avatar || null,
+      published_at: product.source_published_at || null,
       metadata: {
         ...(product._railsMetadata && typeof product._railsMetadata === 'object' ? product._railsMetadata : {}),
         source_batch_id: product.batchId || product.batch_id || null,
         source_supplier_name: product.supplier_name || null,
+        source_supplier_id: product.supplier_id || null,
+        source_published_at: product.source_published_at || null,
       },
       brand_id: product.brand || null,
       category_id: product.subcategory || product.category || null,
@@ -1529,6 +1534,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (validationErrors.length > 0) {
     throw new Error(`Партия не прошла проверку:\n${validationErrors.slice(0, 20).join('\n')}`);
   }
+  const publicationTimestamp = new Date().toISOString();
 
   const lookups = await loadLegacyLookupMaps();
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
@@ -1640,7 +1646,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
         const product = productsByExternalId.get(externalId);
         try {
           if (product) {
-            await updateRailsProduct(railsProduct.id, withPublicationContext(product, railsProduct));
+            await updateRailsProduct(railsProduct.id, withPublicationContext({ ...product, source_published_at: publicationTimestamp }, railsProduct));
             updated += 1;
             await recordBatchPublication(batchId, externalId, railsProduct.id, payloadHashes.get(externalId));
           }
@@ -1677,8 +1683,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
       products: chunk,
+      supplierId: batch?.supplier_id,
       supplierName: batch?.supplier_name,
       supplierAvatar: batch?.supplier_avatar,
+      publishedAt: publicationTimestamp,
     });
     importBatches.push(payload.import_batch?.id);
     imported += Number(payload.result?.products_imported || 0);
@@ -1742,6 +1750,7 @@ module.exports = {
   lookupName,
   parseCsvObjects,
   publicationPayloadHash,
+  railsUpdatePayload,
   listAllSuppliers,
   listFavoriteSuppliers,
   normalizeProductCatalogReferences,

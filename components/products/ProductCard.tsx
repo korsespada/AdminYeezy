@@ -17,6 +17,11 @@ import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
 
+function formatPublishedAt(value: unknown) {
+    const date = new Date(String(value || ''));
+    return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date);
+}
+
 interface ProductCardProps {
     product: Product;
     onEdit: (product: Product) => void;
@@ -309,6 +314,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
                 </div>
+                {(product.published_at || product.metadata?.source_published_at) && <div className="mb-1 text-[10px] text-slate-600">Пуш: {formatPublishedAt(product.published_at || product.metadata?.source_published_at)}</div>}
 
                 {/* Editable Name */}
                 {editingField === 'name' ? (

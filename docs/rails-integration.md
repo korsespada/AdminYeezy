@@ -58,6 +58,13 @@ CSV adapter должен:
 - публиковать чанками;
 - показывать ошибки партии в UI.
 
+При публикации партия также передаёт исходный `source_supplier_id` и
+`published_at`. Так как scraping DB и Rails CRM используют разные базы и разные
+идентификаторы, Rails связывает товар с поставщиком по имени как с основной
+связью, а исходный ID сохраняется в `metadata.source_supplier_id`. Время пуша
+сохраняется в штатном поле Rails `published_at` и дублируется в
+`metadata.source_published_at` для обратной совместимости.
+
 ## Этап 4. CRM
 
 CRM-экраны живут в `AdminYeezy` и работают через Rails admin endpoints:
