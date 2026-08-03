@@ -367,16 +367,11 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const products = await scrapingQuery(`SELECT * FROM products WHERE batch_id=$1 ${predicate}`, params)
   let selectedProducts = products.rows
   if (mode === 'recover_measurements') {
-    const sourceSnapshot = await scrapingQuery(`
+    const sourceSnapshots = await scrapingQuery(`
       SELECT products
       FROM batch_snapshots
-      WHERE batch_id=$1 AND (
-        label='Обработан скриптом'
-        OR label LIKE 'До AI%'
-        OR stage='SCRIPT_PROCESSED'
-      )
-      ORDER BY CASE WHEN label='Обработан скриптом' THEN 0 ELSE 1 END, created_at DESC
-      LIMIT 1
+      WHERE batch_id=$1 AND label='Обработан скриптом'
+      ORDER BY created_at DESC
     `, [batchId])
     const rawSnapshot = await scrapingQuery(`
       SELECT products
@@ -385,16 +380,35 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
       ORDER BY created_at ASC
       LIMIT 1
     `, [batchId])
-    const sourceProducts = Array.isArray(sourceSnapshot.rows[0]?.products)
-      ? sourceSnapshot.rows[0].products
-      : []
     const rawProducts = Array.isArray(rawSnapshot.rows[0]?.products)
       ? rawSnapshot.rows[0].products
       : []
-    const sourceByExternalId = new Map<string, any>(sourceProducts.map((product: any) => [String(product?.external_id || '').trim(), product]))
+    const sourceByExternalId = new Map<string, any>()
+    for (const snapshot of sourceSnapshots.rows) {
+      const snapshotProducts = Array.isArray(snapshot.products) ? snapshot.products : []
+      for (const product of snapshotProducts) {
+        const externalId = String(product?.external_id || '').trim()
+        const attributes = product?.attributes && typeof product.attributes === 'object' ? product.attributes : {}
+        const hasSizeChart = Boolean(attributes.size_chart_source_id || attributes.size_chart_source_ids)
+        if (externalId && hasSizeChart && !sourceByExternalId.has(externalId)) {
+          sourceByExternalId.set(externalId, product)
+        }
+      }
+    }
     const rawByExternalId = new Map<string, any>(rawProducts.map((product: any) => [String(product?.external_id || '').trim(), product]))
+    const recoverableCategories = await scrapingQuery(`
+      SELECT legacy_id,canonical_id
+      FROM catalog_id_mappings
+      WHERE entity_type='category' AND LOWER(name) IN ('одежда','обувь')
+    `)
+    const recoverableCategoryIds = new Set(recoverableCategories.rows.flatMap((row) => [
+      String(row.legacy_id || '').trim(),
+      String(row.canonical_id || '').trim(),
+    ]).filter(Boolean))
     const recoveryGroups = new Map<string, { product: any, targetIds: number[], photoUrls: string[] }>()
     for (const product of products.rows) {
+      if (!recoverableCategoryIds.has(String(product.category || '').trim())) continue
+      if (product?.attributes?.measurements) continue
       const source = sourceByExternalId.get(String(product.external_id || '').trim())
       const sourceAttributes = source?.attributes && typeof source.attributes === 'object' ? source.attributes : {}
       const chartIds = [...new Set([
