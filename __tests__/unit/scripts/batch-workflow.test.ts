@@ -230,4 +230,25 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(payload.metadata.source_supplier_id).toBe(28)
     expect(payload.metadata.source_published_at).toBe('2026-08-03T12:00:00.000Z')
   })
+
+  it('publishes processed inactive batch rows as active catalog products', () => {
+    const row = workflow.productToRailsJsonRow({
+      external_id: 'item-1',
+      name: 'Кроссовки',
+      status: 'inactive',
+      brand: 'brand-1',
+      category: 'category-1',
+      subcategory: 'subcategory-1',
+      photos: [],
+      attributes: {},
+    }, {
+      brands: new Map([['brand-1', 'Brunello Cucinelli']]),
+      categories: new Map([['category-1', 'Обувь']]),
+      subcategories: new Map([['subcategory-1', 'Кроссовки']]),
+    })
+
+    expect(row.status).toBe('active')
+    expect(workflow.railsUpdatePayload({ external_id: 'item-1', status: 'inactive', attributes: {}, photos: [] }).product.status)
+      .toBe('active')
+  })
 })
