@@ -380,6 +380,27 @@ function productToRailsCsvRow(product, lookups) {
   };
 }
 
+function productToRailsJsonRow(product, lookups) {
+  return {
+    external_id: product.external_id || '',
+    name: product.name || '',
+    description: product.description || '',
+    h1: product.h1 || '',
+    seo_title: product.seo_title || '',
+    seo_description: product.seo_description || '',
+    price: product.price || 0,
+    status: product.status === 'inactive' ? 'hidden' : 'active',
+    brand: lookupName(lookups.brands, product.brand, 'бренда'),
+    category: lookupName(lookups.categories, product.category, 'категории'),
+    subcategory: lookupName(lookups.subcategories, product.subcategory, 'подкатегории'),
+    gender: product.gender || '',
+    photos: normalizePhotos(product.photos),
+    attributes: normalizeAttributes(product.attributes),
+    variant_group_key: product.variant_group_key || '',
+    batch_id: product.batchId || product.batch_id || '',
+  };
+}
+
 function catalogLookupKey(value) {
   return String(value || '').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
 }
@@ -442,14 +463,14 @@ async function postRailsImportBatch({ name, products, supplierId, supplierName, 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      source: 'csv',
+      source: 'json',
       name,
       supplier_name: supplierName || null,
       supplier_avatar: supplierAvatar || null,
       source_supplier_id: supplierId || null,
       published_at: publishedAt || null,
       wait: true,
-      csv_text: serializeProductsToCsv(products, RAILS_IMPORT_COLUMNS, ','),
+      products,
     }),
     timeoutMs: 120_000,
   }, 'Rails import');
@@ -1690,14 +1711,14 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     .map(({ index }) => updatedProducts[index])
     .filter((product) => !existingExternalIds.has(String(product.external_id || '').trim()))
     .filter((product) => product.external_id || product.name)
-    .map((product) => productToRailsCsvRow(withPublicationContext(product), lookups));
+    .map((product) => productToRailsJsonRow(withPublicationContext(product), lookups));
   const importBatches = [];
   const newRowsTotal = railsRows.length;
   let importedProcessed = 0;
   if (newRowsTotal > 0 && onProgress) {
     await onProgress({ phase: 'publish', current: 0, total: newRowsTotal, success: 0, failed: 0 });
   }
-  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 50)).entries()) {
+  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 20)).entries()) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
       products: chunk,
