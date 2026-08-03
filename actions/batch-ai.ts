@@ -318,7 +318,7 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements'
 
 function catalogName(value: unknown, entityType: string, mappings: CatalogIdMapping[]) {
   const raw = String(value || '').trim()
@@ -365,6 +365,35 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     predicate = `AND id=$${params.length} ORDER BY id`
   }
   const products = await scrapingQuery(`SELECT * FROM products WHERE batch_id=$1 ${predicate}`, params)
+  let selectedProducts = products.rows
+  if (mode === 'recover_measurements') {
+    const sourceSnapshot = await scrapingQuery(`
+      SELECT products
+      FROM batch_snapshots
+      WHERE batch_id=$1 AND (
+        label='Обработан скриптом'
+        OR label LIKE 'До AI%'
+        OR stage='SCRIPT_PROCESSED'
+      )
+      ORDER BY CASE WHEN label='Обработан скриптом' THEN 0 ELSE 1 END, created_at ASC
+      LIMIT 1
+    `, [batchId])
+    const sourceProducts = Array.isArray(sourceSnapshot.rows[0]?.products)
+      ? sourceSnapshot.rows[0].products
+      : []
+    const sourceByExternalId = new Map<string, any>(sourceProducts.map((product: any) => [String(product?.external_id || '').trim(), product]))
+    selectedProducts = products.rows.flatMap((product: any) => {
+      const source = sourceByExternalId.get(String(product.external_id || '').trim())
+      const sourceAttributes = source?.attributes && typeof source.attributes === 'object' ? source.attributes : {}
+      const hasSizeChart = Boolean(sourceAttributes.size_chart_source_id || sourceAttributes.size_chart_source_ids)
+      if (!source || !hasSizeChart) return []
+      return [{
+        ...product,
+        photos: Array.isArray(source.photos) && source.photos.length > 0 ? source.photos : product.photos,
+        attributes: { ...(product.attributes || {}), ...sourceAttributes },
+      }]
+    })
+  }
   const mappings = await scrapingQuery(`
     SELECT entity_type, legacy_id, canonical_id, canonical_id AS id, name,
            legacy_parent_id, canonical_parent_id, canonical_parent_id AS parent_id
@@ -399,7 +428,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const allowedBrands = allowedIdsToCurrent(batch.rows[0].allowed_brand_ids, 'brand', brands)
   const allowedCategories = allowedIdsToCurrent(batch.rows[0].allowed_category_ids, 'category', categories)
   return {
-    batch: batch.rows[0], products: products.rows, definitions, mappings: mappings.rows,
+    batch: batch.rows[0], products: selectedProducts, definitions, mappings: mappings.rows,
     brands: allowedBrands ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
     categories: allowedCategories ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
     subcategories,
@@ -511,7 +540,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       await snapshotBatch(
         batchId,
         context.batch.stage || 'SCRAPED',
-        mode === 'reprocess' ? 'До повторной AI-обработки' : `До AI · ${mode}`,
+        mode === 'reprocess' ? 'До повторной AI-обработки' : mode === 'recover_measurements' ? 'До восстановления замеров' : `До AI · ${mode}`,
         snapshot,
       )
     }
@@ -619,9 +648,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
           product, userPrompt, systemPrompt: snapshot.systemPrompt,
           variantScanOnly: false,
-          photoUrls: context.batch.ai_photo_enabled ? product.photos || [] : [],
-          photoEnabled: context.batch.ai_photo_enabled === true,
-          fullSizeRefinementEnabled: context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true,
+          photoUrls: mode === 'recover_measurements' || context.batch.ai_photo_enabled ? product.photos || [] : [],
+          photoEnabled: mode === 'recover_measurements' || context.batch.ai_photo_enabled === true,
+          fullSizeRefinementEnabled: mode === 'recover_measurements' || (context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
           brands: context.brands,
           categories: context.categories,
@@ -635,7 +664,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       }
     }
 
-    if (['reprocess', 'selection', 'retry'].includes(mode)) {
+    if (['reprocess', 'selection', 'retry', 'recover_measurements'].includes(mode)) {
       const targetIds = context.products.map((product: any) => Number(product.id)).filter(Number.isInteger)
       if (targetIds.length > 0) {
         await scrapingQuery(`
