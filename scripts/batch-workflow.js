@@ -476,6 +476,12 @@ async function postRailsImportBatch({ name, products, supplierId, supplierName, 
   }, 'Rails import');
 }
 
+function railsImportChunkSize() {
+  const configured = Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 20);
+  if (!Number.isFinite(configured) || configured < 1) return 20;
+  return Math.min(100, Math.floor(configured));
+}
+
 function parseCsvText(text) {
   const normalizedText = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const firstLine = normalizedText.split('\n')[0] || '';
@@ -1718,7 +1724,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (newRowsTotal > 0 && onProgress) {
     await onProgress({ phase: 'publish', current: 0, total: newRowsTotal, success: 0, failed: 0 });
   }
-  for (const [index, chunk] of chunkArray(railsRows, Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 20)).entries()) {
+  for (const [index, chunk] of chunkArray(railsRows, railsImportChunkSize()).entries()) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
       products: chunk,
@@ -1790,6 +1796,7 @@ module.exports = {
   parseCsvObjects,
   publicationPayloadHash,
   productToRailsJsonRow,
+  railsImportChunkSize,
   railsUpdatePayload,
   listAllSuppliers,
   listFavoriteSuppliers,

@@ -251,4 +251,15 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(workflow.railsUpdatePayload({ external_id: 'item-1', status: 'inactive', attributes: {}, photos: [] }).product.status)
       .toBe('active')
   })
+
+  it('clamps Rails JSON chunks to the API limit', () => {
+    const previous = process.env.RAILS_IMPORT_CHUNK_SIZE
+    process.env.RAILS_IMPORT_CHUNK_SIZE = '200'
+    try {
+      expect(workflow.railsImportChunkSize()).toBe(100)
+    } finally {
+      if (previous === undefined) delete process.env.RAILS_IMPORT_CHUNK_SIZE
+      else process.env.RAILS_IMPORT_CHUNK_SIZE = previous
+    }
+  })
 })
