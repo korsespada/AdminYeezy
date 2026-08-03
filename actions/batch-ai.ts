@@ -284,24 +284,23 @@ function priceRuleHints(rules: any[]) {
 }
 
 async function syncCurrentRailsCatalogMappings() {
-  try {
-    const catalog = await getRailsCatalogLookups()
-    const currentSubcategoryName = (name: unknown) => ({
-      'Пальто': 'Пальто и плащи',
-      'Худи': 'Худи и толстовки',
-      'Головные уборы': 'Шапки',
-    }[String(name || '').trim()] || String(name || ''))
-    const rows = [
-      ...catalog.brands.map((item: any) => ({ entity_type: 'brand', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
-      ...catalog.categories.map((item: any) => ({ entity_type: 'category', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
-      ...catalog.subcategories.map((item: any) => ({
-        entity_type: 'subcategory',
-        id: String(item.id),
-        name: currentSubcategoryName(item.name),
-        parent_id: String(item.category || item.parent_id || ''),
-      })),
-    ]
-    if (!rows.length) return
+  const catalog = await getRailsCatalogLookups()
+  const currentSubcategoryName = (name: unknown) => ({
+    'Пальто': 'Пальто и плащи',
+    'Худи': 'Худи и толстовки',
+    'Головные уборы': 'Шапки',
+  }[String(name || '').trim()] || String(name || ''))
+  const rows = [
+    ...catalog.brands.map((item: any) => ({ entity_type: 'brand', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
+    ...catalog.categories.map((item: any) => ({ entity_type: 'category', id: String(item.id), name: String(item.name || ''), parent_id: '' })),
+    ...catalog.subcategories.map((item: any) => ({
+      entity_type: 'subcategory',
+      id: String(item.id),
+      name: currentSubcategoryName(item.name),
+      parent_id: String(item.category || item.parent_id || ''),
+    })),
+  ]
+  if (rows.length) {
     await scrapingQuery(`
       INSERT INTO catalog_id_mappings(entity_type,legacy_id,canonical_id,name,canonical_parent_id,updated_at)
       SELECT entity_type,id,id,name,NULLIF(parent_id,''),NOW()
@@ -312,9 +311,8 @@ async function syncCurrentRailsCatalogMappings() {
         canonical_parent_id=EXCLUDED.canonical_parent_id,
         updated_at=NOW()
     `, [JSON.stringify(rows)])
-  } catch (error) {
-    console.warn('Не удалось обновить справочник Rails перед AI-обработкой', error)
   }
+  return catalog
 }
 
 type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess'
@@ -341,7 +339,7 @@ function productAttributeDefinitions(product: any, context: any) {
 }
 
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
-  await syncCurrentRailsCatalogMappings()
+  const currentCatalog = await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
     SELECT b.*, s.ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
            s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids
@@ -375,17 +373,32 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     [batch.rows[0].supplier_id],
   )
   const allowedIds = (value: unknown) => Array.isArray(value) ? new Set(value.map(String)) : new Set<string>()
-  const allowedBrands = allowedIds(batch.rows[0].allowed_brand_ids)
-  const allowedCategories = allowedIds(batch.rows[0].allowed_category_ids)
-  const brands = mappings.rows.filter((row) => row.entity_type === 'brand')
-  const categories = mappings.rows.filter((row) => row.entity_type === 'category')
-  const subcategories = mappings.rows.filter((row) => row.entity_type === 'subcategory')
+  const allowedIdsToCurrent = (value: unknown, entityType: string, currentRows: any[]) => {
+    const rawIds = allowedIds(value)
+    if (!rawIds.size) return null
+    const currentIds = new Set<string>()
+    for (const row of mappings.rows) {
+      if (row.entity_type !== entityType) continue
+      if (rawIds.has(String(row.legacy_id)) || rawIds.has(String(row.canonical_id))) {
+        currentIds.add(String(row.canonical_id))
+      }
+    }
+    const resolved = new Set(currentRows.map((row) => String(row.id)).filter((id) => currentIds.has(id)))
+    return resolved.size ? resolved : null
+  }
+  const brands = currentCatalog.brands.map((row: any) => ({ id: String(row.id), name: String(row.name || '') }))
+  const categories = currentCatalog.categories.map((row: any) => ({ id: String(row.id), name: String(row.name || '') }))
+  const subcategories = currentCatalog.subcategories.map((row: any) => ({
+    id: String(row.id),
+    name: String(row.name || ''),
+    parent_id: String(row.category || row.parent_id || ''),
+  }))
+  const allowedBrands = allowedIdsToCurrent(batch.rows[0].allowed_brand_ids, 'brand', brands)
+  const allowedCategories = allowedIdsToCurrent(batch.rows[0].allowed_category_ids, 'category', categories)
   return {
     batch: batch.rows[0], products: products.rows, definitions, mappings: mappings.rows,
-    brands: allowedBrands.size ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
-    categories: allowedCategories.size ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
-    // Всегда передаём полный справочник подкатегорий: ограничения поставщика помогают
-    // классификации, но не должны заставлять AI повторно предлагать уже существующее.
+    brands: allowedBrands ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
+    categories: allowedCategories ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
     subcategories,
     priceRules: priceRules.rows,
   }

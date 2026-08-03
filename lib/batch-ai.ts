@@ -119,6 +119,7 @@ export function buildBatchAiUserPrompt(input: {
       rule_key: rule.rule_key,
       name: rule.name,
       conditions: rule.conditions,
+      price: rule.price,
       visual_hint: rule.visual_hint || '',
       reference_photo_numbers: references,
     }
@@ -150,7 +151,7 @@ export function buildBatchAiUserPrompt(input: {
     `Подкатегории: ${JSON.stringify(subcategories)}`,
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
-    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
+    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
     'attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].',
     'subcategory_suggestion: {name,parent_category_id,reason,confidence} или null.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
@@ -287,16 +288,16 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'image_url', image_url: { url } })
   })
   const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
-  const payload = await completion({
-    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
-    messages: [
-      { role: 'system', content: input.systemPrompt },
-      { role: 'user', content },
-    ],
-    temperature: input.settings.temperature,
-    max_tokens: input.settings.maxTokens,
-    response_format: { type: 'json_object' },
-  })
+  const payload = await withBatchAiRetry(() => completion({
+      model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
+      messages: [
+        { role: 'system', content: input.systemPrompt },
+        { role: 'user', content },
+      ],
+      temperature: input.settings.temperature,
+      max_tokens: input.settings.maxTokens,
+      response_format: { type: 'json_object' },
+    }), 'AI batch')
   const text = payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ')
   return parseBatchAiJson(String(text))
@@ -335,16 +336,34 @@ export async function runBatchAiOpenRouterRefinement(input: {
     content.push({ type: 'image_url', image_url: { url } })
   })
   const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
-  const payload = await completion({
-    model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
-    messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
-    temperature: input.settings.temperature,
-    max_tokens: input.settings.maxTokens,
-    response_format: { type: 'json_object' },
-  })
+  const payload = await withBatchAiRetry(() => completion({
+      model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
+      messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
+      temperature: input.settings.temperature,
+      max_tokens: input.settings.maxTokens,
+      response_format: { type: 'json_object' },
+    }), 'AI refinement')
   const text = payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ при уточнении оригинала')
   return parseBatchAiJson(String(text))
+}
+
+async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+      const message = String((error as Error)?.message || error || '').toLowerCase()
+      const retryable = /temporarily unavailable|rate limit|retry later|upstream|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection/.test(message)
+      if (!retryable || attempt === 5) throw error
+      const waitMs = Math.min(30_000, 1_000 * (2 ** (attempt - 1)))
+      console.warn(`${label}: временная ошибка, повтор ${attempt + 1}/5 через ${waitMs} мс: ${message}`)
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+    }
+  }
+  throw lastError
 }
 
 export function parseBatchAiJson(text: string) {

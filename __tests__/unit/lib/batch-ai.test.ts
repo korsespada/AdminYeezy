@@ -306,6 +306,26 @@ describe('batch AI normalization', () => {
     expect(clothingPrompt).toContain('Никогда не заполняй subcategory_suggestion для одежды')
   })
 
+  it('passes the actual price together with each supplier price rule', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { category: 'shoes' },
+      brands: [],
+      categories: [{ id: 'shoes', name: 'Обувь' }],
+      subcategories: [],
+      attributes: [],
+      priceRules: [{
+        rule_key: 'lp_shoes_all',
+        name: 'Вся обувь',
+        conditions: { category: 'shoes' },
+        price: 25000,
+      }],
+    })
+
+    expect(prompt).toContain('"rule_key":"lp_shoes_all"')
+    expect(prompt).toContain('"price":25000')
+    expect(prompt).toContain('Цена будет применена сервером')
+  })
+
   it('does not keep a legacy taxonomy value excluded from the current supplier dictionary', () => {
     const result = normalizeBatchAiOutput({
       product: { brand: 'chanel', category: 'bags', subcategory: 'generic-bags' },

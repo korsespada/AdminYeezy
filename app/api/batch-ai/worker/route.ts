@@ -91,6 +91,17 @@ async function complete(body: any) {
   const item = itemResult.rows[0]
   if (!item) return NextResponse.json({ error: 'lease_not_found' }, { status: 409 })
   const input = item.input_snapshot
+  const context = await scrapingQuery(`
+    SELECT b.supplier_id,s.default_price FROM scraping_batches b
+    JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
+  `, [item.batch_id])
+  const storedRules = await scrapingQuery(
+    'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
+    [context.rows[0]?.supplier_id],
+  )
+  // Правила из БД являются источником истины: очередь могла быть создана до
+  // добавления/изменения правила, поэтому input_snapshot может быть устаревшим.
+  const priceRules = storedRules.rows
   const normalized: any = input.shadeFamilyScan ? {
     product: input.product,
     suggestions: [],
@@ -123,19 +134,8 @@ async function complete(body: any) {
     attributeCodes: new Set((input.attributeCodes || []).map(String)),
     knownAttributeCodes: new Set((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
-    priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
+    priceRuleKeys: new Set(priceRules.map((row: any) => String(row.rule_key))),
   })
-  const context = await scrapingQuery(`
-    SELECT b.supplier_id,s.default_price FROM scraping_batches b
-    JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
-  `, [item.batch_id])
-  const storedRules = await scrapingQuery(
-    'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
-    [context.rows[0]?.supplier_id],
-  )
-  const priceRules = Array.isArray(input.priceRules) && input.priceRules.length
-    ? input.priceRules.map((rule: any) => ({ ...rule, enabled: true }))
-    : storedRules.rows
   const product = normalized.product
   if (!input.variantScanOnly && input.preserveExistingPrice) {
     product.price = Number(input.product?.price || 0)
