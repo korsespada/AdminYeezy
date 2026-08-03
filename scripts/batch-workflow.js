@@ -101,6 +101,14 @@ function normalizeBrand(value) {
   return String(value);
 }
 
+function isJsonAttributeValue(value, depth = 0) {
+  if (depth > 8) return false;
+  if (value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return true;
+  if (Array.isArray(value)) return value.every((item) => isJsonAttributeValue(item, depth + 1));
+  if (typeof value !== 'object') return false;
+  return Object.values(value).every((item) => isJsonAttributeValue(item, depth + 1));
+}
+
 function normalizeAttributes(value) {
   if (!value) return {};
   let parsed = value;
@@ -114,10 +122,7 @@ function normalizeAttributes(value) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
   return Object.fromEntries(Object.entries(parsed).filter(([key, item]) => {
     if (!key.trim() || CORE_PRODUCT_FIELDS.has(key.toLowerCase())) return false;
-    return item === null || typeof item === 'string' || typeof item === 'number' ||
-      typeof item === 'boolean' || (Array.isArray(item) && item.every((entry) =>
-        entry === null || typeof entry === 'string' || typeof entry === 'number' || typeof entry === 'boolean'
-      ));
+    return isJsonAttributeValue(item);
   }));
 }
 

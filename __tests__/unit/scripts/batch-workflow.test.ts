@@ -240,7 +240,14 @@ describe('batch workflow CSV compatibility adapter', () => {
       category: 'category-1',
       subcategory: 'subcategory-1',
       photos: [],
-      attributes: {},
+      attributes: {
+        measurements: {
+          unit: 'см',
+          columns: [{ key: 'insole_length', label: 'Длина стельки' }],
+          rows: [{ size: '39', values: { insole_length: '25' } }],
+          note: '',
+        },
+      },
     }, {
       brands: new Map([['brand-1', 'Brunello Cucinelli']]),
       categories: new Map([['category-1', 'Обувь']]),
@@ -248,6 +255,7 @@ describe('batch workflow CSV compatibility adapter', () => {
     })
 
     expect(row.status).toBe('active')
+    expect(row.attributes.measurements.rows[0].values.insole_length).toBe('25')
     expect(workflow.railsUpdatePayload({ external_id: 'item-1', status: 'inactive', attributes: {}, photos: [] }).product.status)
       .toBe('active')
   })
