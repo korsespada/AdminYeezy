@@ -117,7 +117,7 @@ describe('supplier JSON post-process contract', () => {
       {
         external_id: 'sneaker-price',
         description: 'Price: 490¥ Sizes: 39-46 LP071',
-        photos: ['sneaker.jpg'],
+        photos: ['sneaker.jpg', 'sneaker-2.jpg', 'sneaker-3.jpg', 'sneaker-4.jpg', 'sneaker-5.jpg'],
       },
       {
         external_id: 'sneaker-details',
@@ -157,7 +157,7 @@ describe('supplier JSON post-process contract', () => {
     expect(result[0]).toMatchObject({
       external_id: 'sneaker-price',
       description: timeline[1].description,
-      photos: ['sneaker-detail.jpg', 'sneaker.jpg', 'sneaker-size.jpg'],
+      photos: ['sneaker-detail.jpg', 'sneaker.jpg', 'sneaker-2.jpg', 'sneaker-3.jpg', 'sneaker-4.jpg', 'sneaker-5.jpg', 'sneaker-size.jpg'],
       attributes: {
         description_source_id: 'sneaker-description',
         size_chart_source_id: 'sneaker-size',
@@ -199,12 +199,12 @@ describe('supplier JSON post-process contract', () => {
       {
         external_id: 'shoe-price-1',
         description: 'Price: 450¥ / 550¥ Sizes: 39 40 41 42 43 44 LP2539',
-        photos: ['shoe-1.jpg'],
+        photos: ['shoe-1-1.jpg', 'shoe-1-2.jpg', 'shoe-1-3.jpg', 'shoe-1-4.jpg', 'shoe-1-5.jpg', 'shoe-1-6.jpg'],
       },
       {
         external_id: 'shoe-price-2',
         description: 'Price: 450¥ / 550¥ Sizes: 39~46 LP2539',
-        photos: ['shoe-2.jpg'],
+        photos: ['shoe-2-1.jpg', 'shoe-2-2.jpg', 'shoe-2-3.jpg', 'shoe-2-4.jpg', 'shoe-2-5.jpg', 'shoe-2-6.jpg'],
       },
     ].map((product, source_position) => ({
       ...product,
@@ -220,7 +220,7 @@ describe('supplier JSON post-process contract', () => {
         external_id: 'shoe-price-1',
         category: 'nzg3vsvajpiv1e8',
         description: timeline[1].description,
-        photos: ['shoe-1.jpg', 'shoe-size.jpg'],
+        photos: ['shoe-1-1.jpg', 'shoe-1-2.jpg', 'shoe-1-3.jpg', 'shoe-1-4.jpg', 'shoe-1-5.jpg', 'shoe-1-6.jpg', 'shoe-size.jpg'],
         attributes: expect.objectContaining({
           shoe_without_details: true,
           description_source_id: 'shoe-description',
@@ -231,9 +231,111 @@ describe('supplier JSON post-process contract', () => {
         external_id: 'shoe-price-2',
         category: 'nzg3vsvajpiv1e8',
         description: timeline[1].description,
-        photos: ['shoe-2.jpg', 'shoe-size.jpg'],
+        photos: ['shoe-2-1.jpg', 'shoe-2-2.jpg', 'shoe-2-3.jpg', 'shoe-2-4.jpg', 'shoe-2-5.jpg', 'shoe-2-6.jpg', 'shoe-size.jpg'],
       }),
     ]))
+  })
+
+  it('drops shoe albums with fewer than six source photos', async () => {
+    const timeline = [
+      {
+        external_id: 'shoe-description',
+        description: 'Кроссовки из кожи. Размеры 39 40 41 42 43 44. LP3000',
+        photos: [],
+      },
+      {
+        external_id: 'shoe-price-short',
+        description: 'Price: 450¥ Sizes: 39 40 41 42 43 44 LP3000',
+        photos: ['shoe-1.jpg', 'shoe-2.jpg'],
+      },
+      {
+        external_id: 'shoe-price-long',
+        description: 'Price: 450¥ Sizes: 39 40 41 42 43 44 LP3000',
+        photos: ['shoe-3.jpg', 'shoe-4.jpg', 'shoe-5.jpg', 'shoe-6.jpg', 'shoe-7.jpg', 'shoe-8.jpg'],
+      },
+    ].map((product, source_position) => ({
+      ...product,
+      source_position,
+      attributes: { szwego_parse_mode: 'all' },
+    }))
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', timeline)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].external_id).toBe('shoe-price-long')
+    expect(result[0].photos).toHaveLength(6)
+  })
+
+  it('keeps a letter suffix in the article and resolves the known brand prefix', async () => {
+    const products = [{
+      external_id: 'zegna-shoe',
+      description: 'Price: 720¥ Sizes: 39-46 ZE2441B',
+      photos: ['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg'],
+      source_position: 0,
+      attributes: { szwego_parse_mode: 'all' },
+    }]
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result[0]).toMatchObject({
+      name: 'Zegna',
+      brand: '8xod4z3cjpbltoa',
+      attributes: { model_code: 'ZE2441B', shoe_without_details: true },
+    })
+  })
+
+  it('keeps an unknown article visible without inventing its brand', async () => {
+    const products = [{
+      external_id: 'unknown-shoe',
+      description: 'Price: 510¥ Sizes: 39-46 ST9999',
+      photos: ['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg'],
+      source_position: 0,
+      attributes: { szwego_parse_mode: 'all' },
+    }]
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result[0]).toMatchObject({
+      name: 'Модель ST9999',
+      attributes: { model_code: 'ST9999', shoe_without_details: true },
+    })
+    expect(result[0].brand).toBeFalsy()
+  })
+
+  it('resolves the second Santoni model article alias', async () => {
+    const products = [{
+      external_id: 'santoni-shoe-2',
+      description: 'Price: 510¥ Sizes: 39-46 ST2545-1M',
+      photos: ['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg'],
+      source_position: 0,
+      attributes: { szwego_parse_mode: 'all' },
+    }]
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result[0]).toMatchObject({
+      name: 'Santoni',
+      brand: '7rwzlqrppoe8hue',
+      attributes: { model_code: 'ST2545-1M', shoe_without_details: true },
+    })
+  })
+
+  it('resolves an explicit model article alias to Santoni', async () => {
+    const products = [{
+      external_id: 'santoni-shoe',
+      description: 'Price: 510¥ Sizes: 39-46 ST2579',
+      photos: ['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', '6.jpg'],
+      source_position: 0,
+      attributes: { szwego_parse_mode: 'all' },
+    }]
+
+    const result = await runSupplierJsonProcess('merge_price_details.py', products)
+
+    expect(result[0]).toMatchObject({
+      name: 'Santoni',
+      brand: '7rwzlqrppoe8hue',
+      attributes: { model_code: 'ST2579', shoe_without_details: true },
+    })
   })
 
   it('matches model sources when the supplier inconsistently pads the model number', async () => {

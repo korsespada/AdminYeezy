@@ -11,8 +11,14 @@ BRANDS = {
     "LP": ("5f3npdmxcv8f190", "Loro Piana"),
     "ZE": ("8xod4z3cjpbltoa", "Zegna"),
 }
+# Some supplier model codes do not use the brand's usual prefix.
+MODEL_BRAND_ALIASES = {
+    "ST2579": ("7rwzlqrppoe8hue", "Santoni"),
+    "ST2545-1M": ("7rwzlqrppoe8hue", "Santoni"),
+}
 CLOTHING_CATEGORY_ID = "lrg3k8cd5bgw3jv"
 SHOES_CATEGORY_ID = "nzg3vsvajpiv1e8"
+MIN_SHOE_PHOTOS = 6
 
 SHOE_KEYWORDS = (
     "лофер", "мокасин", "кроссов", "обув", "кед", "сникер",
@@ -91,27 +97,44 @@ def _looks_like_shoe(text):
     return bool(re.search("|".join(re.escape(keyword) for keyword in SHOE_KEYWORDS), value, re.IGNORECASE)) and not _has_clothing_sizes(value)
 
 
+def _is_shoe_product(product):
+    return product.get("category") == SHOES_CATEGORY_ID or _looks_like_shoe(
+        f"{product.get('name') or ''} {_text(product)}"
+    )
+
+
 def _model_code(*texts):
     joined = " ".join(str(value or "") for value in texts).upper()
-    match = re.search(r"(?<![A-Z0-9])(BC|LP|ZE)\s*[-_]?\s*(\d{2,})\b", joined)
-    return f"{match.group(1)}{match.group(2)}" if match else ""
+    match = re.search(
+        r"(?<![A-Z0-9])([A-Z]{2,5})\s*[-_]?\s*\d{2,}(?:[-_]?[A-Z0-9]+)?(?![A-Z0-9])",
+        joined,
+    )
+    return re.sub(r"\s+", "", match.group(0)).replace("_", "") if match else ""
 
 
 def _model_key(*texts):
     """Normalize supplier typos such as BC0105 vs BC105 for source matching."""
     code = _model_code(*texts)
-    match = re.match(r"^(BC|LP|ZE)(\d+)$", code)
-    return f"{match.group(1)}{int(match.group(2))}" if match else ""
+    match = re.match(r"^(BC|LP|ZE)(\d+)(.*)$", code)
+    if match:
+        return f"{match.group(1)}{int(match.group(2))}{match.group(3)}"
+    return code
 
 
 def _classify(product, context=""):
     text = f"{_text(product)} {context}"
     code = _model_code(text)
     prefix = re.match(r"^(BC|LP|ZE)", code)
-    if prefix:
-        brand_id, brand_name = BRANDS[prefix.group(1)]
+    brand = BRANDS.get(prefix.group(1)) if prefix else None
+    brand = brand or MODEL_BRAND_ALIASES.get(code)
+    if brand:
+        brand_id, brand_name = brand
         product["brand"] = brand_id
         product["name"] = brand_name
+    elif code and not str(product.get("name") or "").strip():
+        # Do not guess an ambiguous brand prefix (for example, ST), but keep
+        # the article visible until AI or an operator confirms the brand.
+        product["name"] = f"Модель {code}"
 
     if _looks_like_shoe(text):
         product["category"] = SHOES_CATEGORY_ID
@@ -200,9 +223,12 @@ def _process_all(rows):
         size_photos = _photos(size_row) if size_row else []
         header = _text(header_row) if header_row else ""
         code = _classify(price_row, full_description)
+        source_photos = _unique(_photos(details_row) + _photos(price_row))
+        if _is_shoe_product(price_row) and len(source_photos) < MIN_SHOE_PHOTOS:
+            continue
         price_row["description"] = full_description or price_text
         price_row["photos"] = _unique(
-            _photos(details_row) + _photos(price_row) + size_photos
+            source_photos + size_photos
         )
         price_row["variant_group_key"] = price_row.get("variant_group_key") or code or None
 
@@ -246,7 +272,7 @@ def _process_all(rows):
             continue
 
         product_photos = _photos(source_price)
-        if not product_photos:
+        if len(product_photos) < MIN_SHOE_PHOTOS:
             continue
 
         price_row = copy.deepcopy(source_price)
@@ -288,6 +314,9 @@ def _process_legacy(products):
                 details_row = following if _is_details(following) else current
                 _classify(price_row)
                 price_row["photos"] = _unique(_photos(details_row) + _photos(price_row))
+                if _is_shoe_product(price_row) and len(price_row["photos"]) < MIN_SHOE_PHOTOS:
+                    index += 2
+                    continue
                 result.append(price_row)
                 index += 2
                 continue
