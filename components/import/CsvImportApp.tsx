@@ -42,6 +42,7 @@ import {
   Search,
   Unlink,
   FileText,
+  Layers3,
 } from "lucide-react";
 import {
   fetchLookupsAction,
@@ -112,6 +113,27 @@ function approvedVariantGroupKey(product: CsvProduct) {
   const key = String(product.variant_group_key || "").trim();
   return /^[0-9a-f]{32}$/i.test(key) ? key : "";
 }
+
+function variantFamilyTitle(products: CsvProduct[]) {
+  const first = products[0];
+  if (!first) return "Семья без названия";
+  const modelName = attributeValuesForDisplay(first.attributes?.model_name)[0];
+  const modelCode = String(first.attributes?.model_code || "").trim();
+  return modelName || modelCode || first.name || "Семья без названия";
+}
+
+function variantFamilyColors(products: CsvProduct[]) {
+  return [...new Set(products.flatMap((product) => (
+    attributeValuesForDisplay(product.attributes?.colors ?? product.attributes?.color)
+  )))];
+}
+
+type VariantFamily = {
+  key: string;
+  products: CsvProduct[];
+  title: string;
+  colors: string[];
+};
 
 function AiQueuePhoto({ photo }: { photo: unknown }) {
   const source = typeof photo === "string" ? photo.trim() : "";
@@ -538,6 +560,9 @@ export default function CsvImportApp({
   const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
+  const [cardColumns, setCardColumns] = useState(4);
+  const [showVariantFamilies, setShowVariantFamilies] = useState(false);
+  const [showBulkVariantFamily, setShowBulkVariantFamily] = useState(false);
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
@@ -745,6 +770,16 @@ export default function CsvImportApp({
     () => products.filter((product) => variantGroups.has(approvedVariantGroupKey(product))).length,
     [products, variantGroups],
   );
+  const variantFamilyList = useMemo(() => (
+    [...variantGroups.entries()]
+      .map(([key, familyProducts]) => ({
+        key,
+        products: familyProducts,
+        title: variantFamilyTitle(familyProducts),
+        colors: variantFamilyColors(familyProducts),
+      }))
+      .sort((left, right) => left.title.localeCompare(right.title, "ru"))
+  ), [variantGroups]);
   const priceCounts = useMemo(() => countBy(products.map((product) => String(Number(product.price) || 0))), [products, countBy]);
 
   const aiReadyCount = useMemo(
@@ -2457,6 +2492,21 @@ export default function CsvImportApp({
                 из {filteredProducts.length} показанных
               </div>
               <div className="flex items-center gap-2">
+                {viewMode === "cards" && (
+                  <label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-400 xl:flex">
+                    <span className="whitespace-nowrap">В ряд: {cardColumns}</span>
+                    <input
+                      type="range"
+                      min="4"
+                      max="10"
+                      step="1"
+                      value={cardColumns}
+                      onChange={(event) => setCardColumns(Number(event.target.value))}
+                      className="h-1.5 w-24 cursor-pointer accent-indigo-500"
+                      aria-label="Количество карточек в ряду"
+                    />
+                  </label>
+                )}
                 <div className="flex items-center rounded-lg border border-slate-700 bg-slate-800 p-0.5">
                   <button
                     onClick={() => setViewMode("rows")}
@@ -2480,6 +2530,15 @@ export default function CsvImportApp({
                   </button>
                 </div>
                 <button
+                  type="button"
+                  onClick={() => setShowVariantFamilies(true)}
+                  disabled={variantFamilyList.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition-colors hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Layers3 className="h-3.5 w-3.5" />
+                  Семейные группы{variantFamilyList.length ? ` · ${variantFamilyList.length}` : ""}
+                </button>
+                <button
                   onClick={handleSelectFiltered}
                   disabled={filteredProducts.length === 0}
                   className="px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 border border-slate-700 rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-colors"
@@ -2496,10 +2555,13 @@ export default function CsvImportApp({
                 )}
               </div>
             </div>
-            <div className={viewMode === "cards"
-              ? "grid grid-cols-1 gap-5 pb-48 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
-            }>
+            <div
+              className={viewMode === "cards"
+                ? "grid gap-5 pb-48"
+                : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
+              }
+              style={viewMode === "cards" ? { gridTemplateColumns: `repeat(${cardColumns}, minmax(0, 1fr))` } : undefined}
+            >
               {viewMode === "rows" && (
                 <div className="grid min-w-[1160px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <div>Китайский исходный текст</div>
@@ -2691,6 +2753,15 @@ export default function CsvImportApp({
                   Применить цену и поля
                 </button>
                 <button
+                  type="button"
+                  onClick={() => setShowBulkVariantFamily(true)}
+                  disabled={!batchId || isSnapshotSource}
+                  className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-2.5 text-sm font-bold text-violet-100 transition-all hover:bg-violet-500/20 disabled:opacity-50"
+                >
+                  <Layers3 className="h-4 w-4" />
+                  В семейную группу
+                </button>
+                <button
                   onClick={handleMergePhotos}
                   disabled={selectedForMerge.length < 2}
                   className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:grayscale"
@@ -2703,6 +2774,36 @@ export default function CsvImportApp({
           </div>
         )}
       </div>
+
+      <VariantFamiliesDialog
+        open={showVariantFamilies}
+        families={variantFamilyList}
+        onClose={() => setShowVariantFamilies(false)}
+        onOpenProduct={(product) => {
+          const nextIndex = products.indexOf(product);
+          if (nextIndex >= 0) setSelectedIdx(nextIndex);
+        }}
+      />
+
+      {batchId && (
+        <BulkVariantFamilyDialog
+          open={showBulkVariantFamily}
+          batchId={batchId}
+          selectedProductIds={selectedForMerge
+            .map((index) => Number(products[index]?.id))
+            .filter(Number.isInteger)}
+          families={variantFamilyList}
+          onClose={() => setShowBulkVariantFamily(false)}
+          onChanged={(productIds, groupKey) => {
+            const changedIds = new Set(productIds);
+            setProducts((current) => current.map((product) => (
+              changedIds.has(Number(product.id)) ? { ...product, variant_group_key: groupKey } : product
+            )));
+            setSelectedForMerge([]);
+            setSaveMsg("Цветовая семья сохранена");
+          }}
+        />
+      )}
 
       {/* Drawer */}
       <CsvProductDrawer
@@ -3512,6 +3613,172 @@ function CsvProductDrawer({
 function formatSupplierPublishedOn(value?: string | null) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? `${match[3]}.${match[2]}.${match[1]}` : "Не указано";
+}
+
+function VariantFamiliesDialog({
+  open,
+  families,
+  onClose,
+  onOpenProduct,
+}: {
+  open: boolean;
+  families: VariantFamily[];
+  onClose: () => void;
+  onOpenProduct: (product: CsvProduct) => void;
+}) {
+  const [openFamilyKey, setOpenFamilyKey] = useState<string | null>(null);
+  const openFamily = families.find((family) => family.key === openFamilyKey) || null;
+
+  useEffect(() => {
+    if (!open) setOpenFamilyKey(null);
+  }, [open]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Семейные группы">
+        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+          <div>
+            <h2 className="font-semibold text-white">Семейные группы</h2>
+            <p className="mt-1 text-xs text-slate-400">{openFamily ? `${openFamily.title} · ${openFamily.products.length} товаров` : `Всего групп: ${families.length}`}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {openFamily && <button type="button" onClick={() => setOpenFamilyKey(null)} className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">Все семьи</button>}
+            <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+          {openFamily ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {openFamily.products.map((product) => {
+                const colors = attributeValuesForDisplay(product.attributes?.colors ?? product.attributes?.color);
+                return (
+                  <button type="button" key={String(product.id || product.external_id)} onClick={() => { onOpenProduct(product); onClose(); }} className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800 text-left transition hover:border-violet-400 hover:bg-slate-700/70">
+                    <div className="relative aspect-[4/3] bg-slate-950">
+                      {product.photos?.[0] ? <Image src={resizeImageUrl(product.photos[0], imagePresets.productGrid)} alt="" fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-xs text-slate-600">Нет фото</div>}
+                    </div>
+                    <div className="p-3">
+                      <div className="line-clamp-2 text-xs font-semibold text-white">{product.name || "Без названия"}</div>
+                      <div className="mt-1 truncate text-[11px] text-violet-300">{colors.join(", ") || "Цвет не указан"}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : families.length ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {families.map((family) => (
+                <button type="button" key={family.key} onClick={() => setOpenFamilyKey(family.key)} className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 text-left transition hover:border-violet-400 hover:bg-slate-800/80">
+                  <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-slate-950">
+                    {family.products[0]?.photos?.[0] ? <Image src={resizeImageUrl(family.products[0].photos[0], imagePresets.productGrid)} alt="" fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-[10px] text-slate-600">Нет фото</div>}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-white">{family.title}</div>
+                    <div className="mt-1 text-xs text-violet-300">{family.products.length} {family.products.length === 1 ? "товар" : family.products.length < 5 ? "товара" : "товаров"}</div>
+                    <div className="mt-1 line-clamp-2 text-[11px] text-slate-500">{family.colors.join(", ") || "Цвета не указаны"}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : <div className="py-16 text-center text-sm text-slate-500">В этой выгрузке пока нет семейных групп</div>}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function BulkVariantFamilyDialog({
+  open,
+  batchId,
+  selectedProductIds,
+  families,
+  onClose,
+  onChanged,
+}: {
+  open: boolean;
+  batchId: string;
+  selectedProductIds: number[];
+  families: VariantFamily[];
+  onClose: () => void;
+  onChanged: (productIds: number[], groupKey: string) => void;
+}) {
+  const [targetFamilyKey, setTargetFamilyKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const targetFamily = families.find((family) => family.key === targetFamilyKey) || null;
+
+  useEffect(() => {
+    if (!open) {
+      setTargetFamilyKey(null);
+      setError("");
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const apply = async () => {
+    if (!selectedProductIds.length) return;
+    if (!targetFamily && selectedProductIds.length < 2) {
+      setError("Для новой семьи выберите минимум два товара");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    const result = await assignBatchVariantFamilyAction(
+      batchId,
+      selectedProductIds,
+      targetFamily ? Number(targetFamily.products[0]?.id) : undefined,
+    );
+    if (!result.success || !result.data?.groupKey) {
+      setError(result.error || "Не удалось сохранить цветовую семью");
+      setBusy(false);
+      return;
+    }
+    onChanged(selectedProductIds, result.data.groupKey);
+    setBusy(false);
+    onClose();
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Добавить в семейную группу">
+        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+          <div>
+            <h2 className="font-semibold text-white">В семейную группу</h2>
+            <p className="mt-1 text-xs text-slate-400">Выбрано товаров: {selectedProductIds.length}. Выберите существующую семью или создайте новую.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+          <button type="button" onClick={() => setTargetFamilyKey(null)} className={`mb-4 w-full rounded-xl border p-3 text-left transition ${targetFamily ? "border-slate-700 bg-slate-800 hover:border-slate-500" : "border-violet-400 bg-violet-500/15 ring-1 ring-violet-400/30"}`}>
+            <div className="text-sm font-semibold text-white">Создать новую семью</div>
+            <div className="mt-1 text-xs text-slate-400">Объединит выбранные товары в отдельную цветовую семью.</div>
+          </button>
+          <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Или добавить в существующую</div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {families.map((family) => (
+              <button type="button" key={family.key} onClick={() => setTargetFamilyKey(family.key)} className={`flex min-w-0 items-center gap-3 rounded-xl border p-3 text-left transition ${targetFamilyKey === family.key ? "border-violet-400 bg-violet-500/15 ring-1 ring-violet-400/30" : "border-slate-700 bg-slate-800 hover:border-slate-500"}`}>
+                <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-950">
+                  {family.products[0]?.photos?.[0] ? <Image src={resizeImageUrl(family.products[0].photos[0], imagePresets.productGrid)} alt="" fill className="object-cover" unoptimized /> : null}
+                </div>
+                <div className="min-w-0"><div className="truncate text-sm font-semibold text-white">{family.title}</div><div className="mt-1 text-xs text-violet-300">{family.products.length} товаров</div></div>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="border-t border-slate-700 px-5 py-4">
+          {error && <div className="mb-3 text-sm text-red-300">{error}</div>}
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" onClick={onClose} disabled={busy} className="rounded-lg px-4 py-2 text-sm text-slate-400 hover:text-white">Отмена</button>
+            <button type="button" onClick={apply} disabled={busy || !selectedProductIds.length} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-50">{busy ? "Сохраняем…" : targetFamily ? "Добавить в семью" : "Создать семью"}</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function VariantFamilyManager({
