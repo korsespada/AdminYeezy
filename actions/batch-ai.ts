@@ -1297,7 +1297,21 @@ async function getBatchAiRun(runId: string) {
     ORDER BY CASE WHEN i.status='running' THEN 0 ELSE 1 END,i.created_at
     LIMIT 12
   `, [runId])
-  return { ...run.rows[0], errors: errors.rows, queue_items: queue.rows }
+  const normalizeQueuePhotos = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.map(String).filter(Boolean)
+    if (typeof value !== 'string' || !value.trim()) return []
+    try {
+      const parsed = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
+    } catch {
+      return []
+    }
+  }
+  return {
+    ...run.rows[0],
+    errors: errors.rows,
+    queue_items: queue.rows.map((item) => ({ ...item, photos: normalizeQueuePhotos(item.photos) })),
+  }
 }
 
 export async function getBatchAiRunAction(runId: string) {
@@ -1318,6 +1332,21 @@ export async function getLatestBatchAiRunAction(batchId: string) {
   await finalizeRun(String(latest.rows[0].id))
   await resumeStaleOpenRouterRun(String(latest.rows[0].id))
   return { success: true, data: await getBatchAiRun(String(latest.rows[0].id)) }
+}
+
+export async function getBatchAiRunLogsAction(runId: string, limit = 500) {
+  await requireAdmin()
+  const safeLimit = Math.min(1000, Math.max(50, Number(limit) || 500))
+  const result = await scrapingQuery(`
+    SELECT i.product_id,i.external_id,i.status,i.error_message,i.attempts,
+           i.created_at,i.updated_at,i.completed_at,i.output,p.name,p.slug,p.photo_alts
+    FROM batch_ai_items i
+    LEFT JOIN products p ON p.id=i.product_id
+    WHERE i.run_id=$1
+    ORDER BY i.created_at ASC
+    LIMIT $2
+  `, [runId, safeLimit])
+  return { success: true, data: result.rows }
 }
 
 export async function stopBatchAiRunAction(runId: string) {

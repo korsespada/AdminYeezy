@@ -542,7 +542,7 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
     }
 
     let res = await scrapingQuery(`
-      SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description,
+      SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description, p.slug, p.photo_alts,
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
         p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
         p.ai_confidence, p.source_position, p.created_at, p.updated_at,
@@ -586,9 +586,9 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       UPDATE products
       SET external_id=$1, name=$2, description=$3, h1=$4, seo_title=$5, seo_description=$6,
           price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
-          photos=$14::jsonb, attributes=$15::jsonb, ai_processed=$16, batch_id=$17,
-          variant_group_key=$18, ai_error=$19, ai_confidence=$20, source_position=$21, updated_at=NOW()
-      WHERE id=$22 AND batch_id=$17
+          photos=$14::jsonb, slug=$15, photo_alts=$16::jsonb, attributes=$17::jsonb, ai_processed=$18, batch_id=$19,
+          variant_group_key=$20, ai_error=$21, ai_confidence=$22, source_position=$23, updated_at=NOW()
+      WHERE id=$24 AND batch_id=$19
       RETURNING id
     `, [
       normalized.external_id,
@@ -605,6 +605,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       normalized.subcategory || null,
       normalized.gender,
       JSON.stringify(normalized.photos || []),
+      normalized.slug || null,
+      JSON.stringify(normalized.photo_alts || []),
       JSON.stringify(normalized.attributes || {}),
       normalized.ai_processed === true || normalized.ai_processed === 'true',
       batchId,
@@ -618,8 +620,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
+    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, slug, photo_alts, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23,NOW(),NOW())
     ON CONFLICT (batch_id, external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -634,6 +636,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       subcategory = EXCLUDED.subcategory,
       gender = EXCLUDED.gender,
       photos = EXCLUDED.photos,
+      slug = EXCLUDED.slug,
+      photo_alts = EXCLUDED.photo_alts,
       attributes = EXCLUDED.attributes,
       ai_processed = EXCLUDED.ai_processed,
       variant_group_key = EXCLUDED.variant_group_key,
@@ -657,6 +661,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
     normalized.subcategory || null,
     normalized.gender,
     JSON.stringify(normalized.photos || []),
+    normalized.slug || null,
+    JSON.stringify(normalized.photo_alts || []),
     JSON.stringify(normalized.attributes || {}),
     normalized.ai_processed === true || normalized.ai_processed === 'true',
     batchId,

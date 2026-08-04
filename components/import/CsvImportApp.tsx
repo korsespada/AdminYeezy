@@ -41,6 +41,7 @@ import {
   Link2,
   Search,
   Unlink,
+  FileText,
 } from "lucide-react";
 import {
   fetchLookupsAction,
@@ -61,6 +62,7 @@ import { pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/supp
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import {
   getBatchAiRunAction,
+  getBatchAiRunLogsAction,
   getBatchAiSuggestionsAction,
   getBatchMediaSeoStatusAction,
   getLatestBatchAiRunAction,
@@ -109,6 +111,34 @@ function attributeValuesForDisplay(value: unknown) {
 function approvedVariantGroupKey(product: CsvProduct) {
   const key = String(product.variant_group_key || "").trim();
   return /^[0-9a-f]{32}$/i.test(key) ? key : "";
+}
+
+function AiQueuePhoto({ photo }: { photo: unknown }) {
+  const source = typeof photo === "string" ? photo.trim() : "";
+  const candidates = useMemo(() => {
+    if (!/^https?:\/\//i.test(source)) return [];
+    return [...new Set([
+      source,
+      resizeImageUrl(source, imagePresets.productTable),
+    ].filter(Boolean))];
+  }, [source]);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const candidate = candidates[candidateIndex];
+
+  if (!candidate) {
+    return <Sparkles className="absolute inset-0 m-auto h-5 w-5 text-slate-600" />;
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={candidate}
+      alt=""
+      loading="lazy"
+      className="h-full w-full object-cover"
+      onError={() => setCandidateIndex((index) => index + 1)}
+    />
+  );
 }
 
 // ─── CSV Parsing ───────────────────────────────────────────────────────
@@ -529,6 +559,10 @@ export default function CsvImportApp({
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [aiQueue, setAiQueue] = useState<any[]>([]);
   const [latestAiRun, setLatestAiRun] = useState<any | null>(null);
+  const [activeAiRunMode, setActiveAiRunMode] = useState<string | null>(null);
+  const [aiLogs, setAiLogs] = useState<any[]>([]);
+  const [showAiLogs, setShowAiLogs] = useState(false);
+  const [isLoadingAiLogs, setIsLoadingAiLogs] = useState(false);
   const [canGenerateMediaSeo, setCanGenerateMediaSeo] = useState(false);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
@@ -748,6 +782,28 @@ export default function CsvImportApp({
     setAiSuggestions(result.success ? result.data || [] : []);
   }, []);
 
+  const toggleAiLogs = useCallback(async () => {
+    if (showAiLogs) {
+      setShowAiLogs(false);
+      return;
+    }
+    const runId = activeAiRunId || latestAiRun?.id;
+    if (!runId) return;
+    setShowAiLogs(true);
+    setIsLoadingAiLogs(true);
+    try {
+      const result = await getBatchAiRunLogsAction(String(runId));
+      setAiLogs(result.success ? result.data || [] : []);
+    } finally {
+      setIsLoadingAiLogs(false);
+    }
+  }, [activeAiRunId, latestAiRun?.id, showAiLogs]);
+
+  const isMediaSeoRun = activeAiRunMode
+    ? activeAiRunMode === "media_seo"
+    : latestAiRun?.mode === "media_seo";
+  const mediaSeoRunFinished = isMediaSeoRun && ["completed", "failed", "cancelled"].includes(String(latestAiRun?.status || ""));
+
   // Filtered products for display
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
@@ -912,6 +968,7 @@ export default function CsvImportApp({
         setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
         const run: any = runResult.success ? runResult.data : null;
         setLatestAiRun(run);
+        setActiveAiRunMode(run?.mode || null);
         const running = Boolean(run && ["preparing", "queued", "running"].includes(run.status));
         setActiveAiRunId(running ? String(run.id) : null);
         setIsProcessing(running);
@@ -1066,6 +1123,8 @@ export default function CsvImportApp({
     if (targetBatchId) {
       setIsProcessing(true);
       try {
+        setShowAiLogs(false);
+        setAiLogs([]);
         if (isSnapshotSource) {
           setBatchId(targetBatchId);
           setActiveSnapshotId(null);
@@ -1073,6 +1132,7 @@ export default function CsvImportApp({
         }
         const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
         const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
+        setActiveAiRunMode(mode);
         const result = mode === "media_seo"
           ? await startBatchMediaSeoAction(targetBatchId)
           : await startBatchAiAction(targetBatchId, mode, selectedProductIds);
@@ -2013,25 +2073,48 @@ export default function CsvImportApp({
           </div>
         )}
 
-        {isBatchSource && isProcessing && aiProgress && (
+        {isBatchSource && ((isProcessing && aiProgress) || (showAiLogs && isMediaSeoRun) || mediaSeoRunFinished) && (
           <div className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2 font-bold text-white">
                   <Sparkles className="h-4 w-4 text-indigo-300" />
-                  Очередь обработки ИИ
+                  {isMediaSeoRun ? "Очередь alt + slug" : "Очередь обработки ИИ"}
                 </div>
-                <div className="mt-1 text-xs text-slate-400">
-                  Завершено {aiProgress.current} из {aiProgress.total}
-                  {aiProgress.failed > 0 ? ` · ошибок ${aiProgress.failed}` : ""}
-                  {` · осталось ${Math.max(0, aiProgress.total - aiProgress.current)}`}
-                </div>
+                {aiProgress ? (
+                  <div className="mt-1 text-xs text-slate-400">
+                    Завершено {aiProgress.current} из {aiProgress.total}
+                    {aiProgress.failed > 0 ? ` · ошибок ${aiProgress.failed}` : ""}
+                    {` · осталось ${Math.max(0, aiProgress.total - aiProgress.current)}`}
+                  </div>
+                ) : latestAiRun ? (
+                  <div className="mt-1 text-xs text-slate-400">
+                    {isMediaSeoRun ? "Генерация alt + slug завершена" : "Запуск завершён"}: {latestAiRun.completed_count || 0} из {latestAiRun.total_count || 0}
+                    {latestAiRun.failed_count > 0 ? ` · ошибок ${latestAiRun.failed_count}` : ""}
+                  </div>
+                ) : null}
               </div>
-              <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-900">
-                <div
-                  className="h-full rounded-full bg-indigo-500 transition-all"
-                  style={{ width: `${aiProgress.total ? Math.min(100, aiProgress.current / aiProgress.total * 100) : 0}%` }}
-                />
+              <div className="flex items-center gap-2">
+                {isMediaSeoRun && (
+                  <button
+                    type="button"
+                    onClick={toggleAiLogs}
+                    disabled={!activeAiRunId && !latestAiRun?.id}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-400/30 px-2.5 py-1.5 text-xs font-bold text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+                    title="Открыть журнал генерации alt и slug"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    {showAiLogs ? "Скрыть логи" : "Логи alt + slug"}
+                  </button>
+                )}
+                {aiProgress && (
+                  <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-900">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all"
+                      style={{ width: `${aiProgress.total ? Math.min(100, aiProgress.current / aiProgress.total * 100) : 0}%` }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
             {aiQueue.length > 0 && (
@@ -2040,15 +2123,36 @@ export default function CsvImportApp({
                   const photo = Array.isArray(item.photos) ? item.photos[0] : null;
                   return (
                     <div key={`${item.product_id}-${item.status}`} className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-600 bg-slate-900" title={item.name || item.external_id}>
-                      {photo ? (
-                        <Image src={resizeImageUrl(photo, imagePresets.productTable)} alt="" fill sizes="64px" className="object-cover" />
-                      ) : (
-                        <Sparkles className="absolute inset-0 m-auto h-5 w-5 text-slate-600" />
-                      )}
+                      <AiQueuePhoto photo={photo} />
                       <span className={`absolute bottom-1 right-1 h-2 w-2 rounded-full ${item.status === "running" ? "animate-pulse bg-emerald-400" : "bg-amber-400"}`} />
                     </div>
                   );
                 })}
+              </div>
+            )}
+            {showAiLogs && (
+              <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950/70 p-3 text-xs">
+                {isLoadingAiLogs ? (
+                  <div className="text-slate-500">Загружаю журнал…</div>
+                ) : aiLogs.length === 0 ? (
+                  <div className="text-slate-500">Записей пока нет.</div>
+                ) : (
+                  <div className="space-y-1.5 font-mono">
+                    {aiLogs.map((item) => (
+                      <div key={`${item.product_id}-${item.created_at}`} className="flex flex-wrap gap-x-2 gap-y-0.5 border-b border-slate-800 pb-1.5 last:border-0">
+                        <span className={item.status === "failed" ? "text-red-300" : item.status === "completed" ? "text-emerald-300" : "text-amber-300"}>
+                          {item.status}
+                        </span>
+                        <span className="text-slate-300">#{item.product_id || "?"}</span>
+                        <span className="text-slate-400">{item.external_id || item.name || "без ID"}</span>
+                        {item.status === "completed" && item.slug && (
+                          <span className="text-indigo-200">slug: {item.slug} · alt: {Array.isArray(item.photo_alts) ? item.photo_alts.length : 0}</span>
+                        )}
+                        {item.error_message && <span className="text-red-300">— {item.error_message}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

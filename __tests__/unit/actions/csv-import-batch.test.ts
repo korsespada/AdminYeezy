@@ -110,6 +110,8 @@ describe('batch product server actions', () => {
         brand: 'brand-id',
         category: 'cat-id',
         photos: ['a.jpg'],
+        slug: 'brand-model-black-ext-1',
+        photo_alts: ['Черные кроссовки Brand Model, вид сбоку'],
         ai_processed: true,
         attributes: { color: 'black', sizes: ['M', 'L'] },
       },
@@ -124,8 +126,12 @@ describe('batch product server actions', () => {
     expect(mocks.client.query).toHaveBeenLastCalledWith('COMMIT')
     expect(mocks.client.release).toHaveBeenCalled()
     expect(mocks.client.query).toHaveBeenCalledWith(
-      expect.stringContaining('attributes=$15::jsonb'),
-      expect.arrayContaining([JSON.stringify({ color: 'black', sizes: ['M', 'L'] })]),
+      expect.stringContaining('attributes=$17::jsonb'),
+      expect.arrayContaining([
+        'brand-model-black-ext-1',
+        JSON.stringify(['Черные кроссовки Brand Model, вид сбоку']),
+        JSON.stringify({ color: 'black', sizes: ['M', 'L'] }),
+      ]),
     )
   })
 
