@@ -8,29 +8,35 @@ import { imagePresets, resizeImageUrl } from '@/lib/image'
 
 export default function ProductPhotoGallery({
   photos,
+  altTexts,
   onChange,
+  onMove,
   onRemove,
   onDownload,
   emptyText = 'Нет фото',
 }: {
   photos: string[]
+  altTexts?: string[]
   onChange?: (photos: string[]) => void
+  onMove?: (fromIndex: number, toIndex: number) => void
   onRemove?: (index: number) => void
   onDownload?: (url: string, index: number) => void
   emptyText?: string
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
-  const editable = Boolean(onChange)
+  const editable = Boolean(onChange || onMove)
 
   const movePhoto = (event: React.DragEvent, targetIndex: number) => {
     event.preventDefault()
-    if (!onChange || draggedIndex === null || draggedIndex === targetIndex) return
+    if ((!onChange && !onMove) || draggedIndex === null || draggedIndex === targetIndex) return
     const next = [...photos]
     const [dragged] = next.splice(draggedIndex, 1)
     next.splice(targetIndex, 0, dragged)
+    const sourceIndex = draggedIndex
     setDraggedIndex(targetIndex)
-    onChange(next)
+    if (onMove) onMove(sourceIndex, targetIndex)
+    else onChange?.(next)
   }
 
   if (!photos.length) {
@@ -40,43 +46,47 @@ export default function ProductPhotoGallery({
   return (
     <>
       <div className="grid grid-cols-5 gap-2">
-        {photos.map((url, index) => (
-          <div
-            key={`${url}-${index}`}
-            draggable={editable}
-            onDragStart={() => setDraggedIndex(index)}
-            onDragOver={(event) => movePhoto(event, index)}
-            onDragEnd={() => setDraggedIndex(null)}
-            className={`group relative aspect-square min-w-0 overflow-hidden rounded-lg border bg-slate-950 transition ${editable ? 'cursor-move' : ''} ${draggedIndex === index ? 'border-indigo-400 opacity-50' : 'border-slate-700 hover:border-slate-500'}`}
-          >
-            <Image
-              src={resizeImageUrl(url, imagePresets.productForm)}
-              alt={`Фото товара ${index + 1}`}
-              fill
-              sizes="(max-width: 640px) 20vw, 130px"
-              loading={index < 5 ? 'eager' : 'lazy'}
-              className="object-cover"
-              unoptimized
-            />
-            {editable && <span className="absolute left-1 top-1 rounded bg-slate-950/75 p-0.5 text-white"><GripVertical className="h-3 w-3" /></span>}
-            <button
-              type="button"
-              onClick={(event) => { event.stopPropagation(); setLightboxIndex(index) }}
-              className="absolute bottom-1 left-1 rounded bg-slate-950/80 p-1 text-white shadow hover:bg-indigo-600"
-              title="Открыть полное фото"
-              aria-label={`Открыть фото ${index + 1} полностью`}
+        {photos.map((url, index) => {
+          const altText = altTexts?.[index] || `Фото товара ${index + 1}`
+          return (
+            <div
+              key={`${url}-${index}`}
+              draggable={editable}
+              onDragStart={() => setDraggedIndex(index)}
+              onDragOver={(event) => movePhoto(event, index)}
+              onDragEnd={() => setDraggedIndex(null)}
+              className={`group relative aspect-square min-w-0 overflow-hidden rounded-lg border bg-slate-950 transition ${editable ? 'cursor-move' : ''} ${draggedIndex === index ? 'border-indigo-400 opacity-50' : 'border-slate-700 hover:border-slate-500'}`}
+              title={altText}
             >
-              <Maximize2 className="h-3 w-3" />
-            </button>
-            {(onRemove || onDownload) && (
-              <div className="absolute right-1 top-1 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                {onRemove && <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(index) }} className="rounded bg-red-600 p-1 text-white shadow hover:bg-red-500" title="Удалить фото"><Trash2 className="h-3 w-3" /></button>}
-                {onDownload && <button type="button" onClick={(event) => { event.stopPropagation(); onDownload(url, index) }} className="rounded bg-slate-800 p-1 text-white shadow hover:bg-slate-700" title="Скачать исходное фото"><Download className="h-3 w-3" /></button>}
-              </div>
-            )}
-            <span className="absolute bottom-1 right-1 rounded bg-slate-950/75 px-1.5 py-0.5 text-[10px] text-white">{index + 1}</span>
-          </div>
-        ))}
+              <Image
+                src={resizeImageUrl(url, imagePresets.productForm)}
+                alt={altText}
+                fill
+                sizes="(max-width: 640px) 20vw, 130px"
+                loading={index < 5 ? 'eager' : 'lazy'}
+                className="object-cover"
+                unoptimized
+              />
+              {editable && <span className="absolute left-1 top-1 rounded bg-slate-950/75 p-0.5 text-white"><GripVertical className="h-3 w-3" /></span>}
+              <button
+                type="button"
+                onClick={(event) => { event.stopPropagation(); setLightboxIndex(index) }}
+                className="absolute bottom-1 left-1 rounded bg-slate-950/80 p-1 text-white shadow hover:bg-indigo-600"
+                title="Открыть полное фото"
+                aria-label={`Открыть фото ${index + 1} полностью`}
+              >
+                <Maximize2 className="h-3 w-3" />
+              </button>
+              {(onRemove || onDownload) && (
+                <div className="absolute right-1 top-1 flex flex-col gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                  {onRemove && <button type="button" onClick={(event) => { event.stopPropagation(); onRemove(index) }} className="rounded bg-red-600 p-1 text-white shadow hover:bg-red-500" title="Удалить фото"><Trash2 className="h-3 w-3" /></button>}
+                  {onDownload && <button type="button" onClick={(event) => { event.stopPropagation(); onDownload(url, index) }} className="rounded bg-slate-800 p-1 text-white shadow hover:bg-slate-700" title="Скачать исходное фото"><Download className="h-3 w-3" /></button>}
+                </div>
+              )}
+              <span className="absolute bottom-1 right-1 rounded bg-slate-950/75 px-1.5 py-0.5 text-[10px] text-white">{index + 1}</span>
+            </div>
+          )
+        })}
       </div>
       {lightboxIndex !== null && createPortal(
         <PhotoLightbox

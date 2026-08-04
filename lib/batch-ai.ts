@@ -12,6 +12,7 @@ import {
   inferClothingSubcategoryName,
 } from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleFor } from '@/lib/batch-ai-category-rules'
+import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -87,13 +88,13 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 Требования:
 - Пиши по-русски, без китайских иероглифов, эмодзи, рекламных обещаний и упоминаний реплики.
 - name: кратко «Бренд + тип/модель товара», без артикула.
+- photo_alts: если переданы фотографии, верни ровно один короткий alt на каждую исходную фотографию в исходном порядке, включая кадры, которые предлагаешь исключить. Целевая длина 60–120 символов, жёсткий максимум 160 символов. Пиши по-русски: товар, ракурс и 1–2 видимые детали, без рекламных обещаний и неподтверждённых свойств.
 - description: содержательное описание обычно 350–700 знаков. Сохраняй подтверждённые детали дизайна, формы, цвета, отделки, застёжек, материалов и размеров; разделяй смысловые части не более чем двумя одиночными переносами.
 - h1, seo_title и seo_description должны быть естественными, полезными для поиска и без keyword stuffing.
 - Не сообщай покупателю, что факт неизвестен или не удалось определить: просто не упоминай его.
 - Не начинай текст словами «на фото видно», «на фотографиях представлено», «исходный текст» и подобными служебными фразами.
 - Не используй слова «оригинал», «официальный», «лучший», «премиальный» или «трендовый» и не делай заявлений о подлинности.
 - Внутренние артикулы не являются моделью и не должны попадать в публичные тексты.
-- Коды сезона и коллекции вроде 24B, 25C и 26C не являются моделью и не должны попадать в model_name.
 - Каждый подтверждённый материал перенеси и в description, и в подходящий атрибут.
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
 - model_name — свободное каноничное название конкретной линейки/модели. При низкой уверенности оставь пустым.
@@ -105,7 +106,7 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
 - Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
-- Отметь рекламные, нерелевантные и дублирующиеся изображения для исключения. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры в sizes, а замеры изделия — в measurements.
+- Исключай только рекламные, нерелевантные, дублирующиеся кадры и фото таблиц размеров/замеров. Если основной товар лежит рядом с упаковкой или другим товаром, но сам хорошо виден и остаётся главным объектом кадра, не исключай его. Исключай упаковку или другой товар только когда они доминируют в кадре либо делают продаваемый товар неясным. Исключай кадры с крупным наложенным текстом поверх фото: цена, акция, призыв, рекламная надпись на китайском, английском или любом другом языке; мелкий логотип товара или ненавязчивый водяной знак не исключай. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры в sizes, а замеры изделия — в measurements.
 - measurements заполняй только по явно читаемой таблице или тексту и только объектом {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. В columns оставляй только реально указанные параметры: для одежды length/Длина, chest/Обхват груди, shoulders/Плечи, sleeve/Рукав, waist/Талия, hips/Бёдра, rise/Посадка, inseam/Шаговый шов; для обуви insole_length/Длина стельки, foot_length/Длина стопы, width/Ширина, instep/Подъём, shaft_height/Высота голенища. Не смешивай таблицы разных товаров, не достраивай отсутствующие размеры и не пересчитывай значения.
 - Для цветового семейства group_signature описывает неизменяемую основу товара и НИКОГДА не содержит цвет.
 - В group_signature обязательно включи бренд, точную модель/конструкцию, размер самого товара, материал и фурнитуру. Цвет верни только в отдельном поле color.
@@ -117,8 +118,6 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 
 export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные правила каталога для всех категорий:
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
-- Атрибут stones предназначен только для ювелирных изделий и бижутерии. Стразы, кристаллы и декоративные вставки на обуви, одежде или сумках описывай как декор в description, но никогда не записывай в stones и не предлагай stones как новый атрибут.
-- Коды сезона и коллекции вроде 24B, 25C и 26C не являются model_name. Если точная коммерческая модель неизвестна, оставь model_name пустым.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
 
 Глобальные правила сверки текста с фотографиями:
@@ -129,7 +128,7 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Если фотографии переданы, description должен дополнять скудный исходный текст подтверждёнными визуальными деталями, а не просто пересказывать его. Опиши не менее четырёх информативных признаков, когда они различимы: тип и силуэт, форму, фактуру и цвет, конструкцию, застёжку или шнуровку, подошву и каблук, фурнитуру и декор. Для обуви отдельно учитывай форму мыска, высоту голенища, тип подошвы/каблука и способ фиксации. Не выдумывай скрытые свойства и точный состав материала.
 - При наличии нескольких информативных фотографий делай description содержательным, обычно 350–700 знаков. Не сокращай его до одной общей фразы, даже если исходное китайское описание короткое.
 - Не добавляй рекламные и неподтверждённые фразы вроде «идеальный выбор», «обеспечивает комфорт», «гарантирует устойчивость», «универсальное дополнение» или «купить».
-- Не смешивай признаки разных товаров. Если кадр явно относится к другому товару, рекламе или упаковке, исключи его через media.discard_indexes.
+- Не смешивай признаки разных товаров. Если основной товар лежит рядом с упаковкой или другим товаром, но явно является главным объектом, оставь кадр и описывай только его. Исключи кадр через media.discard_indexes, только если другой товар, упаковка или реклама доминируют и делают основной товар неясным; также исключай изображения с крупным наложенным рекламным/информационным текстом, ценой, акцией или призывом на любом языке. Не исключай из-за небольшого логотипа или водяного знака.
 - Таблицу замеров сохраняй в catalog_attributes.measurements строго как {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. Одна строка соответствует одному размеру; один параметр — одной колонке. Используй только читаемые значения и не объединяй замеры разных товаров.
 - При противоречии текста и фотографий или плохо читаемой таблице запроси через inspect_full_size_indexes до трёх наиболее информативных оригиналов, если они помогут уточнить модель, логотип, конструкцию или замеры.`
 
@@ -167,6 +166,7 @@ export function buildBatchAiUserPrompt(input: {
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
         gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
       },
+      photo_alts: [],
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
       subcategory_suggestion: null,
@@ -621,11 +621,30 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const photos = Array.isArray(original.photos)
     ? original.photos.filter((_: string, index: number) => !discard.has(index + 1) && !sizeCharts.has(index + 1))
     : []
+  const photoAlts = normalizeRetainedPhotoAlts(
+    raw?.photo_alts || proposed.photo_alts,
+    Array.isArray(original.photos) ? original.photos.length : 0,
+    discard,
+    sizeCharts,
+    String(proposed.name || original.name || '').trim(),
+  )
   let subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
   const proposedCategory = choose(proposed.category, input.categoryIds, original.category)
   const parentCategory = subcategory ? input.subcategoryParents?.get(subcategory) : undefined
   const category = parentCategory && input.categoryIds.has(parentCategory) ? parentCategory : proposedCategory
   const normalizedName = (value: unknown) => String(value || '').trim().toLowerCase().replace(/ё/g, 'е')
+  const categoryAndSubcategoryName = [
+    input.categoryNames?.get(category),
+    input.subcategoryNames?.get(subcategory),
+  ].map(normalizedName).join(' ')
+  if (attributes.stones !== undefined && !/(ювелир|бижутер)/i.test(categoryAndSubcategoryName)) {
+    delete attributes.stones
+    for (let index = suggestions.length - 1; index >= 0; index -= 1) {
+      if (canonicalBatchSuggestionKey(suggestions[index]?.code || suggestions[index]?.label, 'attribute') === 'stones') {
+        suggestions.splice(index, 1)
+      }
+    }
+  }
   if (normalizedName(input.categoryNames?.get(category)) === 'сумки') {
     const selectedName = normalizedName(input.subcategoryNames?.get(subcategory))
     const shoulderBags = [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
@@ -743,6 +762,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       subcategory,
       gender: ['male', 'female', 'unisex'].includes(String(proposed.gender)) ? proposed.gender : original.gender,
       photos: photos.length > 0 ? photos : original.photos,
+      photo_alts: photoAlts,
       attributes,
       ai_processed: true,
       ai_error: null,

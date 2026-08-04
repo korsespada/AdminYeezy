@@ -57,6 +57,7 @@ import {
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup } from '@/lib/byesu'
+import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -274,16 +275,64 @@ async function snapshotBatch(batchId: string, stage: string, label: string, sett
   return recordBatchSnapshot(batchId, stage, label, settings)
 }
 
-function priceRuleHints(rules: any[]) {
+function scalarPriceRuleValues(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(scalarPriceRuleValues)
+  if (value && typeof value === 'object') {
+    return scalarPriceRuleValues((value as any).value ?? (value as any).values ?? (value as any).display_value ?? [])
+  }
+  return value === undefined || value === null ? [] : [String(value).trim().toLowerCase()]
+}
+
+function priceRuleConditionMatchesKnownProductValue(product: any, key: string, expected: unknown) {
+  const actual = key.startsWith('attributes.')
+    ? product?.attributes?.[key.slice('attributes.'.length)]
+    : product?.[key]
+  const actualValues = scalarPriceRuleValues(actual).filter(Boolean)
+  if (!actualValues.length) return true
+  if (expected && typeof expected === 'object' && !Array.isArray(expected) && ('min' in expected || 'max' in expected)) {
+    const numbers = actualValues
+      .map((value) => Number(value.replace(',', '.').match(/-?\d+(?:\.\d+)?/)?.[0]))
+      .filter(Number.isFinite)
+    if (!numbers.length) return true
+    const min = Number((expected as any).min)
+    const max = Number((expected as any).max)
+    return numbers.some((value) =>
+      (!Number.isFinite(min) || value >= min) && (!Number.isFinite(max) || value <= max),
+    )
+  }
+  const expectedValues = scalarPriceRuleValues(expected).filter(Boolean)
+  return !expectedValues.length || expectedValues.some((value) => actualValues.includes(value))
+}
+
+function priceRuleCanApplyToKnownProduct(rule: any, product: any) {
+  return Object.entries(rule.conditions || {}).every(([key, expected]) =>
+    priceRuleConditionMatchesKnownProductValue(product, key, expected),
+  )
+}
+
+function priceRuleHints(rules: any[], product?: any) {
   return rules.map((rule) => ({
     rule_key: String(rule.rule_key || `rule_${rule.id}`),
     name: String(rule.name || ''),
     conditions: rule.conditions || {},
     visual_hint: String(rule.visual_hint || ''),
-    reference_images: Array.isArray(rule.reference_images) ? rule.reference_images.map(String).slice(0, 9) : [],
+    // Текстовые условия передаём всегда. Фото-эталоны не прикладываем, если
+    // уже известные поля товара явно противоречат правилу.
+    reference_images: priceRuleCanApplyToKnownProduct(rule, product)
+      ? (Array.isArray(rule.reference_images) ? rule.reference_images.map(String).slice(0, 9) : [])
+      : [],
     price: Number(rule.price || 0),
     priority: Number(rule.priority || 0),
   }))
+}
+
+function promptSubcategoriesForContext(context: any) {
+  if (context.categories.length === 1) {
+    const fixedCategoryId = String(context.categories[0].id)
+    const scoped = context.subcategories.filter((row: any) => String(row.parent_id || '') === fixedCategoryId)
+    if (scoped.length) return scoped
+  }
+  return context.subcategories
 }
 
 async function syncCurrentRailsCatalogMappings() {
@@ -318,7 +367,20 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo'
+
+const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь alt-тексты для каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: товар, видимый ракурс и 1–2 различимые детали. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
+
+function buildBatchMediaSeoPrompt(product: any, brandName: string, slug: string) {
+  return [
+    'Верни объект следующей формы:',
+    JSON.stringify({ photo_alts: [''] }),
+    'photo_alts должен содержать ровно по одному alt-тексту на каждую фотографию, в том же порядке, что и номера на contact sheet. Целевая длина каждого alt 60–120 символов, абсолютный максимум 160 символов.',
+    'Крупный рекламный текст, цены и промо на кадре не описывай.',
+    `Товар: ${JSON.stringify({ name: product.name, brand: brandName, attributes: product.attributes || {}, article: product.external_id })}`,
+    `Slug товара уже сформирован автоматически: ${slug}`,
+  ].join('\n\n')
+}
 
 function catalogName(value: unknown, entityType: string, mappings: CatalogIdMapping[]) {
   const raw = String(value || '').trim()
@@ -354,6 +416,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'reprocess') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'media_seo') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
@@ -475,11 +538,14 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   }))
   const allowedBrands = allowedIdsToCurrent(batch.rows[0].allowed_brand_ids, 'brand', brands)
   const allowedCategories = allowedIdsToCurrent(batch.rows[0].allowed_category_ids, 'category', categories)
+  const allowedSubcategories = allowedIdsToCurrent(batch.rows[0].allowed_subcategory_ids, 'subcategory', subcategories)
   return {
     batch: batch.rows[0], products: selectedProducts, definitions, mappings: mappings.rows,
     brands: allowedBrands ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
     categories: allowedCategories ? categories.filter((row) => allowedCategories.has(String(row.id))) : categories,
-    subcategories,
+    subcategories: allowedSubcategories
+      ? subcategories.filter((row) => allowedSubcategories.has(String(row.id)))
+      : subcategories,
     priceRules: priceRules.rows,
   }
 }
@@ -579,12 +645,14 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     )
     const snapshot = {
       ...settings,
-      systemPrompt: mode === 'variants'
+      systemPrompt: mode === 'media_seo'
+        ? MEDIA_SEO_SYSTEM_PROMPT
+        : mode === 'variants'
         ? 'Ты сравниваешь фотографии товаров и находишь только точные цветовые варианты одной физической модели. Не изменяй товары. Не объединяй по одному бренду или общему названию. Верни строго запрошенный JSON.'
         : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
     }
-    if (mode !== 'variants') {
+    if (!['variants', 'media_seo'].includes(mode)) {
       await snapshotBatch(
         batchId,
         context.batch.stage || 'SCRAPED',
@@ -606,8 +674,6 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         : context.products.length,
     ])
 
-    const priceRules = mode === 'variants' ? [] : priceRuleHints(context.priceRules)
-    const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
     if (mode === 'variants' && variantPlan) {
       const client = await getScrapingClient()
       try {
@@ -695,14 +761,23 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
             })()
           : product
         const attributeDefinitions = productAttributeDefinitions(product, context)
-        const userPrompt = buildBatchAiUserPrompt({
+        const brandName = catalogName(product.brand, 'brand', context.mappings)
+        const generatedSlug = buildProductSeoSlug(product, brandName)
+        const promptSubcategories = promptSubcategoriesForContext(context)
+        const priceRules = mode === 'variants' || mode === 'media_seo' || mode === 'recover_measurements'
+          ? []
+          : priceRuleHints(context.priceRules, promptProduct)
+        const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
+        const userPrompt = mode === 'media_seo'
+          ? buildBatchMediaSeoPrompt(promptProduct, brandName, generatedSlug)
+          : buildBatchAiUserPrompt({
           product: promptProduct,
           supplierInstructions: mode === 'recover_measurements'
             ? `${supplierInstructions}\nРЕЖИМ ВОССТАНОВЛЕНИЯ ЗАМЕРОВ: на приложенных фото находится таблица размеров именно для этого товара. Распознай её и заполни catalog_attributes.measurements. Не меняй название, описание, цену, классификацию, цвет, материалы и публичную галерею.`.trim()
             : supplierInstructions,
           brands: context.brands,
           categories: context.categories,
-          subcategories: context.subcategories,
+          subcategories: promptSubcategories,
           attributes: attributeDefinitions,
           priceRules,
         })
@@ -712,15 +787,17 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
           product: promptProduct, userPrompt, systemPrompt: snapshot.systemPrompt,
           variantScanOnly: false,
+          mediaSeoOnly: mode === 'media_seo',
+          generatedSlug,
           measurementRecoveryOnly: mode === 'recover_measurements',
           measurementTargetProductIds,
-          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : context.batch.ai_photo_enabled ? product.photos || [] : [],
-          photoEnabled: mode === 'recover_measurements' || context.batch.ai_photo_enabled === true,
-          fullSizeRefinementEnabled: mode === 'recover_measurements' || (context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
+          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : mode === 'media_seo' ? product.photos || [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
+          photoEnabled: mode === 'recover_measurements' || mode === 'media_seo' || context.batch.ai_photo_enabled === true,
+          fullSizeRefinementEnabled: mode === 'recover_measurements' || (mode !== 'media_seo' && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
           brands: context.brands,
           categories: context.categories,
-          subcategories: context.subcategories,
+          subcategories: promptSubcategories,
           attributeCodes: attributeDefinitions.map((item: any) => item.code),
           knownAttributeCodes: context.definitions.map((item: any) => item.code),
           attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
@@ -804,6 +881,29 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
   }
 }
 
+async function isLatestBatch(batchId: string) {
+  const latest = await scrapingQuery(`
+    SELECT id FROM scraping_batches
+    WHERE COALESCE(stage, '') <> 'ADMIN_DELETED'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `)
+  return String(latest.rows[0]?.id || '') === String(batchId)
+}
+
+export async function getBatchMediaSeoStatusAction(batchId: string) {
+  await requireAdmin()
+  return { success: true, data: { allowed: await isLatestBatch(batchId) } }
+}
+
+export async function startBatchMediaSeoAction(batchId: string) {
+  await requireAdmin()
+  if (!await isLatestBatch(batchId)) {
+    return { success: false, error: 'Alt и slug можно сгенерировать только для самой последней выгрузки' }
+  }
+  return startBatchAiAction(batchId, 'media_seo')
+}
+
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
   const items = await scrapingQuery("SELECT * FROM batch_ai_items WHERE run_id=$1 AND status='queued' ORDER BY created_at", [runId])
   let cursor = 0
@@ -853,7 +953,9 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       })
       rawOutput = raw
     }
-    let normalized: any = input.variantScanOnly
+    let normalized: any = input.mediaSeoOnly
+      ? normalizeMediaSeoOutput(raw, input)
+      : input.variantScanOnly
       ? variantScanResult(raw, input)
       : normalizeBatchAiOutput(raw, {
       product: input.product,
@@ -882,7 +984,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         rawOutput = repairedRaw
       }
     }
-    if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
+    if (input.mediaSeoOnly) await applyCompletedMediaSeoItem(item, normalized)
+    else if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
     else await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
     const failed = await scrapingQuery(`
@@ -891,7 +994,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
       RETURNING i.product_id
     `, [item.id, String(error.message || error).slice(0, 4000), JSON.stringify(rawOutput ?? null)])
-    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly) {
+    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly && !item.input_snapshot?.mediaSeoOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
   } finally {
@@ -979,6 +1082,33 @@ async function applyCompletedVariantScan(item: any, normalized: any) {
   }
 }
 
+async function applyCompletedMediaSeoItem(item: any, normalized: any) {
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
+    await client.query(`
+      UPDATE products SET slug=$2,photo_alts=$3::jsonb,updated_at=NOW()
+      WHERE id=$1
+    `, [item.product_id, normalized.slug, JSON.stringify(normalized.photo_alts || [])])
+    await client.query(`
+      UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,
+        completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1
+    `, [item.id, JSON.stringify(normalized)])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
 async function applyCompletedItem(item: any, normalized: any, context: any) {
   const product = normalized.product
   const measurementRecoveryOnly = item.input_snapshot?.measurementRecoveryOnly === true
@@ -998,6 +1128,9 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
       product.price = Number(context.batch.default_price)
       product.price_source = 'default'
     }
+  }
+  if (!String(item.input_snapshot?.product?.slug || '').trim()) {
+    product.slug = buildProductSeoSlug(product, catalogName(product.brand, 'brand', context.mappings))
   }
   const client = await getScrapingClient()
   try {
@@ -1027,15 +1160,15 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
     }
     await client.query(`
       UPDATE products SET
-        name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
-        brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,
-        attributes=$12::jsonb,price=$13,price_source=$14,ai_processed=true,
-        ai_error=NULL,ai_confidence=$15,updated_at=NOW()
+        name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
+        brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,
+        photo_alts=$13::jsonb,attributes=$14::jsonb,price=$15,price_source=$16,ai_processed=true,
+        ai_error=NULL,ai_confidence=$17,updated_at=NOW()
       WHERE id=$1
     `, [
       item.product_id, product.name, product.description, product.h1, product.seo_title,
-      product.seo_description, product.brand, product.category, product.subcategory || null,
-      product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.attributes || {}),
+      product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
+      product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
       Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence,
     ])
     await client.query(`
@@ -1078,7 +1211,7 @@ async function finalizeRun(runId: string) {
         return
       }
       let promoteBatch = false
-      if (currentRun?.mode !== 'variants') {
+      if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
         const remaining = await scrapingQuery(`
           SELECT 1 FROM products
           WHERE batch_id=$1 AND COALESCE(ai_processed, false)=false
@@ -1089,7 +1222,7 @@ async function finalizeRun(runId: string) {
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
       }
-      if (currentRun?.mode !== 'variants') {
+      if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
         await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
       }
     } finally {

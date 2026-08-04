@@ -19,4 +19,32 @@ describe('ProductPhotoGallery', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  it('shows the generated alt text as a photo hint', () => {
+    render(
+      <ProductPhotoGallery
+        photos={['https://example.com/one.jpg']}
+        altTexts={['Черные кроссовки Gucci, вид сбоку']}
+      />,
+    )
+
+    expect(screen.getByAltText('Черные кроссовки Gucci, вид сбоку')).toBeInTheDocument()
+    expect(screen.getByAltText('Черные кроссовки Gucci, вид сбоку').parentElement).toHaveAttribute('title', 'Черные кроссовки Gucci, вид сбоку')
+  })
+
+  it('reports photo moves so the caller can reorder alt texts with the photos', () => {
+    const onMove = vi.fn()
+    render(
+      <ProductPhotoGallery
+        photos={['https://example.com/one.jpg', 'https://example.com/two.jpg']}
+        altTexts={['Первое фото', 'Второе фото']}
+        onMove={onMove}
+      />,
+    )
+
+    fireEvent.dragStart(screen.getByAltText('Первое фото').parentElement!)
+    fireEvent.dragOver(screen.getByAltText('Второе фото').parentElement!)
+
+    expect(onMove).toHaveBeenCalledWith(0, 1)
+  })
 })

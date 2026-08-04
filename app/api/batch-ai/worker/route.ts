@@ -2,6 +2,8 @@ import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
+import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
 import {
@@ -102,7 +104,7 @@ async function complete(body: any) {
   // Правила из БД являются источником истины: очередь могла быть создана до
   // добавления/изменения правила, поэтому input_snapshot может быть устаревшим.
   const priceRules = storedRules.rows
-  const normalized: any = input.shadeFamilyScan ? {
+  const normalized: any = input.mediaSeoOnly ? normalizeMediaSeoOutput(body.output, input) : input.shadeFamilyScan ? {
     product: input.product,
     suggestions: [],
     subcategorySuggestion: null,
@@ -137,20 +139,24 @@ async function complete(body: any) {
     priceRuleKeys: new Set(priceRules.map((row: any) => String(row.rule_key))),
   })
   const product = normalized.product
+  if (!input.mediaSeoOnly && !input.variantScanOnly && !String(input.product?.slug || '').trim()) {
+    const brandName = (input.brands || []).find((row: any) => String(row.id) === String(product?.brand))?.name || product?.brand || ''
+    product.slug = buildProductSeoSlug(product, String(brandName))
+  }
   const measurementRecoveryOnly = input.measurementRecoveryOnly === true
   const recoveredMeasurements = product?.attributes?.measurements
   if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
-  if (!input.variantScanOnly && input.preserveExistingPrice) {
+  if (!input.mediaSeoOnly && !input.variantScanOnly && input.preserveExistingPrice) {
     product.price = Number(input.product?.price || 0)
     product.price_source = input.product?.price_source || 'legacy'
   } else {
-    const rule = input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
-    if (!input.variantScanOnly && rule) {
+    const rule = input.mediaSeoOnly || input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
+    if (!input.mediaSeoOnly && !input.variantScanOnly && rule) {
       product.price = Number(rule.price)
       product.price_source = 'rule'
-    } else if (!input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
+    } else if (!input.mediaSeoOnly && !input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
       product.price = Number(context.rows[0].default_price)
       product.price_source = 'default'
     }
@@ -163,7 +169,12 @@ async function complete(body: any) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'run_cancelled' }, { status: 409 })
     }
-    if (measurementRecoveryOnly) {
+    if (input.mediaSeoOnly) {
+      await client.query(`
+        UPDATE products SET slug=$2,photo_alts=$3::jsonb,updated_at=NOW()
+        WHERE id=$1
+      `, [item.product_id, normalized.slug, JSON.stringify(normalized.photo_alts || [])])
+    } else if (measurementRecoveryOnly) {
       const targetIds = [...new Set((input.measurementTargetProductIds || [])
         .map(Number)
         .filter(Number.isInteger))]
@@ -176,20 +187,20 @@ async function complete(body: any) {
       `, [item.batch_id, JSON.stringify(recoveredMeasurements), targetIds])
     } else if (!input.variantScanOnly) {
       await client.query(`
-        UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
-          brand=$7,category=$8,subcategory=$9,gender=$10,photos=$11::jsonb,attributes=$12::jsonb,
-          price=$13,price_source=$14,ai_processed=true,ai_error=NULL,ai_confidence=$15,updated_at=NOW()
+        UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
+          brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,photo_alts=$13::jsonb,attributes=$14::jsonb,
+          price=$15,price_source=$16,ai_processed=true,ai_error=NULL,ai_confidence=$17,updated_at=NOW()
         WHERE id=$1
       `, [item.product_id, product.name, product.description, product.h1, product.seo_title,
-        product.seo_description, product.brand, product.category, product.subcategory || null,
-        product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.attributes || {}),
+        product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
+        product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
         Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence])
     }
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    if (measurementRecoveryOnly) {
+    if (input.mediaSeoOnly || measurementRecoveryOnly) {
       // В режиме восстановления меняется только таблица замеров товара.
     } else if (Array.isArray(normalized.shadeVariants)) {
       await applyShadeVariantsToSuggestion(client, item.run_id, normalized)
@@ -230,7 +241,7 @@ async function fail(body: any) {
       UPDATE batch_ai_items SET status='failed',error_message=$3,lease_token=NULL,completed_at=NOW(),updated_at=NOW()
       WHERE id=$1 AND lease_token=$2 RETURNING run_id,product_id,input_snapshot
     `, [body.item_id, body.lease_token, String(body.error || 'Cockpit error').slice(0, 4000)])
-    if (result.rows[0] && !result.rows[0].input_snapshot?.variantScanOnly && !result.rows[0].input_snapshot?.measurementRecoveryOnly) {
+    if (result.rows[0] && !result.rows[0].input_snapshot?.variantScanOnly && !result.rows[0].input_snapshot?.measurementRecoveryOnly && !result.rows[0].input_snapshot?.mediaSeoOnly) {
       await client.query('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [result.rows[0].product_id, String(body.error || '').slice(0, 4000)])
     }
     if (result.rows[0]) {
@@ -263,6 +274,7 @@ async function finalizeCockpitRun(runId: string) {
       if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, 'PUSHED', label, run.settings_snapshot)
       return
     }
+    if (run.mode === 'media_seo') return
     let promoteBatch = false
     if (run.mode !== 'variants') {
       const remaining = await scrapingQuery(`

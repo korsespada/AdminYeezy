@@ -140,6 +140,8 @@ async function init() {
         subcategory TEXT,
         gender TEXT,
         photos JSONB,
+        slug TEXT,
+        photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
         attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
         source_position INTEGER,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,

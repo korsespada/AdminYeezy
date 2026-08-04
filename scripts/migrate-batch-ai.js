@@ -49,6 +49,8 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS h1 TEXT,
         ADD COLUMN IF NOT EXISTS seo_title TEXT,
         ADD COLUMN IF NOT EXISTS seo_description TEXT,
+        ADD COLUMN IF NOT EXISTS slug TEXT,
+        ADD COLUMN IF NOT EXISTS photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'legacy',
         ADD COLUMN IF NOT EXISTS variant_group_key TEXT,
         ADD COLUMN IF NOT EXISTS ai_error TEXT,
@@ -89,6 +91,22 @@ async function migrate() {
     `)
     await client.query('CREATE INDEX IF NOT EXISTS batch_ai_runs_batch_created_idx ON batch_ai_runs(batch_id, created_at DESC)')
     await client.query('CREATE INDEX IF NOT EXISTS batch_ai_runs_status_idx ON batch_ai_runs(status, created_at)')
+    await client.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema=current_schema()
+            AND table_name='batch_ai_runs'
+            AND column_name='catalog_applied_at'
+        ) THEN
+          ALTER TABLE batch_ai_runs ADD COLUMN catalog_applied_at TIMESTAMPTZ;
+          UPDATE batch_ai_runs
+          SET catalog_applied_at=COALESCE(completed_at,NOW())
+          WHERE mode='media_seo' AND status='completed';
+        END IF;
+      END $$
+    `)
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS batch_ai_items (

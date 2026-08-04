@@ -25,6 +25,8 @@ export interface CsvProduct {
     h1?: string
     seo_title?: string
     seo_description?: string
+    slug?: string
+    photo_alts?: string[]
     price: number
     status: 'active' | 'inactive'
     brand: string
@@ -112,6 +114,8 @@ function normalizeBatchProduct(row: any): CsvProduct {
     h1: row.h1 || '',
     seo_title: row.seo_title || '',
     seo_description: row.seo_description || '',
+    slug: row.slug || '',
+    photo_alts: Array.isArray(row.photo_alts) ? row.photo_alts.map(String) : [],
     price: Number(row.price || 0),
     status: row.status === 'inactive' ? 'inactive' : 'active',
     brand: normalizeBrand(row.brand),

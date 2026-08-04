@@ -62,11 +62,13 @@ import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
+  getBatchMediaSeoStatusAction,
   getLatestBatchAiRunAction,
   getBatchSnapshotsAction,
   rollbackBatchAction,
   rollbackBatchProductAiAction,
   startBatchAiAction,
+  startBatchMediaSeoAction,
   stopBatchAiRunAction,
 } from "@/actions/batch-ai";
 import Image from "next/image";
@@ -527,6 +529,7 @@ export default function CsvImportApp({
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [aiQueue, setAiQueue] = useState<any[]>([]);
   const [latestAiRun, setLatestAiRun] = useState<any | null>(null);
+  const [canGenerateMediaSeo, setCanGenerateMediaSeo] = useState(false);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
 
@@ -613,6 +616,20 @@ export default function CsvImportApp({
       window.clearInterval(timer);
     };
   }, [isPushing, batchId, initialBatchId, products.length]);
+
+  useEffect(() => {
+    if (!batchId || isSnapshotSource) {
+      setCanGenerateMediaSeo(false);
+      return;
+    }
+    let cancelled = false;
+    getBatchMediaSeoStatusAction(batchId).then((result) => {
+      if (!cancelled) setCanGenerateMediaSeo(Boolean(result.success && result.data?.allowed));
+    }).catch(() => {
+      if (!cancelled) setCanGenerateMediaSeo(false);
+    });
+    return () => { cancelled = true; };
+  }, [batchId, isSnapshotSource]);
 
 
   // Unique values for filters (derived from all products)
@@ -716,6 +733,10 @@ export default function CsvImportApp({
     }
     return [...groups.entries()].sort((left, right) => right[1] - left[1]);
   }, [aiErrorProducts]);
+  const mediaSeoProducts = useMemo(
+    () => products.filter((product) => Boolean(product.slug) && Array.isArray(product.photo_alts) && product.photo_alts.length === product.photos.length),
+    [products],
+  );
   const canPublish = isBatchSource && ["SCRIPT_PROCESSED", "AI_PROCESSED"].includes(batchStage) && products.length > 0 && aiRemainingCount === 0;
   const pendingAiSuggestions = useMemo(
     () => aiSuggestions.filter((item) => item.status === "pending"),
@@ -1031,7 +1052,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess" | "recover_measurements", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess" | "recover_measurements" | "media_seo", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1052,12 +1073,16 @@ export default function CsvImportApp({
         }
         const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
         const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
-        const result = await startBatchAiAction(targetBatchId, mode, selectedProductIds);
+        const result = mode === "media_seo"
+          ? await startBatchMediaSeoAction(targetBatchId)
+          : await startBatchAiAction(targetBatchId, mode, selectedProductIds);
         if (result.success) {
           const data: any = result.data;
           if (data?.runId) {
             setActiveAiRunId(String(data.runId));
-            setSaveMsg(mode === "variants"
+            setSaveMsg(mode === "media_seo"
+              ? `Генерация alt и slug: в очереди ${data.queued}…`
+              : mode === "variants"
               ? `Пересборка цветовых семейств: визуальных групп ${data.queued}, по артикулам ${data.deterministic || 0}…`
               : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
@@ -1073,7 +1098,9 @@ export default function CsvImportApp({
                 failed: Number(finalRun.failed_count || 0),
               });
               setAiQueue(finalRun.queue_items || []);
-              setSaveMsg(mode === "variants"
+              setSaveMsg(mode === "media_seo"
+                ? `Alt и slug: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`
+                : mode === "variants"
                 ? `Пересборка семейств: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
@@ -1084,7 +1111,9 @@ export default function CsvImportApp({
             setSaveMsg(finalRun?.status === "cancelled"
               ? "AI-обработка остановлена. Готовые товары сохранены."
               : finalRun?.status === "completed"
-              ? mode === "variants"
+              ? mode === "media_seo"
+                ? `✓ Alt и slug сгенерированы: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}. Проверьте результат и нажмите «Обновить каталог».`
+                : mode === "variants"
                 ? `✓ Цветовые семейства пересобраны: по артикулам ${data.deterministic || 0}, визуально ${finalRun.completed_count || 0}`
                 : `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
               : "ИИ не завершил обработку вовремя. Статус сохранён в истории.");
@@ -1623,14 +1652,24 @@ export default function CsvImportApp({
 
               {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  {canGenerateMediaSeo && (
+                    <button
+                      onClick={() => handleAiProcess("media_seo")}
+                      disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-bold text-violet-200 transition-all hover:bg-violet-500/20 disabled:opacity-50"
+                      title="Перезаписать alt-тексты, slug товара и имена файлов фото для последней выгрузки"
+                    >
+                      <Sparkles className="h-4 w-4" /> Сгенерировать alt + slug
+                    </button>
+                  )}
                   <button
                     onClick={() => handlePush("upsert")}
                     disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
                     className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
-                    title="Отправить в каталог только товары, изменённые после предыдущей публикации"
+                    title="Отправить в каталог только товары, изменённые после предыдущей публикации; после генерации alt и slug фото будут перевыложены в WebP с новыми именами"
                   >
                     {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Обновить изменённые
+                    {mediaSeoProducts.length > 0 ? "Обновить каталог" : "Обновить изменённые"}
                   </button>
                   <button
                     onClick={handleReprocessAll}
@@ -3012,11 +3051,32 @@ function CsvProductDrawer({
     change("attributes", next);
   };
 
-  const removePhoto = (i: number) =>
-    change(
-      "photos",
-      local.photos.filter((_, j) => j !== i),
+  const removePhoto = (i: number) => {
+    const photos = local.photos.filter((_, j) => j !== i);
+    const currentPhotoAlts = Array.from(
+      { length: local.photos.length },
+      (_, photoIndex) => local.photo_alts?.[photoIndex] || local.name || "",
     );
+    const photoAlts = currentPhotoAlts.filter((_, j) => j !== i);
+    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts } : null);
+    onUpdate(index, "photos", photos);
+    onUpdate(index, "photo_alts", photoAlts);
+  };
+
+  const movePhoto = (fromIndex: number, toIndex: number) => {
+    const photos = [...local.photos];
+    const [photo] = photos.splice(fromIndex, 1);
+    photos.splice(toIndex, 0, photo);
+    const photoAlts = Array.from(
+      { length: local.photos.length },
+      (_, photoIndex) => local.photo_alts?.[photoIndex] || local.name || "",
+    );
+    const [photoAlt] = photoAlts.splice(fromIndex, 1);
+    photoAlts.splice(toIndex, 0, photoAlt);
+    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts } : null);
+    onUpdate(index, "photos", photos);
+    onUpdate(index, "photo_alts", photoAlts);
+  };
 
   return (
     <>
@@ -3078,7 +3138,8 @@ function CsvProductDrawer({
               </div>
               <ProductPhotoGallery
                 photos={local.photos}
-                onChange={(photos) => change("photos", photos)}
+                altTexts={local.photo_alts}
+                onMove={movePhoto}
                 onRemove={removePhoto}
               />
             </section>

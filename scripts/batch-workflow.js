@@ -145,6 +145,8 @@ function normalizeProduct(row) {
     h1: row.h1 || '',
     seo_title: row.seo_title || '',
     seo_description: row.seo_description || '',
+    slug: row.slug || '',
+    photo_alts: Array.isArray(row.photo_alts) ? row.photo_alts.map(String) : [],
     price: Number(row.price || 0),
     price_source: row.price_source || 'legacy',
     status: row.status === 'inactive' ? 'inactive' : 'active',
@@ -372,6 +374,7 @@ function productToRailsCsvRow(product, lookups) {
     h1: product.h1 || '',
     seo_title: product.seo_title || '',
     seo_description: product.seo_description || '',
+    slug: product.slug || '',
     price: product.price || 0,
     status: 'active',
     brand: lookupName(lookups.brands, product.brand, 'бренда'),
@@ -393,6 +396,7 @@ function productToRailsJsonRow(product, lookups) {
     h1: product.h1 || '',
     seo_title: product.seo_title || '',
     seo_description: product.seo_description || '',
+    slug: product.slug || '',
     price: product.price || 0,
     status: 'active',
     brand: lookupName(lookups.brands, product.brand, 'бренда'),
@@ -400,6 +404,15 @@ function productToRailsJsonRow(product, lookups) {
     subcategory: lookupName(lookups.subcategories, product.subcategory, 'подкатегории'),
     gender: product.gender || '',
     photos: normalizePhotos(product.photos),
+    media: normalizePhotos(product.photos).map((url, index) => ({
+      original_url: url,
+      thumb_url: url,
+      preview_url: url,
+      og_image_url: url,
+      alt_text: Array.isArray(product.photo_alts) ? product.photo_alts[index] || product.name || '' : product.name || '',
+      sort_order: index,
+      processing_status: 'processed',
+    })),
     attributes: normalizeAttributes(product.attributes),
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
@@ -663,7 +676,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY source_position ASC NULLS LAST, id ASC
@@ -698,9 +711,9 @@ async function saveBatchProducts(batchId, products, options = {}) {
           UPDATE products
           SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
-              photos=$14::jsonb,attributes=$15::jsonb,ai_processed=$16,batch_id=$17,
-              variant_group_key=$18,ai_error=$19,ai_confidence=$20,source_position=$21,updated_at=NOW()
-          WHERE id=$22 AND batch_id=$17
+              photos=$14::jsonb,photo_alts=$15::jsonb,attributes=$16::jsonb,ai_processed=$17,batch_id=$18,
+              variant_group_key=$19,ai_error=$20,ai_confidence=$21,source_position=$22,slug=$23,updated_at=NOW()
+          WHERE id=$24 AND batch_id=$18
           RETURNING id
         `, [
           normalized.external_id,
@@ -717,6 +730,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           normalized.subcategory || null,
           normalized.gender,
           JSON.stringify(normalized.photos || []),
+          JSON.stringify(normalized.photo_alts || []),
           JSON.stringify(normalized.attributes || {}),
           normalized.ai_processed,
           batchId,
@@ -724,6 +738,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           normalized.ai_error,
           normalized.ai_confidence,
           normalized.source_position,
+          normalized.slug || null,
           numericId,
         ]);
         if (updateRes.rowCount > 0) {
@@ -733,14 +748,15 @@ async function saveBatchProducts(batchId, products, options = {}) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23,NOW(),NOW())
         ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
           h1 = EXCLUDED.h1,
           seo_title = EXCLUDED.seo_title,
           seo_description = EXCLUDED.seo_description,
+          slug = EXCLUDED.slug,
           price = EXCLUDED.price,
           price_source = EXCLUDED.price_source,
           status = EXCLUDED.status,
@@ -749,6 +765,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           subcategory = EXCLUDED.subcategory,
           gender = EXCLUDED.gender,
           photos = EXCLUDED.photos,
+          photo_alts = EXCLUDED.photo_alts,
           attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
           variant_group_key = EXCLUDED.variant_group_key,
@@ -764,6 +781,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
         normalized.h1,
         normalized.seo_title,
         normalized.seo_description,
+        normalized.slug || null,
         normalized.price,
         normalized.price_source,
         normalized.status,
@@ -772,6 +790,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
         normalized.subcategory || null,
         normalized.gender,
         JSON.stringify(normalized.photos || []),
+        JSON.stringify(normalized.photo_alts || []),
         JSON.stringify(normalized.attributes || {}),
         normalized.ai_processed,
         batchId,
@@ -896,11 +915,11 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
     for (let position = 0; position < products.length; position += 1) {
       const normalized = normalizeProduct({ ...products[position], batch_id: batchId, source_position: products[position].source_position ?? position });
       await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18,$19,$20,$21,NOW(),NOW())
-      `, [normalized.external_id,normalized.name,normalized.description,normalized.h1,normalized.seo_title,normalized.seo_description,
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23,NOW(),NOW())
+      `, [normalized.external_id,normalized.name,normalized.description,normalized.h1,normalized.seo_title,normalized.seo_description,normalized.slug || null,
         normalized.price,normalized.price_source || 'default',normalized.status,normalized.brand,normalized.category,normalized.subcategory,
-        normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.attributes || {}),false,batchId,
+        normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.photo_alts || []),JSON.stringify(normalized.attributes || {}),false,batchId,
         normalized.variant_group_key,normalized.ai_error,normalized.ai_confidence,normalized.source_position]);
     }
     await client.query(`
@@ -1252,16 +1271,16 @@ function ownedS3Key(url) {
   }
 }
 
-async function uploadPhotoIfNeeded(url, key) {
+async function uploadPhotoIfNeeded(url, key, options = {}) {
   if (!url) throw new Error('пустая ссылка на фото');
   // Ссылка уже ведет на наш S3: не скачиваем ее и не делаем HEAD
   // при каждой повторной публикации.
-  if (isAlreadyHosted(url)) return url;
+  if (isAlreadyHosted(url) && !options.forceReencode) return url;
   if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен');
   let lastError;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await uploadPhotoAttempt(url, key);
+      return await uploadPhotoAttempt(url, key, options);
     } catch (error) {
       lastError = error;
       if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 750));
@@ -1270,8 +1289,8 @@ async function uploadPhotoIfNeeded(url, key) {
   throw new Error(`не удалось перенести фото в S3 после 3 попыток: ${lastError?.message || 'неизвестная ошибка'}`);
 }
 
-async function uploadPhotoAttempt(url, key) {
-  if (isAlreadyHosted(url)) {
+async function uploadPhotoAttempt(url, key, options = {}) {
+  if (isAlreadyHosted(url) && !options.forceReencode) {
     const existingKey = ownedS3Key(url);
     if (!existingKey) throw new Error(`не удалось определить S3 key для ${url}`);
     const storedUrl = await findStoredS3Photo(existingKey);
@@ -1279,8 +1298,10 @@ async function uploadPhotoAttempt(url, key) {
     return storedUrl;
   }
   try {
-    const storedUrl = await findStoredS3Photo(key);
-    if (storedUrl) return storedUrl;
+    if (!options.forceReencode) {
+      const storedUrl = await findStoredS3Photo(key);
+      if (storedUrl) return storedUrl;
+    }
 
     const parsed = new URL(String(url));
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('разрешены только HTTP(S) ссылки');
@@ -1291,12 +1312,12 @@ async function uploadPhotoAttempt(url, key) {
     const source = Buffer.from(await response.arrayBuffer());
     if (!source.length) throw new Error('источник вернул пустой файл');
     if (source.length > 30 * 1024 * 1024) throw new Error('файл больше 30 МБ');
-    const buffer = await sharp(source).rotate().jpeg({ quality: 90 }).toBuffer();
+    const buffer = await sharp(source).rotate().webp({ quality: 88, effort: 4 }).toBuffer();
     await s3Client.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key,
       Body: buffer,
-      ContentType: 'image/jpeg',
+      ContentType: 'image/webp',
     }));
     await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
     const hostedUrl = getS3PublicUrl(key);
@@ -1340,6 +1361,27 @@ async function cleanupUnusedBatchPhotos(batchId, products) {
     }
     continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
   } while (continuationToken);
+}
+
+async function pendingSeoMediaRun(batchId) {
+  const result = await scrapingPool.query(`
+    SELECT current_run.id
+    FROM batch_ai_runs current_run
+    WHERE current_run.batch_id=$1
+      AND current_run.mode='media_seo'
+      AND current_run.status='completed'
+      AND current_run.catalog_applied_at IS NULL
+      AND current_run.batch_id=(
+        SELECT id
+        FROM scraping_batches
+        WHERE COALESCE(stage, '') <> 'ADMIN_DELETED'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      )
+    ORDER BY current_run.completed_at DESC NULLS LAST
+    LIMIT 1
+  `, [batchId]);
+  return result.rows[0] || null;
 }
 
 async function existingRailsProducts(externalIds, options = {}) {
@@ -1423,6 +1465,7 @@ function railsUpdatePayload(product) {
       h1: product.h1 || '',
       seo_title: product.seo_title || '',
       seo_description: product.seo_description || '',
+      slug: product.slug || '',
       price_cents: Math.round(Number(product.price || 0) * 100),
       price_on_request: Number(product.price || 0) === 0,
       status: 'active',
@@ -1445,7 +1488,7 @@ function railsUpdatePayload(product) {
         thumb_url: url,
         preview_url: url,
         og_image_url: url,
-        alt_text: product.name || '',
+        alt_text: Array.isArray(product.photo_alts) ? product.photo_alts[index] || product.name || '' : product.name || '',
         sort_order: index,
         processing_status: 'processed',
       })),
@@ -1603,9 +1646,14 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const previousPayloadHashes = mode === 'upsert'
     ? await batchPublicationHashes(batchId, products.map((product) => product.external_id))
     : new Map();
+  const seoMediaRun = await pendingSeoMediaRun(batchId);
+  if (seoMediaRun && mode !== 'upsert') {
+    throw new Error('После генерации alt и slug используйте режим «Обновить каталог»');
+  }
   const changedExistingExternalIds = new Set(products.flatMap((product) => {
     const externalId = String(product.external_id || '').trim();
     if (!existingExternalIds.has(externalId)) return [];
+    if (seoMediaRun) return [externalId];
     return previousPayloadHashes.get(externalId) === publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId))) ? [] : [externalId];
   }));
   const candidates = products
@@ -1621,6 +1669,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   let updated = 0;
   const skippedUnchanged = mode === 'upsert' ? existingExternalIds.size - changedExistingExternalIds.size : 0;
   let batchProductsChanged = false;
+  const explicitSeoMediaRun = Boolean(seoMediaRun);
 
   if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0 });
 
@@ -1633,24 +1682,34 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       existingProducts.get(String(product.external_id || '').trim()),
     );
     const requestedPhotos = normalizePhotos(product.photos);
+    const isExistingRailsProduct = existingProducts.has(String(product.external_id || '').trim());
+    const rewriteSeoMedia = Boolean(
+      product.slug
+      && Array.isArray(product.photo_alts)
+      && product.photo_alts.length
+      && (!isExistingRailsProduct || explicitSeoMediaRun),
+    );
     const existingCanonicalPhotos = [...new Set(existingPhotoUrls.values())];
     const preserveExistingRailsPhotos = mode === 'upsert'
       && existingCanonicalPhotos.length > 0
       && requestedPhotos.some((url) => !existingPhotoUrls.has(String(url || '').trim()));
     // Старая партия может хранить Szwego URL, хотя Rails уже имеет S3-галерею.
     // При upsert берем готовые фото Rails и обновляем только остальные поля.
-    const publicationPhotos = preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos;
+    const publicationPhotos = rewriteSeoMedia ? requestedPhotos : (preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos);
     for (let photoIndex = 0; photoIndex < publicationPhotos.length; photoIndex += 1) {
       const sourceUrl = publicationPhotos[photoIndex];
       const existingRailsUrl = existingPhotoUrls.get(String(sourceUrl || '').trim());
-      if (existingRailsUrl) {
+      if (existingRailsUrl && !rewriteSeoMedia) {
         photos.push(existingRailsUrl);
         continue;
       }
       const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
-      const key = `batches/${batchId}/${safeExternalId}_${photoIndex}.jpg`;
+      const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
+      const key = rewriteSeoMedia
+        ? `batches/${batchId}/${safeSlug}-${photoIndex + 1}.webp`
+        : `batches/${batchId}/${safeExternalId}_${photoIndex}.webp`;
       try {
-        photos.push(await uploadPhotoIfNeeded(sourceUrl, key));
+        photos.push(await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }));
       } catch (error) {
         productFailed = true;
         photos.push(sourceUrl);
@@ -1760,10 +1819,13 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     throw new Error(`Публикация завершилась с ошибками:\n${errors.slice(0, 20).join('\n')}`);
   }
 
-  try {
+  if (explicitSeoMediaRun) {
     await cleanupUnusedBatchPhotos(batchId, updatedProducts);
-  } catch (error) {
-    console.warn(`Could not clean stale S3 photos for batch ${batchId}:`, error.message);
+    await scrapingPool.query(`
+      UPDATE batch_ai_runs
+      SET catalog_applied_at=NOW(),updated_at=NOW()
+      WHERE batch_id=$1 AND mode='media_seo' AND status='completed' AND catalog_applied_at IS NULL
+    `, [batchId]);
   }
   await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
 

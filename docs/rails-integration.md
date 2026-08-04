@@ -58,6 +58,8 @@ CSV adapter должен:
 - публиковать чанками;
 - показывать ошибки партии в UI.
 
+Для JSON-публикации адаптер передаёт `slug` товара и массив `media`, где у каждого изображения есть HTTPS URL, `alt_text`, `sort_order` и `processing_status`. Rails importer сохраняет эти поля в `products.slug` и `product_media`; при прямом обновлении существующего товара используется `PATCH /api/v1/admin/products/:id` с тем же набором медиа-полей.
+
 При публикации партия также передаёт исходный `source_supplier_id` и
 `published_at`. Так как scraping DB и Rails CRM используют разные базы и разные
 идентификаторы, Rails связывает товар с поставщиком по имени как с основной
