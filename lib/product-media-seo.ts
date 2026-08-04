@@ -59,16 +59,24 @@ export function normalizePhotoAlts(value: unknown, photoCount: number, fallback:
   })
 }
 
+function truncatePhotoSlug(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value
+  const clipped = value.slice(0, maxLength).replace(/-+$/g, '')
+  const lastWordBoundary = clipped.lastIndexOf('-')
+  return lastWordBoundary >= Math.min(40, maxLength - 1) ? clipped.slice(0, lastWordBoundary) : clipped
+}
+
 export function normalizePhotoSlugs(value: unknown, photoCount: number) {
-  const values = Array.isArray(value) ? value : []
+  const altTexts = Array.isArray(value) ? value : []
   const used = new Set<string>()
   return Array.from({ length: photoCount }, (_, index) => {
     const fallback = `foto-${index + 1}`
-    const base = seoSlug(values[index], fallback).slice(0, 80) || fallback
+    const base = truncatePhotoSlug(seoSlug(altTexts[index], fallback), 120) || fallback
     let slug = base
     let suffix = 2
     while (used.has(slug)) {
-      slug = `${base}-${suffix}`
+      const suffixText = `-${suffix}`
+      slug = `${truncatePhotoSlug(base, 120 - suffixText.length)}${suffixText}`
       suffix += 1
     }
     used.add(slug)
@@ -92,9 +100,14 @@ export function normalizeRetainedPhotoAlts(
 export function normalizeMediaSeoOutput(output: any, input: any) {
   const product = input?.product || {}
   const photoCount = Array.isArray(product.photos) ? product.photos.length : 0
+  const photoAlts = normalizePhotoAlts(
+    output?.photo_alts || output?.image_alt_texts,
+    photoCount,
+    String(product.name || '').trim(),
+  )
   return {
     slug: String(input?.generatedSlug || '').trim(),
-    photo_alts: normalizePhotoAlts(output?.photo_alts || output?.image_alt_texts, photoCount, String(product.name || '').trim()),
-    photo_slugs: normalizePhotoSlugs(output?.photo_slugs || output?.image_slugs, photoCount),
+    photo_alts: photoAlts,
+    photo_slugs: normalizePhotoSlugs(photoAlts, photoCount),
   }
 }

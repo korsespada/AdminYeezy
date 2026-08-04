@@ -221,6 +221,7 @@ describe('batch workflow CSV compatibility adapter', () => {
       supplier_id: 28,
       supplier_name: 'LP, Zegna, BC Мужская одежда',
       source_published_at: '2026-08-03T12:00:00.000Z',
+      supplier_published_on: '2026-08-02',
       attributes: {},
       photos: [],
     }).product
@@ -229,6 +230,7 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(payload.published_at).toBe('2026-08-03T12:00:00.000Z')
     expect(payload.metadata.source_supplier_id).toBe(28)
     expect(payload.metadata.source_published_at).toBe('2026-08-03T12:00:00.000Z')
+    expect(payload.metadata.supplier_published_on).toBe('2026-08-02')
   })
 
   it('publishes processed inactive batch rows as active catalog products', () => {
@@ -248,6 +250,7 @@ describe('batch workflow CSV compatibility adapter', () => {
           note: '',
         },
       },
+      supplier_published_on: '2026-08-02',
     }, {
       brands: new Map([['brand-1', 'Brunello Cucinelli']]),
       categories: new Map([['category-1', 'Обувь']]),
@@ -256,6 +259,7 @@ describe('batch workflow CSV compatibility adapter', () => {
 
     expect(row.status).toBe('active')
     expect(row.attributes.measurements.rows[0].values.insole_length).toBe('25')
+    expect(row.supplier_published_on).toBe('2026-08-02')
     expect(workflow.railsUpdatePayload({ external_id: 'item-1', status: 'inactive', attributes: {}, photos: [] }).product.status)
       .toBe('active')
   })

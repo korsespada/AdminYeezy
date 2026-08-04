@@ -113,6 +113,7 @@ describe('batch product server actions', () => {
         slug: 'brand-model-black-ext-1',
         photo_alts: ['Черные кроссовки Brand Model, вид сбоку'],
         photo_slugs: ['vid-sboku'],
+        supplier_published_on: '2026-08-02',
         ai_processed: true,
         attributes: { color: 'black', sizes: ['M', 'L'] },
       },
@@ -133,6 +134,7 @@ describe('batch product server actions', () => {
         JSON.stringify(['Черные кроссовки Brand Model, вид сбоку']),
         JSON.stringify(['vid-sboku']),
         JSON.stringify({ color: 'black', sizes: ['M', 'L'] }),
+        '2026-08-02',
       ]),
     )
   })

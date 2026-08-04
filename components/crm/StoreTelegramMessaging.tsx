@@ -172,7 +172,7 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-semibold text-white">{campaign.title}</h3>
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-400">{campaign.body}</p>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-400">{telegramPreview(campaign.body)}</p>
                   </div>
                   <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{campaign.status}</span>
                 </div>
@@ -182,6 +182,16 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
                   <span className="text-amber-300">В очереди: {campaign.deliveries.pending}</span>
                   <span className="text-red-300">Ошибки: {campaign.deliveries.failed}</span>
                 </div>
+                {campaign.deliveries.errors && campaign.deliveries.errors.length > 0 && (
+                  <div className="mt-3 space-y-1 border-t border-slate-800 pt-3 text-xs text-red-200">
+                    <p className="font-medium text-red-300">Причины ошибок:</p>
+                    {campaign.deliveries.errors.map((error) => (
+                      <p key={`${error.message}-${error.count}`}>
+                        {error.count} × {error.message}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </article>
             ))}
             {campaigns.length === 0 && (
@@ -194,6 +204,10 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
       </div>
     </main>
   )
+}
+
+function telegramPreview(body: string) {
+  return body.replace(/<\/?[a-z][^>]*>/gi, '')
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

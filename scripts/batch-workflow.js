@@ -59,12 +59,13 @@ const RAILS_IMPORT_COLUMNS = [
   { name: 'attributes', key: 'attributes' },
   { name: 'variant_group_key', key: 'variant_group_key' },
   { name: 'batch_id', key: 'batchId' },
+  { name: 'supplier_published_on', key: 'supplier_published_on' },
 ];
 
 const CORE_PRODUCT_FIELDS = new Set([
   'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
-  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'source_position', 'created_at', 'updated_at',
+  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
 ]);
 
 function ensureDir(dir) {
@@ -163,6 +164,7 @@ function normalizeProduct(row) {
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence == null ? null : Number(row.ai_confidence),
     source_position: row.source_position == null ? null : Number(row.source_position),
+    supplier_published_on: row.supplier_published_on || null,
   };
 }
 
@@ -386,6 +388,7 @@ function productToRailsCsvRow(product, lookups) {
     attributes: normalizeAttributes(product.attributes),
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
+    supplier_published_on: product.supplier_published_on || null,
   };
 }
 
@@ -417,6 +420,7 @@ function productToRailsJsonRow(product, lookups) {
     attributes: normalizeAttributes(product.attributes),
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
+    supplier_published_on: product.supplier_published_on || null,
   };
 }
 
@@ -677,7 +681,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY source_position ASC NULLS LAST, id ASC
@@ -713,8 +717,8 @@ async function saveBatchProducts(batchId, products, options = {}) {
           SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
               photos=$14::jsonb,photo_alts=$15::jsonb,photo_slugs=$16::jsonb,attributes=$17::jsonb,ai_processed=$18,batch_id=$19,
-              variant_group_key=$20,ai_error=$21,ai_confidence=$22,source_position=$23,slug=$24,updated_at=NOW()
-          WHERE id=$25 AND batch_id=$19
+              variant_group_key=$20,ai_error=$21,ai_confidence=$22,source_position=$23,slug=$24,supplier_published_on=$25,updated_at=NOW()
+          WHERE id=$26 AND batch_id=$19
           RETURNING id
         `, [
           normalized.external_id,
@@ -741,6 +745,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           normalized.ai_confidence,
           normalized.source_position,
           normalized.slug || null,
+          normalized.supplier_published_on || null,
           numericId,
         ]);
         if (updateRes.rowCount > 0) {
@@ -750,8 +755,8 @@ async function saveBatchProducts(batchId, products, options = {}) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,NOW(),NOW())
         ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -775,6 +780,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           ai_error = EXCLUDED.ai_error,
           ai_confidence = EXCLUDED.ai_confidence,
           source_position = EXCLUDED.source_position,
+          supplier_published_on = EXCLUDED.supplier_published_on,
           updated_at = NOW()
         RETURNING id
       `, [
@@ -802,6 +808,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
         normalized.ai_error,
         normalized.ai_confidence,
         normalized.source_position,
+        normalized.supplier_published_on || null,
       ]);
       if (insertRes.rows[0]?.id) keptIds.push(Number(insertRes.rows[0].id));
     }
@@ -919,12 +926,12 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
     for (let position = 0; position < products.length; position += 1) {
       const normalized = normalizeProduct({ ...products[position], batch_id: batchId, source_position: products[position].source_position ?? position });
       await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,NOW(),NOW())
       `, [normalized.external_id,normalized.name,normalized.description,normalized.h1,normalized.seo_title,normalized.seo_description,normalized.slug || null,
         normalized.price,normalized.price_source || 'default',normalized.status,normalized.brand,normalized.category,normalized.subcategory,
         normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.photo_alts || []),JSON.stringify(normalized.photo_slugs || []),JSON.stringify(normalized.attributes || {}),false,batchId,
-        normalized.variant_group_key,normalized.ai_error,normalized.ai_confidence,normalized.source_position]);
+        normalized.variant_group_key,normalized.ai_error,normalized.ai_confidence,normalized.source_position,normalized.supplier_published_on || null]);
     }
     await client.query(`
       INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
@@ -1461,6 +1468,14 @@ async function existingRailsExternalIds(externalIds) {
 
 function railsUpdatePayload(product) {
   const sizes = Array.isArray(product.attributes?.sizes) ? product.attributes.sizes : [];
+  const metadata = {
+    ...(product._railsMetadata && typeof product._railsMetadata === 'object' ? product._railsMetadata : {}),
+    source_batch_id: product.batchId || product.batch_id || null,
+    source_supplier_name: product.supplier_name || null,
+    source_supplier_id: product.supplier_id || null,
+    source_published_at: product.source_published_at || null,
+  };
+  if (product.supplier_published_on) metadata.supplier_published_on = product.supplier_published_on;
   return {
     product: {
       external_id: product.external_id || '',
@@ -1476,13 +1491,7 @@ function railsUpdatePayload(product) {
       primary_supplier_name: product.supplier_name || null,
       primary_supplier_avatar: product.supplier_avatar || null,
       published_at: product.source_published_at || null,
-      metadata: {
-        ...(product._railsMetadata && typeof product._railsMetadata === 'object' ? product._railsMetadata : {}),
-        source_batch_id: product.batchId || product.batch_id || null,
-        source_supplier_name: product.supplier_name || null,
-        source_supplier_id: product.supplier_id || null,
-        source_published_at: product.source_published_at || null,
-      },
+      metadata,
       brand_id: product.brand || null,
       category_id: product.subcategory || product.category || null,
       gender: normalizeCatalogGender(product.gender) || null,

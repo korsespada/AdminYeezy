@@ -171,6 +171,10 @@ export interface RailsStoreTelegramCampaign {
     pending: number
     sent: number
     failed: number
+    errors?: Array<{
+      message: string
+      count: number
+    }>
   }
 }
 

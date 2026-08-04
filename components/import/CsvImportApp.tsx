@@ -562,6 +562,7 @@ export default function CsvImportApp({
   const [activeAiRunMode, setActiveAiRunMode] = useState<string | null>(null);
   const [aiLogs, setAiLogs] = useState<any[]>([]);
   const [showAiLogs, setShowAiLogs] = useState(false);
+  const [showAiErrors, setShowAiErrors] = useState(false);
   const [isLoadingAiLogs, setIsLoadingAiLogs] = useState(false);
   const [canGenerateMediaSeo, setCanGenerateMediaSeo] = useState(false);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
@@ -1126,6 +1127,7 @@ export default function CsvImportApp({
       setIsProcessing(true);
       try {
         setShowAiLogs(false);
+        setShowAiErrors(false);
         setAiLogs([]);
         if (isSnapshotSource) {
           setBatchId(targetBatchId);
@@ -1136,10 +1138,10 @@ export default function CsvImportApp({
         const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
         setActiveAiRunMode(mode);
         const result = mode === "media_seo"
-          ? await startBatchMediaSeoAction(targetBatchId)
+          ? await startBatchMediaSeoAction(targetBatchId, selectedProductIds)
           : await startBatchAiAction(targetBatchId, mode, selectedProductIds);
         if (result.success) {
-          const data: any = result.data;
+          const data: any = "data" in result ? result.data : null;
           if (data?.runId) {
             setActiveAiRunId(String(data.runId));
             setSaveMsg(mode === "media_seo"
@@ -2098,6 +2100,29 @@ export default function CsvImportApp({
               </div>
               <div className="flex items-center gap-2">
                 {isMediaSeoRun && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowAiErrors((current) => !current)}
+                      disabled={!latestAiRun?.errors?.length}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-400/30 px-2.5 py-1.5 text-xs font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"
+                      title="Показать товары, для которых alt и slug не сгенерировались"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {showAiErrors ? "Скрыть ошибки" : `Показать ошибки${latestAiRun?.errors?.length ? ` (${latestAiRun.errors.length})` : ""}`}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAiProcess("media_seo", (latestAiRun?.errors || []).map((item: any) => Number(item.product_id)).filter(Number.isInteger))}
+                      disabled={isProcessing || !latestAiRun?.errors?.some((item: any) => Number.isInteger(Number(item.product_id)))}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 px-2.5 py-1.5 text-xs font-bold text-amber-100 hover:bg-amber-500/10 disabled:opacity-50"
+                      title="Повторно сгенерировать alt и slug только для товаров с ошибкой"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" /> Повторить ошибки
+                    </button>
+                  </>
+                )}
+                {isMediaSeoRun && (
                   <button
                     type="button"
                     onClick={toggleAiLogs}
@@ -2151,6 +2176,24 @@ export default function CsvImportApp({
                           <span className="text-indigo-200">slug: {item.slug} · alt: {Array.isArray(item.photo_alts) ? item.photo_alts.length : 0}</span>
                         )}
                         {item.error_message && <span className="text-red-300">— {item.error_message}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {showAiErrors && isMediaSeoRun && (
+              <div className="mt-3 rounded-lg border border-red-500/25 bg-red-950/20 p-3 text-xs">
+                {!latestAiRun?.errors?.length ? (
+                  <div className="text-slate-500">Ошибок в этом запуске нет.</div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {latestAiRun.errors.map((item: any) => (
+                      <div key={`${item.product_id}-${item.updated_at}`} className="flex flex-wrap gap-x-2 gap-y-0.5 border-b border-red-950/50 pb-1.5 text-red-100 last:border-0">
+                        <span className="font-mono text-red-300">#{item.product_id || "?"}</span>
+                        <span>{item.name || item.external_id || "Товар без названия"}</span>
+                        {item.external_id && <span className="text-slate-500">{item.external_id}</span>}
+                        <span className="text-red-300">— {item.error_message || "Неизвестная ошибка"}</span>
                       </div>
                     ))}
                   </div>
@@ -2685,6 +2728,7 @@ export default function CsvImportApp({
           const nextIndex = products.indexOf(variant);
           if (nextIndex >= 0) setSelectedIdx(nextIndex);
         }}
+        supplierName={initialSupplierName || undefined}
       />
       {showAiSuggestions && batchId && (
         <BatchAiReviewDialog
@@ -3083,6 +3127,7 @@ interface CsvProductDrawerProps {
   variants: CsvProduct[];
   onVariantsChanged: (productIds: number[], groupKey: string | null) => void;
   onOpenVariant: (product: CsvProduct) => void;
+  supplierName?: string;
 }
 
 function CsvProductDrawer({
@@ -3100,6 +3145,7 @@ function CsvProductDrawer({
   variants,
   onVariantsChanged,
   onOpenVariant,
+  supplierName,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
 
@@ -3449,11 +3495,23 @@ function CsvProductDrawer({
                 )}
               </div>
             </section>
+
+            <section className="border-t border-slate-800 pt-4 text-xs text-slate-500">
+              <div className="flex flex-wrap gap-x-5 gap-y-2">
+                {supplierName && <span>Поставщик: <span className="text-slate-300">{supplierName}</span></span>}
+                <span>Выложен у поставщика: <span className="text-slate-300">{formatSupplierPublishedOn(local.supplier_published_on)}</span></span>
+              </div>
+            </section>
           </div>
         </div>
       </div>
     </>
   );
+}
+
+function formatSupplierPublishedOn(value?: string | null) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : "Не указано";
 }
 
 function VariantFamilyManager({

@@ -2,5 +2,6 @@
 
 # Keep delegated work bounded in this repository. The project AGENTS.md still
 # allows a read-only subagent when it provides a measurable benefit.
+web_search = "live"
 [agents]
 max_concurrent_threads_per_session = 1

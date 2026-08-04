@@ -9,7 +9,15 @@ import sys
 import io
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+try:
+    MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+except Exception:
+    # Windows Python may not ship the IANA timezone database. Moscow has no
+    # daylight saving time, so UTC+3 is an exact operational fallback.
+    MOSCOW_TZ = timezone(timedelta(hours=3))
 
 # Принудительная кодировка UTF-8 для вывода в консоль (фикс для Windows)
 if sys.platform == 'win32':
@@ -54,30 +62,50 @@ def request_with_retry(session, method, url, max_retries=3, **kwargs):
 
 # ==========================================================
 
+def _moscow_today() -> date:
+    return datetime.now(MOSCOW_TZ).date()
+
 def _parse_date_from_text(text: str) -> date | None:
     if not text: return None
-    text = text.strip()
+    text = text.strip().lower()
+    today = _moscow_today()
+    if re.search(r"(刚刚|刚才|just now|только что|\d+\s*(?:秒|seconds?|сек\w*)\s*(?:前|ago)?|\d+\s*(?:分钟|分|minutes?|mins?|мин\w*)\s*(?:前|ago)?|\d+\s*(?:小时|hours?|hrs?|час\w*)\s*(?:前|ago)?)", text):
+        return today
+    if re.search(r"(昨天|yesterday|вчера)", text):
+        return today - timedelta(days=1)
+    days_ago = re.search(r"(\d+)\s*(?:天|days?|дн\w*)\s*(?:前|ago)?", text)
+    if days_ago:
+        return today - timedelta(days=int(days_ago.group(1)))
     m = re.search(r"(\d{4})[./-](\d{2})[./-](\d{2})", text)
     if m:
         try: return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except ValueError: pass
     m = re.search(r"(\d{2})[./-](\d{2})", text)
     if m:
-        try: return date(datetime.now().year, int(m.group(1)), int(m.group(2)))
+        try: return date(today.year, int(m.group(1)), int(m.group(2)))
         except ValueError: pass
     return None
 
+def _parse_timestamp(value) -> date | None:
+    try:
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000.0
+        return datetime.fromtimestamp(timestamp, tz=MOSCOW_TZ).date()
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
 def _parse_date_from_item_fields(item: dict) -> date | None:
-    for k in ("createTime", "create_time", "createdTime", "created_time", "uploadTime", "upload_time", "time", "date"):
+    for k in ("createTime", "create_time", "createdTime", "created_time", "uploadTime", "upload_time", "time", "date", "time_stamp", "update_time", "new_send_time"):
         v = item.get(k)
         if v is None: continue
         if isinstance(v, (int, float)):
-            try:
-                ts = float(v)
-                if ts > 10_000_000_000: ts /= 1000.0
-                return datetime.fromtimestamp(ts).date()
-            except: pass
+            d = _parse_timestamp(v)
+            if d: return d
         if isinstance(v, str):
+            if re.fullmatch(r"\d{10,13}", v.strip()):
+                d = _parse_timestamp(v)
+                if d: return d
             d = _parse_date_from_text(v)
             if d: return d
     return None
@@ -295,11 +323,9 @@ def main():
                     skip_reasons["few_photos"] = skip_reasons.get("few_photos", 0) + 1
                     continue
 
-                item_date = None
-                if parsed_end_date:
-                    item_date = _parse_date_from_item_fields(item) or _parse_date_from_text(description)
-                    if not item_date:
-                        item_date = get_item_date(item, session, args.album_id, headers)
+                item_date = _parse_date_from_item_fields(item) or _parse_date_from_text(description)
+                if not item_date:
+                    item_date = get_item_date(item, session, args.album_id, headers)
 
                 if parsed_end_date and item_date and item_date < parsed_end_date:
                     date_skip_count += 1
@@ -325,7 +351,7 @@ def main():
                     attributes["szwego_video_url"] = video_url
                 attributes = {key: value for key, value in attributes.items() if value not in (None, "")}
 
-                row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False), attributes]
+                row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False), attributes, item_date.isoformat() if item_date else None]
                 
                 if goods_id in seen_by_goods_id:
                     old_info = seen_by_goods_id[goods_id]
@@ -363,6 +389,7 @@ def main():
                         **dict(zip(csv_header, row)),
                         "photos": json.loads(row[8]) if row[8] else [],
                         "attributes": row[9] if len(row) > 9 else {},
+                        "supplier_published_on": row[10] if len(row) > 10 else None,
                         "source_position": index,
                     }
                     for index, row in enumerate(all_rows)

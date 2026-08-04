@@ -144,6 +144,7 @@ async function init() {
         photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
         photo_slugs JSONB NOT NULL DEFAULT '[]'::jsonb,
         attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
+        supplier_published_on DATE,
         source_position INTEGER,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT NOW(),

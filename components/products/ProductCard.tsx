@@ -22,6 +22,11 @@ function formatPublishedAt(value: unknown) {
     return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date);
 }
 
+function formatSupplierPublishedOn(value: unknown) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}.${match[2]}.${match[1]}` : '';
+}
+
 interface ProductCardProps {
     product: Product;
     onEdit: (product: Product) => void;
@@ -314,7 +319,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
                 </div>
-                {(product.published_at || product.metadata?.source_published_at) && <div className="mb-1 text-[10px] text-slate-600">Пуш: {formatPublishedAt(product.published_at || product.metadata?.source_published_at)}</div>}
+                {product.supplier?.name && <div className="mb-1 text-[10px] text-slate-600">Поставщик: {product.supplier.name}</div>}
+                {product.metadata?.supplier_published_on && <div className="mb-1 text-[10px] text-slate-600">Выложен: {formatSupplierPublishedOn(product.metadata.supplier_published_on)}</div>}
+                {(product.published_at || product.metadata?.source_published_at) && <div className="mb-1 text-[10px] text-slate-600">Запушен: {formatPublishedAt(product.published_at || product.metadata?.source_published_at)}</div>}
 
                 {/* Editable Name */}
                 {editingField === 'name' ? (

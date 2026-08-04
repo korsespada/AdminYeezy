@@ -370,14 +370,14 @@ async function syncCurrentRailsCatalogMappings() {
 
 type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo'
 
-const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: товар, видимый ракурс и 1–2 различимые детали. Также верни короткий уникальный photo_slug для каждой фотографии: 1–4 слова по-русски о ракурсе или детали, без бренда, модели, артикула, номера и расширения файла. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
+const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: подтверждённый бренд, товар, видимый ракурс и 1–2 различимые детали. Бренд товара обязателен в каждом alt. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
 function buildBatchMediaSeoPrompt(product: any, brandName: string, slug: string) {
   return [
     'Верни объект следующей формы:',
-    JSON.stringify({ photo_alts: [''], photo_slugs: [''] }),
+    JSON.stringify({ photo_alts: [''] }),
     'photo_alts должен содержать ровно по одному alt-тексту на каждую фотографию, в том же порядке, что и номера на contact sheet. Целевая длина каждого alt 60–120 символов, абсолютный максимум 160 символов.',
-    'photo_slugs должен содержать ровно по одному короткому описателю кадра в том же порядке. Пиши по-русски: например «вид спереди», «вид сбоку», «деталь застёжки».',
+    'В каждом alt обязательно укажи подтверждённый бренд товара. Имя файла будет автоматически получено транслитерацией этого alt.',
     'Крупный рекламный текст, цены и промо на кадре не описывай.',
     `Товар: ${JSON.stringify({ name: product.name, brand: brandName, attributes: product.attributes || {} })}`,
     `Slug товара уже сформирован автоматически: ${slug}`,
@@ -418,7 +418,15 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'reprocess') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
-  if (mode === 'media_seo') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'media_seo') {
+    const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
+    if (productIds.length > 0) {
+      params.push(productIds)
+      predicate = `AND id=ANY($${params.length}::int[]) ORDER BY source_position ASC NULLS LAST, id`
+    } else {
+      predicate = 'ORDER BY source_position ASC NULLS LAST, id'
+    }
+  }
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
@@ -925,7 +933,7 @@ export async function getBatchMediaSeoStatusAction(batchId: string) {
   return { success: true, data: { allowed: await isLatestBatch(batchId) } }
 }
 
-export async function startBatchMediaSeoAction(batchId: string) {
+export async function startBatchMediaSeoAction(batchId: string, productIds?: number[]) {
   await requireAdmin()
   if (!await isLatestBatch(batchId)) {
     return { success: false, error: 'Alt и slug можно сгенерировать только для самой последней выгрузки' }
@@ -935,7 +943,7 @@ export async function startBatchMediaSeoAction(batchId: string) {
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось получить slug товаров из каталога' }
   }
-  return startBatchAiAction(batchId, 'media_seo')
+  return startBatchAiAction(batchId, 'media_seo', productIds)
 }
 
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
@@ -1447,14 +1455,14 @@ export async function rollbackBatchAction(batchId: string, snapshotId: string) {
       const row = products[position]
       await client.query(`
         INSERT INTO products(external_id,name,description,price,status,brand,category,subcategory,gender,photos,attributes,
-          ai_processed,batch_id,h1,seo_title,seo_description,price_source,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+          ai_processed,batch_id,h1,seo_title,seo_description,price_source,variant_group_key,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
       `, [
         row.external_id, row.name, row.description, row.price, row.status, row.brand, row.category,
         row.subcategory, row.gender, JSON.stringify(row.photos || []), JSON.stringify(row.attributes || {}),
         row.ai_processed || false, batchId, row.h1, row.seo_title, row.seo_description,
         row.price_source || 'legacy', row.variant_group_key, row.ai_error, row.ai_confidence,
-        row.source_position ?? position, row.created_at || new Date(), new Date(),
+        row.source_position ?? position, row.supplier_published_on || null, row.created_at || new Date(), new Date(),
       ])
     }
     await client.query('UPDATE scraping_batches SET stage=$2,items_count=$3,updated_at=NOW() WHERE id=$1', [batchId, snapshot.rows[0].stage, products.length])
@@ -1516,7 +1524,7 @@ export async function rollbackBatchProductAiAction(batchId: string, productId: n
         external_id=$3,name=$4,description=$5,h1=$6,seo_title=$7,seo_description=$8,
         price=$9,status=$10,brand=$11,category=$12,subcategory=$13,gender=$14,
         photos=$15::jsonb,attributes=$16::jsonb,ai_processed=false,ai_error=NULL,
-        ai_confidence=NULL,price_source=$17,variant_group_key=$18,source_position=$19,updated_at=NOW()
+        ai_confidence=NULL,price_source=$17,variant_group_key=$18,source_position=$19,supplier_published_on=$20,updated_at=NOW()
       WHERE id=$1 AND batch_id=$2
     `, [
       productId, batchId, restored.external_id || current.rows[0].external_id,
@@ -1525,7 +1533,7 @@ export async function rollbackBatchProductAiAction(batchId: string, productId: n
       restored.status || 'inactive', restored.brand || null, restored.category || null,
       restored.subcategory || null, restored.gender || null, JSON.stringify(restored.photos || []),
       JSON.stringify(restored.attributes || {}), restored.price_source || 'legacy',
-      restored.variant_group_key || null, restored.source_position ?? current.rows[0].source_position,
+      restored.variant_group_key || null, restored.source_position ?? current.rows[0].source_position, restored.supplier_published_on || null,
     ])
     await client.query(`
       UPDATE scraping_batches SET

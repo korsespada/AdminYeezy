@@ -44,6 +44,7 @@ export interface CsvProduct {
     ai_error?: string | null
     ai_confidence?: number | null
     source_position?: number | null
+    supplier_published_on?: string | null
 }
 
 export interface Lookups {
@@ -137,6 +138,7 @@ function normalizeBatchProduct(row: any): CsvProduct {
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence === null || row.ai_confidence === undefined ? null : Number(row.ai_confidence),
     source_position: row.source_position === null || row.source_position === undefined ? null : Number(row.source_position),
+    supplier_published_on: row.supplier_published_on || null,
   }
 }
 
@@ -547,7 +549,7 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
       SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description, p.slug, p.photo_alts, p.photo_slugs,
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
         p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
-        p.ai_confidence, p.source_position, p.created_at, p.updated_at,
+        p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
         EXISTS (
           SELECT 1 FROM batch_ai_items i
           JOIN batch_ai_runs r ON r.id=i.run_id
@@ -589,8 +591,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       SET external_id=$1, name=$2, description=$3, h1=$4, seo_title=$5, seo_description=$6,
           price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
           photos=$14::jsonb, slug=$15, photo_alts=$16::jsonb, photo_slugs=$17::jsonb, attributes=$18::jsonb, ai_processed=$19, batch_id=$20,
-          variant_group_key=$21, ai_error=$22, ai_confidence=$23, source_position=$24, updated_at=NOW()
-      WHERE id=$25 AND batch_id=$20
+          variant_group_key=$21, ai_error=$22, ai_confidence=$23, source_position=$24, supplier_published_on=$25, updated_at=NOW()
+      WHERE id=$26 AND batch_id=$20
       RETURNING id
     `, [
       normalized.external_id,
@@ -617,14 +619,15 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       normalized.ai_error || null,
       normalized.ai_confidence ?? null,
       normalized.source_position,
+      normalized.supplier_published_on || null,
       numericId,
     ])
     if (updateRes.rowCount > 0) return updateRes.rows[0].id
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, slug, photo_alts, photo_slugs, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,NOW(),NOW())
+    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, slug, photo_alts, photo_slugs, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,NOW(),NOW())
     ON CONFLICT (batch_id, external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -648,6 +651,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       ai_error = EXCLUDED.ai_error,
       ai_confidence = EXCLUDED.ai_confidence,
       source_position = EXCLUDED.source_position,
+      supplier_published_on = EXCLUDED.supplier_published_on,
       updated_at = NOW()
     RETURNING id
   `, [
@@ -675,6 +679,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
     normalized.ai_error || null,
     normalized.ai_confidence ?? null,
     normalized.source_position,
+    normalized.supplier_published_on || null,
   ])
 
   return insertRes.rows[0]?.id

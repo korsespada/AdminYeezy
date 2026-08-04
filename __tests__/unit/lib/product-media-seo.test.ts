@@ -31,11 +31,13 @@ describe('product media SEO helpers', () => {
     )).toEqual(['первое фото', 'вид сбоку'])
   })
 
-  it('builds unique short slugs for each photo without using external IDs', () => {
-    expect(normalizePhotoSlugs(['Вид спереди', 'Вид спереди', ''], 3)).toEqual([
-      'vid-speredi',
-      'vid-speredi-2',
+  it('transliterates each alt into a bounded unique photo slug', () => {
+    const alt = 'Тёмно-синие шерстяные брюки Brunello Cucinelli, вид сверху, зауженные штанины и пояс'
+    expect(normalizePhotoSlugs([alt, alt, ''], 3)).toEqual([
+      'temno-sinie-sherstyanye-bryuki-brunello-cucinelli-vid-sverhu-zauzhennye-shtaniny-i-poyas',
+      'temno-sinie-sherstyanye-bryuki-brunello-cucinelli-vid-sverhu-zauzhennye-shtaniny-i-poyas-2',
       'foto-3',
     ])
+    expect(normalizePhotoSlugs(['товар '.repeat(80)], 1)[0].length).toBeLessThanOrEqual(120)
   })
 })

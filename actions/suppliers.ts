@@ -788,12 +788,12 @@ async function importScrapedProductsTransaction(taskId: number, supplier: any, p
         ? item.photos.map(String).filter(Boolean)
         : (() => { try { return item.photos ? JSON.parse(item.photos) : [] } catch { return [] } })()
       await client.query(`
-        INSERT INTO products(external_id,name,description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,batch_id,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,'default','inactive',$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,batch_id,source_position,supplier_published_on,created_at,updated_at)
+        VALUES($1,$2,$3,$4,'default','inactive',$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,NOW(),NOW())
         ON CONFLICT(batch_id,external_id) DO UPDATE SET
           name=EXCLUDED.name,description=EXCLUDED.description,price=EXCLUDED.price,price_source=EXCLUDED.price_source,
           status=EXCLUDED.status,brand=EXCLUDED.brand,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,
-          gender=EXCLUDED.gender,photos=EXCLUDED.photos,attributes=EXCLUDED.attributes,
+          gender=EXCLUDED.gender,photos=EXCLUDED.photos,attributes=EXCLUDED.attributes,supplier_published_on=EXCLUDED.supplier_published_on,
           source_position=EXCLUDED.source_position,updated_at=NOW()
       `, [
         externalId, item.name || 'Без названия', item.description || '',
@@ -802,6 +802,7 @@ async function importScrapedProductsTransaction(taskId: number, supplier: any, p
         item.subcategory || parserDefaults.subcategory || null, item.gender || supplier.default_gender || '',
         JSON.stringify(Array.isArray(photos) ? photos : []), JSON.stringify(extractProductAttributes(item)),
         batchId, Number.isFinite(Number(item.source_position)) ? Number(item.source_position) : index,
+        item.supplier_published_on || null,
       ])
     }
     const actual = await client.query('SELECT COUNT(*)::int AS count FROM products WHERE batch_id=$1', [batchId])

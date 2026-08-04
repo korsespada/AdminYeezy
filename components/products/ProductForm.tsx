@@ -42,6 +42,11 @@ function formatPublishedAt(value: unknown) {
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date)
 }
 
+function formatSupplierPublishedOn(value: unknown) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : ''
+}
+
 export default function ProductForm({
   product,
   brands,
@@ -717,6 +722,17 @@ export default function ProductForm({
                     className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
                   />
                   <p className="text-[10px] text-slate-600">Время последней публикации товара в каталог.</p>
+                </div>}
+                {product?.metadata?.supplier_published_on && <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-400">Выложен у поставщика</label>
+                  <input
+                    type="text"
+                    value={formatSupplierPublishedOn(product.metadata.supplier_published_on)}
+                    readOnly
+                    aria-label="Выложен у поставщика"
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                  />
+                  <p className="text-[10px] text-slate-600">Дата публикации в альбоме поставщика.</p>
                 </div>}
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-slate-400">SKU</label>
