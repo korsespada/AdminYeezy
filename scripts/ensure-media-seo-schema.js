@@ -17,7 +17,12 @@ async function ensureMediaSeoSchema() {
     await client.query(`
       ALTER TABLE products
         ADD COLUMN IF NOT EXISTS slug TEXT,
-        ADD COLUMN IF NOT EXISTS photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb
+        ADD COLUMN IF NOT EXISTS photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS photo_slugs JSONB NOT NULL DEFAULT '[]'::jsonb
+    `)
+    await client.query(`
+      ALTER TABLE batch_ai_runs
+        ADD COLUMN IF NOT EXISTS catalog_applied_at TIMESTAMPTZ
     `)
     await client.query('COMMIT')
     console.log('Media SEO schema is ready')

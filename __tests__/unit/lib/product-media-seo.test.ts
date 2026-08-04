@@ -2,16 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   buildProductSeoSlug,
   normalizePhotoAlt,
+  normalizePhotoSlugs,
   normalizeRetainedPhotoAlts,
 } from '@/lib/product-media-seo'
 
 describe('product media SEO helpers', () => {
-  it('builds a latin product slug from brand, model, color and article', () => {
+  it('builds a temporary readable product slug without external ID', () => {
     expect(buildProductSeoSlug({
       name: 'Nike Dunk Low',
       external_id: 'A-42',
       attributes: { model_name: 'Dunk Low', colors: ['черный'] },
-    }, 'Nike')).toBe('nike-dunk-low-chernyi-a-42')
+    }, 'Nike')).toBe('nike-dunk-low-chernyi')
   })
 
   it('keeps alt text within the hard limit', () => {
@@ -28,5 +29,13 @@ describe('product media SEO helpers', () => {
       new Set(),
       'Товар',
     )).toEqual(['первое фото', 'вид сбоку'])
+  })
+
+  it('builds unique short slugs for each photo without using external IDs', () => {
+    expect(normalizePhotoSlugs(['Вид спереди', 'Вид спереди', ''], 3)).toEqual([
+      'vid-speredi',
+      'vid-speredi-2',
+      'foto-3',
+    ])
   })
 })

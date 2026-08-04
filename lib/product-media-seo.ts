@@ -19,6 +19,10 @@ export function seoSlug(value: unknown, fallback = 'product') {
 }
 
 function firstValue(value: unknown) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    return firstValue(record.display_value ?? record.value ?? record.name ?? record.filter_values ?? record.values)
+  }
   const values = Array.isArray(value) ? value : [value]
   return values.map((item) => String(item || '').trim()).find(Boolean) || ''
 }
@@ -36,8 +40,7 @@ export function buildProductSeoSlug(product: Record<string, any>, brandName: str
   const attributes = product.attributes && typeof product.attributes === 'object' ? product.attributes : {}
   const model = modelWithoutBrand(firstValue(attributes.model_name) || String(product.name || '').trim(), brandName)
   const color = firstValue(attributes.colors ?? attributes.color)
-  const article = String(product.external_id || product.sku || '').trim()
-  return seoSlug([brandName, model, color, article].filter(Boolean).join(' '), article || 'product')
+  return seoSlug([brandName, model, color].filter(Boolean).join(' '), 'product')
 }
 
 export function normalizePhotoAlt(value: unknown, fallback: string) {
@@ -56,6 +59,23 @@ export function normalizePhotoAlts(value: unknown, photoCount: number, fallback:
   })
 }
 
+export function normalizePhotoSlugs(value: unknown, photoCount: number) {
+  const values = Array.isArray(value) ? value : []
+  const used = new Set<string>()
+  return Array.from({ length: photoCount }, (_, index) => {
+    const fallback = `foto-${index + 1}`
+    const base = seoSlug(values[index], fallback).slice(0, 80) || fallback
+    let slug = base
+    let suffix = 2
+    while (used.has(slug)) {
+      slug = `${base}-${suffix}`
+      suffix += 1
+    }
+    used.add(slug)
+    return slug
+  })
+}
+
 export function normalizeRetainedPhotoAlts(
   value: unknown,
   originalPhotoCount: number,
@@ -71,8 +91,10 @@ export function normalizeRetainedPhotoAlts(
 
 export function normalizeMediaSeoOutput(output: any, input: any) {
   const product = input?.product || {}
+  const photoCount = Array.isArray(product.photos) ? product.photos.length : 0
   return {
     slug: String(input?.generatedSlug || '').trim(),
-    photo_alts: normalizePhotoAlts(output?.photo_alts || output?.image_alt_texts, Array.isArray(product.photos) ? product.photos.length : 0, String(product.name || '').trim()),
+    photo_alts: normalizePhotoAlts(output?.photo_alts || output?.image_alt_texts, photoCount, String(product.name || '').trim()),
+    photo_slugs: normalizePhotoSlugs(output?.photo_slugs || output?.image_slugs, photoCount),
   }
 }

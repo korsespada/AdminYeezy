@@ -147,6 +147,7 @@ function normalizeProduct(row) {
     seo_description: row.seo_description || '',
     slug: row.slug || '',
     photo_alts: Array.isArray(row.photo_alts) ? row.photo_alts.map(String) : [],
+    photo_slugs: Array.isArray(row.photo_slugs) ? row.photo_slugs.map(String) : [],
     price: Number(row.price || 0),
     price_source: row.price_source || 'legacy',
     status: row.status === 'inactive' ? 'inactive' : 'active',
@@ -676,7 +677,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY source_position ASC NULLS LAST, id ASC
@@ -711,9 +712,9 @@ async function saveBatchProducts(batchId, products, options = {}) {
           UPDATE products
           SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
-              photos=$14::jsonb,photo_alts=$15::jsonb,attributes=$16::jsonb,ai_processed=$17,batch_id=$18,
-              variant_group_key=$19,ai_error=$20,ai_confidence=$21,source_position=$22,slug=$23,updated_at=NOW()
-          WHERE id=$24 AND batch_id=$18
+              photos=$14::jsonb,photo_alts=$15::jsonb,photo_slugs=$16::jsonb,attributes=$17::jsonb,ai_processed=$18,batch_id=$19,
+              variant_group_key=$20,ai_error=$21,ai_confidence=$22,source_position=$23,slug=$24,updated_at=NOW()
+          WHERE id=$25 AND batch_id=$19
           RETURNING id
         `, [
           normalized.external_id,
@@ -731,6 +732,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           normalized.gender,
           JSON.stringify(normalized.photos || []),
           JSON.stringify(normalized.photo_alts || []),
+          JSON.stringify(normalized.photo_slugs || []),
           JSON.stringify(normalized.attributes || {}),
           normalized.ai_processed,
           batchId,
@@ -748,8 +750,8 @@ async function saveBatchProducts(batchId, products, options = {}) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,NOW(),NOW())
         ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -766,6 +768,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           gender = EXCLUDED.gender,
           photos = EXCLUDED.photos,
           photo_alts = EXCLUDED.photo_alts,
+          photo_slugs = EXCLUDED.photo_slugs,
           attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
           variant_group_key = EXCLUDED.variant_group_key,
@@ -791,6 +794,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
         normalized.gender,
         JSON.stringify(normalized.photos || []),
         JSON.stringify(normalized.photo_alts || []),
+        JSON.stringify(normalized.photo_slugs || []),
         JSON.stringify(normalized.attributes || {}),
         normalized.ai_processed,
         batchId,
@@ -915,11 +919,11 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
     for (let position = 0; position < products.length; position += 1) {
       const normalized = normalizeProduct({ ...products[position], batch_id: batchId, source_position: products[position].source_position ?? position });
       await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18,$19,$20,$21,$22,$23,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,NOW(),NOW())
       `, [normalized.external_id,normalized.name,normalized.description,normalized.h1,normalized.seo_title,normalized.seo_description,normalized.slug || null,
         normalized.price,normalized.price_source || 'default',normalized.status,normalized.brand,normalized.category,normalized.subcategory,
-        normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.photo_alts || []),JSON.stringify(normalized.attributes || {}),false,batchId,
+        normalized.gender,JSON.stringify(normalized.photos || []),JSON.stringify(normalized.photo_alts || []),JSON.stringify(normalized.photo_slugs || []),JSON.stringify(normalized.attributes || {}),false,batchId,
         normalized.variant_group_key,normalized.ai_error,normalized.ai_confidence,normalized.source_position]);
     }
     await client.query(`
@@ -1687,6 +1691,8 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       product.slug
       && Array.isArray(product.photo_alts)
       && product.photo_alts.length
+      && Array.isArray(product.photo_slugs)
+      && product.photo_slugs.length === requestedPhotos.length
       && (!isExistingRailsProduct || explicitSeoMediaRun),
     );
     const existingCanonicalPhotos = [...new Set(existingPhotoUrls.values())];
@@ -1705,8 +1711,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       }
       const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
       const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
+      const photoSlug = String(product.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`)
+        .replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || `foto-${photoIndex + 1}`;
       const key = rewriteSeoMedia
-        ? `batches/${batchId}/${safeSlug}-${photoIndex + 1}.webp`
+        ? `batches/${batchId}/${safeSlug}-${photoSlug}.webp`
         : `batches/${batchId}/${safeExternalId}_${photoIndex}.webp`;
       try {
         photos.push(await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }));

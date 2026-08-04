@@ -30,6 +30,7 @@ import {
   createRailsCatalogSubcategory,
   getRailsCatalogAttributeRegistry,
   getRailsCatalogLookups,
+  refreshRailsProductSlugs,
   syncRailsCatalogAttributeRegistry,
   upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
@@ -369,15 +370,16 @@ async function syncCurrentRailsCatalogMappings() {
 
 type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo'
 
-const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь alt-тексты для каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: товар, видимый ракурс и 1–2 различимые детали. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
+const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: товар, видимый ракурс и 1–2 различимые детали. Также верни короткий уникальный photo_slug для каждой фотографии: 1–4 слова по-русски о ракурсе или детали, без бренда, модели, артикула, номера и расширения файла. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
 function buildBatchMediaSeoPrompt(product: any, brandName: string, slug: string) {
   return [
     'Верни объект следующей формы:',
-    JSON.stringify({ photo_alts: [''] }),
+    JSON.stringify({ photo_alts: [''], photo_slugs: [''] }),
     'photo_alts должен содержать ровно по одному alt-тексту на каждую фотографию, в том же порядке, что и номера на contact sheet. Целевая длина каждого alt 60–120 символов, абсолютный максимум 160 символов.',
+    'photo_slugs должен содержать ровно по одному короткому описателю кадра в том же порядке. Пиши по-русски: например «вид спереди», «вид сбоку», «деталь застёжки».',
     'Крупный рекламный текст, цены и промо на кадре не описывай.',
-    `Товар: ${JSON.stringify({ name: product.name, brand: brandName, attributes: product.attributes || {}, article: product.external_id })}`,
+    `Товар: ${JSON.stringify({ name: product.name, brand: brandName, attributes: product.attributes || {} })}`,
     `Slug товара уже сформирован автоматически: ${slug}`,
   ].join('\n\n')
 }
@@ -762,7 +764,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           : product
         const attributeDefinitions = productAttributeDefinitions(product, context)
         const brandName = catalogName(product.brand, 'brand', context.mappings)
-        const generatedSlug = buildProductSeoSlug(product, brandName)
+        const generatedSlug = mode === 'media_seo'
+          ? String(product.slug || '').trim()
+          : buildProductSeoSlug(product, brandName)
         const promptSubcategories = promptSubcategoriesForContext(context)
         const priceRules = mode === 'variants' || mode === 'media_seo' || mode === 'recover_measurements'
           ? []
@@ -891,6 +895,31 @@ async function isLatestBatch(batchId: string) {
   return String(latest.rows[0]?.id || '') === String(batchId)
 }
 
+async function syncBatchProductSlugsFromRails(batchId: string) {
+  const products = await scrapingQuery(`
+    SELECT external_id FROM products
+    WHERE batch_id=$1
+    ORDER BY source_position ASC NULLS LAST, id
+  `, [batchId])
+  const externalIds = products.rows.map((row) => String(row.external_id || '').trim()).filter(Boolean)
+  if (externalIds.length === 0) throw new Error('В выгрузке нет товаров для генерации alt и slug')
+
+  const refreshed = await refreshRailsProductSlugs(externalIds)
+  const invalid = refreshed.products.filter((product) => !product.slug || !product.seo_article)
+  if (refreshed.missingExternalIds.length > 0 || invalid.length > 0 || refreshed.products.length !== new Set(externalIds).size) {
+    throw new Error('Сначала опубликуйте выгрузку в каталог: для части товаров Rails не вернул внутренний артикул')
+  }
+
+  await scrapingQuery(`
+    UPDATE products AS product SET slug=source.slug,updated_at=NOW()
+    FROM jsonb_to_recordset($2::jsonb) AS source(external_id text,slug text)
+    WHERE product.batch_id=$1 AND product.external_id=source.external_id
+  `, [batchId, JSON.stringify(refreshed.products.map((product) => ({
+    external_id: product.external_id,
+    slug: product.slug,
+  })))])
+}
+
 export async function getBatchMediaSeoStatusAction(batchId: string) {
   await requireAdmin()
   return { success: true, data: { allowed: await isLatestBatch(batchId) } }
@@ -900,6 +929,11 @@ export async function startBatchMediaSeoAction(batchId: string) {
   await requireAdmin()
   if (!await isLatestBatch(batchId)) {
     return { success: false, error: 'Alt и slug можно сгенерировать только для самой последней выгрузки' }
+  }
+  try {
+    await syncBatchProductSlugsFromRails(batchId)
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось получить slug товаров из каталога' }
   }
   return startBatchAiAction(batchId, 'media_seo')
 }
@@ -1092,9 +1126,9 @@ async function applyCompletedMediaSeoItem(item: any, normalized: any) {
       return
     }
     await client.query(`
-      UPDATE products SET slug=$2,photo_alts=$3::jsonb,updated_at=NOW()
+      UPDATE products SET slug=$2,photo_alts=$3::jsonb,photo_slugs=$4::jsonb,updated_at=NOW()
       WHERE id=$1
-    `, [item.product_id, normalized.slug, JSON.stringify(normalized.photo_alts || [])])
+    `, [item.product_id, normalized.slug, JSON.stringify(normalized.photo_alts || []), JSON.stringify(normalized.photo_slugs || [])])
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,
         completed_at=NOW(),updated_at=NOW()

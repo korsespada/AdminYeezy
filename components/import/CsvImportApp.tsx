@@ -768,7 +768,9 @@ export default function CsvImportApp({
     return [...groups.entries()].sort((left, right) => right[1] - left[1]);
   }, [aiErrorProducts]);
   const mediaSeoProducts = useMemo(
-    () => products.filter((product) => Boolean(product.slug) && Array.isArray(product.photo_alts) && product.photo_alts.length === product.photos.length),
+    () => products.filter((product) => Boolean(product.slug)
+      && Array.isArray(product.photo_alts) && product.photo_alts.length === product.photos.length
+      && Array.isArray(product.photo_slugs) && product.photo_slugs.length === product.photos.length),
     [products],
   );
   const canPublish = isBatchSource && ["SCRIPT_PROCESSED", "AI_PROCESSED"].includes(batchStage) && products.length > 0 && aiRemainingCount === 0;
@@ -3162,9 +3164,14 @@ function CsvProductDrawer({
       (_, photoIndex) => local.photo_alts?.[photoIndex] || local.name || "",
     );
     const photoAlts = currentPhotoAlts.filter((_, j) => j !== i);
-    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts } : null);
+    const photoSlugs = Array.from(
+      { length: local.photos.length },
+      (_, photoIndex) => local.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`,
+    ).filter((_, j) => j !== i);
+    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts, photo_slugs: photoSlugs } : null);
     onUpdate(index, "photos", photos);
     onUpdate(index, "photo_alts", photoAlts);
+    onUpdate(index, "photo_slugs", photoSlugs);
   };
 
   const movePhoto = (fromIndex: number, toIndex: number) => {
@@ -3177,9 +3184,16 @@ function CsvProductDrawer({
     );
     const [photoAlt] = photoAlts.splice(fromIndex, 1);
     photoAlts.splice(toIndex, 0, photoAlt);
-    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts } : null);
+    const photoSlugs = Array.from(
+      { length: local.photos.length },
+      (_, photoIndex) => local.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`,
+    );
+    const [photoSlug] = photoSlugs.splice(fromIndex, 1);
+    photoSlugs.splice(toIndex, 0, photoSlug);
+    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts, photo_slugs: photoSlugs } : null);
     onUpdate(index, "photos", photos);
     onUpdate(index, "photo_alts", photoAlts);
+    onUpdate(index, "photo_slugs", photoSlugs);
   };
 
   return (

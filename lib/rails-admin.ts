@@ -624,6 +624,32 @@ export async function getRailsCatalogLookups() {
   }
 }
 
+export interface RailsProductSlugRefresh {
+  external_id: string
+  slug: string
+  seo_article: string
+}
+
+export async function refreshRailsProductSlugs(externalIds: string[]) {
+  const ids = [...new Set(externalIds.map(String).map((value) => value.trim()).filter(Boolean))]
+  const products: RailsProductSlugRefresh[] = []
+  const missingExternalIds: string[] = []
+
+  for (let index = 0; index < ids.length; index += 50) {
+    const response = await railsFetch<{
+      products?: RailsProductSlugRefresh[]
+      missing_external_ids?: string[]
+    }>('/admin/products/refresh_slugs', {
+      method: 'POST',
+      body: JSON.stringify({ external_ids: ids.slice(index, index + 50) }),
+    })
+    products.push(...(response.products || []))
+    missingExternalIds.push(...(response.missing_external_ids || []))
+  }
+
+  return { products, missingExternalIds: [...new Set(missingExternalIds)] }
+}
+
 async function resolveCategoryFilterSlug(value?: string) {
   const raw = value?.trim() || ''
   if (!raw || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(raw)) return raw
