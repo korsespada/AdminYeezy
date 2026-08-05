@@ -984,6 +984,7 @@ export default function CsvImportApp({
 
   const handleOpenCurrentBatch = async () => {
     if (!initialBatchId || !isSnapshotSource) return;
+    window.history.replaceState(window.history.state, "", `/admin/batches/${encodeURIComponent(initialBatchId)}`);
     setBatchId(initialBatchId);
     setActiveSnapshotId(null);
     await handleLoadBatch(initialBatchId);
@@ -1085,7 +1086,7 @@ export default function CsvImportApp({
   };
 
   // ─── Data Handlers ────────────────────────────────────────────────
-  const handlePush = async (mode: "add" | "upsert" = "add") => {
+  const handlePush = async (mode: "add" | "upsert" = "add", replaceMissing = false) => {
     if (products.length === 0) return;
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
@@ -1109,7 +1110,7 @@ export default function CsvImportApp({
       try {
         const saved = isSnapshotSource ? true : await persistBatchProducts(products);
         if (!saved) return;
-        const pushResult = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId);
+        const pushResult = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId, replaceMissing);
         if (pushResult.success) {
           setResult({
             success: Number(pushResult.data?.success || 0),
@@ -1861,6 +1862,10 @@ export default function CsvImportApp({
                     </button>
                     {showPublishMenu && (
                       <div className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
+                        <button onClick={() => { setShowPublishMenu(false); handlePush("upsert", true) }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-emerald-200 hover:bg-slate-800">
+                          <span className="block font-semibold">Заменить каталог текущей версией</span>
+                          <span className="text-xs text-slate-500">Обновить товары, добавить новые и удалить отсутствующие в текущей БД-версии</span>
+                        </button>
                         <button onClick={() => { setShowPublishMenu(false); handlePush("upsert") }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-slate-800">
                           <span className="block font-semibold">Обновить и добавить</span>
                           <span className="text-xs text-slate-500">Совпавшие external_id обновить, остальные добавить</span>

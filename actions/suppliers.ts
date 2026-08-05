@@ -1152,7 +1152,7 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
     }
 }
 
-export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add', snapshotId?: string | null): Promise<ActionResponse> {
+export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add', snapshotId?: string | null, replaceMissing = false): Promise<ActionResponse> {
     try {
         await requireAdmin()
         const workflow = require('../scripts/batch-workflow')
@@ -1179,7 +1179,7 @@ export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'u
         }
         const result = snapshotId
           ? await workflow.pushBatchSnapshotToCatalog(batchId, snapshotId, { mode: 'upsert' }, onProgress)
-          : await workflow.pushBatchToCatalog(batchId, { mode }, onProgress)
+          : await workflow.pushBatchToCatalog(batchId, { mode, deleteMissing: replaceMissing }, onProgress)
         try {
             await redis.del('catalog:all')
         } catch (redisErr: any) {
