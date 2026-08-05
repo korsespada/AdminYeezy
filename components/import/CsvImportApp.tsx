@@ -53,6 +53,7 @@ import {
   updateBatchProductAction,
   assignBatchVariantFamilyAction,
   detachBatchVariantProductAction,
+  deleteBatchVariantFamilyAction,
   deleteBatchProductAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
@@ -2801,6 +2802,19 @@ export default function CsvImportApp({
         open={showVariantFamilies}
         families={variantFamilyList}
         onClose={() => setShowVariantFamilies(false)}
+        onDeleteFamily={async (family) => {
+          if (!batchId || isSnapshotSource) return;
+          if (!window.confirm(`Удалить семью «${family.title}» вместе со всеми товарами (${family.products.length})?`)) return;
+          const result = await deleteBatchVariantFamilyAction(batchId, family.key);
+          if (!result.success) {
+            setSaveMsg(`✗ Ошибка БД: ${result.error || "не удалось удалить семью"}`);
+            return;
+          }
+          const familyIds = new Set(family.products.map((product) => Number(product.id)));
+          setProducts((current) => current.filter((product) => !familyIds.has(Number(product.id))));
+          setSelectedForMerge((current) => current.filter((index) => !familyIds.has(Number(products[index]?.id))));
+          setSaveMsg(`✓ Семья удалена: ${result.data?.deletedCount || family.products.length} товаров`);
+        }}
         onOpenProduct={(product) => {
           const nextIndex = products.indexOf(product);
           if (nextIndex >= 0) setSelectedIdx(nextIndex);
@@ -3641,14 +3655,17 @@ function VariantFamiliesDialog({
   open,
   families,
   onClose,
+  onDeleteFamily,
   onOpenProduct,
 }: {
   open: boolean;
   families: VariantFamily[];
   onClose: () => void;
+  onDeleteFamily: (family: VariantFamily) => Promise<void>;
   onOpenProduct: (product: CsvProduct) => void;
 }) {
   const [openFamilyKey, setOpenFamilyKey] = useState<string | null>(null);
+  const [deletingFamilyKey, setDeletingFamilyKey] = useState<string | null>(null);
   const openFamily = families.find((family) => family.key === openFamilyKey) || null;
 
   useEffect(() => {
@@ -3656,6 +3673,16 @@ function VariantFamiliesDialog({
   }, [open]);
 
   if (!open) return null;
+
+  const deleteFamily = async (family: VariantFamily) => {
+    setDeletingFamilyKey(family.key);
+    try {
+      await onDeleteFamily(family);
+      if (openFamilyKey === family.key) setOpenFamilyKey(null);
+    } finally {
+      setDeletingFamilyKey(null);
+    }
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
@@ -3666,7 +3693,10 @@ function VariantFamiliesDialog({
             <p className="mt-1 text-xs text-slate-400">{openFamily ? `${openFamily.title} · ${openFamily.products.length} товаров` : `Всего групп: ${families.length}`}</p>
           </div>
           <div className="flex items-center gap-2">
-            {openFamily && <button type="button" onClick={() => setOpenFamilyKey(null)} className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">Все семьи</button>}
+            {openFamily && <>
+              <button type="button" onClick={() => void deleteFamily(openFamily)} disabled={deletingFamilyKey === openFamily.key} className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"><Trash2 className="h-4 w-4" />Удалить семью</button>
+              <button type="button" onClick={() => setOpenFamilyKey(null)} className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white">Все семьи</button>
+            </>}
             <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
           </div>
         </div>
@@ -3691,16 +3721,17 @@ function VariantFamiliesDialog({
           ) : families.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {families.map((family) => (
-                <button type="button" key={family.key} onClick={() => setOpenFamilyKey(family.key)} className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 text-left transition hover:border-violet-400 hover:bg-slate-800/80">
+                <div key={family.key} className="flex min-w-0 items-center gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 text-left transition hover:border-violet-400 hover:bg-slate-800/80">
                   <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg bg-slate-950">
                     {family.products[0]?.photos?.[0] ? <Image src={resizeImageUrl(family.products[0].photos[0], imagePresets.productGrid)} alt="" fill className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-[10px] text-slate-600">Нет фото</div>}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-white">{family.title}</div>
+                    <button type="button" onClick={() => setOpenFamilyKey(family.key)} className="block w-full truncate text-left text-sm font-semibold text-white">{family.title}</button>
                     <div className="mt-1 text-xs text-violet-300">{family.products.length} {family.products.length === 1 ? "товар" : family.products.length < 5 ? "товара" : "товаров"}</div>
                     <div className="mt-1 line-clamp-2 text-[11px] text-slate-500">{family.colors.join(", ") || "Цвета не указаны"}</div>
                   </div>
-                </button>
+                  <button type="button" onClick={() => void deleteFamily(family)} disabled={deletingFamilyKey === family.key} className="shrink-0 rounded-lg p-2 text-red-300 hover:bg-red-500/10 disabled:opacity-50" title="Удалить семью вместе с товарами" aria-label={`Удалить семью ${family.title}`}><Trash2 className="h-4 w-4" /></button>
+                </div>
               ))}
             </div>
           ) : <div className="py-16 text-center text-sm text-slate-500">В этой выгрузке пока нет семейных групп</div>}

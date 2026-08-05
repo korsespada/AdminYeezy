@@ -1097,3 +1097,26 @@ export async function detachBatchVariantProductAction(batchId: string, productId
     return { success: false, error: error.message }
   }
 }
+
+export async function deleteBatchVariantFamilyAction(batchId: string, groupKey: string) {
+  try {
+    await requireAdmin()
+    if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя удалять семью во время обработки выгрузки' }
+    const normalizedKey = String(groupKey || '').trim()
+    if (!/^[0-9a-f]{32}$/i.test(normalizedKey)) return { success: false, error: 'Некорректный ключ семейной группы' }
+
+    const result = await scrapingQuery(
+      'DELETE FROM products WHERE batch_id=$1 AND variant_group_key=$2 RETURNING id',
+      [batchId, normalizedKey],
+    )
+    await scrapingQuery(
+      'UPDATE scraping_batches SET items_count=(SELECT COUNT(*) FROM products WHERE batch_id=$1), updated_at=NOW() WHERE id=$1',
+      [batchId],
+    )
+    revalidatePath('/admin/batches')
+    revalidatePath('/admin/scraping')
+    return { success: true, data: { deletedCount: result.rowCount || 0 } }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
+}
