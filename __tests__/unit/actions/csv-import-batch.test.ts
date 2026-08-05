@@ -218,13 +218,13 @@ describe('batch product server actions', () => {
       .mockResolvedValueOnce({ rowCount: 2 })
       .mockResolvedValueOnce({})
 
-    const res = await assignBatchVariantFamilyAction('batch-1', [10, 11])
+    const res = await assignBatchVariantFamilyAction('batch-1', [10, 11], undefined, 'Тестовая семья')
 
     expect(res.success).toBe(true)
     expect(res.data?.groupKey).toMatch(/^[0-9a-f]{32}$/)
     expect(mocks.client.query).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE products SET variant_group_key=$1'),
-      [res.data?.groupKey, 'batch-1', [10, 11]],
+      [res.data?.groupKey, 'Тестовая семья', 'batch-1', [10, 11]],
     )
     expect(mocks.client.query).toHaveBeenLastCalledWith('COMMIT')
   })
@@ -239,7 +239,7 @@ describe('batch product server actions', () => {
 
     expect(res.success).toBe(true)
     expect(mocks.scrapingQuery).toHaveBeenLastCalledWith(
-      'UPDATE products SET variant_group_key=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
+      'UPDATE products SET variant_group_key=NULL,variant_group_name=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
       ['batch-1', 10],
     )
   })

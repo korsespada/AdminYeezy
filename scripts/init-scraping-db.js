@@ -146,6 +146,8 @@ async function init() {
         attributes JSONB NOT NULL DEFAULT '{}'::jsonb,
         supplier_published_on DATE,
         source_position INTEGER,
+        variant_group_key TEXT,
+        variant_group_name TEXT,
         batch_id TEXT REFERENCES scraping_batches(id) ON DELETE CASCADE,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()

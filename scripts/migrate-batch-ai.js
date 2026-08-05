@@ -55,6 +55,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS supplier_published_on DATE,
         ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'legacy',
         ADD COLUMN IF NOT EXISTS variant_group_key TEXT,
+        ADD COLUMN IF NOT EXISTS variant_group_name TEXT,
         ADD COLUMN IF NOT EXISTS ai_error TEXT,
         ADD COLUMN IF NOT EXISTS ai_confidence NUMERIC(5,4)
     `)

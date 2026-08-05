@@ -117,6 +117,8 @@ function approvedVariantGroupKey(product: CsvProduct) {
 function variantFamilyTitle(products: CsvProduct[]) {
   const first = products[0];
   if (!first) return "Семья без названия";
+  const savedName = String(first.variant_group_name || "").trim();
+  if (savedName) return savedName;
   const modelName = attributeValuesForDisplay(first.attributes?.model_name)[0];
   const modelCode = String(first.attributes?.model_code || "").trim();
   return modelName || modelCode || first.name || "Семья без названия";
@@ -534,6 +536,7 @@ export default function CsvImportApp({
   const [lookups, setLookups] = useState<Lookups | null>(null);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [selectedForMerge, setSelectedForMerge] = useState<number[]>([]); // Список индексов в порядке выбора
+  const selectionAnchorRef = useRef<number | null>(null);
   const [previousProducts, setPreviousProducts] = useState<CsvProduct[] | null>(
     null,
   ); // Для отмены объединения
@@ -1415,15 +1418,29 @@ export default function CsvImportApp({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const toggleMergeSelection = useCallback((index: number) => {
+  const toggleMergeSelection = useCallback((index: number, shiftKey = false) => {
+    const visibleIndices = displayedProducts.map((product) => products.indexOf(product)).filter((value) => value >= 0);
+    const anchor = selectionAnchorRef.current;
     setSelectedForMerge((prev) => {
+      if (shiftKey && anchor !== null) {
+        const anchorPosition = visibleIndices.indexOf(anchor);
+        const currentPosition = visibleIndices.indexOf(index);
+        if (anchorPosition >= 0 && currentPosition >= 0) {
+          const [from, to] = anchorPosition < currentPosition
+            ? [anchorPosition, currentPosition]
+            : [currentPosition, anchorPosition];
+          return [...new Set([...prev, ...visibleIndices.slice(from, to + 1)])];
+        }
+      }
       if (prev.includes(index)) return prev.filter((i) => i !== index);
       return [...prev, index];
     });
-  }, []);
+    selectionAnchorRef.current = index;
+  }, [displayedProducts, products]);
 
   const handleSelectFiltered = () => {
     setSelectedForMerge(filteredProducts.map((product) => products.indexOf(product)));
+    selectionAnchorRef.current = filteredProducts.length ? products.indexOf(filteredProducts[0]) : null;
   };
 
   const handleRetryFailedAi = async () => {
@@ -2611,7 +2628,7 @@ export default function CsvImportApp({
                     lookups={lookups}
                     isSelected={selectionOrder !== -1}
                     selectionOrder={selectionOrder + 1}
-                    onToggleSelection={() => toggleMergeSelection(realIndex)}
+                    onToggleSelection={(event) => toggleMergeSelection(realIndex, Boolean(event?.shiftKey))}
                     onRemove={handleRemove}
                     onClick={() => setSelectedIdx(realIndex)}
                   />
@@ -2623,6 +2640,7 @@ export default function CsvImportApp({
                     onUpdate={() => undefined}
                     selected={selectionOrder !== -1}
                     onToggleSelect={() => toggleMergeSelection(realIndex)}
+                    onSelectionClick={(event) => toggleMergeSelection(realIndex, event.shiftKey)}
                     brands={(lookups?.brands || []) as any}
                     categories={(lookups?.categories || []) as any}
                     subcategories={(lookups?.subcategories || []) as any}
@@ -2641,7 +2659,7 @@ export default function CsvImportApp({
                     lookups={lookups}
                     isSelected={selectionOrder !== -1}
                     selectionOrder={selectionOrder + 1}
-                    onToggleSelection={() => toggleMergeSelection(realIndex)}
+                    onToggleSelection={(event) => toggleMergeSelection(realIndex, Boolean(event?.shiftKey))}
                     onRemove={handleRemove}
                     onUpdate={updateProduct}
                     onClick={() => setSelectedIdx(realIndex)}
@@ -2794,10 +2812,10 @@ export default function CsvImportApp({
             .filter(Number.isInteger)}
           families={variantFamilyList}
           onClose={() => setShowBulkVariantFamily(false)}
-          onChanged={(productIds, groupKey) => {
+          onChanged={(productIds, groupKey, groupName) => {
             const changedIds = new Set(productIds);
             setProducts((current) => current.map((product) => (
-              changedIds.has(Number(product.id)) ? { ...product, variant_group_key: groupKey } : product
+              changedIds.has(Number(product.id)) ? { ...product, variant_group_key: groupKey, variant_group_name: groupName } : product
             )));
             setSelectedForMerge([]);
             setSaveMsg("Цветовая семья сохранена");
@@ -2821,9 +2839,9 @@ export default function CsvImportApp({
         allProducts={products}
         batchId={batchId}
         variants={selectedIdx !== null ? variantGroups.get(approvedVariantGroupKey(products[selectedIdx])) || [] : []}
-        onVariantsChanged={(productIds, groupKey) => {
+        onVariantsChanged={(productIds, groupKey, groupName) => {
           const changedIds = new Set(productIds);
-          setProducts((current) => current.map((item) => changedIds.has(Number(item.id)) ? { ...item, variant_group_key: groupKey } : item));
+          setProducts((current) => current.map((item) => changedIds.has(Number(item.id)) ? { ...item, variant_group_key: groupKey, variant_group_name: groupName || null } : item));
         }}
         onOpenVariant={(variant) => {
           const nextIndex = products.indexOf(variant);
@@ -2869,7 +2887,7 @@ function CsvProductRow({
   lookups: Lookups | null;
   isSelected: boolean;
   selectionOrder: number;
-  onToggleSelection: () => void;
+  onToggleSelection: (event?: React.MouseEvent) => void;
   onRemove: (index: number) => void;
   onClick: () => void;
 }) {
@@ -2900,7 +2918,7 @@ function CsvProductRow({
         <button
           onClick={(event) => {
             event.stopPropagation();
-            onToggleSelection();
+            onToggleSelection(event);
           }}
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold ${
             isSelected
@@ -2980,7 +2998,7 @@ interface CsvProductCardProps {
   lookups: Lookups | null;
   isSelected: boolean;
   selectionOrder: number;
-  onToggleSelection: () => void;
+  onToggleSelection: (event?: React.MouseEvent) => void;
   onRemove: (i: number) => void;
   onUpdate: (i: number, f: keyof CsvProduct, v: any) => void;
   onClick: () => void;
@@ -3073,7 +3091,7 @@ function CsvProductCard({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onToggleSelection();
+            onToggleSelection(e);
           }}
           className={`absolute top-3 left-3 w-8 h-8 rounded-full flex items-center justify-center transition-all z-10 shadow-lg ${isSelected ? "bg-indigo-500 text-white scale-110" : "bg-slate-900/60 text-slate-400 opacity-0 group-hover:opacity-100"}`}
         >
@@ -3226,7 +3244,7 @@ interface CsvProductDrawerProps {
   allProducts: CsvProduct[];
   batchId?: string | null;
   variants: CsvProduct[];
-  onVariantsChanged: (productIds: number[], groupKey: string | null) => void;
+  onVariantsChanged: (productIds: number[], groupKey: string | null, groupName?: string) => void;
   onOpenVariant: (product: CsvProduct) => void;
   supplierName?: string;
 }
@@ -3413,7 +3431,7 @@ function CsvProductDrawer({
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <Palette className="h-4 w-4 text-violet-300" />
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Цветовые варианты ({variants.length > 1 ? variants.length : 0})</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">{local.variant_group_name || "Цветовые варианты"} ({variants.length > 1 ? variants.length : 0})</h3>
                   </div>
                   {batchId && local.id != null && (
                     <VariantFamilyManager
@@ -3702,9 +3720,10 @@ function BulkVariantFamilyDialog({
   selectedProductIds: number[];
   families: VariantFamily[];
   onClose: () => void;
-  onChanged: (productIds: number[], groupKey: string) => void;
+  onChanged: (productIds: number[], groupKey: string, groupName: string) => void;
 }) {
   const [targetFamilyKey, setTargetFamilyKey] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const targetFamily = families.find((family) => family.key === targetFamilyKey) || null;
@@ -3713,6 +3732,7 @@ function BulkVariantFamilyDialog({
     if (!open) {
       setTargetFamilyKey(null);
       setError("");
+      setGroupName("");
     }
   }, [open]);
 
@@ -3724,19 +3744,24 @@ function BulkVariantFamilyDialog({
       setError("Для новой семьи выберите минимум два товара");
       return;
     }
+    if (!targetFamily && !groupName.trim()) {
+      setError("Укажите название новой семьи");
+      return;
+    }
     setBusy(true);
     setError("");
     const result = await assignBatchVariantFamilyAction(
       batchId,
       selectedProductIds,
       targetFamily ? Number(targetFamily.products[0]?.id) : undefined,
+      targetFamily ? undefined : groupName,
     );
     if (!result.success || !result.data?.groupKey) {
       setError(result.error || "Не удалось сохранить цветовую семью");
       setBusy(false);
       return;
     }
-    onChanged(selectedProductIds, result.data.groupKey);
+    onChanged(selectedProductIds, result.data.groupKey, result.data.groupName || groupName.trim());
     setBusy(false);
     onClose();
   };
@@ -3756,6 +3781,18 @@ function BulkVariantFamilyDialog({
             <div className="text-sm font-semibold text-white">Создать новую семью</div>
             <div className="mt-1 text-xs text-slate-400">Объединит выбранные товары в отдельную цветовую семью.</div>
           </button>
+          {!targetFamily && (
+            <label className="mb-5 block">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-400">Название группы</span>
+              <input
+                value={groupName}
+                onChange={(event) => setGroupName(event.target.value)}
+                placeholder="Например: BC0013 — лоферы"
+                autoFocus
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-violet-500"
+              />
+            </label>
+          )}
           <div className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">Или добавить в существующую</div>
           <div className="grid gap-2 sm:grid-cols-2">
             {families.map((family) => (
@@ -3790,13 +3827,14 @@ function VariantFamilyManager({
   product: CsvProduct;
   products: CsvProduct[];
   batchId: string;
-  onChanged: (productIds: number[], groupKey: string | null) => void;
+  onChanged: (productIds: number[], groupKey: string | null, groupName?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [groupName, setGroupName] = useState("");
   const productId = Number(product.id);
   const currentFamily = approvedVariantGroupKey(product);
 
@@ -3844,7 +3882,6 @@ function VariantFamilyManager({
   const toggleCandidate = (candidate: CsvProduct) => {
     const id = Number(candidate.id);
     const candidateFamily = approvedVariantGroupKey(candidate);
-    setError("");
     setSelectedIds((previous) => {
       if (candidateFamily) return previous.has(id) && previous.size === 1 ? new Set() : new Set([id]);
       const next = new Set([...previous].filter((selectedId) => {
@@ -3865,7 +3902,7 @@ function VariantFamilyManager({
       ? await assignBatchVariantFamilyAction(batchId, [productId], Number(selectedExistingFamily.id))
       : currentFamily
         ? await assignBatchVariantFamilyAction(batchId, selectedProducts.map((candidate) => Number(candidate.id)), productId)
-        : await assignBatchVariantFamilyAction(batchId, [productId, ...selectedProducts.map((candidate) => Number(candidate.id))]);
+        : await assignBatchVariantFamilyAction(batchId, [productId, ...selectedProducts.map((candidate) => Number(candidate.id))], undefined, groupName);
     if (!result.success) {
       setError(result.error || "Не удалось изменить цветовую семью");
       setBusy(false);
@@ -3877,7 +3914,9 @@ function VariantFamilyManager({
         ? selectedProducts.map((candidate) => Number(candidate.id))
         : [productId, ...selectedProducts.map((candidate) => Number(candidate.id))];
     const nextGroupKey = result.data?.groupKey || currentFamily || (selectedExistingFamily ? approvedVariantGroupKey(selectedExistingFamily) : "");
-    onChanged(affectedIds, nextGroupKey);
+    const nextGroupName = result.data?.groupName
+      || (currentFamily || selectedExistingFamily ? String(product.variant_group_name || selectedExistingFamily?.variant_group_name || "") : groupName.trim());
+    onChanged(affectedIds, nextGroupKey, nextGroupName);
     setBusy(false);
     setSelectedIds(new Set());
     setOpen(false);
@@ -3893,7 +3932,7 @@ function VariantFamilyManager({
       setBusy(false);
       return;
     }
-    onChanged([productId], null);
+    onChanged([productId], null, "");
     setBusy(false);
     setOpen(false);
   };
@@ -3908,7 +3947,7 @@ function VariantFamilyManager({
     <>
       <button
         type="button"
-        onClick={() => { setOpen(true); setError(""); }}
+        onClick={() => { setOpen(true); setError(""); setGroupName(""); }}
         className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-xs font-semibold text-violet-300 hover:bg-violet-500/20"
       >
         <Link2 className="h-3.5 w-3.5" />
@@ -3929,6 +3968,12 @@ function VariantFamilyManager({
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <input value={query} onChange={(event) => setQuery(event.target.value)} autoFocus placeholder="Название, артикул, модель или цвет" className="w-full rounded-lg border border-slate-700 bg-slate-950 py-2.5 pl-10 pr-3 text-sm text-white outline-none focus:border-violet-500" />
               </label>
+              {!currentFamily && (
+                <label className="mt-3 block">
+                  <span className="mb-1 block text-xs font-semibold text-slate-400">Название новой группы</span>
+                  <input value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="Например: BC0013 — лоферы" className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-violet-500" />
+                </label>
+              )}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
               {candidates.length ? (

@@ -34,6 +34,7 @@ interface ProductCardProps {
     onUpdate: (product: Product) => void;
     selected: boolean;
     onToggleSelect: (id: string) => void;
+    onSelectionClick?: (event: React.MouseEvent) => void;
     categories?: Category[];
     subcategories?: Subcategory[];
     brands?: Brand[];
@@ -46,7 +47,7 @@ interface ProductCardProps {
     variantColors?: string[];
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [] }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [] }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -249,9 +250,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 <div className="absolute left-2 top-2 z-10">
                     <Checkbox
                         checked={selected}
-                        onCheckedChange={() => onToggleSelect(product.id)}
+                        onCheckedChange={() => { if (!onSelectionClick) onToggleSelect(product.id); }}
                         className="h-5 w-5 border-slate-700 bg-slate-900/80 shadow-lg backdrop-blur-sm"
-                        onClick={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); onSelectionClick?.(e); }}
                     />
                 </div>
                 {/* Delete button on hover */}

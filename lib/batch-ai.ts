@@ -773,6 +773,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       // Цветовое семейство применяется только после серверной сверки нескольких
       // разных цветов и ручного одобрения предложения.
       variant_group_key: original.variant_group_key || null,
+      variant_group_name: original.variant_group_name || null,
     },
     suggestions,
     subcategorySuggestion,

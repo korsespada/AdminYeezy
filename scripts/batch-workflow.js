@@ -29,6 +29,8 @@ const PRODUCT_COLUMNS = [
   { name: 'gender', key: 'gender' },
   { name: 'photos', key: 'photos' },
   { name: 'ai_processed', key: 'ai_processed' },
+  { name: 'variant_group_key', key: 'variant_group_key' },
+  { name: 'variant_group_name', key: 'variant_group_name' },
 ];
 
 const SUPPLIER_SCRIPT_BASE_COLUMNS = [
@@ -40,6 +42,7 @@ const SUPPLIER_SCRIPT_BASE_COLUMNS = [
   { name: 'h1', key: 'h1' }, { name: 'seo_title', key: 'seo_title' },
   { name: 'seo_description', key: 'seo_description' }, { name: 'ai_processed', key: 'ai_processed' },
   { name: 'variant_group_key', key: 'variant_group_key' },
+  { name: 'variant_group_name', key: 'variant_group_name' },
 ];
 
 const RAILS_IMPORT_COLUMNS = [
@@ -65,7 +68,7 @@ const RAILS_IMPORT_COLUMNS = [
 const CORE_PRODUCT_FIELDS = new Set([
   'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
-  'ai_processed', 'attributes', 'variant_group_key', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
+  'ai_processed', 'attributes', 'variant_group_key', 'variant_group_name', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
 ]);
 
 function ensureDir(dir) {
@@ -161,6 +164,7 @@ function normalizeProduct(row) {
     batchId: row.batch_id || row.batchId,
     ai_processed: row.ai_processed === true || row.ai_processed === 'true' || row.ai_processed === 'True',
     variant_group_key: row.variant_group_key || null,
+    variant_group_name: row.variant_group_name || null,
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence == null ? null : Number(row.ai_confidence),
     source_position: row.source_position == null ? null : Number(row.source_position),
@@ -681,7 +685,7 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, variant_group_name, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at
     FROM products
     WHERE batch_id=$1
     ORDER BY source_position ASC NULLS LAST, id ASC
@@ -717,8 +721,8 @@ async function saveBatchProducts(batchId, products, options = {}) {
           SET external_id=$1,name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,
               price=$7,price_source=$8,status=$9,brand=$10,category=$11,subcategory=$12,gender=$13,
               photos=$14::jsonb,photo_alts=$15::jsonb,photo_slugs=$16::jsonb,attributes=$17::jsonb,ai_processed=$18,batch_id=$19,
-              variant_group_key=$20,ai_error=$21,ai_confidence=$22,source_position=$23,slug=$24,supplier_published_on=$25,updated_at=NOW()
-          WHERE id=$26 AND batch_id=$19
+              variant_group_key=$20,variant_group_name=$21,ai_error=$22,ai_confidence=$23,source_position=$24,slug=$25,supplier_published_on=$26,updated_at=NOW()
+          WHERE id=$27 AND batch_id=$19
           RETURNING id
         `, [
           normalized.external_id,
@@ -741,6 +745,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           normalized.ai_processed,
           batchId,
           normalized.variant_group_key,
+          normalized.variant_group_name,
           normalized.ai_error,
           normalized.ai_confidence,
           normalized.source_position,
@@ -755,8 +760,8 @@ async function saveBatchProducts(batchId, products, options = {}) {
       }
 
       const insertRes = await client.query(`
-        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,NOW(),NOW())
+        INSERT INTO products(external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,variant_group_key,variant_group_name,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,NOW(),NOW())
         ON CONFLICT (batch_id, external_id) DO UPDATE SET
           name = EXCLUDED.name,
           description = EXCLUDED.description,
@@ -777,6 +782,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
           attributes = EXCLUDED.attributes,
           ai_processed = EXCLUDED.ai_processed,
           variant_group_key = EXCLUDED.variant_group_key,
+          variant_group_name = EXCLUDED.variant_group_name,
           ai_error = EXCLUDED.ai_error,
           ai_confidence = EXCLUDED.ai_confidence,
           source_position = EXCLUDED.source_position,
@@ -805,6 +811,7 @@ async function saveBatchProducts(batchId, products, options = {}) {
         normalized.ai_processed,
         batchId,
         normalized.variant_group_key,
+        normalized.variant_group_name,
         normalized.ai_error,
         normalized.ai_confidence,
         normalized.source_position,

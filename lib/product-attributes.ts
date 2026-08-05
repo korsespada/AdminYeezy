@@ -29,6 +29,7 @@ export const CORE_PRODUCT_FIELDS = new Set([
   'ai_processed',
   'ai_sampled',
   'variant_group_key',
+  'variant_group_name',
   'ai_error',
   'ai_confidence',
   'source_position',

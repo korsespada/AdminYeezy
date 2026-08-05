@@ -41,6 +41,7 @@ export interface CsvProduct {
     ai_sampled?: boolean
     price_source?: string
     variant_group_key?: string | null
+    variant_group_name?: string | null
     ai_error?: string | null
     ai_confidence?: number | null
     source_position?: number | null
@@ -69,6 +70,7 @@ const BATCH_PRODUCT_COLUMNS = [
   { name: 'photos', key: 'photos' },
   { name: 'ai_processed', key: 'ai_processed' },
   { name: 'variant_group_key', key: 'variant_group_key' },
+  { name: 'variant_group_name', key: 'variant_group_name' },
 ]
 
 const SUPPLIER_SCRIPT_BASE_COLUMNS = [
@@ -80,6 +82,7 @@ const SUPPLIER_SCRIPT_BASE_COLUMNS = [
   { name: 'h1', key: 'h1' }, { name: 'seo_title', key: 'seo_title' },
   { name: 'seo_description', key: 'seo_description' }, { name: 'ai_processed', key: 'ai_processed' },
   { name: 'variant_group_key', key: 'variant_group_key' },
+  { name: 'variant_group_name', key: 'variant_group_name' },
 ]
 
 function normalizePhotos(value: any): string[] {
@@ -135,6 +138,7 @@ function normalizeBatchProduct(row: any): CsvProduct {
     ai_sampled: row.ai_sampled === true || row.ai_sampled === 'true',
     price_source: row.price_source || 'legacy',
     variant_group_key: row.variant_group_key || null,
+    variant_group_name: row.variant_group_name || null,
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence === null || row.ai_confidence === undefined ? null : Number(row.ai_confidence),
     source_position: row.source_position === null || row.source_position === undefined ? null : Number(row.source_position),
@@ -548,7 +552,7 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
     let res = await scrapingQuery(`
       SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description, p.slug, p.photo_alts, p.photo_slugs,
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
-        p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.ai_error,
+        p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.variant_group_name, p.ai_error,
         p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
         EXISTS (
           SELECT 1 FROM batch_ai_items i
@@ -591,8 +595,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       SET external_id=$1, name=$2, description=$3, h1=$4, seo_title=$5, seo_description=$6,
           price=$7, price_source=$8, status=$9, brand=$10, category=$11, subcategory=$12, gender=$13,
           photos=$14::jsonb, slug=$15, photo_alts=$16::jsonb, photo_slugs=$17::jsonb, attributes=$18::jsonb, ai_processed=$19, batch_id=$20,
-          variant_group_key=$21, ai_error=$22, ai_confidence=$23, source_position=$24, supplier_published_on=$25, updated_at=NOW()
-      WHERE id=$26 AND batch_id=$20
+          variant_group_key=$21, variant_group_name=$22, ai_error=$23, ai_confidence=$24, source_position=$25, supplier_published_on=$26, updated_at=NOW()
+      WHERE id=$27 AND batch_id=$20
       RETURNING id
     `, [
       normalized.external_id,
@@ -616,6 +620,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       normalized.ai_processed === true || normalized.ai_processed === 'true',
       batchId,
       normalized.variant_group_key || null,
+      normalized.variant_group_name || null,
       normalized.ai_error || null,
       normalized.ai_confidence ?? null,
       normalized.source_position,
@@ -626,8 +631,8 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
   }
 
   const insertRes = await client.query(`
-    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, slug, photo_alts, photo_slugs, attributes, ai_processed, batch_id, variant_group_key, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,NOW(),NOW())
+    INSERT INTO products (external_id, name, description, h1, seo_title, seo_description, price, price_source, status, brand, category, subcategory, gender, photos, slug, photo_alts, photo_slugs, attributes, ai_processed, batch_id, variant_group_key, variant_group_name, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16::jsonb,$17::jsonb,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,NOW(),NOW())
     ON CONFLICT (batch_id, external_id) DO UPDATE SET
       name = EXCLUDED.name,
       description = EXCLUDED.description,
@@ -648,6 +653,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
       attributes = EXCLUDED.attributes,
       ai_processed = EXCLUDED.ai_processed,
       variant_group_key = EXCLUDED.variant_group_key,
+      variant_group_name = EXCLUDED.variant_group_name,
       ai_error = EXCLUDED.ai_error,
       ai_confidence = EXCLUDED.ai_confidence,
       source_position = EXCLUDED.source_position,
@@ -676,6 +682,7 @@ async function upsertBatchProduct(client: any, batchId: string, product: any, po
     normalized.ai_processed === true || normalized.ai_processed === 'true',
     batchId,
     normalized.variant_group_key || null,
+    normalized.variant_group_name || null,
     normalized.ai_error || null,
     normalized.ai_confidence ?? null,
     normalized.source_position,
@@ -782,6 +789,7 @@ export async function updateBatchProductAction(identifier: string | number, patc
       'attributes',
       'ai_processed',
       'variant_group_key',
+      'variant_group_name',
       'ai_error',
       'ai_confidence',
     ].includes(key))
@@ -1022,12 +1030,15 @@ export async function assignBatchVariantFamilyAction(
   batchId: string,
   productIds: number[],
   targetProductId?: number | null,
+  groupName?: string | null,
 ) {
   await requireAdmin()
   if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя менять варианты во время обработки выгрузки' }
   const ids = [...new Set(productIds.map(Number).filter(Number.isInteger))]
   if (!ids.length) return { success: false, error: 'Выберите товары' }
   if (!targetProductId && ids.length < 2) return { success: false, error: 'Для новой семьи выберите минимум два товара' }
+  const requestedGroupName = String(groupName || '').trim()
+  if (!targetProductId && !requestedGroupName) return { success: false, error: 'Укажите название новой семьи' }
 
   const client = await getScrapingClient()
   try {
@@ -1039,24 +1050,31 @@ export async function assignBatchVariantFamilyAction(
     if (selected.rowCount !== ids.length) throw new Error('Часть выбранных товаров не найдена в этой выгрузке')
 
     let groupKey = ''
+    let existingGroupName = ''
     if (targetProductId) {
       const target = await client.query(
-        'SELECT variant_group_key FROM products WHERE batch_id=$1 AND id=$2 FOR UPDATE',
+        'SELECT variant_group_key,variant_group_name FROM products WHERE batch_id=$1 AND id=$2 FOR UPDATE',
         [batchId, Number(targetProductId)],
       )
       groupKey = String(target.rows[0]?.variant_group_key || '').trim()
+      existingGroupName = String(target.rows[0]?.variant_group_name || '').trim()
       if (!/^[0-9a-f]{32}$/i.test(groupKey)) throw new Error('У выбранного товара нет подтверждённой цветовой семьи')
+      if (!requestedGroupName && !existingGroupName) {
+        throw new Error('У выбранной семьи нет названия')
+      }
     } else {
       groupKey = crypto.randomBytes(16).toString('hex')
     }
 
+    const persistedGroupName = requestedGroupName || existingGroupName
+
     await client.query(
-      'UPDATE products SET variant_group_key=$1,updated_at=NOW() WHERE batch_id=$2 AND id=ANY($3::int[])',
-      [groupKey, batchId, ids],
+      'UPDATE products SET variant_group_key=$1,variant_group_name=$2,updated_at=NOW() WHERE batch_id=$3 AND id=ANY($4::int[])',
+      [groupKey, persistedGroupName, batchId, ids],
     )
     await client.query('COMMIT')
     revalidatePath('/admin/batches')
-    return { success: true, data: { groupKey } }
+    return { success: true, data: { groupKey, groupName: persistedGroupName } }
   } catch (error: any) {
     await client.query('ROLLBACK')
     return { success: false, error: error.message }
@@ -1070,7 +1088,7 @@ export async function detachBatchVariantProductAction(batchId: string, productId
     await requireAdmin()
     if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя менять варианты во время обработки выгрузки' }
     await scrapingQuery(
-      'UPDATE products SET variant_group_key=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
+      'UPDATE products SET variant_group_key=NULL,variant_group_name=NULL,updated_at=NOW() WHERE batch_id=$1 AND id=$2',
       [batchId, Number(productId)],
     )
     revalidatePath('/admin/batches')
