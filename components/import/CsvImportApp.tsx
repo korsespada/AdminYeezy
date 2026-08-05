@@ -2492,8 +2492,12 @@ export default function CsvImportApp({
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900">
               <Database className="h-7 w-7 text-slate-500" />
             </div>
-            <h3 className="mb-2 text-lg font-semibold text-white">В партии нет товаров</h3>
-            <p className="text-sm text-slate-400">В этой выгрузке пока нет товарных карточек.</p>
+            <h3 className="mb-2 text-lg font-semibold text-white">
+              {pathError ? "Не удалось загрузить товары" : "В партии нет товаров"}
+            </h3>
+            <p className="text-sm text-slate-400">
+              {pathError || "В этой выгрузке пока нет товарных карточек."}
+            </p>
           </div>
         )}
 

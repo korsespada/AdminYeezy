@@ -19,7 +19,8 @@ async function ensureMediaSeoSchema() {
         ADD COLUMN IF NOT EXISTS slug TEXT,
         ADD COLUMN IF NOT EXISTS photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS photo_slugs JSONB NOT NULL DEFAULT '[]'::jsonb,
-        ADD COLUMN IF NOT EXISTS supplier_published_on DATE
+        ADD COLUMN IF NOT EXISTS supplier_published_on DATE,
+        ADD COLUMN IF NOT EXISTS variant_group_name TEXT
     `)
     await client.query(`
       ALTER TABLE batch_ai_runs
