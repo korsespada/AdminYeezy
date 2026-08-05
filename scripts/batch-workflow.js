@@ -68,7 +68,7 @@ const RAILS_IMPORT_COLUMNS = [
 const CORE_PRODUCT_FIELDS = new Set([
   'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
-  'ai_processed', 'attributes', 'variant_group_key', 'variant_group_name', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
+  'slug', 'photo_alts', 'photo_slugs', 'ai_processed', 'attributes', 'variant_group_key', 'variant_group_name', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
 ]);
 
 function ensureDir(dir) {

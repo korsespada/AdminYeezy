@@ -233,6 +233,21 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(payload.metadata.supplier_published_on).toBe('2026-08-02')
   })
 
+  it('keeps media SEO fields out of catalog attributes', () => {
+    const payload = workflow.railsUpdatePayload({
+      external_id: 'item-1',
+      name: 'Шапка',
+      slug: 'shapka-seraya-item-1',
+      photo_alts: ['Серая шапка, вид спереди'],
+      photo_slugs: ['vid-speredi'],
+      photos: ['https://cdn.example/item-1.webp'],
+      attributes: { color: 'Серый' },
+    }).product
+
+    expect(payload.catalog_attributes).toEqual({ color: 'Серый' })
+    expect(payload.media[0].alt_text).toBe('Серая шапка, вид спереди')
+  })
+
   it('publishes processed inactive batch rows as active catalog products', () => {
     const row = workflow.productToRailsJsonRow({
       external_id: 'item-1',
