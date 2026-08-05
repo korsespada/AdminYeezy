@@ -1152,31 +1152,34 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
     }
 }
 
-export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add'): Promise<ActionResponse> {
+export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add', snapshotId?: string | null): Promise<ActionResponse> {
     try {
         await requireAdmin()
         const workflow = require('../scripts/batch-workflow')
         const lastReported = new Map<string, number>()
         let progressWrite = Promise.resolve()
-        const result = await workflow.pushBatchToCatalog(batchId, { mode }, async (progress: any) => {
-            const phase = ['lookup', 'media', 'publish'].includes(progress?.phase) ? progress.phase : 'publish'
-            const current = Math.max(0, Number(progress?.current || 0))
-            const total = Math.max(0, Number(progress?.total || 0))
-            const previous = lastReported.get(phase) ?? -5
-            if (current !== 0 && current !== total && current - previous < 5) return
-            lastReported.set(phase, current)
-            progressWrite = progressWrite.then(async () => {
-              const persisted = await scrapingQuery(
-                `UPDATE batch_operation_locks
-                 SET operation=$2,updated_at=NOW()
-                 WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
-                 RETURNING operation`,
-                [batchId, `publish|${phase}|${current}|${total}`],
-              )
-              if (!persisted.rows[0]) throw new Error('Публикация остановлена пользователем')
-            })
-            await progressWrite
-        })
+        const onProgress = async (progress: any) => {
+          const phase = ['lookup', 'media', 'publish'].includes(progress?.phase) ? progress.phase : 'publish'
+          const current = Math.max(0, Number(progress?.current || 0))
+          const total = Math.max(0, Number(progress?.total || 0))
+          const previous = lastReported.get(phase) ?? -5
+          if (current !== 0 && current !== total && current - previous < 5) return
+          lastReported.set(phase, current)
+          progressWrite = progressWrite.then(async () => {
+            const persisted = await scrapingQuery(
+              `UPDATE batch_operation_locks
+               SET operation=$2,updated_at=NOW()
+               WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
+               RETURNING operation`,
+              [batchId, `publish|${phase}|${current}|${total}`],
+            )
+            if (!persisted.rows[0]) throw new Error('Публикация остановлена пользователем')
+          })
+          await progressWrite
+        }
+        const result = snapshotId
+          ? await workflow.pushBatchSnapshotToCatalog(batchId, snapshotId, { mode: 'upsert' }, onProgress)
+          : await workflow.pushBatchToCatalog(batchId, { mode }, onProgress)
         try {
             await redis.del('catalog:all')
         } catch (redisErr: any) {

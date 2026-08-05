@@ -1087,7 +1087,8 @@ export default function CsvImportApp({
   // ─── Data Handlers ────────────────────────────────────────────────
   const handlePush = async (mode: "add" | "upsert" = "add") => {
     if (products.length === 0) return;
-    if (!batchId) {
+    const targetBatchId = batchId || initialBatchId;
+    if (!targetBatchId) {
       setSaveMsg("Публикация доступна только из JSONB-партии. Откройте текущую выгрузку, а не старый CSV-артефакт.");
       return;
     }
@@ -1102,13 +1103,13 @@ export default function CsvImportApp({
       setSaveMsg(`⚠ Предупреждений: ${validationWarnings.length}`);
     }
 
-    if (batchId) {
+    if (targetBatchId) {
       setIsPushing(true);
       setPublishProgress({ phase: "lookup", current: 0, total: products.length });
       try {
-        const saved = await persistBatchProducts(products);
+        const saved = isSnapshotSource ? true : await persistBatchProducts(products);
         if (!saved) return;
-        const pushResult = await pushBatchToCatalogAction(batchId, mode);
+        const pushResult = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId);
         if (pushResult.success) {
           setResult({
             success: Number(pushResult.data?.success || 0),
@@ -1117,7 +1118,7 @@ export default function CsvImportApp({
             failed: Number(pushResult.data?.failed || 0),
             errors: pushResult.data?.errors || [],
           });
-          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}`);
+          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, удалено из каталога: ${Number(pushResult.data?.deleted || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}`);
           setBatchStage("PUSHED");
         } else {
           setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
@@ -1752,6 +1753,18 @@ export default function CsvImportApp({
                 >
                   {isRunningCustomScript ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Filter className="h-4 w-4" />}
                   Пост-обработка скриптом
+                </button>
+              )}
+
+              {isSnapshotSource && initialBatchId && ["SCRIPT_PROCESSED", "AI_PROCESSED", "PUSHED"].includes(batchStage) && aiRemainingCount === 0 && (
+                <button
+                  onClick={() => handlePush("upsert")}
+                  disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
+                  title="Обновить Rails-каталог данными этого snapshot и удалить товары этой партии, которых в нём нет"
+                >
+                  {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  Пушить этот snapshot в каталог
                 </button>
               )}
 

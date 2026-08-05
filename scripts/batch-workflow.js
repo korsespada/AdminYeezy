@@ -695,6 +695,44 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   return res.rows.map(normalizeProduct);
 }
 
+async function getBatchSnapshotProducts(batchId, snapshotId) {
+  const result = await scrapingPool.query(
+    'SELECT stage,label,products FROM batch_snapshots WHERE id=$1 AND batch_id=$2 LIMIT 1',
+    [snapshotId, batchId],
+  );
+  const snapshot = result.rows[0];
+  if (!snapshot) throw new Error('Снимок этапа не найден');
+  const products = Array.isArray(snapshot.products) ? snapshot.products : [];
+  return {
+    stage: String(snapshot.stage || ''),
+    label: String(snapshot.label || ''),
+    products: products.map((product) => normalizeProduct({ ...product, batch_id: batchId })),
+  };
+}
+
+async function getBatchKnownExternalIds(batchId) {
+  const result = await scrapingPool.query(`
+    WITH known AS (
+      SELECT external_id FROM batch_publications WHERE batch_id=$1
+      UNION
+      SELECT external_id FROM products WHERE batch_id=$1
+    )
+    SELECT DISTINCT known.external_id
+    FROM known
+    WHERE known.external_id IS NOT NULL
+      AND BTRIM(known.external_id) <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM batch_publications other
+        WHERE other.batch_id <> $1 AND other.external_id=known.external_id
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM products other
+        WHERE other.batch_id <> $1 AND other.external_id=known.external_id
+      )
+  `, [batchId]);
+  return result.rows.map((row) => String(row.external_id).trim()).filter(Boolean);
+}
+
 async function saveBatchProducts(batchId, products, options = {}) {
   const client = await scrapingPool.connect();
   try {
@@ -1473,6 +1511,25 @@ async function existingRailsExternalIds(externalIds) {
   return new Set((await existingRailsProducts(externalIds)).keys());
 }
 
+async function deleteRailsProductsByExternalIds(externalIds) {
+  const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
+  let deleted = 0;
+  const failed = [];
+  for (let index = 0; index < ids.length; index += 50) {
+    const result = await fetchJsonWithRetry(railsApiUrl('/admin/products/bulk_destroy'), {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${await railsAdminToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ external_ids: ids.slice(index, index + 50) }),
+    }, 'Rails bulk delete');
+    deleted += Number(result.deleted || 0);
+    failed.push(...(result.failed || []));
+  }
+  return { requested: ids.length, deleted, failed };
+}
+
 function railsUpdatePayload(product) {
   const sizes = Array.isArray(product.attributes?.sizes) ? product.attributes.sizes : [];
   const metadata = {
@@ -1610,7 +1667,9 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   `, [batchId, operationOwnerId]);
   if (!operation.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
   try {
-  const products = await getBatchProducts(batchId);
+  const products = Array.isArray(options.sourceProducts)
+    ? options.sourceProducts.map((product) => normalizeProduct({ ...product, batch_id: batchId }))
+    : await getBatchProducts(batchId);
   if (products.length === 0) throw new Error('В партии нет товаров для пуша');
   const batch = await getBatch(batchId);
   if (!['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch?.stage || ''))) {
@@ -1851,6 +1910,21 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       WHERE batch_id=$1 AND mode='media_seo' AND status='completed' AND catalog_applied_at IS NULL
     `, [batchId]);
   }
+  let deleted = 0;
+  let deleteFailed = [];
+  if (options.deleteMissing) {
+    const targetExternalIds = new Set(products.map((product) => String(product.external_id || '').trim()).filter(Boolean));
+    const knownExternalIds = await getBatchKnownExternalIds(batchId);
+    const missingExternalIds = knownExternalIds.filter((externalId) => !targetExternalIds.has(externalId));
+    if (missingExternalIds.length > 0) {
+      const deletionResult = await deleteRailsProductsByExternalIds(missingExternalIds);
+      deleted = Number(deletionResult.deleted || 0);
+      deleteFailed = deletionResult.failed || [];
+      if (deleteFailed.length > 0) {
+        throw new Error(`Удаление товаров, отсутствующих в snapshot, завершилось с ошибками: ${deleteFailed.slice(0, 10).map((item) => item.external_id || item.error || String(item)).join('; ')}`);
+      }
+    }
+  }
   await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
 
   return {
@@ -1861,11 +1935,26 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     total: products.length,
     skippedExisting: mode === 'add' ? existingExternalIds.size : 0,
     skippedUnchanged,
+    deleted,
+    deleteFailed,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
   } finally {
     await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
   }
+}
+
+async function pushBatchSnapshotToCatalog(batchId, snapshotId, options = {}, onProgress) {
+  const snapshot = await getBatchSnapshotProducts(batchId, snapshotId);
+  if (!['AI_PROCESSED', 'SCRIPT_PROCESSED', 'PUSHED'].includes(snapshot.stage)) {
+    throw new Error(`Публикация snapshot доступна только для обработанного этапа (сейчас: ${snapshot.label || snapshot.stage || 'неизвестно'})`);
+  }
+  return pushBatchToCatalog(batchId, {
+    ...options,
+    mode: 'upsert',
+    sourceProducts: snapshot.products,
+    deleteMissing: true,
+  }, onProgress);
 }
 
 async function closePools() {
@@ -1894,6 +1983,7 @@ module.exports = {
   normalizeProductCatalogReferences,
   processBatchWithAi,
   pushBatchToCatalog,
+  pushBatchSnapshotToCatalog,
   runBatchPostProcessScript,
   saveBatchProducts,
   serializeProductsToCsv,
