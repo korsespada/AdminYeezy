@@ -6,6 +6,7 @@ import { BookOpen, Bot, CheckCircle2, Cpu, Image, Save, Server, ShieldAlert } fr
 import { updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
+import type { ByesuModelOption } from '@/lib/byesu'
 
 type WorkerState = {
   available?: boolean
@@ -22,13 +23,14 @@ type Props = {
       byesuOpenai?: boolean
       byesuLegacy?: boolean
     }
+    byesuModels?: ByesuModelOption[]
   }
 }
 
-const BYESU_MODELS = [
-  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'Gemini Business' },
-  { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', group: 'OpenAI Codex' },
-] as const
+const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
+  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' },
+  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' },
+]
 
 export default function AIRulesEditor({ initialSettings }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
@@ -44,6 +46,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [pending, startTransition] = useTransition()
   const worker = initialSettings.cockpitWorker
   const credentials = initialSettings.credentials
+  const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
   const selectedByesuGroup = settings.byesuModel.toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
   const selectedByesuKeyReady = selectedByesuGroup === 'gemini'
     ? credentials?.byesuGemini
@@ -132,11 +135,11 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                   onChange={(event) => update('byesuModel', event.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
                 >
-                  {!BYESU_MODELS.some((model) => model.value === settings.byesuModel) && (
+                  {!byesuModels.some((model) => model.value === settings.byesuModel) && (
                     <option value={settings.byesuModel}>{settings.byesuModel}</option>
                   )}
-                  {BYESU_MODELS.map((model) => (
-                    <option key={model.value} value={model.value}>{model.label} · {model.group}</option>
+                  {byesuModels.map((model) => (
+                    <option key={`${model.group}:${model.value}`} value={model.value}>{model.label} · {model.group === 'gemini' ? 'Gemini Business' : 'OpenAI Codex'}</option>
                   ))}
                 </select>
                 <div className={`rounded-xl border p-3 text-sm ${
@@ -154,7 +157,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                   </p>
                 </div>
                 <p className="text-xs leading-relaxed text-slate-500">
-                  BYESU привязывает ключ к группе. Ключи задаются один раз глобально в Coolify и автоматически выбираются по модели — в поставщиках их вводить не нужно.
+                  Список загружен из каталога BYESU по подключённым ключам. BYESU привязывает ключ к группе, поэтому в поставщиках их вводить не нужно.
                 </p>
               </>
             )}

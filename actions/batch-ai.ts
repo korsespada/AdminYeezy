@@ -57,7 +57,7 @@ import {
   saveBatchAiSuggestions,
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
-import { byesuApiKeyStatus, byesuModelGroup } from '@/lib/byesu'
+import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 
 const SETTINGS_KEYS = [
@@ -68,6 +68,11 @@ const SETTINGS_KEYS = [
   'batch_ai_max_tokens',
   'batch_ai_concurrency',
   'batch_ai_system_prompt',
+]
+
+const FALLBACK_BYESU_MODELS = [
+  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' as const },
+  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' as const },
 ]
 
 function finiteNumber(value: unknown, fallback: number) {
@@ -90,6 +95,8 @@ export async function getBatchAiSettingsAction() {
     ORDER BY heartbeat_at DESC LIMIT 1
   `).catch(() => ({ rows: [] }))
   const byesuKeys = byesuApiKeyStatus()
+  const fetchedByesuModels = await getByesuModels()
+  const byesuModels = fetchedByesuModels.length > 0 ? fetchedByesuModels : FALLBACK_BYESU_MODELS
   return {
     success: true,
     data: {
@@ -107,6 +114,7 @@ export async function getBatchAiSettingsAction() {
         byesuOpenai: byesuKeys.openai,
         byesuLegacy: byesuKeys.legacy,
       },
+      byesuModels,
     },
   }
 }
