@@ -682,6 +682,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         currentFile.snapshot_id = null
         currentFile.snapshot_missing = false
         currentFile.is_current = true
+        currentFile.items_count = Number(batch.product_count || batch.items_count || 0)
       }
       const stageRank: Record<string, number> = { 'Сырой товар': 0, 'Обработан скриптом': 1, 'Обработано ИИ': 2 }
       const sortedFiles = files.sort((a, b) => (stageRank[a.status] ?? 9) - (stageRank[b.status] ?? 9) || new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
