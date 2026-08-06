@@ -47,8 +47,12 @@ const SUBCATEGORY_TARGETS: Record<string, string> = {
 }
 
 function sourceConfig() {
-  const url = process.env.CHROMOFF_SUPABASE_URL?.replace(/\/+$/, '')
-  const key = process.env.CHROMOFF_SUPABASE_SERVICE_ROLE_KEY?.trim()
+  const cleanEnvValue = (...names: string[]) => {
+    const value = names.map((name) => process.env[name]?.trim()).find(Boolean)
+    return value?.replace(/^(['"])(.*)\1$/, '$2')
+  }
+  const url = cleanEnvValue('CHROMOFF_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL')?.replace(/\/+$/, '')
+  const key = cleanEnvValue('CHROMOFF_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY')
   if (!url || !key) {
     throw new Error('Нужны CHROMOFF_SUPABASE_URL и CHROMOFF_SUPABASE_SERVICE_ROLE_KEY в окружении AdminYeezy.')
   }
@@ -67,7 +71,9 @@ async function sourceRows<T>(table: string, select: string): Promise<T[]> {
       cache: 'no-store',
     })
     const page = await response.json().catch(() => [])
-    if (!response.ok || !Array.isArray(page)) throw new Error(`Не удалось прочитать ${table} из Chromoff.`)
+    if (!response.ok || !Array.isArray(page)) {
+      throw new Error(`Не удалось прочитать ${table} из Chromoff (HTTP ${response.status}). Проверь URL и service_role key в env AdminYeezy.`)
+    }
     rows.push(...page as T[])
     if (page.length < pageSize) return rows
   }
