@@ -3,21 +3,24 @@
 import { useState, useTransition } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction } from '@/actions/chromoff'
-import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
+import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction } from '@/actions/chromoff'
+import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 
 export default function ChromoffCatalog({
   listings,
   categories,
+  candidates,
   totalItems,
 }: {
   listings: RailsChromoffListing[]
   categories: RailsChromoffCategory[]
+  candidates: RailsChromoffCandidate[]
   totalItems: number
 }) {
   const [, startTransition] = useTransition()
   const [importMessage, setImportMessage] = useState('')
   const [canImport, setCanImport] = useState(false)
+  const [listingMessage, setListingMessage] = useState('')
   const mappedCategories = categories.filter((category) => category.catalog_category)
 
   return (
@@ -75,7 +78,7 @@ export default function ChromoffCatalog({
               onClick={() => startTransition(async () => {
                 const response = await importChromoffCatalogAction()
                 setImportMessage(response.success
-                  ? `Импортировано: ${Number(response.imported || 0).toLocaleString('ru-RU')} товаров. Все они скрыты в витрине до ручной публикации.`
+                  ? `Импортировано: ${Number(response.imported || 0).toLocaleString('ru-RU')} товаров. Текущие активные карточки сохранены опубликованными.`
                   : response.message || 'Импорт не выполнен.')
               })}
             >
@@ -85,9 +88,35 @@ export default function ChromoffCatalog({
           </div>
         </section>
 
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold text-white">Добавить новый товар</h2>
+          <p className="mt-1 text-sm text-slate-400">Только товары бренда Chrome Hearts, которые ещё не входят в Chromoff.</p>
+          <form
+            className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+            action={(formData) => startTransition(async () => {
+              const response = await createChromoffListingAction(formData)
+              setListingMessage(response.message)
+            })}
+          >
+            <select name="product_id" required className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+              <option value="">Выбери товар</option>
+              {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
+            </select>
+            <select name="chromoff_category_id" required className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+              <option value="">Выбери подкатегорию</option>
+              {categories.filter((category) => category.parent_id).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+            </select>
+            <div className="flex items-center gap-3">
+              <input type="hidden" name="published" value="true" />
+              <Button type="submit">Добавить и опубликовать</Button>
+            </div>
+          </form>
+          {listingMessage && <p className="mt-3 text-sm text-slate-300">{listingMessage}</p>}
+        </section>
+
         <section className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900">
           <div className="border-b border-slate-800 px-5 py-4 text-sm text-slate-400">
-            Импорт создаёт товары в общем каталоге, но сразу ставит им noindex и не публикует в Chromoff. Публикация — вручную у каждого товара.
+            Импорт создаёт товары в общем каталоге с noindex на YeezyUnique. Текущий каталог сохраняет публикацию в Chromoff; новые товары добавляются вручную выше.
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-800 text-sm">

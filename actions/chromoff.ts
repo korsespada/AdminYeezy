@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { buildChromoffImportPayload } from '@/lib/chromoff-source'
-import { runRailsChromoffImport, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffListing } from '@/lib/rails-admin'
 
 export async function setChromoffListingPublishedAction(formData: FormData) {
   const id = String(formData.get('id') || '').trim()
@@ -15,6 +15,24 @@ export async function setChromoffListingPublishedAction(formData: FormData) {
     return { success: true, message: published ? 'Товар опубликован в Chromoff.' : 'Товар скрыт с Chromoff.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить публикацию.' }
+  }
+}
+
+export async function createChromoffListingAction(formData: FormData) {
+  const productId = String(formData.get('product_id') || '').trim()
+  const chromoffCategoryId = String(formData.get('chromoff_category_id') || '').trim()
+  if (!productId || !chromoffCategoryId) return { success: false, message: 'Выбери товар и подкатегорию Chromoff.' }
+
+  try {
+    await createRailsChromoffListing({
+      productId,
+      chromoffCategoryId,
+      published: String(formData.get('published') || '') === 'true',
+    })
+    revalidatePath('/admin/chromoff')
+    return { success: true, message: 'Товар добавлен в Chromoff.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось добавить товар в Chromoff.' }
   }
 }
 

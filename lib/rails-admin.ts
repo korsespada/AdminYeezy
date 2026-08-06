@@ -185,6 +185,7 @@ export interface RailsChromoffImportProduct {
   source_status?: string | null
   source_metadata?: Record<string, unknown>
   sort_order: number
+  published: boolean
   seo_description?: string | null
   h1?: string | null
   media: ProductMedia[]
@@ -205,6 +206,13 @@ export interface RailsChromoffImportSummary {
   existing_categories: number
   existing_listings: number
   missing_category_sources: string[]
+}
+
+export interface RailsChromoffCandidate {
+  id: string
+  name: string
+  slug: string
+  price_cents: number
 }
 
 export interface RailsStoreTelegramContact {
@@ -747,6 +755,29 @@ export async function updateRailsChromoffListing(id: string, input: {
   const result = await railsFetch<{ listing: RailsChromoffListing }>(`/admin/chromoff/listings/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ listing }),
+  })
+  return result.listing
+}
+
+export async function listRailsChromoffCandidates() {
+  const result = await railsFetch<{ products: RailsChromoffCandidate[] }>('/admin/chromoff/listings/candidates?per_page=100')
+  return result.products || []
+}
+
+export async function createRailsChromoffListing(input: {
+  productId: string
+  chromoffCategoryId: string
+  published: boolean
+}) {
+  const result = await railsFetch<{ listing: RailsChromoffListing }>('/admin/chromoff/listings', {
+    method: 'POST',
+    body: JSON.stringify({
+      listing: {
+        product_id: input.productId,
+        chromoff_category_id: input.chromoffCategoryId,
+        published: input.published,
+      },
+    }),
   })
   return result.listing
 }

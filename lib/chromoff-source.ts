@@ -165,6 +165,7 @@ export async function buildChromoffImportPayload(): Promise<RailsChromoffImportP
       video_url: product.video_url || null,
       source_external_id: product.external_id || null,
       source_status: product.status || null,
+      published: product.status === 'active',
       source_metadata: {
         source_created_at: product.created_at || null,
         pinterest_published: product.pinterest_published ?? null,

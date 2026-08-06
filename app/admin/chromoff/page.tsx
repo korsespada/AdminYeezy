@@ -1,5 +1,5 @@
 import ChromoffCatalog from '@/components/chromoff/ChromoffCatalog'
-import { listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
+import { listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
 import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -7,11 +7,12 @@ export const dynamic = 'force-dynamic'
 export default async function ChromoffPage() {
   await connection()
   try {
-    const [categories, listings] = await Promise.all([
+    const [categories, listings, candidates] = await Promise.all([
       listRailsChromoffCategories(),
       listRailsChromoffListings({ page: 1, perPage: 50 }),
+      listRailsChromoffCandidates(),
     ])
-    return <ChromoffCatalog categories={categories} listings={listings.items} totalItems={listings.totalItems} />
+    return <ChromoffCatalog categories={categories} listings={listings.items} candidates={candidates} totalItems={listings.totalItems} />
   } catch (error) {
     return (
       <main className="min-h-full bg-slate-950 p-8 text-slate-100">
