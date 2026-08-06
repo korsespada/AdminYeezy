@@ -38,7 +38,7 @@ export default function ChromoffCatalog({
   page: number
   filters: ChromoffFilters
 }) {
-  const [, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransition()
   const [importMessage, setImportMessage] = useState('')
   const [canImport, setCanImport] = useState(false)
   const [listingMessage, setListingMessage] = useState('')
@@ -59,6 +59,37 @@ export default function ChromoffCatalog({
     if (filters.published !== 'all') params.set('published', filters.published)
     const query = params.toString()
     return query ? `/admin/chromoff?${query}` : '/admin/chromoff'
+  }
+
+  const previewImport = () => {
+    setImportMessage('Проверяем источник и сопоставление категорий…')
+    startTransition(async () => {
+      const response = await previewChromoffImportAction()
+      if (!response.success) {
+        setCanImport(false)
+        setImportMessage(response.message || 'Dry-run завершился с ошибкой.')
+        return
+      }
+      const result = response.result
+      if (!result) {
+        setCanImport(false)
+        setImportMessage('Dry-run не вернул результат.')
+        return
+      }
+      const ready = result.categories_missing_catalog_mapping === 0 && result.missing_category_sources.length === 0
+      setCanImport(ready)
+      setImportMessage(`Проверено: ${result.products_received.toLocaleString('ru-RU')} товаров, ${result.categories_received} категорий. ${ready ? 'Ошибок сопоставления нет — импорт можно запускать.' : `Непривязанных категорий: ${result.categories_missing_catalog_mapping}.`}`)
+    })
+  }
+
+  const importCatalog = () => {
+    setImportMessage('Импорт запущен: переносим товары и фотографии в общий каталог. Это может занять несколько минут — не закрывай страницу.')
+    startTransition(async () => {
+      const response = await importChromoffCatalogAction()
+      setImportMessage(response.success
+        ? `Импортировано: ${Number(response.imported || 0).toLocaleString('ru-RU')} товаров. Текущие активные карточки сохранены опубликованными.`
+        : response.message || 'Импорт не выполнен.')
+    })
   }
 
   return (
@@ -84,34 +115,13 @@ export default function ChromoffCatalog({
             <span>Непривязанных: {categories.length - mappedCategories.length}</span>
           </div>
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <Button type="button" variant="outline" onClick={() => startTransition(async () => {
-              const response = await previewChromoffImportAction()
-              if (!response.success) {
-                setCanImport(false)
-                setImportMessage(response.message || 'Dry-run завершился с ошибкой.')
-                return
-              }
-              const result = response.result
-              if (!result) {
-                setCanImport(false)
-                setImportMessage('Dry-run не вернул результат.')
-                return
-              }
-              const ready = result.categories_missing_catalog_mapping === 0 && result.missing_category_sources.length === 0
-              setCanImport(ready)
-              setImportMessage(`Проверено: ${result.products_received.toLocaleString('ru-RU')} товаров, ${result.categories_received} категорий. ${ready ? 'Ошибок сопоставления нет — импорт можно запускать.' : `Непривязанных категорий: ${result.categories_missing_catalog_mapping}.`}`)
-            })}>
-              Проверить импорт
+            <Button type="button" variant="outline" disabled={isPending} onClick={previewImport}>
+              {isPending ? 'Проверяем…' : 'Проверить импорт'}
             </Button>
-            <Button type="button" disabled={!canImport} onClick={() => startTransition(async () => {
-              const response = await importChromoffCatalogAction()
-              setImportMessage(response.success
-                ? `Импортировано: ${Number(response.imported || 0).toLocaleString('ru-RU')} товаров. Текущие активные карточки сохранены опубликованными.`
-                : response.message || 'Импорт не выполнен.')
-            })}>
-              Импортировать каталог
+            <Button type="button" disabled={!canImport || isPending} onClick={importCatalog}>
+              {isPending ? 'Импортируем…' : 'Импортировать каталог'}
             </Button>
-            {importMessage && <span className="text-sm text-slate-300">{importMessage}</span>}
+            {importMessage && <span className="text-sm text-slate-300" role="status" aria-live="polite">{importMessage}</span>}
           </div>
         </section>
 
