@@ -41,6 +41,7 @@ published catalog and CRM operations.
 - Use a Goal only for multi-turn work with explicit completion criteria.
 - Do not deploy, restart Coolify resources, modify shared databases, or send
   external messages without explicit authorization.
+- If Coolify needs to be inspected or used, use the Coolify MCP server.
 
 ## Dependency and tool documentation
 

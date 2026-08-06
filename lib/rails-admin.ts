@@ -153,6 +153,7 @@ export interface RailsChromoffListing {
   legacy_slug: string
   name: string
   image_url?: string | null
+  images?: string[]
   price_cents: number
   status: string
   published: boolean
@@ -718,6 +719,8 @@ export async function listRailsChromoffListings(options: {
   search?: string
   published?: boolean
   categoryId?: string
+  minPrice?: string | number
+  maxPrice?: string | number
 } = {}): Promise<RailsCrmListResult<RailsChromoffListing>> {
   const params = new URLSearchParams()
   params.set('page', String(options.page || 1))
@@ -725,6 +728,8 @@ export async function listRailsChromoffListings(options: {
   if (options.search?.trim()) params.set('q', options.search.trim())
   if (typeof options.published === 'boolean') params.set('published', String(options.published))
   if (options.categoryId) params.set('category_id', options.categoryId)
+  if (options.minPrice !== undefined && String(options.minPrice).trim()) params.set('min_price', String(options.minPrice))
+  if (options.maxPrice !== undefined && String(options.maxPrice).trim()) params.set('max_price', String(options.maxPrice))
 
   const result = await railsFetch<{ listings: RailsChromoffListing[]; meta?: { total?: number; pages?: number } }>(
     `/admin/chromoff/listings?${params}`

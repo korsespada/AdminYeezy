@@ -4,15 +4,65 @@ import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ChromoffPage() {
+const PAGE_SIZE = 48
+
+type ChromoffSearchParams = {
+  page?: string
+  q?: string
+  category?: string
+  subcategory?: string
+  minPrice?: string
+  maxPrice?: string
+  published?: string
+}
+
+function positivePage(value?: string) {
+  const page = Number(value)
+  return Number.isInteger(page) && page > 0 ? page : 1
+}
+
+export default async function ChromoffPage({
+  searchParams,
+}: {
+  searchParams: Promise<ChromoffSearchParams>
+}) {
   await connection()
+  const params = await searchParams
+  const page = positivePage(params.page)
+  const filters = {
+    q: params.q?.trim() || '',
+    category: params.category || '',
+    subcategory: params.subcategory || '',
+    minPrice: params.minPrice || '',
+    maxPrice: params.maxPrice || '',
+    published: ['published', 'hidden'].includes(params.published || '') ? params.published as 'published' | 'hidden' : 'all' as const,
+  }
+
   try {
     const [categories, listings, candidates] = await Promise.all([
       listRailsChromoffCategories(),
-      listRailsChromoffListings({ page: 1, perPage: 50 }),
+      listRailsChromoffListings({
+        page,
+        perPage: PAGE_SIZE,
+        search: filters.q,
+        categoryId: filters.subcategory || filters.category,
+        minPrice: filters.minPrice,
+        maxPrice: filters.maxPrice,
+        published: filters.published === 'all' ? undefined : filters.published === 'published',
+      }),
       listRailsChromoffCandidates(),
     ])
-    return <ChromoffCatalog categories={categories} listings={listings.items} candidates={candidates} totalItems={listings.totalItems} />
+    return (
+      <ChromoffCatalog
+        categories={categories}
+        listings={listings.items}
+        candidates={candidates}
+        totalItems={listings.totalItems}
+        totalPages={listings.totalPages}
+        page={page}
+        filters={filters}
+      />
+    )
   } catch (error) {
     return (
       <main className="min-h-full bg-slate-950 p-8 text-slate-100">
