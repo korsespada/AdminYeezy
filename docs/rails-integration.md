@@ -98,6 +98,22 @@ POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
 GET  /api/v1/admin/customers
 ```
 
+## Chromoff
+
+Новый раздел `/admin/chromoff` использует отдельные Rails endpoints:
+
+```text
+GET    /api/v1/admin/chromoff/categories
+PATCH  /api/v1/admin/chromoff/categories/:id
+GET    /api/v1/admin/chromoff/listings
+PATCH  /api/v1/admin/chromoff/listings/:id
+```
+
+Публичная витрина Chromoff получает только опубликованные listings через
+`/api/v1/catalog/chromoff/*`. У listing есть собственная категория, legacy URL
+и SEO-поля. Поэтому одна и та же карточка может оставаться в своей категории
+YeezyUnique и одновременно иметь другое меню/SEO на Chromoff.
+
 Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
 
 ## Проверка

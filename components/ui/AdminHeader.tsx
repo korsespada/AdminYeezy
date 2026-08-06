@@ -3,7 +3,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal, Gem } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -45,6 +45,13 @@ export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
           <Link href="/admin/crm">
             <ClipboardList size={20} className="text-sky-400" />
             <span className="hidden min-[2100px]:inline">CRM</span>
+          </Link>
+        </Button>
+
+        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Chromoff">
+          <Link href="/admin/chromoff">
+            <Gem size={20} className="text-violet-400" />
+            <span className="hidden min-[2100px]:inline">Chromoff</span>
           </Link>
         </Button>
 

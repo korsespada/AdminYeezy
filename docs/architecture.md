@@ -9,6 +9,7 @@
 ```text
 AdminYeezy -> yeezy_scraping
            -> Rails API -> Rails CRM Postgres -> storefront
+                                      -> Chromoff storefront
 
 legacy shop DB -> Rails bootstrap importer
 NocoDB         -> yeezy_scraping
@@ -26,6 +27,21 @@ NocoDB         -> Rails CRM read-only access
 | S3/CDN | Изображения | Media pipeline |
 
 Rails CRM Postgres является единственным source of truth для сайта. `yeezy_scraping` не заменяет CRM-БД, а `shop` не должен использоваться как основная БД нового сайта.
+
+## Chromoff catalog
+
+`Chromoff` остаётся отдельной витриной Chrome Hearts, но не получает отдельную
+операционную БД каталога. В Rails хранятся:
+
+- общий товар и медиа;
+- отдельная `ChromoffListing` с ручной публикацией, legacy URL и SEO overrides;
+- отдельная `ChromoffCategory` hierarchy, сохраняющая меню Chromoff;
+- техническая связь каждой Chromoff-категории с общей Rails taxonomy, которая
+  не изменяет меню YeezyUnique.
+
+Заказы, Telegram-пользователи, корзины и история старого Supabase-контура не
+переносятся этим каталоговым контуром. До cutover Supabase используется только
+как источник read-only dry-run и импорта; запись в него из AdminYeezy не нужна.
 
 ## Почему отдельный сервис
 

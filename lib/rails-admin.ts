@@ -136,6 +136,77 @@ export interface RailsTelegramNotificationRecipient {
   updated_at?: string
 }
 
+export interface RailsChromoffCategory {
+  id: string
+  source_id: string
+  parent_id?: string | null
+  name: string
+  slug: string
+  sort_order: number
+  active: boolean
+  catalog_category?: { id: string; name: string; slug: string; parent_id?: string | null } | null
+}
+
+export interface RailsChromoffListing {
+  id: string
+  source_product_id: string
+  legacy_slug: string
+  name: string
+  image_url?: string | null
+  price_cents: number
+  status: string
+  published: boolean
+  chromoff_published: boolean
+  chromoff_category?: { id: string; name: string; slug: string; parent_id?: string | null } | null
+  seo_title?: string | null
+  seo_description?: string | null
+  h1?: string | null
+}
+
+export interface RailsChromoffImportCategory {
+  source_id: string
+  parent_source_id?: string | null
+  catalog_category_id: string
+  name: string
+  slug: string
+  sort_order: number
+}
+
+export interface RailsChromoffImportProduct {
+  source_product_id: string
+  category_source_id: string
+  legacy_slug: string
+  name: string
+  description?: string | null
+  price_cents: number
+  gender?: string | null
+  video_url?: string | null
+  source_external_id?: string | null
+  source_status?: string | null
+  source_metadata?: Record<string, unknown>
+  sort_order: number
+  seo_description?: string | null
+  h1?: string | null
+  media: ProductMedia[]
+}
+
+export interface RailsChromoffImportPayload {
+  categories: RailsChromoffImportCategory[]
+  products: RailsChromoffImportProduct[]
+}
+
+export interface RailsChromoffImportSummary {
+  dry_run: boolean
+  imported?: boolean
+  categories_received: number
+  products_received: number
+  categories_with_catalog_mapping: number
+  categories_missing_catalog_mapping: number
+  existing_categories: number
+  existing_listings: number
+  missing_category_sources: string[]
+}
+
 export interface RailsStoreTelegramContact {
   id: string
   telegram_id: string
@@ -626,6 +697,68 @@ export async function getRailsCatalogLookups() {
     categories,
     subcategories,
   }
+}
+
+export async function listRailsChromoffCategories(): Promise<RailsChromoffCategory[]> {
+  const result = await railsFetch<{ categories: RailsChromoffCategory[] }>('/admin/chromoff/categories')
+  return result.categories || []
+}
+
+export async function listRailsChromoffListings(options: {
+  page?: number
+  perPage?: number
+  search?: string
+  published?: boolean
+  categoryId?: string
+} = {}): Promise<RailsCrmListResult<RailsChromoffListing>> {
+  const params = new URLSearchParams()
+  params.set('page', String(options.page || 1))
+  params.set('per_page', String(options.perPage || 50))
+  if (options.search?.trim()) params.set('q', options.search.trim())
+  if (typeof options.published === 'boolean') params.set('published', String(options.published))
+  if (options.categoryId) params.set('category_id', options.categoryId)
+
+  const result = await railsFetch<{ listings: RailsChromoffListing[]; meta?: { total?: number; pages?: number } }>(
+    `/admin/chromoff/listings?${params}`
+  )
+  return {
+    items: result.listings || [],
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+  }
+}
+
+export async function updateRailsChromoffListing(id: string, input: {
+  published?: boolean
+  chromoffCategoryId?: string
+  legacySlug?: string
+  seoTitle?: string
+  seoDescription?: string
+  h1?: string
+}) {
+  const listing: Record<string, unknown> = {}
+  if (input.published !== undefined) listing.published = input.published
+  if (input.chromoffCategoryId !== undefined) listing.chromoff_category_id = input.chromoffCategoryId
+  if (input.legacySlug !== undefined) listing.legacy_slug = input.legacySlug
+  if (input.seoTitle !== undefined) listing.seo_title = input.seoTitle
+  if (input.seoDescription !== undefined) listing.seo_description = input.seoDescription
+  if (input.h1 !== undefined) listing.h1 = input.h1
+
+  const result = await railsFetch<{ listing: RailsChromoffListing }>(`/admin/chromoff/listings/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ listing }),
+  })
+  return result.listing
+}
+
+export async function runRailsChromoffImport(
+  payload: RailsChromoffImportPayload,
+  dryRun: boolean,
+): Promise<RailsChromoffImportSummary> {
+  return railsFetch<RailsChromoffImportSummary>('/admin/chromoff/imports', {
+    method: 'POST',
+    body: JSON.stringify({ import: { ...payload, dry_run: dryRun } }),
+  })
 }
 
 export interface RailsProductSlugRefresh {

@@ -3,6 +3,7 @@ import {
   BarChart3,
   Boxes,
   ClipboardList,
+  Gem,
   Database,
   FileSearch,
   FolderTree,
@@ -28,6 +29,13 @@ interface AdminLaunchpadProps {
 }
 
 const sections = [
+  {
+    title: 'Chromoff',
+    description: 'Каталог Chrome Hearts: отдельные категории, перенос из Supabase и ручная публикация на Chromoff.',
+    href: '/admin/chromoff',
+    icon: Gem,
+    tone: 'text-violet-300',
+  },
   {
     title: 'Товары',
     description: 'Опубликованный каталог из Rails CRM: поиск, фильтры, карточки и массовые действия.',

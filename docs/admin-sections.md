@@ -19,6 +19,7 @@ Production-доступ к `/admin/*` должен быть только по Ra
 | `/admin` | Опубликованные товары | Rails admin/products |
 | `/admin/brands` | Бренды | Rails catalog lookups, read-only |
 | `/admin/categories` | Категории и подкатегории | Rails catalog lookups, read-only |
+| `/admin/chromoff` | Каталог Chromoff: Chrome Hearts, отдельная taxonomy и ручная публикация | Rails Chromoff API |
 | `/admin/trash` | Архивированные товары | Rails admin/products |
 
 Все изменения опубликованного каталога идут через Rails API. Прямые SQL-записи в Rails CRM Postgres запрещены.
