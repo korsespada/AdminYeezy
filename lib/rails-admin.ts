@@ -13,11 +13,12 @@ import {
   type Subcategory,
 } from './types'
 import { cookies } from 'next/headers'
-import { ADMIN_TOKEN_COOKIE } from './admin-session'
+import { ADMIN_TOKEN_COOKIE, AdminAuthError } from './admin-session'
 import { isPriceCentsOnRequest, isPriceOnRequest } from './product-pricing'
 import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
+let pendingRailsAdminLogin: Promise<string> | null = null
 let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
 const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
@@ -423,14 +424,29 @@ function jwtExpiresAt(token: string) {
 }
 
 async function railsAdminToken() {
+  let hasRequestCookies = false
+
   try {
-    const cookieToken = (await cookies()).get(ADMIN_TOKEN_COOKIE)?.value
+    const cookieStore = await cookies()
+    hasRequestCookies = true
+    const cookieToken = cookieStore.get(ADMIN_TOKEN_COOKIE)?.value
     if (cookieToken) return cookieToken
   } catch {
     // Server actions and server components have request cookies; tests and
     // background scripts fall back to env credentials below.
   }
 
+  // A production page request must always act as the signed-in operator.
+  // Falling back to a shared email/password here makes every parallel Rails
+  // request perform another login and can trip the Rails login throttle.
+  if (hasRequestCookies && process.env.NODE_ENV === 'production') {
+    throw new AdminAuthError('Rails admin session is missing or expired')
+  }
+
+  return railsServiceAdminToken()
+}
+
+async function railsServiceAdminToken() {
   const staticToken = process.env.RAILS_ADMIN_TOKEN || process.env.ADMIN_RAILS_TOKEN
   if (staticToken) return staticToken
 
@@ -451,6 +467,17 @@ async function railsAdminToken() {
     )
   }
 
+  const pendingLogin = pendingRailsAdminLogin || loginRailsService(email, password)
+  pendingRailsAdminLogin = pendingLogin
+
+  try {
+    return await pendingLogin
+  } finally {
+    if (pendingRailsAdminLogin === pendingLogin) pendingRailsAdminLogin = null
+  }
+}
+
+async function loginRailsService(email: string, password: string) {
   const response = await fetch(railsApiUrl('/admin/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

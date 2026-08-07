@@ -186,6 +186,36 @@ describe('rails admin product adapter', () => {
     )
   })
 
+  it('shares one env-credential login between concurrent background requests', async () => {
+    delete process.env.RAILS_ADMIN_TOKEN
+    process.env.RAILS_ADMIN_EMAIL = 'service@example.test'
+    process.env.RAILS_ADMIN_PASSWORD = 'service-password'
+    vi.resetModules()
+    const { listRailsCrmCustomers: listCustomers } = await import('@/lib/rails-admin')
+
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/admin/auth/login')) {
+        return {
+          ok: true,
+          json: async () => ({ token: 'service-token' }),
+        }
+      }
+
+      return {
+        ok: true,
+        json: async () => ({ customers: [], meta: { total: 0, pages: 0 } }),
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await Promise.all([
+      listCustomers({ page: 1, perPage: 1 }),
+      listCustomers({ page: 1, perPage: 1 }),
+    ])
+
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/admin/auth/login'))).toHaveLength(1)
+  })
+
   it('loads CRM customers from the admin endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,

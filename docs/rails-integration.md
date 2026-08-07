@@ -21,6 +21,18 @@ GET  /api/v1/admin/auth/me
 
 JWT хранить в HttpOnly cookie. Production fallback через plaintext-таблицу `admins` удалить.
 
+### Runtime authentication
+
+Интерактивные запросы из `/admin/*` всегда передают JWT текущего оператора из
+HttpOnly cookie `admin_token`. При отсутствии или истечении cookie production
+страница не должна выполнять вход через `RAILS_ADMIN_EMAIL` и
+`RAILS_ADMIN_PASSWORD`: пользователя нужно вернуть на `/login`.
+
+Переменные `RAILS_ADMIN_TOKEN` и `RAILS_ADMIN_EMAIL` / `RAILS_ADMIN_PASSWORD`
+разрешены только для явных server/background-операций. Если такой процесс
+получает JWT по email/password, параллельные запросы обязаны совместно ждать
+один login-запрос и использовать выданный JWT из процесса-кеша.
+
 ## Этап 2. Каталог
 
 Перевести просмотр и редактирование опубликованных товаров на:

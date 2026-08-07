@@ -95,7 +95,8 @@ Auth:
 
 - production UI login идет через `POST /api/v1/admin/auth/login`;
 - browser session хранит Rails JWT в HttpOnly cookie `admin_token`;
-- `RAILS_ADMIN_EMAIL`, `RAILS_ADMIN_PASSWORD` и `RAILS_ADMIN_TOKEN` допустимы только для server/background операций или временного override;
+- browser-запросы к Rails используют только `admin_token`; если cookie истёк, пользователь повторно входит через `/login`;
+- `RAILS_ADMIN_EMAIL`, `RAILS_ADMIN_PASSWORD` и `RAILS_ADMIN_TOKEN` допустимы только для явных server/background операций или временного override;
 - plaintext `admins` fallback не должен работать в production.
 
 Smoke-check AdminYeezy:
