@@ -1,7 +1,38 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerModelsUrl } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
+  it('normalizes provider endpoints and encrypts API keys at rest', () => {
+    const previous = process.env.AI_PROVIDER_ENCRYPTION_KEY
+    process.env.AI_PROVIDER_ENCRYPTION_KEY = 'unit-test-key'
+    try {
+      expect(normalizeProviderBaseUrl('https://openrouter.ai/api/v1/chat/completions', 'openrouter')).toBe('https://openrouter.ai/api/v1')
+      expect(providerChatUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/chat/completions')
+      expect(providerModelsUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/models')
+      const encrypted = encryptProviderApiKey('secret-key')
+      expect(encrypted).not.toContain('secret-key')
+      expect(decryptProviderApiKey(encrypted)).toBe('secret-key')
+    } finally {
+      if (previous === undefined) delete process.env.AI_PROVIDER_ENCRYPTION_KEY
+      else process.env.AI_PROVIDER_ENCRYPTION_KEY = previous
+    }
+  })
+
+  it('asks one color-split response to contain fully processed products', () => {
+    const prompt = buildBatchAiColorSplitPrompt({
+      product: { external_id: 'album-1', photos: ['1.jpg', '2.jpg'] },
+      brands: [],
+      categories: [],
+      subcategories: [],
+      attributes: [],
+    })
+
+    expect(prompt).toContain('Второго AI-прохода не будет')
+    expect(prompt).toContain('photo_indexes')
+    expect(prompt).toContain('catalog_attributes')
+  })
+
   it('keeps unknown taxonomy out of the applied product and removes rejected media', () => {
     const result = normalizeBatchAiOutput({
       product: {

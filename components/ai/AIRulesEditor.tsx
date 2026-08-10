@@ -2,11 +2,12 @@
 
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, Bot, CheckCircle2, Cpu, Image, Save, Server, ShieldAlert } from 'lucide-react'
-import { updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { BookOpen, Bot, CheckCircle2, Cpu, Image, Plus, RefreshCw, Save, Server, ShieldAlert, Trash2, X } from 'lucide-react'
+import { createAiProviderAction, deleteAiProviderAction, refreshAiProviderModelsAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
 import type { ByesuModelOption } from '@/lib/byesu'
+import type { AiProviderKind, AiProviderRecord } from '@/lib/ai-providers'
 
 type WorkerState = {
   available?: boolean
@@ -24,6 +25,7 @@ type Props = {
       byesuLegacy?: boolean
     }
     byesuModels?: ByesuModelOption[]
+    providers?: AiProviderRecord[]
   }
 }
 
@@ -35,6 +37,8 @@ const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
 export default function AIRulesEditor({ initialSettings }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
     provider: initialSettings.provider,
+    activeProviderId: initialSettings.activeProviderId || null,
+    providerId: initialSettings.activeProviderId || undefined,
     openrouterModel: initialSettings.openrouterModel,
     byesuModel: initialSettings.byesuModel,
     temperature: initialSettings.temperature,
@@ -44,17 +48,76 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
+  const [providers, setProviders] = useState<AiProviderRecord[]>(initialSettings.providers || [])
+  const [showProviderForm, setShowProviderForm] = useState(false)
+  const [providerForm, setProviderForm] = useState({
+    name: '', kind: 'openrouter' as AiProviderKind, baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '',
+  })
   const worker = initialSettings.cockpitWorker
   const credentials = initialSettings.credentials
   const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
+  const activeSavedProvider = providers.find((provider) => provider.id === settings.activeProviderId)
   const selectedByesuGroup = settings.byesuModel.toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
   const selectedByesuKeyReady = selectedByesuGroup === 'gemini'
-    ? credentials?.byesuGemini
-    : credentials?.byesuOpenai
+    ? Boolean(activeSavedProvider?.hasApiKey || credentials?.byesuGemini)
+    : Boolean(activeSavedProvider?.hasApiKey || credentials?.byesuOpenai)
 
   const update = <K extends keyof BatchAiSettings>(key: K, value: BatchAiSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
   }
+
+  const selectLegacyProvider = (provider: BatchAiSettings['provider']) => {
+    setSettings((current) => ({ ...current, provider, activeProviderId: null, providerId: undefined }))
+  }
+
+  const selectSavedProvider = (provider: AiProviderRecord) => {
+    setSettings((current) => ({
+      ...current,
+      provider: provider.kind,
+      activeProviderId: provider.id,
+      providerId: provider.id,
+      ...(provider.kind === 'byesu' ? { byesuModel: provider.model } : { openrouterModel: provider.model }),
+    }))
+  }
+
+  const addProvider = () => startTransition(async () => {
+    setMessage(null)
+    const result = await createAiProviderAction(providerForm)
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось добавить провайдера' })
+      return
+    }
+    const provider = result.data as AiProviderRecord
+    setProviders((current) => [provider, ...current])
+    selectSavedProvider(provider)
+    setProviderForm({ name: '', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '' })
+    setShowProviderForm(false)
+    setMessage({ type: 'success', text: `Провайдер «${provider.name}» добавлен. Нажмите «Сохранить настройки».` })
+  })
+
+  const removeProvider = (provider: AiProviderRecord) => {
+    if (!window.confirm(`Удалить провайдера «${provider.name}»?`)) return
+    startTransition(async () => {
+      const result = await deleteAiProviderAction(provider.id)
+      if (!result.success) {
+        setMessage({ type: 'error', text: result.error || 'Не удалось удалить провайдера' })
+        return
+      }
+      setProviders((current) => current.filter((item) => item.id !== provider.id))
+      if (settings.activeProviderId === provider.id) selectLegacyProvider('openrouter')
+      setMessage({ type: 'success', text: `Провайдер «${provider.name}» удалён.` })
+    })
+  }
+
+  const refreshModels = (provider: AiProviderRecord) => startTransition(async () => {
+    const result = await refreshAiProviderModelsAction(provider.id)
+    if (!result.success) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось получить модели' })
+      return
+    }
+    setProviders((current) => current.map((item) => item.id === provider.id ? { ...item, models: result.data?.models || [] } : item))
+    setMessage({ type: 'success', text: `Список моделей обновлён: ${result.data?.models?.length || 0}.` })
+  })
 
   const save = () => startTransition(async () => {
     setMessage(null)
@@ -103,24 +166,58 @@ export default function AIRulesEditor({ initialSettings }: Props) {
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдер</span>
             <div className="grid gap-3 sm:grid-cols-3">
               <ProviderButton
-                active={settings.provider === 'byesu'}
+                active={!settings.activeProviderId && settings.provider === 'byesu'}
                 title="BYESU API"
                 description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'}`}
-                onClick={() => update('provider', 'byesu')}
+                onClick={() => selectLegacyProvider('byesu')}
               />
               <ProviderButton
-                active={settings.provider === 'openrouter'}
+                active={!settings.activeProviderId && settings.provider === 'openrouter'}
                 title="OpenRouter"
                 description={credentials?.openrouter ? 'Ключ подключён' : 'Ключ не задан'}
-                onClick={() => update('provider', 'openrouter')}
+                onClick={() => selectLegacyProvider('openrouter')}
               />
               <ProviderButton
-                active={settings.provider === 'cockpit'}
+                active={!settings.activeProviderId && settings.provider === 'cockpit'}
                 title="Cockpit локальный"
                 description="Обработка локальным worker"
-                onClick={() => update('provider', 'cockpit')}
+                onClick={() => selectLegacyProvider('cockpit')}
               />
             </div>
+          </div>
+
+          <div className="space-y-3 lg:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Сохранённые провайдеры</span>
+                <p className="mt-1 text-xs text-slate-500">Ключ хранится в БД зашифрованным и никогда не показывается обратно.</p>
+              </div>
+              <button type="button" onClick={() => setShowProviderForm(true)} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+                <Plus className="h-4 w-4" /> Добавить AI-провайдера
+              </button>
+            </div>
+            {providers.length > 0 ? (
+              <div className="grid gap-3 md:grid-cols-2">
+                {providers.map((provider) => (
+                  <div key={provider.id} className={`rounded-xl border p-4 ${settings.activeProviderId === provider.id ? 'border-indigo-500 bg-indigo-500/10' : 'border-slate-700 bg-slate-950/50'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <button type="button" onClick={() => selectSavedProvider(provider)} className="min-w-0 text-left">
+                        <div className="truncate font-semibold text-white">{provider.name}</div>
+                        <div className="mt-1 truncate font-mono text-xs text-slate-500">{provider.kind} · {provider.baseUrl}</div>
+                        <div className="mt-2 text-xs text-emerald-300">API-ключ сохранён · {provider.models.length ? `${provider.models.length} моделей` : 'модели не загружены'}</div>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button type="button" onClick={() => refreshModels(provider)} disabled={pending} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-50" title="Обновить список моделей"><RefreshCw className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => removeProvider(provider)} disabled={pending} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50" title="Удалить провайдера"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    </div>
+                    {settings.activeProviderId === provider.id && <div className="mt-3 text-xs font-semibold text-indigo-300">Выбран для новых AI-запусков</div>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-700 px-4 py-5 text-sm text-slate-500">Сохранённых провайдеров пока нет. Можно продолжить использовать ключи из окружения.</div>
+            )}
           </div>
 
           <div className="space-y-3">
@@ -129,7 +226,14 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 <label htmlFor="batch-ai-byesu-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
                   Модель BYESU
                 </label>
-                <select
+                {activeSavedProvider?.models.length ? <select
+                  id="batch-ai-byesu-model"
+                  value={settings.byesuModel}
+                  onChange={(event) => update('byesuModel', event.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
+                >
+                  {activeSavedProvider.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+                </select> : <select
                   id="batch-ai-byesu-model"
                   value={settings.byesuModel}
                   onChange={(event) => update('byesuModel', event.target.value)}
@@ -141,7 +245,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                   {byesuModels.map((model) => (
                     <option key={`${model.group}:${model.value}`} value={model.value}>{model.label} · {model.group === 'gemini' ? 'Gemini Business' : 'OpenAI Codex'}</option>
                   ))}
-                </select>
+                </select>}
                 <div className={`rounded-xl border p-3 text-sm ${
                   selectedByesuKeyReady
                     ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
@@ -152,7 +256,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                   </div>
                   <p className="mt-1">
                     {selectedByesuKeyReady
-                      ? 'Нужный API-ключ подключён.'
+                      ? activeSavedProvider ? `Ключ сохранён в провайдере «${activeSavedProvider.name}».` : 'Нужный API-ключ подключён.'
                       : `Добавьте ${selectedByesuGroup === 'gemini' ? 'BYESU_GEMINI_API_KEY' : 'BYESU_OPENAI_API_KEY'} в Coolify.`}
                   </p>
                 </div>
@@ -167,13 +271,20 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 <label htmlFor="batch-ai-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
                   Модель OpenRouter
                 </label>
-                <input
+                {activeSavedProvider?.models.length ? <select
+                  id="batch-ai-model"
+                  value={settings.openrouterModel}
+                  onChange={(event) => update('openrouterModel', event.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
+                >
+                  {activeSavedProvider.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
+                </select> : <input
                   id="batch-ai-model"
                   value={settings.openrouterModel}
                   onChange={(event) => update('openrouterModel', event.target.value)}
                   placeholder="google/gemini-2.5-flash"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
-                />
+                />}
               </>
             )}
 
@@ -230,6 +341,25 @@ export default function AIRulesEditor({ initialSettings }: Props) {
           </label>
         </div>
       </section>
+
+      {showProviderForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={() => setShowProviderForm(false)}>
+          <div className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3">
+              <div><h2 className="text-xl font-bold text-white">Добавить AI-провайдера</h2><p className="mt-1 text-sm text-slate-400">Можно указать OpenRouter или BYESU совместимый endpoint.</p></div>
+              <button type="button" onClick={() => setShowProviderForm(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="mt-5 grid gap-4">
+              <label className="space-y-2 text-sm text-slate-300"><span>Название</span><input value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Мой OpenRouter" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500" /></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>Тип</span><select value={providerForm.kind} onChange={(event) => setProviderForm((current) => ({ ...current, kind: event.target.value as AiProviderKind, baseUrl: event.target.value === 'byesu' ? 'https://byesu.com/v1' : 'https://openrouter.ai/api/v1' }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"><option value="openrouter">OpenRouter</option><option value="byesu">BYESU</option></select></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>Base URL</span><input value={providerForm.baseUrl} onChange={(event) => setProviderForm((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://openrouter.ai/api/v1" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Указывайте адрес до `/chat/completions`, обычно с `/v1` на конце.</span></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>API-ключ</span><input type="password" value={providerForm.apiKey} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} autoComplete="new-password" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>Модель</span><input value={providerForm.model} onChange={(event) => setProviderForm((current) => ({ ...current, model: event.target.value }))} placeholder="google/gemini-2.5-flash" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">При добавлении система попробует автоматически получить список моделей. Если endpoint это поддерживает, список будет доступен для обновления.</span></label>
+            </div>
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={addProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Добавляем…' : 'Добавить провайдера'}</button></div>
+          </div>
+        </div>
+      )}
 
       <section className="overflow-hidden rounded-2xl border border-slate-700 bg-slate-800 shadow-xl">
         <header className="flex items-center gap-3 border-b border-slate-700 bg-slate-800/50 p-6">

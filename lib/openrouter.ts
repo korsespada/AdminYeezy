@@ -36,15 +36,19 @@ function openRouterError(payload: OpenRouterPayload, statusCode: number) {
 export async function openRouterChatCompletion(
   requestBody: Record<string, any>,
   extraHeaders: Record<string, string> = {},
+  connection: { baseUrl?: string; apiKey?: string } = {},
 ): Promise<OpenRouterPayload> {
-  const apiKey = process.env.OPENROUTER_API_KEY?.trim()
+  const apiKey = connection.apiKey?.trim() || process.env.OPENROUTER_API_KEY?.trim()
   if (!apiKey) throw new Error('OPENROUTER_API_KEY не задан')
 
   const body = JSON.stringify(requestBody)
   const agent = createOpenRouterAgent()
+  const target = connection.baseUrl?.trim()
+    ? new URL(`${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`)
+    : OPENROUTER_CHAT_URL
 
   return new Promise((resolve, reject) => {
-    const request = https.request(OPENROUTER_CHAT_URL, {
+    const request = https.request(target, {
       method: 'POST',
       agent,
       headers: {

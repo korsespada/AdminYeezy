@@ -233,7 +233,7 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(payload.metadata.supplier_published_on).toBe('2026-08-02')
   })
 
-  it('keeps media SEO fields out of catalog attributes', () => {
+  it('publishes hosted video and keeps supplier media fields out of catalog attributes', () => {
     const payload = workflow.railsUpdatePayload({
       external_id: 'item-1',
       name: 'Шапка',
@@ -241,10 +241,18 @@ describe('batch workflow CSV compatibility adapter', () => {
       photo_alts: ['Серая шапка, вид спереди'],
       photo_slugs: ['vid-speredi'],
       photos: ['https://cdn.example/item-1.webp'],
-      attributes: { color: 'Серый' },
+      attributes: {
+        color: 'Серый',
+        szwego_video_url: 'https://supplier.example/source.mov',
+        hosted_video_url: 'https://cdn.example/item-1.mp4',
+        hosted_video_poster_url: 'https://cdn.example/item-1-poster.webp',
+        source_parent_external_id: 'source-1',
+      },
     }).product
 
     expect(payload.catalog_attributes).toEqual({ color: 'Серый' })
+    expect(payload.video_url).toBe('https://cdn.example/item-1.mp4')
+    expect(payload.video_poster_url).toBe('https://cdn.example/item-1-poster.webp')
     expect(payload.media[0].alt_text).toBe('Серая шапка, вид спереди')
   })
 

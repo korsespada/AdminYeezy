@@ -14,6 +14,7 @@ import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
+  buildBatchAiColorSplitPrompt,
   buildBatchAiFamilyDefinition,
   buildBatchAiShadeRepairPrompt,
   buildBatchAiUserPrompt,
@@ -59,9 +60,18 @@ import {
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
+import {
+  decryptProviderApiKey,
+  encryptProviderApiKey,
+  fetchProviderModels,
+  normalizeProviderBaseUrl,
+  type AiProviderKind,
+  type AiProviderRecord,
+} from '@/lib/ai-providers'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
+  'batch_ai_provider_id',
   'batch_ai_openrouter_model',
   'batch_ai_byesu_model',
   'batch_ai_temperature',
@@ -84,7 +94,15 @@ export async function getBatchAiSettingsAction() {
   await requireAdmin()
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
-  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider)
+  const configuredProviders = await scrapingQuery(`
+    SELECT id,name,kind,base_url,model,models,created_at,updated_at
+    FROM ai_providers ORDER BY updated_at DESC, created_at DESC
+  `).catch(() => ({ rows: [] }))
+  const activeProviderId = String(values.batch_ai_provider_id || '').trim() || null
+  const activeConfigured = configuredProviders.rows.find((row) => String(row.id) === activeProviderId)
+  const provider: BatchAiProvider = activeConfigured
+    ? activeConfigured.kind as BatchAiProvider
+    : ['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider)
     ? values.batch_ai_provider as BatchAiProvider
     : 'openrouter'
   const worker = await scrapingQuery(`
@@ -97,12 +115,25 @@ export async function getBatchAiSettingsAction() {
   const byesuKeys = byesuApiKeyStatus()
   const fetchedByesuModels = await getByesuModels()
   const byesuModels = fetchedByesuModels.length > 0 ? fetchedByesuModels : FALLBACK_BYESU_MODELS
+  const providers: AiProviderRecord[] = configuredProviders.rows.map((row) => ({
+    id: String(row.id),
+    name: String(row.name || ''),
+    kind: row.kind as AiProviderKind,
+    baseUrl: String(row.base_url || ''),
+    model: String(row.model || ''),
+    models: Array.isArray(row.models) ? row.models : [],
+    hasApiKey: true,
+    createdAt: String(row.created_at || ''),
+    updatedAt: String(row.updated_at || ''),
+  }))
   return {
     success: true,
     data: {
       provider,
-      openrouterModel: values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
-      byesuModel: values.batch_ai_byesu_model || 'gemini-3.1-flash-lite',
+      activeProviderId,
+      providers,
+      openrouterModel: activeConfigured?.kind === 'openrouter' ? String(activeConfigured.model || '') : values.batch_ai_openrouter_model || 'google/gemini-2.5-flash',
+      byesuModel: activeConfigured?.kind === 'byesu' ? String(activeConfigured.model || '') : values.batch_ai_byesu_model || 'gemini-3.1-flash-lite',
       temperature: finiteNumber(values.batch_ai_temperature, 0.1),
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
@@ -121,11 +152,19 @@ export async function getBatchAiSettingsAction() {
 
 export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
   await requireAdmin()
-  const provider: BatchAiProvider = ['openrouter', 'byesu', 'cockpit'].includes(settings.provider)
+  const requestedProviderId = String(settings.providerId || '').trim()
+  const configured = requestedProviderId
+    ? await scrapingQuery('SELECT id,kind,model FROM ai_providers WHERE id=$1', [requestedProviderId]).then((result) => result.rows[0])
+    : null
+  if (requestedProviderId && !configured) return { success: false, error: 'Провайдер не найден' }
+  const provider: BatchAiProvider = configured
+    ? configured.kind as BatchAiProvider
+    : ['openrouter', 'byesu', 'cockpit'].includes(settings.provider)
     ? settings.provider
     : 'openrouter'
   const values: Record<string, string> = {
     batch_ai_provider: provider,
+    batch_ai_provider_id: requestedProviderId,
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
     batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gemini-3.1-flash-lite',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
@@ -141,6 +180,12 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
         INSERT INTO app_settings(key, value, updated_at) VALUES($1,$2,NOW())
         ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()
       `, [key, value])
+    }
+    if (configured) {
+      const selectedModel = configured.kind === 'byesu' ? String(settings.byesuModel || '') : String(settings.openrouterModel || '')
+      if (selectedModel.trim()) {
+        await client.query('UPDATE ai_providers SET model=$2,updated_at=NOW() WHERE id=$1', [requestedProviderId, selectedModel.trim().slice(0, 200)])
+      }
     }
     await client.query('COMMIT')
     revalidatePath('/admin/batches')
@@ -274,10 +319,33 @@ export async function uploadPriceRuleReferenceAction(supplierId: number, formDat
 async function loadSettings(): Promise<BatchAiSettings> {
   const result = await getBatchAiSettingsAction()
   const settings = result.data as BatchAiSettings
-  return {
+  return hydrateBatchAiSettings({
     ...settings,
     systemPrompt: `${settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT}\n\n${GLOBAL_BATCH_AI_CATALOG_RULES}`,
+  })
+}
+
+async function hydrateBatchAiSettings(settings: BatchAiSettings): Promise<BatchAiSettings> {
+  const providerId = String(settings.providerId || settings.activeProviderId || '').trim()
+  if (!providerId) return settings
+  const result = await scrapingQuery('SELECT id,kind,name,base_url,api_key_ciphertext,model FROM ai_providers WHERE id=$1', [providerId])
+  const row = result.rows[0]
+  if (!row) throw new Error('Выбранный AI-провайдер удалён или недоступен')
+  return {
+    ...settings,
+    provider: row.kind as BatchAiProvider,
+    providerName: String(row.name || ''),
+    providerBaseUrl: String(row.base_url || ''),
+    providerApiKey: decryptProviderApiKey(row.api_key_ciphertext),
+    openrouterModel: row.kind === 'openrouter' ? String(row.model || '') : settings.openrouterModel,
+    byesuModel: row.kind === 'byesu' ? String(row.model || '') : settings.byesuModel,
   }
+}
+
+function publicBatchAiSettings(settings: BatchAiSettings) {
+  const safeSettings = { ...settings }
+  delete safeSettings.providerApiKey
+  return safeSettings
 }
 
 async function snapshotBatch(batchId: string, stage: string, label: string, settings: any = {}) {
@@ -376,7 +444,7 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors'
 
 const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: подтверждённый бренд, товар, видимый ракурс и 1–2 различимые детали. Бренд товара обязателен в каждом alt. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
@@ -444,6 +512,12 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'retry') {
     params.push(productId)
     predicate = `AND id=$${params.length} ORDER BY id`
+  }
+  if (mode === 'split_colors') {
+    const id = Number(Array.isArray(productId) ? productId[0] : productId)
+    if (!Number.isInteger(id)) throw new Error('Для разделения по цветам нужен товар')
+    params.push(id)
+    predicate = `AND id=$${params.length} ORDER BY id LIMIT 1`
   }
   const products = await scrapingQuery(`SELECT * FROM products WHERE batch_id=$1 ${predicate}`, params)
   let selectedProducts = products.rows
@@ -568,6 +642,80 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   }
 }
 
+export async function createAiProviderAction(input: {
+  name: string
+  kind: AiProviderKind
+  baseUrl?: string
+  apiKey: string
+  model: string
+}) {
+  await requireAdmin()
+  const name = String(input.name || '').trim().slice(0, 120)
+  const apiKey = String(input.apiKey || '').trim()
+  const requestedModel = String(input.model || '').trim().slice(0, 200)
+  if (!name) return { success: false, error: 'Укажите название провайдера' }
+  if (!apiKey) return { success: false, error: 'Укажите API-ключ' }
+  if (!['openrouter', 'byesu'].includes(input.kind)) return { success: false, error: 'Неподдерживаемый тип провайдера' }
+  try {
+    const baseUrl = normalizeProviderBaseUrl(input.baseUrl, input.kind)
+    const models = await fetchProviderModels(baseUrl, apiKey).catch(() => [])
+    const model = requestedModel || models[0]?.value || ''
+    if (!model) return { success: false, error: 'Укажите модель или используйте endpoint, который возвращает /models' }
+    const encrypted = encryptProviderApiKey(apiKey)
+    const result = await scrapingQuery(`
+      INSERT INTO ai_providers(id,name,kind,base_url,api_key_ciphertext,model,models,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
+      RETURNING id,name,kind,base_url,model,models,created_at,updated_at
+    `, [crypto.randomUUID(), name, input.kind, baseUrl, encrypted, model, JSON.stringify(models)])
+    const row = result.rows[0]
+    return {
+      success: true,
+      data: {
+        id: String(row.id), name: row.name, kind: row.kind, baseUrl: row.base_url, model: row.model,
+        models: Array.isArray(row.models) ? row.models : [], hasApiKey: true,
+        createdAt: String(row.created_at), updatedAt: String(row.updated_at),
+      } satisfies AiProviderRecord,
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось добавить провайдера' }
+  }
+}
+
+export async function deleteAiProviderAction(providerId: string) {
+  await requireAdmin()
+  const id = String(providerId || '').trim()
+  if (!id) return { success: false, error: 'Провайдер не указан' }
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM ai_providers WHERE id=$1', [id])
+    await client.query("UPDATE app_settings SET value='',updated_at=NOW() WHERE key='batch_ai_provider_id' AND value=$1", [id])
+    await client.query('COMMIT')
+    revalidatePath('/admin/ai-rules')
+    revalidatePath('/admin/batches')
+    return { success: true }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message || 'Не удалось удалить провайдера' }
+  } finally {
+    client.release()
+  }
+}
+
+export async function refreshAiProviderModelsAction(providerId: string) {
+  await requireAdmin()
+  const result = await scrapingQuery('SELECT id,base_url,api_key_ciphertext FROM ai_providers WHERE id=$1', [providerId])
+  if (!result.rows[0]) return { success: false, error: 'Провайдер не найден' }
+  try {
+    const models = await fetchProviderModels(result.rows[0].base_url, decryptProviderApiKey(result.rows[0].api_key_ciphertext))
+    await scrapingQuery('UPDATE ai_providers SET models=$2::jsonb,updated_at=NOW() WHERE id=$1', [providerId, JSON.stringify(models)])
+    revalidatePath('/admin/ai-rules')
+    return { success: true, data: { models } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось получить список моделей' }
+  }
+}
+
 export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   await requireAdmin()
   const runId = crypto.randomUUID()
@@ -577,6 +725,12 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     if (active.rows[0]) return { success: false, error: 'Для этой выгрузки уже выполняется AI-обработка' }
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
+    if (mode === 'split_colors' && settings.provider === 'cockpit') {
+      return { success: false, error: 'Разделение по цветам пока доступно через BYESU или OpenRouter' }
+    }
+    if (mode === 'split_colors' && (!Array.isArray(context.products[0]?.photos) || context.products[0].photos.length < 2)) {
+      return { success: false, error: 'Для разделения по цветам нужно минимум две фотографии' }
+    }
     let variantPlan: ReturnType<typeof colorFamilyRebuildPlan> | null = null
     if (mode === 'variants') {
       const approved = await scrapingQuery(`
@@ -617,7 +771,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
     const needsAiProvider = mode !== 'variants'
       || Boolean((variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0))
 
-    if (needsAiProvider && settings.provider === 'byesu') {
+    if (needsAiProvider && settings.provider === 'byesu' && !settings.providerApiKey) {
       const group = byesuModelGroup(settings.byesuModel)
       const keys = byesuApiKeyStatus()
       if (!keys[group]) {
@@ -629,7 +783,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         }
       }
     }
-    if (needsAiProvider && settings.provider === 'openrouter' && !process.env.OPENROUTER_API_KEY?.trim()) {
+    if (needsAiProvider && settings.provider === 'openrouter' && !settings.providerApiKey && !process.env.OPENROUTER_API_KEY?.trim()) {
       return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }
     }
 
@@ -639,7 +793,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         WHERE batch_id=$1 AND mode='sample' AND status='completed'
         ORDER BY created_at DESC LIMIT 1
       `, [batchId])
-      if (sample.rows[0]?.settings_snapshot) settings = sample.rows[0].settings_snapshot
+      if (sample.rows[0]?.settings_snapshot) settings = await hydrateBatchAiSettings(sample.rows[0].settings_snapshot)
     }
 
     if (needsAiProvider && settings.provider === 'cockpit') {
@@ -662,7 +816,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       context.mappings as CatalogIdMapping[],
     )
     const snapshot = {
-      ...settings,
+      ...publicBatchAiSettings(settings),
       systemPrompt: mode === 'media_seo'
         ? MEDIA_SEO_SYSTEM_PROMPT
         : mode === 'variants'
@@ -790,6 +944,16 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
         const userPrompt = mode === 'media_seo'
           ? buildBatchMediaSeoPrompt(promptProduct, brandName, generatedSlug)
+          : mode === 'split_colors'
+          ? buildBatchAiColorSplitPrompt({
+              product: promptProduct,
+              supplierInstructions,
+              brands: context.brands,
+              categories: context.categories,
+              subcategories: promptSubcategories,
+              attributes: attributeDefinitions,
+              priceRules,
+            })
           : buildBatchAiUserPrompt({
           product: promptProduct,
           supplierInstructions: mode === 'recover_measurements'
@@ -807,13 +971,14 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
           product: promptProduct, userPrompt, systemPrompt: snapshot.systemPrompt,
           variantScanOnly: false,
+          colorSplitOnly: mode === 'split_colors',
           mediaSeoOnly: mode === 'media_seo',
           generatedSlug,
           measurementRecoveryOnly: mode === 'recover_measurements',
           measurementTargetProductIds,
-          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : mode === 'media_seo' ? product.photos || [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
-          photoEnabled: mode === 'recover_measurements' || mode === 'media_seo' || context.batch.ai_photo_enabled === true,
-          fullSizeRefinementEnabled: mode === 'recover_measurements' || (mode !== 'media_seo' && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
+          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : ['media_seo', 'split_colors'].includes(mode) ? product.photos || [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
+          photoEnabled: mode === 'recover_measurements' || ['media_seo', 'split_colors'].includes(mode) || context.batch.ai_photo_enabled === true,
+          fullSizeRefinementEnabled: mode === 'recover_measurements' || (!['media_seo', 'split_colors'].includes(mode) && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
           brands: context.brands,
           categories: context.categories,
@@ -970,6 +1135,68 @@ async function processOpenRouterRun(runId: string, context: any, settings: Batch
   await finalizeRun(runId)
 }
 
+function batchAiNormalizationOptions(input: any, context: any) {
+  return {
+    product: input.product,
+    brandIds: new Set<string>(context.brands.map((row: any) => String(row.id))),
+    categoryIds: new Set<string>(context.categories.map((row: any) => String(row.id))),
+    subcategoryIds: new Set<string>(context.subcategories.map((row: any) => String(row.id))),
+    subcategoryParents: new Map<string, string>(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
+    categoryNames: new Map<string, string>(context.categories.map((row: any) => [String(row.id), String(row.name || '')])),
+    subcategoryNames: new Map<string, string>(context.subcategories.map((row: any) => [String(row.id), String(row.name || '')])),
+    attributeCodes: new Set<string>((input.attributeCodes || []).map(String)),
+    knownAttributeCodes: new Set<string>((input.knownAttributeCodes || []).map(String)),
+    attributeDictionaryValues: input.attributeDictionaryValues || [],
+    priceRuleKeys: new Set<string>((input.priceRules || []).map((row: any) => String(row.rule_key))),
+  }
+}
+
+function normalizeColorSplitOutput(raw: any, input: any, context: any) {
+  const sourcePhotos = Array.isArray(input.product?.photos) ? input.product.photos.map(String) : []
+  const variants = Array.isArray(raw?.variants) ? raw.variants : []
+  if (sourcePhotos.length < 2) throw new Error('Для разделения по цветам нужно минимум две фотографии')
+  if (variants.length < 2 || variants.length > 8) throw new Error('ИИ должен вернуть от 2 до 8 цветовых вариантов')
+
+  const usedIndexes = new Set<number>()
+  const usedColors = new Set<string>()
+  const normalizedVariants = variants.map((variant: any) => {
+    const color = String(variant?.color_key || '').trim().slice(0, 100)
+    const normalizedColor = normalizedColorFamilyValue(color)
+    if (!normalizedColor || usedColors.has(normalizedColor)) throw new Error('ИИ вернул пустые или повторяющиеся цвета')
+    usedColors.add(normalizedColor)
+    const indexes = [...new Set<number>((variant?.photo_indexes || []).map(Number)
+      .filter((value: number) => Number.isInteger(value) && value > 0 && value <= sourcePhotos.length))]
+      .sort((left, right) => left - right)
+    if (!indexes.length) throw new Error(`Для цвета «${color}» не выбраны фотографии`)
+    for (const index of indexes) {
+      if (usedIndexes.has(index)) throw new Error(`Фотография ${index} назначена нескольким цветам`)
+      usedIndexes.add(index)
+    }
+    const photos = indexes.map((index) => sourcePhotos[index - 1])
+    const proposedAlts = Array.isArray(variant?.photo_alts) ? variant.photo_alts : []
+    const normalized = normalizeBatchAiOutput({
+      ...variant,
+      product: variant.product || {},
+      photo_alts: photos.map((_: string, index: number) => String(proposedAlts[index] || '')),
+      media: { discard_indexes: [], size_chart_indexes: [] },
+    }, {
+      ...batchAiNormalizationOptions(input, context),
+      product: { ...input.product, photos },
+    })
+    normalized.product.attributes = {
+      ...(normalized.product.attributes || {}),
+      colors: [color],
+      source_parent_external_id: input.product.external_id,
+    }
+    return { color, normalized, firstPhotoIndex: indexes[0] }
+  }).sort((left: any, right: any) => left.firstPhotoIndex - right.firstPhotoIndex)
+
+  return {
+    familyName: String(raw?.family_name || normalizedVariants[0]?.normalized?.product?.name || 'Цветовые варианты').trim().slice(0, 250),
+    variants: normalizedVariants,
+  }
+}
+
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
   let rawOutput: any = null
   try {
@@ -1005,21 +1232,11 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     }
     let normalized: any = input.mediaSeoOnly
       ? normalizeMediaSeoOutput(raw, input)
+      : input.colorSplitOnly
+      ? normalizeColorSplitOutput(raw, input, context)
       : input.variantScanOnly
       ? variantScanResult(raw, input)
-      : normalizeBatchAiOutput(raw, {
-      product: input.product,
-      brandIds: new Set(context.brands.map((row: any) => String(row.id))),
-      categoryIds: new Set(context.categories.map((row: any) => String(row.id))),
-      subcategoryIds: new Set(context.subcategories.map((row: any) => String(row.id))),
-      subcategoryParents: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
-      categoryNames: new Map(context.categories.map((row: any) => [String(row.id), String(row.name || '')])),
-      subcategoryNames: new Map(context.subcategories.map((row: any) => [String(row.id), String(row.name || '')])),
-      attributeCodes: new Set((input.attributeCodes || []).map(String)),
-      knownAttributeCodes: new Set((input.knownAttributeCodes || []).map(String)),
-      attributeDictionaryValues: input.attributeDictionaryValues || [],
-      priceRuleKeys: new Set((input.priceRules || []).map((row: any) => String(row.rule_key))),
-    })
+      : normalizeBatchAiOutput(raw, batchAiNormalizationOptions(input, context))
     if (input.shadeFamilyScan && shadeScanHasColorConflicts(normalized.shadeVariants)) {
       const repairedRaw = await runBatchAiOpenRouter({
         settings,
@@ -1035,6 +1252,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       }
     }
     if (input.mediaSeoOnly) await applyCompletedMediaSeoItem(item, normalized)
+    else if (input.colorSplitOnly) await applyCompletedColorSplit(item, normalized, context)
     else if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
     else await applyCompletedItem(item, normalized, context)
   } catch (error: any) {
@@ -1150,6 +1368,116 @@ async function applyCompletedMediaSeoItem(item: any, normalized: any) {
         completed_at=NOW(),updated_at=NOW()
       WHERE id=$1
     `, [item.id, JSON.stringify(normalized)])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+async function applyCompletedColorSplit(item: any, normalized: any, context: any) {
+  const source = item.input_snapshot?.product || {}
+  const sourceExternalId = String(source.external_id || item.external_id || '').trim()
+  if (!sourceExternalId) throw new Error('У исходного товара отсутствует внешний ID')
+  const familyKey = crypto.createHash('md5')
+    .update(`${context.batch.supplier_id || ''}:${sourceExternalId}`)
+    .digest('hex')
+  const familyName = String(normalized.familyName || source.name || 'Цветовые варианты').trim().slice(0, 250)
+  const variants = (normalized.variants || []).map((entry: any, index: number) => {
+    const product = entry.normalized.product
+    if (item.input_snapshot?.preserveExistingPrice) {
+      product.price = Number(source.price || 0)
+      product.price_source = source.price_source || 'legacy'
+    } else {
+      const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
+      if (rule) {
+        product.price = Number(rule.price)
+        product.price_source = 'rule'
+      } else if (!Number(product.price) && Number(context.batch.default_price)) {
+        product.price = Number(context.batch.default_price)
+        product.price_source = 'default'
+      }
+    }
+    product.variant_group_key = familyKey
+    product.variant_group_name = familyName
+    product.slug = buildProductSeoSlug(product, catalogName(product.brand, 'brand', context.mappings))
+    const colorHash = crypto.createHash('sha256').update(normalizedColorFamilyValue(entry.color)).digest('hex').slice(0, 12)
+    return {
+      product,
+      externalId: index === 0 ? sourceExternalId : `${sourceExternalId}::color:${colorHash}`,
+    }
+  })
+
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
+    const lockedSource = await client.query(
+      'SELECT id FROM products WHERE id=$1 AND batch_id=$2 FOR UPDATE',
+      [item.product_id, context.batch.id],
+    )
+    if (!lockedSource.rows[0]) throw new Error('Исходный товар для разделения не найден')
+
+    for (let index = 0; index < variants.length; index += 1) {
+      const { product, externalId } = variants[index]
+      if (index === 0) {
+        await client.query(`
+          UPDATE products SET
+            external_id=$2,name=$3,description=$4,h1=$5,seo_title=$6,seo_description=$7,slug=$8,
+            brand=$9,category=$10,subcategory=$11,gender=$12,photos=$13::jsonb,photo_alts=$14::jsonb,
+            photo_slugs='[]'::jsonb,attributes=$15::jsonb,price=$16,price_source=$17,ai_processed=true,
+            variant_group_key=$18,variant_group_name=$19,ai_error=NULL,ai_confidence=$20,updated_at=NOW()
+          WHERE id=$1
+        `, [
+          item.product_id, externalId, product.name, product.description, product.h1, product.seo_title,
+          product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
+          product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []),
+          JSON.stringify(product.attributes || {}), Number(product.price || 0), product.price_source || 'legacy',
+          familyKey, familyName, product.ai_confidence,
+        ])
+      } else {
+        await client.query(`
+          INSERT INTO products(
+            external_id,name,description,h1,seo_title,seo_description,slug,price,price_source,status,
+            brand,category,subcategory,gender,photos,photo_alts,photo_slugs,attributes,ai_processed,batch_id,
+            variant_group_key,variant_group_name,ai_error,ai_confidence,source_position,supplier_published_on,created_at,updated_at
+          ) VALUES(
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16::jsonb,'[]'::jsonb,$17::jsonb,true,$18,
+            $19,$20,NULL,$21,$22,$23,NOW(),NOW()
+          )
+          ON CONFLICT(batch_id,external_id) DO UPDATE SET
+            name=EXCLUDED.name,description=EXCLUDED.description,h1=EXCLUDED.h1,seo_title=EXCLUDED.seo_title,
+            seo_description=EXCLUDED.seo_description,slug=EXCLUDED.slug,price=EXCLUDED.price,price_source=EXCLUDED.price_source,
+            status=EXCLUDED.status,brand=EXCLUDED.brand,category=EXCLUDED.category,subcategory=EXCLUDED.subcategory,
+            gender=EXCLUDED.gender,photos=EXCLUDED.photos,photo_alts=EXCLUDED.photo_alts,photo_slugs='[]'::jsonb,
+            attributes=EXCLUDED.attributes,ai_processed=true,variant_group_key=EXCLUDED.variant_group_key,
+            variant_group_name=EXCLUDED.variant_group_name,ai_error=NULL,ai_confidence=EXCLUDED.ai_confidence,updated_at=NOW()
+        `, [
+          externalId, product.name, product.description, product.h1, product.seo_title, product.seo_description,
+          product.slug, Number(product.price || 0), product.price_source || 'legacy', source.status || 'draft',
+          product.brand, product.category, product.subcategory || null, product.gender || null,
+          JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
+          context.batch.id, familyKey, familyName, product.ai_confidence, source.source_position ?? null,
+          source.supplier_published_on || null,
+        ])
+      }
+    }
+    await client.query(`
+      UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,
+        completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1
+    `, [item.id, JSON.stringify(normalized)])
+    await client.query(`
+      UPDATE scraping_batches SET
+        items_count=(SELECT COUNT(*)::int FROM products WHERE batch_id=$1),updated_at=NOW()
+      WHERE id=$1
+    `, [context.batch.id])
     await client.query('COMMIT')
   } catch (error) {
     await client.query('ROLLBACK')
@@ -1324,7 +1652,7 @@ async function resumeStaleOpenRouterRun(runId: string) {
     )
   `, [runId])
   const context = await batchContext(String(run.batch_id), run.mode as BatchAiRunMode)
-  const settings = run.settings_snapshot as BatchAiSettings
+  const settings = await hydrateBatchAiSettings(run.settings_snapshot as BatchAiSettings)
   after(async () => {
     await processOpenRouterRun(runId, context, settings)
   })

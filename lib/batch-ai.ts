@@ -18,6 +18,11 @@ export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
 export type BatchAiSettings = {
   provider: BatchAiProvider
+  providerId?: string
+  activeProviderId?: string | null
+  providerName?: string
+  providerBaseUrl?: string
+  providerApiKey?: string
   openrouterModel: string
   byesuModel: string
   temperature: number
@@ -247,6 +252,51 @@ export function buildBatchAiVisualFamilyPrompt(
   ].join('\n\n')
 }
 
+export function buildBatchAiColorSplitPrompt(input: {
+  product: any
+  supplierInstructions?: string | null
+  brands: BatchAiLookup[]
+  categories: BatchAiLookup[]
+  subcategories: BatchAiLookup[]
+  attributes: BatchAiAttributeDefinition[]
+  priceRules?: BatchAiPriceRuleHint[]
+}) {
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [] } = input
+  return [
+    'Один исходный альбом содержит несколько отдельно продаваемых цветовых вариантов одной физической модели.',
+    'За один ответ раздели фотографии по цветам и полностью обработай каждый получившийся товар. Второго AI-прохода не будет.',
+    'Не разделяй один многоцветный дизайн. Создай варианты только когда на фотографиях показаны отдельные экземпляры одной модели разных цветов.',
+    'Каждый номер фотографии разрешено включить максимум в один вариант. Общие кадры, где одновременно показаны разные цвета, рекламные кадры и таблицы не включай ни в один вариант.',
+    'Нужно вернуть от 2 до 8 вариантов. Для каждого варианта обязательно укажи непустой уникальный color_key на русском и минимум одну фотографию.',
+    'Каждый product должен быть полностью готов как после обычной AI-обработки: название, описание, SEO, классификация, пол, атрибуты, ценовое правило и confidence.',
+    'Верни строго JSON без markdown следующей формы:',
+    JSON.stringify({
+      family_name: '',
+      variants: [{
+        color_key: '',
+        photo_indexes: [],
+        product: {
+          name: '', description: '', h1: '', seo_title: '', seo_description: '',
+          brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
+          gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
+        },
+        photo_alts: [],
+        media: { discard_indexes: [], size_chart_indexes: [] },
+        subcategory_suggestion: null,
+        attribute_suggestions: [],
+      }],
+    }),
+    'photo_indexes и номера фотографий начинаются с 1 и подписаны на contact sheet. photo_alts верни в том же порядке и количестве, что photo_indexes.',
+    `Особенности поставщика: ${supplierInstructions || 'нет'}`,
+    `Исходный товар: ${JSON.stringify(product)}`,
+    `Бренды: ${JSON.stringify(brands)}`,
+    `Категории: ${JSON.stringify(categories)}`,
+    `Подкатегории: ${JSON.stringify(subcategories)}`,
+    `Схема атрибутов: ${JSON.stringify(attributes)}`,
+    `Ценовые правила поставщика: ${JSON.stringify(priceRules)}`,
+  ].join('\n\n')
+}
+
 export function buildBatchAiShadePrompt(
   products: any[],
   familyDefinition = buildBatchAiFamilyDefinition('internal_code'),
@@ -356,7 +406,15 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
+  const completion = input.settings.provider === 'byesu'
+    ? (body: Record<string, any>) => byesuChatCompletion(body, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      })
+    : (body: Record<string, any>) => openRouterChatCompletion(body, {}, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      })
   const payload = await withBatchAiRetry(() => completion({
       model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
       messages: [
@@ -404,7 +462,15 @@ export async function runBatchAiOpenRouterRefinement(input: {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
     content.push({ type: 'image_url', image_url: { url } })
   })
-  const completion = input.settings.provider === 'byesu' ? byesuChatCompletion : openRouterChatCompletion
+  const completion = input.settings.provider === 'byesu'
+    ? (body: Record<string, any>) => byesuChatCompletion(body, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      })
+    : (body: Record<string, any>) => openRouterChatCompletion(body, {}, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      })
   const payload = await withBatchAiRetry(() => completion({
       model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
       messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],

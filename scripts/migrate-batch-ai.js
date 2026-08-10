@@ -184,9 +184,25 @@ async function migrate() {
     `)
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_providers (
+        id UUID PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('openrouter', 'byesu')),
+        base_url TEXT NOT NULL,
+        api_key_ciphertext TEXT NOT NULL,
+        model TEXT NOT NULL,
+        models JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS ai_providers_updated_idx ON ai_providers(updated_at DESC)')
+
+    await client.query(`
       INSERT INTO app_settings (key, value)
       VALUES
         ('batch_ai_provider', 'openrouter'),
+        ('batch_ai_provider_id', ''),
         ('batch_ai_openrouter_model', 'google/gemini-2.5-flash'),
         ('batch_ai_temperature', '0.1'),
         ('batch_ai_max_tokens', '5000'),

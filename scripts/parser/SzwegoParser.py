@@ -314,10 +314,10 @@ def main():
                 photos = [u.strip() for u in imgs_src if u and u.strip()]
                 video_url = item.get("videoUrl", "") or item.get("videoURL", "") or ""
 
-                # В ленте 全部 видео тоже имеют картинку-превью в imgsSrc. Это не
-                # фотография товара, но сама публикация нужна для сохранения порядка.
-                if args.parse_mode == "all" and video_url:
-                    photos = []
+                # Szwego может вернуть обычные фотографии и videoUrl в одной
+                # публикации. Сохраняем изображения, а само видео передаём
+                # отдельно в технических атрибутах.
+                photos = [photo for photo in photos if ".mp4" not in photo.lower()]
 
                 if args.parse_mode == "images" and len(photos) < args.min_photos:
                     skip_reasons["few_photos"] = skip_reasons.get("few_photos", 0) + 1
@@ -330,10 +330,6 @@ def main():
                 if parsed_end_date and item_date and item_date < parsed_end_date:
                     date_skip_count += 1
                     skip_reasons["old_date"] = skip_reasons.get("old_date", 0) + 1
-                    continue
-
-                if args.parse_mode == "images" and (video_url or any(".mp4" in photo for photo in photos)):
-                    skip_reasons["has_mp4"] = skip_reasons.get("has_mp4", 0) + 1
                     continue
 
                 # Photo dup check

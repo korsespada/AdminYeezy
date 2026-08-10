@@ -2,6 +2,7 @@ const { Pool } = require('pg');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
@@ -128,6 +129,24 @@ function normalizeAttributes(value) {
     if (!key.trim() || CORE_PRODUCT_FIELDS.has(key.toLowerCase())) return false;
     return isJsonAttributeValue(item);
   }));
+}
+
+function catalogAttributes(value) {
+  return Object.fromEntries(Object.entries(normalizeAttributes(value)).filter(([key]) => {
+    const normalized = key.trim().toLowerCase();
+    return !normalized.startsWith('szwego_')
+      && !normalized.startsWith('hosted_video_')
+      && normalized !== 'video_transfer_error'
+      && normalized !== 'source_parent_external_id';
+  }));
+}
+
+function hostedVideo(product) {
+  const attributes = normalizeAttributes(product?.attributes);
+  return {
+    url: String(attributes.hosted_video_url || '').trim() || null,
+    posterUrl: String(attributes.hosted_video_poster_url || '').trim() || null,
+  };
 }
 
 function extractAttributes(row) {
@@ -389,7 +408,9 @@ function productToRailsCsvRow(product, lookups) {
     subcategory: lookupName(lookups.subcategories, product.subcategory, 'подкатегории'),
     gender: product.gender || '',
     photos: normalizePhotos(product.photos).join('|'),
-    attributes: normalizeAttributes(product.attributes),
+    attributes: catalogAttributes(product.attributes),
+    video_url: hostedVideo(product).url,
+    video_poster_url: hostedVideo(product).posterUrl,
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
     supplier_published_on: product.supplier_published_on || null,
@@ -421,7 +442,9 @@ function productToRailsJsonRow(product, lookups) {
       sort_order: index,
       processing_status: 'processed',
     })),
-    attributes: normalizeAttributes(product.attributes),
+    attributes: catalogAttributes(product.attributes),
+    video_url: hostedVideo(product).url,
+    video_poster_url: hostedVideo(product).posterUrl,
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
     supplier_published_on: product.supplier_published_on || null,
@@ -1398,6 +1421,74 @@ async function findStoredS3Photo(key) {
   }
 }
 
+function runProcess(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8000); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} завершился с кодом ${code}: ${stderr.trim()}`));
+    });
+  });
+}
+
+async function uploadVideoIfNeeded(url, videoKey, posterKey) {
+  if (!url) return { url: null, posterUrl: null };
+  if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен для видео');
+
+  const storedVideo = await findStoredS3Photo(videoKey);
+  const storedPoster = await findStoredS3Photo(posterKey);
+  if (storedVideo && storedPoster) return { url: storedVideo, posterUrl: storedPoster };
+
+  const parsed = new URL(String(url));
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('для видео разрешены только HTTP(S) ссылки');
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yeezy-video-'));
+  const sourcePath = path.join(tempDir, 'source-video');
+  const outputPath = path.join(tempDir, 'video.mp4');
+  const posterJpegPath = path.join(tempDir, 'poster.jpg');
+  try {
+    const response = await fetch(parsed, { signal: AbortSignal.timeout(60_000) });
+    if (!response.ok) throw new Error(`источник видео вернул HTTP ${response.status}`);
+    const declaredSize = Number(response.headers.get('content-length') || 0);
+    if (declaredSize > 150 * 1024 * 1024) throw new Error('видео больше 150 МБ');
+    const source = Buffer.from(await response.arrayBuffer());
+    if (!source.length) throw new Error('источник вернул пустое видео');
+    if (source.length > 150 * 1024 * 1024) throw new Error('видео больше 150 МБ');
+    fs.writeFileSync(sourcePath, source);
+
+    await runProcess(process.env.FFMPEG_PATH || 'ffmpeg', [
+      '-y', '-i', sourcePath,
+      '-map', '0:v:0', '-map', '0:a?',
+      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,format=yuv420p",
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-movflags', '+faststart', outputPath,
+    ]);
+    await runProcess(process.env.FFMPEG_PATH || 'ffmpeg', [
+      '-y', '-ss', '0.5', '-i', outputPath, '-frames:v', '1', '-q:v', '3', posterJpegPath,
+    ]);
+
+    const video = fs.readFileSync(outputPath);
+    const poster = await sharp(fs.readFileSync(posterJpegPath)).webp({ quality: 84, effort: 4 }).toBuffer();
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET, Key: videoKey, Body: video, ContentType: 'video/mp4',
+    }));
+    await s3Client.send(new PutObjectCommand({
+      Bucket: process.env.S3_BUCKET, Key: posterKey, Body: poster, ContentType: 'image/webp',
+    }));
+    await Promise.all([
+      s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: videoKey })),
+      s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: posterKey })),
+    ]);
+    return { url: getS3PublicUrl(videoKey), posterUrl: getS3PublicUrl(posterKey) };
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 async function cleanupUnusedBatchPhotos(batchId, products) {
   const prefix = `batches/${batchId}/`;
   const keep = new Set(products.flatMap((product) => normalizePhotos(product.photos).map(ownedS3Key).filter(Boolean)));
@@ -1559,7 +1650,9 @@ function railsUpdatePayload(product) {
       brand_id: product.brand || null,
       category_id: product.subcategory || product.category || null,
       gender: normalizeCatalogGender(product.gender) || null,
-      catalog_attributes: normalizeAttributes(product.attributes),
+      catalog_attributes: catalogAttributes(product.attributes),
+      video_url: hostedVideo(product).url,
+      video_poster_url: hostedVideo(product).posterUrl,
       media: normalizePhotos(product.photos).map((url, index) => ({
         original_url: url,
         thumb_url: url,
@@ -1733,6 +1826,8 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const externalId = String(product.external_id || '').trim();
     if (!existingExternalIds.has(externalId)) return [];
     if (seoMediaRun) return [externalId];
+    const attributes = normalizeAttributes(product.attributes);
+    if (attributes.szwego_video_url && !hostedVideo(product).url) return [externalId];
     return previousPayloadHashes.get(externalId) === publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId))) ? [] : [externalId];
   }));
   const candidates = products
@@ -1748,6 +1843,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   let updated = 0;
   const skippedUnchanged = mode === 'upsert' ? existingExternalIds.size - changedExistingExternalIds.size : 0;
   let batchProductsChanged = false;
+  const videoWarnings = [];
   const explicitSeoMediaRun = Boolean(seoMediaRun);
 
   if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0 });
@@ -1761,6 +1857,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       existingProducts.get(String(product.external_id || '').trim()),
     );
     const requestedPhotos = normalizePhotos(product.photos);
+    const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
     const isExistingRailsProduct = existingProducts.has(String(product.external_id || '').trim());
     const rewriteSeoMedia = Boolean(
       product.slug
@@ -1784,7 +1881,6 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
         photos.push(existingRailsUrl);
         continue;
       }
-      const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
       const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
       const photoSlug = String(product.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`)
         .replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || `foto-${photoIndex + 1}`;
@@ -1800,6 +1896,29 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       }
     }
     product.photos = photos.filter(Boolean);
+    const sourceAttributes = normalizeAttributes(product.attributes);
+    const sourceVideoUrl = String(sourceAttributes.szwego_video_url || '').trim();
+    if (sourceVideoUrl && !hostedVideo(product).url) {
+      try {
+        const safeVideoExternalId = String(sourceAttributes.source_parent_external_id || safeExternalId)
+          .replace(/[^a-zA-Z0-9_.-]+/g, '_');
+        const uploaded = await uploadVideoIfNeeded(
+          sourceVideoUrl,
+          `batches/${batchId}/${safeVideoExternalId}.mp4`,
+          `batches/${batchId}/${safeVideoExternalId}-video-poster.webp`,
+        );
+        product.attributes = {
+          ...sourceAttributes,
+          hosted_video_url: uploaded.url,
+          hosted_video_poster_url: uploaded.posterUrl,
+        };
+        batchProductsChanged = true;
+      } catch (error) {
+        videoWarnings.push(`${product.external_id || product.name}: ${error.message}`);
+        product.attributes = { ...sourceAttributes, video_transfer_error: String(error.message || error).slice(0, 1000) };
+        batchProductsChanged = true;
+      }
+    }
     if (JSON.stringify(product.photos) !== JSON.stringify(normalizePhotos(sourceProduct.photos))) {
       batchProductsChanged = true;
     }
@@ -1937,6 +2056,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     skippedUnchanged,
     deleted,
     deleteFailed,
+    videoWarnings,
     railsImportBatchIds: importBatches.filter(Boolean),
   };
   } finally {

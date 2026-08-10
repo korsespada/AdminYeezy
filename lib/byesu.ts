@@ -89,15 +89,23 @@ export async function getByesuModels(): Promise<ByesuModelOption[]> {
   return Array.from(unique.values()).sort((left, right) => left.group.localeCompare(right.group) || left.value.localeCompare(right.value))
 }
 
-export async function byesuChatCompletion(requestBody: Record<string, any>): Promise<ByesuPayload> {
-  const { apiKey, group } = byesuApiKey(requestBody.model)
+export async function byesuChatCompletion(
+  requestBody: Record<string, any>,
+  connection: { baseUrl?: string; apiKey?: string } = {},
+): Promise<ByesuPayload> {
+  const legacy = byesuApiKey(requestBody.model)
+  const apiKey = connection.apiKey?.trim() || legacy.apiKey
+  const group = legacy.group
   if (!apiKey) {
     throw new Error(group === 'gemini'
       ? 'BYESU_GEMINI_API_KEY не задан для группы Gemini Business'
       : 'BYESU_OPENAI_API_KEY не задан для группы OpenAI Codex')
   }
 
-  const response = await fetch(BYESU_CHAT_URL, {
+  const target = connection.baseUrl?.trim()
+    ? `${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`
+    : BYESU_CHAT_URL
+  const response = await fetch(target, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,

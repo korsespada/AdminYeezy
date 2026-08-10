@@ -28,7 +28,7 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-venv python-is-python3 ca-certificates \
+  && apt-get install -y --no-install-recommends python3 python3-venv python-is-python3 ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

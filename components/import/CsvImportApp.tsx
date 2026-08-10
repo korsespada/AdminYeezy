@@ -1119,7 +1119,8 @@ export default function CsvImportApp({
             failed: Number(pushResult.data?.failed || 0),
             errors: pushResult.data?.errors || [],
           });
-          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, удалено из каталога: ${Number(pushResult.data?.deleted || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}`);
+          const videoWarnings = Array.isArray(pushResult.data?.videoWarnings) ? pushResult.data.videoWarnings : [];
+          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, удалено из каталога: ${Number(pushResult.data?.deleted || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}${videoWarnings.length ? ` · видео с ошибками: ${videoWarnings.length}` : ""}`);
           setBatchStage("PUSHED");
         } else {
           setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
@@ -1153,7 +1154,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess" | "recover_measurements" | "media_seo", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1187,6 +1188,8 @@ export default function CsvImportApp({
             setActiveAiRunId(String(data.runId));
             setSaveMsg(mode === "media_seo"
               ? `Генерация alt и slug: в очереди ${data.queued}…`
+              : mode === "split_colors"
+              ? "ИИ разделяет фотографии по цветам и сразу создаёт обработанные товары…"
               : mode === "variants"
               ? `Пересборка цветовых семейств: визуальных групп ${data.queued}, по артикулам ${data.deterministic || 0}…`
               : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
@@ -1205,6 +1208,8 @@ export default function CsvImportApp({
               setAiQueue(finalRun.queue_items || []);
               setSaveMsg(mode === "media_seo"
                 ? `Alt и slug: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`
+                : mode === "split_colors"
+                ? `Разделение по цветам: готово ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
                 : mode === "variants"
                 ? `Пересборка семейств: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
@@ -1218,6 +1223,8 @@ export default function CsvImportApp({
               : finalRun?.status === "completed"
               ? mode === "media_seo"
                 ? `✓ Alt и slug сгенерированы: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}. Проверьте результат и нажмите «Обновить каталог».`
+                : mode === "split_colors"
+                ? `✓ Товар разделён по цветам: варианты созданы, обработаны ИИ и объединены в одну семью`
                 : mode === "variants"
                 ? `✓ Цветовые семейства пересобраны: по артикулам ${data.deterministic || 0}, визуально ${finalRun.completed_count || 0}`
                 : `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
@@ -1282,6 +1289,15 @@ export default function CsvImportApp({
       setIsProcessing(false);
       setTimeout(() => setSaveMsg(null), 5000);
     }
+  };
+
+  const handleSplitProductColors = async (product: CsvProduct) => {
+    if (!batchId || !product.id || isProcessing || product.photos.length < 2) return;
+    if (!window.confirm(
+      `Разделить товар «${product.name || product.external_id}» по цветам?\n\n` +
+      "ИИ за один запрос распределит фотографии, создаст отдельный обработанный товар для каждого цвета и объединит их в одну семью.",
+    )) return;
+    await handleAiProcess("split_colors", [Number(product.id)]);
   };
 
   const handleRollbackProductAi = async (product: CsvProduct) => {
@@ -2868,6 +2884,9 @@ export default function CsvImportApp({
         onClose={() => setSelectedIdx(null)}
         onUpdate={updateProduct}
         onRetryAi={batchId && selectedIdx !== null ? () => handleRetryProductAi(products[selectedIdx]) : undefined}
+        onSplitColors={batchId && selectedIdx !== null && products[selectedIdx].photos.length >= 2
+          ? () => handleSplitProductColors(products[selectedIdx])
+          : undefined}
         onRollbackAi={batchId && selectedIdx !== null && (products[selectedIdx].ai_processed === true || products[selectedIdx].ai_processed === "true")
           ? () => handleRollbackProductAi(products[selectedIdx])
           : undefined}
@@ -3275,6 +3294,7 @@ interface CsvProductDrawerProps {
   onClose: () => void;
   onUpdate: (i: number, f: keyof CsvProduct, v: any) => void;
   onRetryAi?: () => void;
+  onSplitColors?: () => void;
   onRollbackAi?: () => void;
   aiBusy?: boolean;
   allProducts: CsvProduct[];
@@ -3293,6 +3313,7 @@ function CsvProductDrawer({
   onClose,
   onUpdate,
   onRetryAi,
+  onSplitColors,
   onRollbackAi,
   aiBusy = false,
   allProducts,
@@ -3469,14 +3490,28 @@ function CsvProductDrawer({
                     <Palette className="h-4 w-4 text-violet-300" />
                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">{local.variant_group_name || "Цветовые варианты"} ({variants.length > 1 ? variants.length : 0})</h3>
                   </div>
-                  {batchId && local.id != null && (
-                    <VariantFamilyManager
-                      product={local}
-                      products={allProducts}
-                      batchId={batchId}
-                      onChanged={onVariantsChanged}
-                    />
-                  )}
+                  <div className="flex items-center gap-2">
+                    {onSplitColors && (
+                      <button
+                        type="button"
+                        onClick={onSplitColors}
+                        disabled={aiBusy}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-300 hover:bg-violet-500/20 disabled:opacity-50"
+                        title="Один AI-запрос: разделить фото, создать товары и объединить их в семью"
+                      >
+                        <Palette className="h-3.5 w-3.5" />
+                        Разделить по цветам
+                      </button>
+                    )}
+                    {batchId && local.id != null && (
+                      <VariantFamilyManager
+                        product={local}
+                        products={allProducts}
+                        batchId={batchId}
+                        onChanged={onVariantsChanged}
+                      />
+                    )}
+                  </div>
                 </div>
                 {variants.length > 1 ? <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-8">
                   {variants.map((variant) => {
