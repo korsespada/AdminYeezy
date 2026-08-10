@@ -119,5 +119,5 @@ function customerLabel(order: RailsCrmOrder) {
 }
 
 function sourceLabel(source?: string | null) {
-  return source === 'telegram_mini_app' ? 'Telegram Mini App' : source === 'site' ? 'Сайт' : 'Неизвестно'
+  return source === 'telegram_mini_app' ? 'Telegram Mini App' : 'Сайт'
 }

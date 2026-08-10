@@ -16,7 +16,7 @@ export default async function CrmCustomersPage({
   const params = await searchParams
   const page = Math.max(1, Number(params.page) || 1)
   const search = params.search?.trim() || ''
-  const source = ['site', 'telegram_mini_app', 'unknown'].includes(params.source?.trim() || '') ? params.source!.trim() : ''
+  const source = ['site', 'telegram_mini_app'].includes(params.source?.trim() || '') ? params.source!.trim() : ''
 
   try {
     const result = await listRailsCrmCustomers({ page, perPage: PER_PAGE, search, source })

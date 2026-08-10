@@ -25,7 +25,7 @@ export default function CrmCustomerDetail({ customer }: { customer: RailsCrmCust
 }
 
 function Info({ label, value }: { label: string; value?: string | null }) { return <div><div className="text-xs uppercase tracking-wide text-slate-500">{label}</div><div className="mt-1 text-slate-200">{value || '—'}</div></div> }
-function sourceLabel(source?: string | null) { return source === 'telegram_mini_app' ? 'Telegram Mini App' : source === 'site' ? 'Сайт' : 'Неизвестно' }
+function sourceLabel(source?: string | null) { return source === 'telegram_mini_app' ? 'Telegram Mini App' : 'Сайт' }
 function channelLabel(channel?: string) { return ({ telegram: 'Telegram', email: 'Электронная почта', whatsapp: 'WhatsApp' } as Record<string, string>)[channel || ''] || 'Неизвестно' }
 function statusLabel(status: string) { return ({ payment_pending: 'Ожидает оплаты', paid: 'Оплачен', shipped: 'Отправлен', delivered: 'Доставлен', refund_pending: 'Возврат', cancelled: 'Отменен' } as Record<string, string>)[status] || 'Неизвестно' }
 function formatMoney(value?: number, currency = 'RUB') { return typeof value === 'number' ? new Intl.NumberFormat('ru-RU', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value / 100) : '—' }

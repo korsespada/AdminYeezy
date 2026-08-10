@@ -34,7 +34,6 @@ export default function CrmCustomersList({ customers, totalItems, totalPages, pa
               <option value="">Все источники</option>
               <option value="site">Сайт</option>
               <option value="telegram_mini_app">Telegram Mini App</option>
-              <option value="unknown">Неизвестно</option>
             </select>
             <Button type="submit" className="bg-sky-600 hover:bg-sky-500">Найти</Button>
           </form>
@@ -78,7 +77,7 @@ export default function CrmCustomersList({ customers, totalItems, totalPages, pa
 }
 
 function sourceLabel(source?: string | null) {
-  return source === 'telegram_mini_app' ? 'Telegram Mini App' : source === 'site' ? 'Сайт' : 'Неизвестно'
+  return source === 'telegram_mini_app' ? 'Telegram Mini App' : 'Сайт'
 }
 
 function formatDate(value?: string | null) {
