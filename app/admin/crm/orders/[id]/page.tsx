@@ -1,36 +1,23 @@
 import CrmOrderDetail from '@/components/crm/CrmOrderDetail'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { getRailsCrmOrder, searchRailsCrmReplacementProducts } from '@/lib/rails-admin'
+import { getRailsCrmOrder } from '@/lib/rails-admin'
 import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
 export default async function CrmOrderDetailPage({
   params,
-  searchParams,
+  searchParams: _searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ replacementSearch?: string; replacementItem?: string }>
+  searchParams: Promise<Record<string, string | undefined>>
 }) {
   await connection()
   const { id } = await params
-  const query = await searchParams
-  const replacementSearch = query.replacementSearch?.trim() || ''
-  const replacementItem = query.replacementItem?.trim() || ''
+  await _searchParams
 
   try {
-    const [order, replacementProducts] = await Promise.all([
-      getRailsCrmOrder(id),
-      replacementSearch ? searchRailsCrmReplacementProducts({ search: replacementSearch }) : Promise.resolve([]),
-    ])
-    return (
-      <CrmOrderDetail
-        order={order}
-        replacementSearch={replacementSearch}
-        replacementItem={replacementItem}
-        replacementProducts={replacementProducts}
-      />
-    )
+    return <CrmOrderDetail order={await getRailsCrmOrder(id)} />
   } catch (error: any) {
     return (
       <Alert variant="destructive" className="m-8 border-red-800 bg-red-900/20 text-red-400">

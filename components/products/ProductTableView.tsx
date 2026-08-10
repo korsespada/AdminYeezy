@@ -109,7 +109,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
             formData.append('catalog_attributes', JSON.stringify(product.catalog_attributes || product.attributes || {}));
             formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
-            if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
+            formData.append('fulfillment_mode', 'made_to_order');
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
 

@@ -30,6 +30,7 @@ export interface RailsCrmCustomer {
   phone?: string | null
   telegram_username?: string | null
   preferred_contact_channel?: string | null
+  registration_source?: 'site' | 'telegram_mini_app' | 'unknown' | string | null
 }
 
 export interface RailsCrmOrder {
@@ -41,6 +42,7 @@ export interface RailsCrmOrder {
   paid_at?: string | null
   created_at?: string
   customer?: RailsCrmCustomer | null
+  /** Legacy API fields retained only for response compatibility. */
   item_counts?: Record<string, number>
 }
 
@@ -117,13 +119,47 @@ export interface RailsCrmCustomerSummary {
   telegram_username?: string | null
   country?: string
   preferred_contact_channel?: string
+  registration_source?: 'site' | 'telegram_mini_app' | 'unknown' | string
   referral_code?: string
   created_at?: string
   order_count: number
   last_order_at?: string | null
-  wallet_cash_cents: number
-  wallet_bonus_cents: number
-  wallet_total_cents: number
+  wallet_cash_cents?: number
+  wallet_bonus_cents?: number
+  wallet_total_cents?: number
+}
+
+export interface RailsCrmCustomerDetail extends RailsCrmCustomerSummary {
+  addresses: Array<{
+    id: string
+    country?: string | null
+    region?: string | null
+    city?: string | null
+    street?: string | null
+    house?: string | null
+    apartment?: string | null
+    address_line?: string | null
+    postal_code?: string | null
+    recipient_name?: string | null
+    phone?: string | null
+    is_default?: boolean
+    delivery_comment?: string | null
+    created_at?: string
+  }>
+  orders: Array<{
+    id: string
+    public_number: string
+    status: string
+    total_cents?: number
+    currency?: string
+    created_at?: string
+  }>
+  identities?: Array<{
+    provider: string
+    email?: string | null
+    verified_at?: string | null
+    created_at?: string
+  }>
 }
 
 export interface RailsTelegramNotificationRecipient {
@@ -317,24 +353,17 @@ export interface RailsCrmOrderItem {
   title: string
   image_url?: string | null
   size?: string | null
-  sku?: string | null
-  fulfillment_mode: string
-  status: string
-  public_status?: string
-  public_message?: string
+  product_slug?: string | null
+  product_url?: string | null
   quantity: number
   unit_price_cents: number
   total_price_cents: number
-  production_min_days?: number | null
-  production_max_days?: number | null
-  supplier?: {
-    id: number | string
-    name?: string
-    wechat_name?: string | null
-  } | null
-  metadata?: Record<string, any>
-  replacement_offers?: RailsCrmReplacementOffer[]
+  sku?: string | null
+  status?: string
+  fulfillment_mode?: string
+  supplier?: Record<string, unknown> | null
   supplier_requests?: RailsCrmSupplierRequest[]
+  replacement_offers?: RailsCrmReplacementOffer[]
 }
 
 export interface RailsCrmPayment {
@@ -367,7 +396,6 @@ export interface RailsCrmOrderDetail extends RailsCrmOrder {
   subtotal_cents?: number
   delivery_cents?: number
   discount_cents?: number
-  wallet_spent_cents?: number
   admin_comment?: string | null
   customer_comment?: string | null
   checkout?: {
@@ -383,6 +411,7 @@ export interface RailsCrmOrderDetail extends RailsCrmOrder {
   }
   cancelled_at?: string | null
   delivered_at?: string | null
+  wallet_spent_cents?: number
   items: RailsCrmOrderItem[]
   payments: RailsCrmPayment[]
   refunds: RailsCrmRefund[]
@@ -684,7 +713,7 @@ export function mapRailsProduct(product: any): Product {
     photos_processed: true,
     gender: mapRailsGenderToUi(product.gender || metadata.gender || ''),
     thumb: product.image_url || photos[0] || '',
-    fulfillment_mode: product.fulfillment_mode || 'requires_confirmation',
+    fulfillment_mode: 'made_to_order',
     availability_confidence: product.availability_confidence || 'unknown',
     indexing_status: product.indexing_status || 'indexable',
     currency: product.currency || 'RUB',
@@ -1267,11 +1296,13 @@ export async function listRailsCrmCustomers(options: {
   page?: number
   perPage?: number
   search?: string
+  source?: 'site' | 'telegram_mini_app' | 'unknown' | string
 } = {}): Promise<RailsCrmListResult<RailsCrmCustomerSummary>> {
   const params = new URLSearchParams()
   params.set('page', String(options.page || 1))
   params.set('per_page', String(options.perPage || 30))
   if (options.search?.trim()) params.set('q', options.search.trim())
+  if (options.source) params.set('source', options.source)
 
   const result = await railsFetch<{
     customers: RailsCrmCustomerSummary[]
@@ -1283,6 +1314,11 @@ export async function listRailsCrmCustomers(options: {
     totalItems: Number(result.meta?.total || 0),
     totalPages: Number(result.meta?.pages || 0),
   }
+}
+
+export async function getRailsCrmCustomer(id: string): Promise<RailsCrmCustomerDetail> {
+  const result = await railsFetch<{ customer: RailsCrmCustomerDetail }>(`/admin/customers/${encodeURIComponent(id)}`)
+  return result.customer
 }
 
 export async function listRailsTelegramNotificationRecipients(): Promise<RailsTelegramNotificationRecipient[]> {
@@ -2151,7 +2187,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   }
 
   if (formData.has('currency')) product.currency = String(formData.get('currency') || 'RUB')
-  if (formData.has('fulfillment_mode')) product.fulfillment_mode = String(formData.get('fulfillment_mode') || 'requires_confirmation')
+  if (formData.has('fulfillment_mode')) product.fulfillment_mode = 'made_to_order'
   if (formData.has('indexing_status')) product.indexing_status = String(formData.get('indexing_status') || 'indexable')
   if (formData.has('availability_confidence')) product.availability_confidence = String(formData.get('availability_confidence') || 'unknown')
   if (formData.has('production_min_days')) product.production_min_days = optionalInt(formData.get('production_min_days'))
@@ -2201,7 +2237,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (applyDefaults) {
     product.currency ||= 'RUB'
     product.status ||= 'active'
-    product.fulfillment_mode ||= 'requires_confirmation'
+    product.fulfillment_mode ||= 'made_to_order'
     product.indexing_status ||= 'indexable'
     product.availability_confidence ||= 'unknown'
   }

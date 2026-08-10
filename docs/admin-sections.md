@@ -58,30 +58,21 @@ yeezy_scraping batch
 
 | URL | Назначение | Rails API |
 |---|---|---|
-| `/admin/crm` | CRM launchpad и очереди | `/api/v1/admin/*` |
-| `/admin/crm/orders` | Список заказов, queue/status/search | `GET /admin/orders` |
+| `/admin/crm` | CRM с четырьмя вкладками | `/api/v1/admin/*` |
+| `/admin/crm/orders` | Список оплачиваемых заказов и шесть статусов | `GET /admin/orders` |
 | `/admin/crm/orders/[id]` | Карточка заказа | `GET /admin/orders/:id` |
-| `/admin/crm/refunds` | Возвраты, approve/reject | `/admin/refunds` |
-| `/admin/crm/wallet-withdrawals` | Заявки на вывод wallet | `/admin/wallet_withdrawal_requests` |
-| `/admin/crm/customers` | Пользователи/клиенты | `GET /admin/customers` |
+| `/admin/crm/customers` | Клиенты, фильтр по источнику регистрации и адреса | `GET /admin/customers` |
+| `/admin/crm/customers/[id]` | Контакты, адреса и история клиента | `GET /admin/customers/:id` |
+| `/admin/crm/telegram` | Telegram-сообщения и рассылки | `GET/POST /admin/store_telegram_*` |
+| `/admin/crm/settings` | Получатели всех CRM-уведомлений | `GET/POST /admin/telegram_notification_recipients` |
 
 Карточка заказа включает:
 
-- order status transition;
-- item-level status transition;
-- supplier requests and supplier responses;
-- replacement offers с поиском товара/variant picker;
-- payments, refunds, customer info и timeline.
+- переход только между шестью статусами заказа;
+- одно фото товара, название и ссылку, количество, размер и сумму;
+- платежи, возвраты, данные клиента, адрес доставки и историю статусов.
 
-Refunds и wallet actions должны выполняться только Rails service endpoints:
-
-```text
-POST /api/v1/admin/refunds/:id/approve
-POST /api/v1/admin/refunds/:id/reject
-POST /api/v1/admin/wallet_withdrawal_requests/:id/approve
-POST /api/v1/admin/wallet_withdrawal_requests/:id/reject
-POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
-```
+Неоплаченные заявки из Mini App и кнопки «сообщить цену» не создают заказов.
 
 ## SEO и аналитика
 
@@ -96,7 +87,7 @@ SEO landings, redirects, audits и AI-каталог относятся к Rails
 ## Что важно не сломать
 
 - `AdminYeezy` остается отдельным Next.js приложением.
-- Rails CRM - source of truth для каталога, заказов, клиентов, платежей, возвратов и wallet.
+- Rails CRM - source of truth для каталога, заказов, клиентов, платежей и возвратов.
 - `yeezy_scraping` остается технической БД для парсинга, supplier/import batches и AI-процессов.
 - NocoDB допустим только для контролируемого просмотра/ограниченной операторской работы, не для прямого CRM workflow.
 - Storefront `/admin` не развивается как UI.

@@ -68,7 +68,7 @@ export function WithdrawalActions({ request }: { request: RailsCrmWalletWithdraw
       <form action={markWalletWithdrawalPaidAction} className="flex justify-end">
         <input type="hidden" name="withdrawalId" value={String(request.id)} />
         <Button type="submit" size="sm" className="bg-sky-600 hover:bg-sky-500">
-          Mark paid
+          Отметить как оплаченное
         </Button>
       </form>
     )

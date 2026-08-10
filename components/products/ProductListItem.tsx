@@ -116,7 +116,7 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
             formData.append('gender', product.gender || '');
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
             formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
-            if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
+            formData.append('fulfillment_mode', 'made_to_order');
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
 

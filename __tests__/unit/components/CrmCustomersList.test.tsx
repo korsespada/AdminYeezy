@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import CrmCustomersList from '@/components/crm/CrmCustomersList'
 
 describe('CrmCustomersList', () => {
-  it('renders customers with contact, wallet and order aggregates', () => {
+  it('renders customers with source, contact and order aggregates', () => {
     render(
       <CrmCustomersList
         customers={[
@@ -20,9 +20,7 @@ describe('CrmCustomersList', () => {
             created_at: '2026-06-13T10:00:00Z',
             order_count: 2,
             last_order_at: '2026-06-13T11:00:00Z',
-            wallet_cash_cents: 12000,
-            wallet_bonus_cents: 3000,
-            wallet_total_cents: 15000,
+            registration_source: 'site',
           },
         ]}
         totalItems={1}
@@ -32,12 +30,11 @@ describe('CrmCustomersList', () => {
       />
     )
 
-    expect(screen.getByRole('heading', { name: 'Пользователи' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Клиенты' })).toBeInTheDocument()
     expect(screen.getByDisplayValue('vip')).toBeInTheDocument()
     expect(screen.getByText('VIP Customer')).toBeInTheDocument()
     expect(screen.getByText('vip@example.com')).toBeInTheDocument()
     expect(screen.getByText('@vip_customer')).toBeInTheDocument()
-    expect(screen.getByText('VIPCODE')).toBeInTheDocument()
-    expect(screen.getByText(/150/)).toBeInTheDocument()
+    expect(screen.getAllByText('Сайт').length).toBeGreaterThanOrEqual(1)
   })
 })

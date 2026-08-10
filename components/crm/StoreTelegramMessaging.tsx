@@ -40,7 +40,7 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
             <Field label="Название рассылки">
               <input name="title" required placeholder="Летняя акция" className={inputClassName} />
             </Field>
-            <Field label="Текст сообщения (поддерживается Telegram HTML)">
+            <Field label="Текст сообщения (поддерживается HTML Telegram)">
               <textarea name="body" required rows={8} placeholder="<b>Новая коллекция</b> уже на сайте" className={inputClassName} />
             </Field>
             <details className="rounded-md border border-slate-800 bg-slate-950 p-3 text-xs text-slate-400">
@@ -74,7 +74,7 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
                 <input name="media" type="file" accept="image/*,video/*" className={fileClassName} />
               </Field>
             </div>
-            <Field label="Или публичный URL / Telegram file_id">
+            <Field label="Или публичная ссылка / идентификатор файла Telegram">
               <input name="mediaUrl" placeholder="https://static.yeezyunique.ru/..." className={inputClassName} />
             </Field>
 
@@ -133,9 +133,9 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
             </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="radio" name="audience" value="direct" className="accent-sky-500" />
-              По Telegram ID
+              По идентификатору Telegram
             </label>
-            <Field label="Telegram ID для теста">
+            <Field label="Идентификатор Telegram для теста">
               <input
                 name="telegramIds"
                 inputMode="numeric"
@@ -174,7 +174,7 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
                     <h3 className="font-semibold text-white">{campaign.title}</h3>
                     <p className="mt-1 line-clamp-2 text-sm text-slate-400">{telegramPreview(campaign.body)}</p>
                   </div>
-                  <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{campaign.status}</span>
+                  <span className="rounded-full bg-slate-800 px-3 py-1 text-xs text-slate-300">{campaignStatusLabel(campaign.status)}</span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
                   <span>Всего: {campaign.deliveries.total}</span>
@@ -208,6 +208,10 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
 
 function telegramPreview(body: string) {
   return body.replace(/<\/?[a-z][^>]*>/gi, '')
+}
+
+function campaignStatusLabel(status: string) {
+  return ({ draft: 'Черновик', sending: 'Отправляется', completed: 'Завершена' } as Record<string, string>)[status] || 'Неизвестно'
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

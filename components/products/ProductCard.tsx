@@ -175,7 +175,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
             formData.append('video_url', product.video_url || '');
             formData.append('video_poster_url', product.video_poster_url || '');
-            if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
+            formData.append('fulfillment_mode', 'made_to_order');
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
 

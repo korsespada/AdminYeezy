@@ -68,7 +68,7 @@ export default function ProductForm({
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState('')
   const [status, setStatus] = useState<Product['status']>('active')
-  const [fulfillmentMode, setFulfillmentMode] = useState<Product['fulfillment_mode']>('requires_confirmation')
+  const [fulfillmentMode, setFulfillmentMode] = useState<Product['fulfillment_mode']>('made_to_order')
   const [availabilityConfidence, setAvailabilityConfidence] = useState<Product['availability_confidence']>('unknown')
   const [indexingStatus, setIndexingStatus] = useState<Product['indexing_status']>('indexable')
   const [productionMinDays, setProductionMinDays] = useState('')
@@ -147,7 +147,7 @@ export default function ProductForm({
         setDescription(normalizeDescription(product.description))
         setPrice(Number(product.price).toString())
         setStatus(product.status || 'active')
-        setFulfillmentMode(product.fulfillment_mode || 'requires_confirmation')
+        setFulfillmentMode('made_to_order')
         setAvailabilityConfidence(product.availability_confidence || 'unknown')
         setIndexingStatus(product.indexing_status || 'indexable')
         setProductionMinDays(product.production_min_days == null ? '' : String(product.production_min_days))
@@ -226,7 +226,7 @@ export default function ProductForm({
         setDescription('')
         setPrice('')
         setStatus('active')
-        setFulfillmentMode('requires_confirmation')
+        setFulfillmentMode('made_to_order')
         setAvailabilityConfidence('unknown')
         setIndexingStatus('indexable')
         setProductionMinDays('')
@@ -324,7 +324,7 @@ export default function ProductForm({
     formData.append('price', priceNum.toString())
     formData.append('status', status === 'inactive' ? 'hidden' : status)
     formData.append('currency', 'RUB')
-    formData.append('fulfillment_mode', fulfillmentMode || 'requires_confirmation')
+    formData.append('fulfillment_mode', 'made_to_order')
     formData.append('availability_confidence', availabilityConfidence || 'unknown')
     formData.append('indexing_status', indexingStatus || 'indexable')
     formData.append('production_min_days', productionMinDays)
@@ -372,7 +372,7 @@ export default function ProductForm({
           description: description.trim(),
           price: parseFloat(price),
           status,
-          fulfillment_mode: fulfillmentMode,
+          fulfillment_mode: 'made_to_order',
           availability_confidence: availabilityConfidence,
           indexing_status: indexingStatus,
           production_min_days: productionMinDays ? Number(productionMinDays) : null,

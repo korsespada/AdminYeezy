@@ -10,15 +10,16 @@ const PER_PAGE = 30
 export default async function CrmCustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; search?: string }>
+  searchParams: Promise<{ page?: string; search?: string; source?: string }>
 }) {
   await connection()
   const params = await searchParams
   const page = Math.max(1, Number(params.page) || 1)
   const search = params.search?.trim() || ''
+  const source = ['site', 'telegram_mini_app', 'unknown'].includes(params.source?.trim() || '') ? params.source!.trim() : ''
 
   try {
-    const result = await listRailsCrmCustomers({ page, perPage: PER_PAGE, search })
+    const result = await listRailsCrmCustomers({ page, perPage: PER_PAGE, search, source })
 
     return (
       <CrmCustomersList
@@ -27,12 +28,13 @@ export default async function CrmCustomersPage({
         totalPages={result.totalPages}
         page={page}
         search={search}
+        source={source}
       />
     )
   } catch (error: any) {
     return (
       <Alert variant="destructive" className="m-8 border-red-800 bg-red-900/20 text-red-400">
-        <AlertTitle className="text-xl font-bold">Ошибка загрузки пользователей из Rails CRM</AlertTitle>
+        <AlertTitle className="text-xl font-bold">Ошибка загрузки клиентов из Rails CRM</AlertTitle>
         <AlertDescription>{error.message}</AlertDescription>
       </Alert>
     )

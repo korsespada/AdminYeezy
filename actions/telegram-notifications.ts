@@ -9,7 +9,7 @@ import {
   updateRailsTelegramNotificationRecipient,
 } from '@/lib/rails-admin'
 
-const NOTIFICATIONS_PATH = '/admin/crm/notifications'
+const NOTIFICATIONS_PATH = '/admin/crm/settings'
 
 function requiredString(formData: FormData, key: string) {
   const value = String(formData.get(key) || '').trim()
@@ -17,17 +17,13 @@ function requiredString(formData: FormData, key: string) {
   return value
 }
 
-function checked(formData: FormData, key: string) {
-  return formData.get(key) === 'on'
-}
-
 function notificationInput(formData: FormData) {
   return {
     telegramId: requiredString(formData, 'telegramId'),
     label: String(formData.get('label') || '').trim(),
-    notifyNewOrders: checked(formData, 'notifyNewOrders'),
-    notifyNewCustomers: checked(formData, 'notifyNewCustomers'),
-    isActive: checked(formData, 'isActive'),
+    notifyNewOrders: true,
+    notifyNewCustomers: true,
+    isActive: true,
   }
 }
 

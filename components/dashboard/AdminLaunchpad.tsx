@@ -45,7 +45,7 @@ const sections = [
   },
   {
     title: 'CRM',
-    description: 'Заказы, item statuses, поставщики, замены, возвраты, выплаты и клиенты.',
+    description: 'Заказы, клиенты, Telegram-сообщения и настройки уведомлений.',
     href: '/admin/crm',
     icon: ClipboardList,
     tone: 'text-violet-300',

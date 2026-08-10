@@ -6,7 +6,7 @@ import { connection } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const PER_PAGE = 30
-const queues = new Set(['', 'paid', 'problem', 'production', 'refund'])
+const statuses = new Set(['', 'payment_pending', 'paid', 'shipped', 'delivered', 'refund_pending', 'cancelled'])
 
 export default async function CrmOrdersPage({
   searchParams,
@@ -18,8 +18,8 @@ export default async function CrmOrdersPage({
   const rawPage = Number(params.page)
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
   const search = params.search?.trim() || ''
-  const queue = queues.has(params.queue || '') ? params.queue || '' : ''
-  const status = params.status?.trim() || ''
+  const queue = ''
+  const status = statuses.has(params.status?.trim() || '') ? params.status?.trim() || '' : ''
   const railsConfigured = Boolean(process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL)
 
   if (!railsConfigured) {

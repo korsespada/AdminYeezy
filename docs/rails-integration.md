@@ -96,19 +96,24 @@ CRM-экраны живут в `AdminYeezy` и работают через Rails
 GET  /api/v1/admin/orders
 GET  /api/v1/admin/orders/:id
 POST /api/v1/admin/orders/:id/transitions
-POST /api/v1/admin/order_items/:id/transitions
-POST /api/v1/admin/order_items/:id/supplier_requests
-POST /api/v1/admin/supplier_requests/:id/responses
-POST /api/v1/admin/order_items/:id/replacement_offers
-GET  /api/v1/admin/refunds
-POST /api/v1/admin/refunds/:id/approve
-POST /api/v1/admin/refunds/:id/reject
-GET  /api/v1/admin/wallet_withdrawal_requests
-POST /api/v1/admin/wallet_withdrawal_requests/:id/approve
-POST /api/v1/admin/wallet_withdrawal_requests/:id/reject
-POST /api/v1/admin/wallet_withdrawal_requests/:id/mark_paid
 GET  /api/v1/admin/customers
+GET  /api/v1/admin/customers/:id
+GET  /api/v1/admin/telegram_notification_recipients
+POST /api/v1/admin/telegram_notification_recipients
 ```
+
+В CRM остаются четыре вкладки: «Заказы», «Клиенты», «Telegram-сообщения» и
+«Настройки CRM». В заказах используются только статусы `payment_pending`,
+`paid`, `shipped`, `delivered`, `refund_pending`, `cancelled`; подтверждение
+оплаты приходит callback от Platega. Заявки корзины без оплаты не являются
+заказами и отправляются в Telegram-коммуникацию с номером `REQ-...`.
+
+Карточка клиента показывает источник регистрации (`Сайт`, `Telegram Mini App`
+или `Неизвестно` для старых записей), а список клиентов можно фильтровать по
+источнику. В карточке клиента доступны контакты, заполненные адреса и история заказов. В карточке заказа
+показываются одно фото товара, название и ссылка, номер, количество, размер и
+сумма. Балансы, производственные статусы, supplier requests и replacement
+offers не входят в CRM UI.
 
 ## Chromoff
 
@@ -132,14 +137,14 @@ YeezyUnique и одновременно иметь другое меню/SEO н�
 Если AI не выбрал категорию Chromoff, `chromoff_category_id` остаётся пустым,
 listing получает `needs_review` и назначается из `/admin/chromoff`.
 
-Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
+Не менять статусы заказов, платежи и возвраты прямым SQL.
 
 ## Проверка
 
 1. Вход выполняется Rails-учетной записью.
 2. Изменение опубликованного товара появляется на сайте.
 3. Тестовая партия публикуется без дублей при повторном запуске.
-4. CRM customers, orders, refunds и wallet withdrawals открываются через Rails JWT.
+4. CRM customers, orders и Telegram-настройки открываются через Rails JWT.
 5. Legacy-БД `shop` не меняется в результате новой публикации.
 
 Полная карта разделов: [admin-sections.md](./admin-sections.md).
