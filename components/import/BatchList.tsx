@@ -51,20 +51,17 @@ export default function BatchList({ initialData }: { initialData: Batch[] }) {
   }
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Вы уверены, что хотите удалить партию "${name}"? Все товары, принадлежащие этой партии, будут удалены из базы данных! Это действие нельзя отменить.`)) {
+    if (!confirm(`Удалить локальные товары партии "${name}"? Основной каталог не будет затронут. Это действие нельзя отменить.`)) {
       return
     }
-    const replaceShared = window.confirm(
-      'Удалить также совпадающие товары из основного каталога?\n\n' +
-      'Да — это замена старой версии: новая выгрузка потом создаст товары заново.\n' +
-      'Нет — общие товары будут сохранены.',
-    )
 
     setDeletingId(id)
-    const res = await deleteBatchAction(id, { replaceShared })
+    const res = await deleteBatchAction(id)
     if (res.success) {
       setBatches(prev => prev.filter(b => b.id !== id))
-      const catalogMessage = res.catalogDeletedCount !== undefined
+      const catalogMessage = res.catalogSkipped
+        ? 'Основной каталог не затронут: партия не была опубликована.'
+        : res.catalogDeletedCount !== undefined
         ? `Из каталога удалено: ${res.catalogDeletedCount}, архивировано: ${res.catalogArchivedCount || 0}, ошибок: ${res.catalogFailedCount || 0}${res.catalogProtectedCount ? `, защищено как общие: ${res.catalogProtectedCount}` : ''}`
         : 'Из каталога: не проверено'
       alert(`Локально удалено: ${res.deletedCount || 0}\n${catalogMessage}`)

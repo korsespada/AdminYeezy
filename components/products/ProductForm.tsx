@@ -88,6 +88,8 @@ export default function ProductForm({
   const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
+  const [videoUrl, setVideoUrl] = useState('')
+  const [videoPosterUrl, setVideoPosterUrl] = useState('')
 
   const selectedCategoryName = useMemo(
     () => categories.find((item) => item.id === category)?.name || '',
@@ -179,6 +181,8 @@ export default function ProductForm({
         setSubcategory(product.subcategory || product.expand?.subcategory?.id || '')
         setGender(product.gender || '')
         setPhotoUrlsToAdd('')
+        setVideoUrl(product.video_url || '')
+        setVideoPosterUrl(product.video_poster_url || '')
 
         // Set existing photos (they are external URLs, not PocketBase files)
         const media = product.media && product.media.length > 0
@@ -238,6 +242,8 @@ export default function ProductForm({
         setSubcategory('')
         setGender('')
         setPhotoUrlsToAdd('')
+        setVideoUrl('')
+        setVideoPosterUrl('')
         setExistingPhotos([])
         setExistingMedia([])
       }
@@ -328,6 +334,8 @@ export default function ProductForm({
     formData.append('seo_title', seoTitle.trim())
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
+    formData.append('video_url', videoUrl.trim())
+    formData.append('video_poster_url', videoPosterUrl.trim())
     const normalizedCatalogAttributes = normalizeCatalogAttributes(catalogAttributes, {
       categoryName: selectedCategoryName,
       subcategoryName: selectedSubcategoryName,
@@ -387,6 +395,8 @@ export default function ProductForm({
           subcategory,
           photos: existingPhotos,
           media: mediaPayload,
+          video_url: videoUrl.trim() || null,
+          video_poster_url: videoPosterUrl.trim() || null,
         })
       }
       onClose()
@@ -519,6 +529,46 @@ export default function ProductForm({
               )}
 
               {/* New Photos (Removed, as we now use URL input directly to existing photos list) */}
+            </div>
+
+            {/* Video */}
+            <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/35 p-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Видео товара</label>
+                <p className="mt-1 text-xs text-gray-500">Видео хранится отдельно от фотографий и показывается последней миниатюрой на сайте.</p>
+              </div>
+              {videoUrl && (
+                <video
+                  controls
+                  playsInline
+                  preload="metadata"
+                  poster={videoPosterUrl || existingPhotos[0] || undefined}
+                  className="max-h-64 w-full rounded-md bg-black object-contain"
+                >
+                  <source src={videoUrl} type="video/mp4" />
+                </video>
+              )}
+              <input
+                type="url"
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                placeholder="https://.../video.mp4"
+                disabled={isPending}
+              />
+              <input
+                type="url"
+                value={videoPosterUrl}
+                onChange={(e) => setVideoPosterUrl(e.target.value)}
+                className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                placeholder="URL постера (необязательно)"
+                disabled={isPending}
+              />
+              {(videoUrl || videoPosterUrl) && (
+                <Button type="button" variant="outline" size="sm" onClick={() => { setVideoUrl(''); setVideoPosterUrl('') }} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending}>
+                  Удалить видео
+                </Button>
+              )}
             </div>
 
             {/* Name */}

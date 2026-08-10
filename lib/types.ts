@@ -99,6 +99,9 @@ export interface Product {
   subcategory: string // Subcategory ID
   photos: string[] // Array of photo filenames
   media?: ProductMedia[]
+  /** Published video is separate from the photo gallery. */
+  video_url?: string | null
+  video_poster_url?: string | null
   supplier?: ProductSupplier | null
   photos_processed: boolean
   gender: string

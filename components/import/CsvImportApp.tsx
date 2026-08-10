@@ -60,7 +60,7 @@ import {
   type CsvProduct,
   type Lookups,
 } from "@/actions/csv-import";
-import { pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
+import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import {
   getBatchAiRunAction,
@@ -1105,6 +1105,25 @@ export default function CsvImportApp({
     }
 
     if (targetBatchId) {
+      if (!isSnapshotSource) {
+        const preview = await previewBatchPublishAction(targetBatchId, mode, replaceMissing);
+        if (!preview.success) {
+          setSaveMsg(`✗ Не удалось подготовить предпросмотр: ${preview.error || "unknown"}`);
+          return;
+        }
+        const data = preview.data as any;
+        const shouldContinue = window.confirm(
+          `Предпросмотр публикации\n\n` +
+          `Всего в партии: ${data.total}\n` +
+          `Новых: ${data.newCount}\n` +
+          `Будет обновлено: ${data.updateCount}\n` +
+          `Будет пропущено: ${data.skippedCount}\n` +
+          `Будет удалено из каталога: ${data.deleteCount}\n` +
+          `Видео к переносу в S3: ${data.videoCount}\n\n` +
+          `Продолжить публикацию?`,
+        );
+        if (!shouldContinue) return;
+      }
       setIsPushing(true);
       setPublishProgress({ phase: "lookup", current: 0, total: products.length });
       try {
@@ -1599,6 +1618,24 @@ export default function CsvImportApp({
     }
   };
 
+  const handleUndoChanges = async () => {
+    if (isSnapshotSource) return;
+    if (previousProducts) {
+      handleUndoMerge();
+      return;
+    }
+    if (batchId) {
+      const result = await getBatchProductsAction(batchId);
+      if (result.success && result.data) {
+        setProducts(result.data.products);
+        setIsDirty(false);
+        setSaveMsg("✓ Изменения отменены");
+      }
+      return;
+    }
+    if (localPath) await handleLoadPath(localPath);
+  };
+
   // ─── Render ───────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-900 font-sans text-slate-200">
@@ -1748,6 +1785,13 @@ export default function CsvImportApp({
                   >
                     <Save className="w-4 h-4" />
                     {isSaving ? "Сохраняю..." : isBatchSource ? "Сохранить БД" : "Сохранить файл"}
+                  </button>
+                  <button
+                    onClick={handleUndoChanges}
+                    disabled={isSaving}
+                    className="mt-1 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-white disabled:opacity-50"
+                  >
+                    Отменить изменения
                   </button>
                 </div>
               )}
@@ -1903,9 +1947,11 @@ export default function CsvImportApp({
                   </button>
                   {showMoreActions && (
                     <div className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
+                      <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Настройки</div>
                       {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
-                      {previousProducts && <button onClick={handleUndoMerge} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
+                      <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
+                      {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Пересобрать цветовые семьи</button>}

@@ -3,7 +3,7 @@
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Brand, type Category, type Product, type Subcategory } from '@/lib/types';
-import { Trash2, Copy, Palette, Sparkles } from 'lucide-react';
+import { Trash2, Copy, Palette, Sparkles, Play } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
@@ -173,6 +173,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             formData.append('gender', product.gender || '');
             formData.append('productMetadata', JSON.stringify(product.metadata || {}));
             formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
+            formData.append('video_url', product.video_url || '');
+            formData.append('video_poster_url', product.video_poster_url || '');
             if (product.fulfillment_mode) formData.append('fulfillment_mode', product.fulfillment_mode);
             if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
             if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
@@ -284,6 +286,11 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 {product.photos && product.photos.length > 0 && (
                     <Badge variant="outline" className="absolute bottom-2 right-2 z-10 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-300 backdrop-blur-sm">
                         {product.photos.length} фото
+                    </Badge>
+                )}
+                {product.video_url && (
+                    <Badge variant="outline" className="absolute bottom-2 left-2 z-10 gap-1 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-200 backdrop-blur-sm">
+                        <Play className="h-3 w-3 fill-current" /> видео
                     </Badge>
                 )}
             </div>

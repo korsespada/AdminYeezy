@@ -664,6 +664,8 @@ export function mapRailsProduct(product: any): Product {
     subcategory: subcategoryId,
     photos,
     media,
+    video_url: product.video_url || null,
+    video_poster_url: product.video_poster_url || null,
     supplier: product.supplier
       ? {
         id: String(product.supplier.id),
@@ -2152,6 +2154,8 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('seo_description')) product.seo_description = String(formData.get('seo_description') || '')
   if (formData.has('h1')) product.h1 = String(formData.get('h1') || '')
   if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
+  if (formData.has('video_url')) product.video_url = String(formData.get('video_url') || '').trim() || null
+  if (formData.has('video_poster_url')) product.video_poster_url = String(formData.get('video_poster_url') || '').trim() || null
   if (formData.has('catalog_attributes')) {
     product.catalog_attributes = parseJsonObject(formData.get('catalog_attributes'))
     const variants = catalogAttributeVariants(

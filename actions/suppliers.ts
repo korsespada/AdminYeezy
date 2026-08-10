@@ -415,6 +415,7 @@ export interface ExportHistoryBatch {
   product_count?: number
   ai_product_count?: number
   active_operation?: string | null
+  published_external_count?: number
 }
 
 function normalizeTaskStatus(status: string | null, resultPath: string | null) {
@@ -537,6 +538,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         pc.product_count,
         pc.ai_product_count,
         pc.ai_updated_at,
+        COALESCE(pub.published_external_count, 0) AS published_external_count,
         op.operation as active_operation
       FROM scraping_tasks t
       LEFT JOIN suppliers s ON t.supplier_id = s.id
@@ -552,6 +554,11 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
                MAX(updated_at) FILTER (WHERE COALESCE(ai_processed, false)) AS ai_updated_at
         FROM products WHERE batch_id=b.id
       ) pc ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT COUNT(DISTINCT external_id)::int AS published_external_count
+        FROM batch_publications
+        WHERE batch_id=b.id
+      ) pub ON TRUE
       LEFT JOIN batch_operation_locks op
         ON op.batch_id=b.id AND op.updated_at > NOW() - INTERVAL '2 minutes'
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
@@ -602,6 +609,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             ai_product_count: Number(row.ai_product_count || 0),
             ai_updated_at: row.ai_updated_at || null,
             active_operation: row.active_operation || null,
+            published_external_count: Number(row.published_external_count || 0),
           },
           files: [],
         })
@@ -717,6 +725,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         product_count: batch.product_count,
         ai_product_count: batch.ai_product_count,
         active_operation: batch.active_operation,
+        published_external_count: batch.published_external_count,
       }
     })
 
@@ -1210,6 +1219,54 @@ export async function createBatchAction(name: string, supplierId?: number, items
     }
 }
 
+export async function previewBatchPublishAction(
+  batchId: string,
+  mode: 'add' | 'upsert' = 'upsert',
+  replaceMissing = false,
+  snapshotId?: string | null,
+): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const products = snapshotId
+      ? await scrapingQuery('SELECT product FROM jsonb_array_elements((SELECT products FROM batch_snapshots WHERE id=$1 AND batch_id=$2)) AS product', [snapshotId, batchId])
+      : await scrapingQuery(`
+          SELECT jsonb_build_object('external_id', external_id, 'attributes', attributes) AS product
+          FROM products
+          WHERE batch_id=$1 AND external_id IS NOT NULL AND BTRIM(external_id) <> ''
+        `, [batchId])
+    const productRows = products.rows.map((row) => row.product || row)
+    const externalIds = [...new Set(productRows.map((row: any) => String(row.external_id || '').trim()).filter(Boolean))]
+    const workflow = require('../scripts/batch-workflow')
+    const existing = await workflow.existingRailsProducts(externalIds)
+    const existingCount = existing.size
+    const newCount = Math.max(0, externalIds.length - existingCount)
+    const known = await scrapingQuery(`
+      SELECT external_id FROM batch_publications WHERE batch_id=$1
+      UNION
+      SELECT external_id FROM products WHERE batch_id=$1 AND external_id IS NOT NULL
+    `, [batchId])
+    const knownIds = new Set(known.rows.map((row) => String(row.external_id).trim()).filter(Boolean))
+    const targetIds = new Set(externalIds)
+    const deleteCount = replaceMissing
+      ? [...knownIds].filter((externalId) => !targetIds.has(externalId)).length
+      : 0
+    const videoCount = productRows.filter((row: any) => String(row.attributes?.szwego_video_url || '').trim()).length
+    return {
+      success: true,
+      data: {
+        total: externalIds.length,
+        newCount,
+        updateCount: mode === 'upsert' ? existingCount : 0,
+        skippedCount: mode === 'add' ? existingCount : 0,
+        deleteCount,
+        videoCount,
+      },
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function getBatchPublishProgressAction(batchId: string): Promise<ActionResponse> {
     try {
         await requireAdmin()
@@ -1282,7 +1339,7 @@ export async function getBatchesAction() {
 /**
  * Удаление партии и всех связанных с ней товаров
  */
-export async function deleteBatchAction(batchId: string, options: { replaceShared?: boolean } = {}) {
+export async function deleteBatchAction(batchId: string, options: { replaceShared?: boolean; catalogOnly?: boolean } = {}) {
     let operationOwnerId: string | null = null
     try {
         await requireAdmin()
@@ -1355,18 +1412,28 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           ...legacySharedIds,
           ...publications.rows.filter((row) => row.shared).map((row) => String(row.external_id).trim()),
         ])
-        const externalIds = options.replaceShared
+        const catalogOnly = Boolean(options.catalogOnly)
+        // Локальная очистка никогда не трогает Rails. Каталог можно чистить
+        // только отдельной явной операцией и только для реально опубликованной
+        // партии (включая партию, у которой локальные товары уже удалены).
+        const canTouchCatalog = catalogOnly && (batchStage === 'PUSHED' || publications.rows.length > 0)
+        const externalIds = canTouchCatalog && options.replaceShared
           ? [...new Set([
               ...publications.rows.map((row) => String(row.external_id).trim()),
               ...legacyCandidates,
             ].filter(Boolean))]
-          : [...new Set([...publicationExternalIds, ...legacyExternalIds])]
+          : canTouchCatalog
+            ? [...new Set([...publicationExternalIds, ...legacyExternalIds])]
+            : []
 
         // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
         let catalogDeletedCount = 0
         let catalogArchivedCount = 0
         let catalogFailedCount = 0
-        const requiresCatalogDeletion = batchStage === 'PUSHED' || publications.rows.length > 0 || legacyCandidates.length > 0
+        const requiresCatalogDeletion = canTouchCatalog
+        if (catalogOnly && !canTouchCatalog) {
+          throw new Error('Основной каталог можно очищать только у опубликованной партии')
+        }
         if (requiresCatalogDeletion && !process.env.RAILS_API_URL) {
           throw new Error('Нельзя удалить опубликованную партию: не настроен RAILS_API_URL')
         }
@@ -1377,13 +1444,37 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           catalogFailedCount = result.failed.length
         }
 
-        await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
+        if (catalogOnly) {
+          if (catalogFailedCount > 0) throw new Error('Не все товары удалось удалить из основного каталога')
+          await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
+          try { await redis.del('catalog:all') } catch (redisErr: any) { console.warn('Redis clear cache error:', redisErr.message) }
+          revalidatePath('/admin')
+          revalidatePath('/admin/batches')
+          revalidatePath('/admin/scraping')
+          return {
+            success: true,
+            deletedCount: 0,
+            catalogDeletedCount,
+            catalogArchivedCount,
+            catalogFailedCount,
+            catalogRequestedCount: externalIds.length,
+            catalogProtectedCount: !options.replaceShared ? protectedExternalIds.size : 0,
+            catalogSkipped: false,
+            catalogOnly: true,
+            replaceShared: Boolean(options.replaceShared),
+          }
+        }
+
+        const wasPublished = batchStage === 'PUSHED' || publications.rows.length > 0
+        // Пока опубликованная партия ещё не очищена из каталога, сохраняем
+        // registry и S3-медиа: Rails всё ещё может ссылаться на них.
+        if (!wasPublished) await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
 
         // Если хотя бы один external_id разделяется с другой публикацией, Rails может
         // ссылаться на фотографии этой партии — весь префикс удалять небезопасно.
-        const canDeleteS3 = publications.rows.length > 0
+        const canDeleteS3 = !wasPublished && (publications.rows.length > 0
           ? publications.rows.every((row) => !row.shared)
-          : batchStage !== 'PUSHED' && protectedExternalIds.size === 0
+          : protectedExternalIds.size === 0)
         if (canDeleteS3) {
           try {
             await deleteS3Folder(`batches/${batchId}/`)
@@ -1416,8 +1507,10 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           catalogArchivedCount,
           catalogFailedCount,
           catalogRequestedCount: externalIds.length,
-          catalogProtectedCount: options.replaceShared ? 0 : protectedExternalIds.size,
-          replaceShared: Boolean(options.replaceShared),
+          catalogProtectedCount: 0,
+          catalogSkipped: true,
+          catalogOnly: false,
+          replaceShared: false,
         }
     } catch (err: any) {
         return { success: false, error: err.message }
