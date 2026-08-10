@@ -163,6 +163,11 @@ export interface RailsChromoffListing {
   seo_title?: string | null
   seo_description?: string | null
   h1?: string | null
+  sort_order?: number
+  sync_mode?: 'auto' | 'manual'
+  source_supplier_id?: string | null
+  source_supplier_name?: string | null
+  metadata?: Record<string, unknown>
 }
 
 export interface RailsChromoffImportCategory {

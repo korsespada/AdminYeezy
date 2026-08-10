@@ -12,7 +12,7 @@ Chromoff остаётся самостоятельным магазином со
 | Данные | Source of truth |
 |---|---|
 | Общий товар, цена, статус, медиа | Rails CRM `Product` / `ProductMedia` |
-| Публикация на Chromoff, legacy slug, Chromoff SEO | Rails CRM `ChromoffListing` |
+| Публикация на Chromoff, legacy slug, Chromoff SEO и режим синхронизации | Rails CRM `ChromoffListing` |
 | Разделы и подкатегории Chromoff | Rails CRM `ChromoffCategory` |
 | Старые данные Chromoff | Supabase, только read-only источник импорта |
 
@@ -24,6 +24,9 @@ Rails API и server actions AdminYeezy.
 В разделе есть:
 
 - карточки товаров с общей ценой и первой фотографией YeezyUnique;
+- источник товара на каждой карточке: «Автосинхронизация» или «Ручной товар»;
+- состояние Chromoff SEO (`h1`, `seo_title`, `seo_description`) и поставщик-источник;
+- редактирование Chromoff H1/title/description прямо в карточке;
 - фильтры по названию, разделу Chromoff, подкатегории, цене и публикации;
 - переключатель «Опубликовать на Chromoff» / «Скрыть с Chromoff»;
 - ручное добавление уже существующего Chrome Hearts-товара в подкатегорию;
@@ -42,6 +45,28 @@ Rails API и server actions AdminYeezy.
 Для импортированных в общий каталог товаров, которые должны существовать только
 на Chromoff, используется `noindex` на YeezyUnique. Это не запрещает их
 индексацию на Chromoff: у витрин разные маршруты и собственные SEO-поля.
+
+## Автосинхронизация поставщиков
+
+После успешного пуша товара в Rails API создаётся или обновляется
+`ChromoffListing`, если бренд товара — `Chrome Hearts` (`chrome-hearts`), а
+поставщик входит в список `CHROMOFF_AUTO_SUPPLIER_IDS`.
+
+По умолчанию список состоит из трёх поставщиков:
+
+```text
+_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I
+_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag
+_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ
+```
+
+Новое listing создаётся скрытым (`published=false`), чтобы оператор сначала
+проверил категорию и SEO, затем нажал «Опубликовать на Chromoff». Уже
+опубликованная карточка обновляет общий товар и сохраняет свою публикацию,
+slug, категорию и SEO-overrides.
+
+Ручные карточки и карточки от других поставщиков не перехватываются этой
+синхронизацией: они остаются `sync_mode=manual` и видны в интерфейсе отдельно.
 
 ## Импорт из старого Chromoff
 

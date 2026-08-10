@@ -5,7 +5,7 @@ import { useMemo, useState, useTransition } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction } from '@/actions/chromoff'
+import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, updateChromoffListingSeoAction } from '@/actions/chromoff'
 import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 
 type ChromoffFilters = {
@@ -19,6 +19,12 @@ type ChromoffFilters = {
 
 function formatPrice(priceCents: number) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(priceCents / 100)
+}
+
+function seoStatus(listing: RailsChromoffListing) {
+  return listing.h1?.trim() && listing.seo_title?.trim() && listing.seo_description?.trim()
+    ? 'SEO готово'
+    : 'SEO нужно проверить'
 }
 
 export default function ChromoffCatalog({
@@ -101,7 +107,7 @@ export default function ChromoffCatalog({
               <Badge className="bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">Отдельная витрина</Badge>
               <h1 className="mt-3 text-3xl font-bold text-white">Chromoff</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                Chrome Hearts: свои разделы и подкатегории, но общий товар, цена и фотографии из YeezyUnique.
+                Chrome Hearts: свои разделы, публикация и SEO; общий товар, цена и фотографии из YeezyUnique.
               </p>
             </div>
             <div className="rounded-lg border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
@@ -194,6 +200,17 @@ export default function ChromoffCatalog({
                       <div>
                         <p className="line-clamp-2 min-h-10 font-medium leading-5 text-white">{listing.name}</p>
                         <p className="mt-1 truncate text-xs text-slate-500">{parent ? `${parent.name} · ` : ''}{category?.name || 'Категория не назначена'}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <Badge variant="outline" className={listing.sync_mode === 'auto' ? 'border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400'}>
+                            {listing.sync_mode === 'auto' ? 'Автосинхронизация' : 'Ручной товар'}
+                          </Badge>
+                          <Badge variant="outline" className={listing.h1 && listing.seo_title && listing.seo_description ? 'border-sky-500/40 text-sky-300' : 'border-amber-500/40 text-amber-300'}>
+                            {seoStatus(listing)}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 truncate text-[11px] text-slate-600">
+                          {listing.source_supplier_name || listing.source_supplier_id || 'Источник не указан'}
+                        </p>
                       </div>
                       <div className="flex items-center justify-between gap-2"><span className="text-lg font-semibold text-white">{formatPrice(listing.price_cents)}</span><Badge variant="outline" className="border-slate-700 text-slate-300">{listing.status}</Badge></div>
                       <form action={(formData) => startTransition(async () => { await setChromoffListingPublishedAction(formData) })}>
@@ -201,6 +218,16 @@ export default function ChromoffCatalog({
                         <input type="hidden" name="published" value={String(!listing.published)} />
                         <Button type="submit" size="sm" variant={listing.published ? 'outline' : 'default'} className="w-full">{listing.published ? 'Скрыть с Chromoff' : 'Опубликовать на Chromoff'}</Button>
                       </form>
+                      <details className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
+                        <summary className="cursor-pointer text-xs font-medium text-slate-300">Редактировать SEO Chromoff</summary>
+                        <form className="mt-3 space-y-2" action={(formData) => startTransition(async () => { await updateChromoffListingSeoAction(formData) })}>
+                          <input type="hidden" name="id" value={listing.id} />
+                          <input name="h1" defaultValue={listing.h1 || ''} placeholder="H1 Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
+                          <input name="seo_title" defaultValue={listing.seo_title || ''} placeholder="SEO title Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
+                          <textarea name="seo_description" defaultValue={listing.seo_description || ''} rows={3} placeholder="SEO description Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
+                          <Button type="submit" size="sm" variant="outline" className="w-full">Сохранить SEO</Button>
+                        </form>
+                      </details>
                     </CardContent>
                   </Card>
                 )

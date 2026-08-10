@@ -123,8 +123,12 @@ PATCH  /api/v1/admin/chromoff/listings/:id
 
 Публичная витрина Chromoff получает только опубликованные listings через
 `/api/v1/catalog/chromoff/*`. У listing есть собственная категория, legacy URL
-и SEO-поля. Поэтому одна и та же карточка может оставаться в своей категории
+SEO-поля, `sync_mode` и источник поставщика. Поэтому одна и та же карточка может оставаться в своей категории
 YeezyUnique и одновременно иметь другое меню/SEO на Chromoff.
+
+Пуш из `/admin/import_batches` автоматически создаёт или обновляет listing для
+Chrome Hearts только для разрешённых Chromoff-поставщиков. Новые listings
+создаются скрытыми до ручной проверки; listings с `sync_mode=manual` не меняются.
 
 Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
 
