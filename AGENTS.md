@@ -15,6 +15,10 @@ published catalog and CRM operations.
 - Files under `docs/archive/` are historical evidence, not current requirements.
 - If docs, code, and tests disagree, report the conflict and prefer working
   behavior and tests over stale planning text.
+- Any new section, component, workflow, integration, or material change to an
+  existing one must update the relevant current documentation in `docs/` in
+  the same change. Add a new document when the existing ones cannot describe
+  the operating workflow clearly, and update `docs/README.md` with its link.
 
 ## Data boundaries
 

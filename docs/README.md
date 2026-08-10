@@ -6,6 +6,7 @@
 - [Rails integration](./rails-integration.md) — API contract and migration
   boundary.
 - [Admin sections](./admin-sections.md) — current UI areas.
+- [Chromoff catalog](./chromoff-catalog.md) — catalog ownership, import and operator workflow.
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.
 - [Coolify deployment](./coolify-deployment.md) — environment and operations.
