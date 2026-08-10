@@ -22,6 +22,7 @@ import {
   buildBatchAiVisualFamilyPrompt,
   matchingPriceRule,
   normalizeBatchAiOutput,
+  CHROMOFF_AUTO_SUPPLIER_IDS,
   runBatchAiOpenRouter,
   runBatchAiOpenRouterRefinement,
   type BatchAiProvider,
@@ -31,6 +32,7 @@ import {
   createRailsCatalogSubcategory,
   getRailsCatalogAttributeRegistry,
   getRailsCatalogLookups,
+  listRailsChromoffCategories,
   refreshRailsProductSlugs,
   syncRailsCatalogAttributeRegistry,
   upsertRailsCatalogAttributeValue,
@@ -412,6 +414,10 @@ function promptSubcategoriesForContext(context: any) {
   return context.subcategories
 }
 
+function isChromoffSupplier(supplierId: unknown) {
+  return CHROMOFF_AUTO_SUPPLIER_IDS.has(String(supplierId || '').trim())
+}
+
 async function syncCurrentRailsCatalogMappings() {
   const catalog = await getRailsCatalogLookups()
   const currentSubcategoryName = (name: unknown) => ({
@@ -489,6 +495,25 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
   `, [batchId])
   if (!batch.rows[0]) throw new Error('Выгрузка не найдена')
+  const chromoffMode = isChromoffSupplier(batch.rows[0].supplier_id)
+  let resolvedChromoffCategories: Array<{ id: string; name: string; parent_id: string | null; slug: string; path: string }> = []
+  if (chromoffMode) {
+    const categories = (await listRailsChromoffCategories()).filter((category) => category.active !== false)
+    const byId = new Map(categories.map((category) => [String(category.id), category]))
+    resolvedChromoffCategories = categories.map((category) => {
+      const parent = category.parent_id ? byId.get(String(category.parent_id)) : null
+      return {
+        id: String(category.id),
+        name: String(category.name || ''),
+        parent_id: category.parent_id ? String(category.parent_id) : null,
+        slug: String(category.slug || ''),
+        path: parent ? `${parent.name} → ${category.name}` : String(category.name || ''),
+      }
+    })
+  }
+  if (chromoffMode && resolvedChromoffCategories.length === 0) {
+    throw new Error('Для Chromoff не загружен справочник категорий. Сначала настройте категории Chromoff.')
+  }
   let predicate = ''
   const params: any[] = [batchId]
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
@@ -639,6 +664,8 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
       ? subcategories.filter((row) => allowedSubcategories.has(String(row.id)))
       : subcategories,
     priceRules: priceRules.rows,
+    chromoffMode,
+    chromoffCategories: resolvedChromoffCategories,
   }
 }
 
@@ -953,6 +980,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
               subcategories: promptSubcategories,
               attributes: attributeDefinitions,
               priceRules,
+              chromoffMode: context.chromoffMode,
+              chromoffCategories: context.chromoffCategories,
             })
           : buildBatchAiUserPrompt({
           product: promptProduct,
@@ -964,6 +993,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           subcategories: promptSubcategories,
           attributes: attributeDefinitions,
           priceRules,
+          chromoffMode: context.chromoffMode,
+          chromoffCategories: context.chromoffCategories,
         })
         await scrapingQuery(`
           INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
@@ -988,6 +1019,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
           priceRules,
           priceReferenceUrls,
+          chromoffMode: context.chromoffMode,
+          chromoffCategories: context.chromoffCategories,
         })])
       }
     }
@@ -1148,6 +1181,8 @@ function batchAiNormalizationOptions(input: any, context: any) {
     knownAttributeCodes: new Set<string>((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
     priceRuleKeys: new Set<string>((input.priceRules || []).map((row: any) => String(row.rule_key))),
+    chromoffMode: input.chromoffMode === true,
+    chromoffCategories: Array.isArray(input.chromoffCategories) ? input.chromoffCategories : [],
   }
 }
 

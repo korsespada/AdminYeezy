@@ -33,6 +33,51 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('catalog_attributes')
   })
 
+  it('uses the Chromoff taxonomy for approved suppliers without changing the common taxonomy', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { external_id: 'ch-1', category: '', subcategory: '' },
+      brands: [],
+      categories: [],
+      subcategories: [],
+      attributes: [],
+      chromoffMode: true,
+      chromoffCategories: [{ id: 'bracelets', name: 'Браслеты из кожи', parent_id: 'accessories', path: 'Аксессуары → Браслеты из кожи' }],
+    })
+    expect(prompt).toContain('Категории Chromoff')
+    expect(prompt).toContain('Браслеты из кожи')
+    expect(prompt).toContain('Не заменяй её общей категорией YeezyUnique')
+
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Браслет Chrome Hearts', category: '', subcategory: '', catalog_attributes: {} },
+      chromoff_category: { id: 'bracelets', confidence: 0.91, reason: 'Кожаный браслет' },
+    }, {
+      product: { name: '', category: '', subcategory: '', attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(),
+      chromoffMode: true,
+      chromoffCategories: [{ id: 'bracelets', name: 'Браслеты из кожи', parent_id: 'accessories' }],
+    })
+    expect(result.product.category).toBe('')
+    expect(result.product.attributes.chromoff_category_id).toBe('bracelets')
+    expect(result.product.attributes.chromoff_category_status).toBe('ai_assigned')
+
+    const review = normalizeBatchAiOutput({
+      product: { category: '', subcategory: '' },
+      chromoff_category: { id: 'bracelets', confidence: 0.6, reason: 'Недостаточно фото' },
+    }, {
+      product: { category: '', subcategory: '', attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(),
+      chromoffMode: true,
+      chromoffCategories: [{ id: 'bracelets', name: 'Браслеты из кожи', parent_id: 'accessories' }],
+    })
+    expect(review.product.attributes.chromoff_category_status).toBe('needs_review')
+  })
+
   it('keeps unknown taxonomy out of the applied product and removes rejected media', () => {
     const result = normalizeBatchAiOutput({
       product: {

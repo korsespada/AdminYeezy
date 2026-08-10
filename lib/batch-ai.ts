@@ -32,6 +32,13 @@ export type BatchAiSettings = {
 }
 
 export type BatchAiLookup = { id: string; name: string; parent_id?: string | null }
+export type BatchAiChromoffCategory = BatchAiLookup & { slug?: string; path?: string }
+
+export const CHROMOFF_AUTO_SUPPLIER_IDS = new Set([
+  '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I',
+  '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag',
+  '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ',
+])
 export type BatchAiAttributeDefinition = {
   code: string
   label: string
@@ -145,8 +152,10 @@ export function buildBatchAiUserPrompt(input: {
   subcategories: BatchAiLookup[]
   attributes: BatchAiAttributeDefinition[]
   priceRules?: BatchAiPriceRuleHint[]
+  chromoffMode?: boolean
+  chromoffCategories?: BatchAiChromoffCategory[]
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [] } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [] } = input
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
     || (categories.length === 1 ? categories[0] : null)
   const categoryRule = batchAiCategoryRuleFor(selectedCategory?.name)
@@ -171,6 +180,7 @@ export function buildBatchAiUserPrompt(input: {
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
         gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
       },
+      chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
       photo_alts: [],
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
@@ -189,6 +199,12 @@ export function buildBatchAiUserPrompt(input: {
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
+    ...(chromoffMode ? [
+      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YeezyUnique.',
+      'Выбирай наиболее конкретную подкатегорию из справочника; родительскую категорию выбирай только если у неё нет подходящей дочерней категории.',
+      'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
+      `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
+    ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
@@ -260,8 +276,10 @@ export function buildBatchAiColorSplitPrompt(input: {
   subcategories: BatchAiLookup[]
   attributes: BatchAiAttributeDefinition[]
   priceRules?: BatchAiPriceRuleHint[]
+  chromoffMode?: boolean
+  chromoffCategories?: BatchAiChromoffCategory[]
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [] } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [] } = input
   return [
     'Один исходный альбом содержит несколько отдельно продаваемых цветовых вариантов одной физической модели.',
     'За один ответ раздели фотографии по цветам и полностью обработай каждый получившийся товар. Второго AI-прохода не будет.',
@@ -280,6 +298,7 @@ export function buildBatchAiColorSplitPrompt(input: {
           brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
           gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
         },
+        chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
         photo_alts: [],
         media: { discard_indexes: [], size_chart_indexes: [] },
         subcategory_suggestion: null,
@@ -292,6 +311,12 @@ export function buildBatchAiColorSplitPrompt(input: {
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
+    ...(chromoffMode ? [
+      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YeezyUnique.',
+      'Выбирай наиболее конкретную подкатегорию из справочника; родительскую категорию выбирай только если у неё нет подходящей дочерней категории.',
+      'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
+      `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
+    ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRules)}`,
   ].join('\n\n')
@@ -542,6 +567,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
     aliases?: string[]
   }>
   priceRuleKeys?: Set<string>
+  chromoffMode?: boolean
+  chromoffCategories?: BatchAiChromoffCategory[]
 }) {
   const proposed = raw?.product || {}
   const original = input.product
@@ -554,7 +581,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const attributes: Record<string, unknown> = {}
   for (const [code, value] of Object.entries(original.attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
-    if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = value
+    if (input.attributeCodes.has(canonicalCode) || canonicalCode.startsWith('chromoff_')) attributes[canonicalCode] = value
   }
   const suggestions: any[] = []
   const dictionaryByCode = new Map<string, Map<string, string>>()
@@ -703,6 +730,35 @@ export function normalizeBatchAiOutput(raw: any, input: {
     input.categoryNames?.get(category),
     input.subcategoryNames?.get(subcategory),
   ].map(normalizedName).join(' ')
+
+  const chromoffCategoryOptions = input.chromoffCategories || []
+  const chromoffCategoryById = new Map(chromoffCategoryOptions.map((item) => [String(item.id), item]))
+  const rawChromoffCategory = raw?.chromoff_category && typeof raw.chromoff_category === 'object'
+    ? raw.chromoff_category
+    : {}
+  const chromoffCategoryId = chromoffCategoryById.has(String(rawChromoffCategory.id || ''))
+    ? String(rawChromoffCategory.id)
+    : ''
+  const chromoffConfidenceValue = Number(rawChromoffCategory.confidence)
+  const chromoffConfidence = Number.isFinite(chromoffConfidenceValue)
+    ? Math.max(0, Math.min(1, chromoffConfidenceValue > 1 && chromoffConfidenceValue <= 100 ? chromoffConfidenceValue / 100 : chromoffConfidenceValue))
+    : 0
+  const chromoffCategory = input.chromoffMode
+    ? {
+        id: chromoffCategoryId,
+        name: chromoffCategoryById.get(chromoffCategoryId)?.name || '',
+        confidence: chromoffConfidence,
+        reason: String(rawChromoffCategory.reason || '').trim().slice(0, 500),
+        status: chromoffCategoryId && chromoffConfidence >= 0.75 ? 'ai_assigned' : 'needs_review',
+      }
+    : null
+  if (input.chromoffMode) {
+    attributes.chromoff_category_id = chromoffCategory?.id || ''
+    attributes.chromoff_category_name = chromoffCategory?.name || ''
+    attributes.chromoff_category_confidence = chromoffCategory?.confidence || 0
+    attributes.chromoff_category_status = chromoffCategory?.status || 'needs_review'
+    attributes.chromoff_category_reason = chromoffCategory?.reason || ''
+  }
   if (attributes.stones !== undefined && !/(ювелир|бижутер)/i.test(categoryAndSubcategoryName)) {
     delete attributes.stones
     for (let index = suggestions.length - 1; index >= 0; index -= 1) {
@@ -844,6 +900,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     suggestions,
     subcategorySuggestion,
     colorFamily: raw?.color_family || null,
+    chromoffCategory,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },
   }
 }

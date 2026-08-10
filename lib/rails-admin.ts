@@ -167,6 +167,9 @@ export interface RailsChromoffListing {
   sync_mode?: 'auto' | 'manual'
   source_supplier_id?: string | null
   source_supplier_name?: string | null
+  chromoff_category_status?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual' | null
+  chromoff_category_confidence?: number | null
+  chromoff_category_reason?: string | null
   metadata?: Record<string, unknown>
 }
 

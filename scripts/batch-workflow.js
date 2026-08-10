@@ -136,9 +136,20 @@ function catalogAttributes(value) {
     const normalized = key.trim().toLowerCase();
     return !normalized.startsWith('szwego_')
       && !normalized.startsWith('hosted_video_')
+      && !normalized.startsWith('chromoff_')
       && normalized !== 'video_transfer_error'
       && normalized !== 'source_parent_external_id';
   }));
+}
+
+function chromoffClassificationMetadata(product) {
+  const attributes = normalizeAttributes(product?.attributes);
+  const metadata = {};
+  for (const key of ['id', 'name', 'confidence', 'status', 'reason']) {
+    const value = attributes[`chromoff_category_${key}`];
+    if (value !== undefined && value !== null && value !== '') metadata[`chromoff_category_${key}`] = value;
+  }
+  return metadata;
 }
 
 function hostedVideo(product) {
@@ -414,6 +425,7 @@ function productToRailsCsvRow(product, lookups) {
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
     supplier_published_on: product.supplier_published_on || null,
+    ...chromoffClassificationMetadata(product),
   };
 }
 
@@ -448,6 +460,7 @@ function productToRailsJsonRow(product, lookups) {
     variant_group_key: product.variant_group_key || '',
     batch_id: product.batchId || product.batch_id || '',
     supplier_published_on: product.supplier_published_on || null,
+    ...chromoffClassificationMetadata(product),
   };
 }
 
@@ -1631,6 +1644,8 @@ function railsUpdatePayload(product) {
     source_published_at: product.source_published_at || null,
   };
   if (product.supplier_published_on) metadata.supplier_published_on = product.supplier_published_on;
+  Object.assign(metadata, chromoffClassificationMetadata(product));
+  const categoryId = product.subcategory || product.category || null;
   return {
     product: {
       external_id: product.external_id || '',
@@ -1648,7 +1663,7 @@ function railsUpdatePayload(product) {
       published_at: product.source_published_at || null,
       metadata,
       brand_id: product.brand || null,
-      category_id: product.subcategory || product.category || null,
+      ...(categoryId ? { category_id: categoryId } : {}),
       gender: normalizeCatalogGender(product.gender) || null,
       catalog_attributes: catalogAttributes(product.attributes),
       video_url: hostedVideo(product).url,

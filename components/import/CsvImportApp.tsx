@@ -110,6 +110,18 @@ function attributeValuesForDisplay(value: unknown) {
   return values.map((item) => String(item).trim()).filter(Boolean);
 }
 
+function chromoffCategoryForDisplay(product: CsvProduct) {
+  const attributes = product.attributes || {}
+  const name = String(attributes.chromoff_category_name || '').trim()
+  const status = String(attributes.chromoff_category_status || '').trim()
+  if (!name && !status) return null
+  return {
+    name: name || 'Не определена',
+    status,
+    confidence: Number(attributes.chromoff_category_confidence || 0),
+  }
+}
+
 function approvedVariantGroupKey(product: CsvProduct) {
   const key = String(product.variant_group_key || "").trim();
   return /^[0-9a-f]{32}$/i.test(key) ? key : "";
@@ -2998,6 +3010,7 @@ function CsvProductRow({
   const brandName = lookups ? resolveName(product.brand, lookups.brands) : product.brand;
   const categoryName = lookups ? resolveName(product.category, lookups.categories) : product.category;
   const subcategoryName = lookups ? resolveName(product.subcategory, lookups.subcategories) : product.subcategory;
+  const chromoffCategory = chromoffCategoryForDisplay(product);
 
   return (
     <div
@@ -3065,6 +3078,11 @@ function CsvProductRow({
           {[brandName, categoryName].filter(Boolean).join(" · ") || "Не определено"}
         </p>
         <p className="truncate text-[10px] text-slate-500">{subcategoryName || "Без подкатегории"}</p>
+        {chromoffCategory && (
+          <p className={chromoffCategory.status === "ai_assigned" ? "truncate text-[10px] text-violet-300" : "truncate text-[10px] text-amber-300"}>
+            Chromoff: {chromoffCategory.name}{chromoffCategory.status === "needs_review" ? " · проверить" : ""}
+          </p>
+        )}
       </div>
 
       <div className="flex items-center">
@@ -3141,6 +3159,7 @@ function CsvProductCard({
   const subcategoryName = lookups
     ? resolveName(product.subcategory, lookups.subcategories)
     : product.subcategory;
+  const chromoffCategory = chromoffCategoryForDisplay(product);
 
   const startEdit = (field: "name" | "price", e: React.MouseEvent) => {
     e.stopPropagation();
@@ -3271,6 +3290,11 @@ function CsvProductCard({
           {categoryName && <span> • {categoryName}</span>}
           {subcategoryName && <span> • {subcategoryName}</span>}
         </div>
+        {chromoffCategory && (
+          <div className={`mb-3 inline-flex max-w-full self-start rounded-full border px-2 py-1 text-[10px] font-semibold ${chromoffCategory.status === "ai_assigned" ? "border-violet-500/30 bg-violet-500/10 text-violet-300" : "border-amber-500/30 bg-amber-500/10 text-amber-300"}`}>
+            Chromoff: {chromoffCategory.name}{chromoffCategory.status === "needs_review" ? " · проверить" : ""}
+          </div>
+        )}
 
         {editField === "name" ? (
           <input

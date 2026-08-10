@@ -127,8 +127,10 @@ SEO-поля, `sync_mode` и источник поставщика. Поэтом
 YeezyUnique и одновременно иметь другое меню/SEO на Chromoff.
 
 Пуш из `/admin/import_batches` автоматически создаёт или обновляет listing для
-Chrome Hearts только для разрешённых Chromoff-поставщиков. Новые listings
+товаров разрешённых Chromoff-поставщиков независимо от бренда. Новые listings
 создаются скрытыми до ручной проверки; listings с `sync_mode=manual` не меняются.
+Если AI не выбрал категорию Chromoff, `chromoff_category_id` остаётся пустым,
+listing получает `needs_review` и назначается из `/admin/chromoff`.
 
 Не менять статусы заказов, платежи, возвраты и wallet прямым SQL.
 

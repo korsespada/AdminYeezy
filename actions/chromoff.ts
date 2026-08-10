@@ -35,6 +35,20 @@ export async function updateChromoffListingSeoAction(formData: FormData) {
   }
 }
 
+export async function updateChromoffListingCategoryAction(formData: FormData) {
+  const id = String(formData.get('id') || '').trim()
+  const categoryId = String(formData.get('chromoff_category_id') || '').trim()
+  if (!id || !categoryId) return { success: false, message: 'Выбери категорию Chromoff.' }
+
+  try {
+    await updateRailsChromoffListing(id, { chromoffCategoryId: categoryId })
+    revalidatePath('/admin/chromoff')
+    return { success: true, message: 'Категория Chromoff сохранена.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить категорию Chromoff.' }
+  }
+}
+
 export async function createChromoffListingAction(formData: FormData) {
   const productId = String(formData.get('product_id') || '').trim()
   const chromoffCategoryId = String(formData.get('chromoff_category_id') || '').trim()
