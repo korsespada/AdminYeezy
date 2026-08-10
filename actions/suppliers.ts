@@ -397,6 +397,7 @@ export interface ExportHistoryBatch {
   supplier_id: number | null
   supplier_name: string | null
   supplier_avatar: string | null
+  has_script: boolean
   items_count: number
   stage?: string | null
   status: string
@@ -524,6 +525,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         t.updated_at,
         s.name as supplier_name,
         s.avatar_url as supplier_avatar,
+        NULLIF(BTRIM(s.post_process_script), '') IS NOT NULL as has_script,
         b.id as batch_real_id,
         b.name as batch_name,
         b.items_count as batch_items_count,
@@ -595,6 +597,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             supplier_id: row.supplier_id,
             supplier_name: row.supplier_name,
             supplier_avatar: row.supplier_avatar,
+            has_script: Boolean(row.has_script),
             items_count: Number(row.batch_items_count || row.items_count || 0),
             stage: row.batch_stage,
             created_at: row.batch_created_at || row.created_at,
@@ -707,6 +710,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         supplier_id: batch.supplier_id,
         supplier_name: batch.supplier_name,
         supplier_avatar: batch.supplier_avatar,
+        has_script: batch.has_script,
         items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
         stage: batch.stage,
         status: normalizeBatchStatus(effectiveBatchHistoryStage(batch.stage, allAiProcessed), sortedFiles),

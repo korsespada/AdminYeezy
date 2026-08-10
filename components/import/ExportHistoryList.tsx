@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   ArchiveX,
   Bot,
-  Calendar,
   ChevronDown,
   ChevronUp,
   Database,
@@ -379,19 +378,18 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1320px] table-fixed text-left">
+          <table className="w-full min-w-[1120px] table-fixed text-left">
             <colgroup>
-              <col className="w-[28%]" /><col className="w-[11%]" /><col className="w-[10%]" />
-              <col className="w-[7%]" /><col className="w-[14%]" /><col className="w-[10%]" /><col className="w-[20%]" />
+              <col className="w-[30%]" /><col className="w-[13%]" /><col className="w-[14%]" />
+              <col className="w-[8%]" /><col className="w-[15%]" /><col className="w-[20%]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-700 bg-slate-950/60">
                 <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Поставщик</th>
                 <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Папка</th>
-                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Дата начала</th>
+                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Период</th>
                 <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Товаров</th>
                 <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Статус</th>
-                <th className="whitespace-nowrap px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-400">Период до</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Действия</th>
               </tr>
             </thead>
@@ -411,6 +409,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'
                 const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
+                const hasScript = batch.has_script !== false
+                const pathStages = hasScript
+                  ? [['SCRAPED', 'Сырой товар'], ['SCRIPT_PROCESSED', 'Скрипт'], ['AI_PROCESSED', 'ИИ'], ['PUSHED', 'Опубликовано']]
+                  : [['SCRAPED', 'Сырой товар'], ['AI_PROCESSED', 'ИИ'], ['PUSHED', 'Опубликовано']]
+                const currentIndex = pathStages.findIndex(([stage]) => stage === String(batch.stage || ''))
 
                 return (
                   <React.Fragment key={batch.id}>
@@ -441,15 +444,14 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                         </select>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">{formatDate(batch.created_at)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
+                        <div className="flex flex-col gap-0.5 leading-4">
+                          <span title="Дата начала">с {formatDate(batch.created_at)}</span>
+                          <span className="text-xs text-slate-500" title="Период до">{batch.end_date ? `до ${formatDate(batch.end_date)}` : 'Весь период'}</span>
+                        </div>
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
                       <td className="px-4 py-3"><StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} /></td>
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
-                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                          {batch.end_date && <Calendar className="h-3.5 w-3.5 text-slate-500" />}
-                          {batch.end_date || '—'}
-                        </span>
-                      </td>
                       <td className="relative px-3 py-3 text-right">
                         <div className="ml-auto flex w-fit flex-nowrap items-center justify-end gap-0.5 whitespace-nowrap rounded-lg bg-slate-900/35 p-0.5">
                           {!batch.isSynthetic && hasAiRemaining && batch.status !== 'Удалено из БД' && (
@@ -547,24 +549,19 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
                     {isExpanded && !batch.isSynthetic && (
                       <tr className="border-b border-slate-800 bg-slate-950/60">
-                        <td colSpan={7} className="px-6 py-4">
+                        <td colSpan={6} className="px-6 py-4">
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Путь выгрузки</span>
                             {batch.stage === 'DELETED_FROM_DB' && <span className="text-xs text-rose-300">Локальные товары удалены</span>}
                           </div>
-                          <div className="grid gap-2 sm:grid-cols-4">
-                            {[
-                              ['SCRAPED', 'Сырой товар'],
-                              ['SCRIPT_PROCESSED', 'Скрипт'],
-                              ['AI_PROCESSED', 'ИИ'],
-                              ['PUSHED', 'Опубликовано'],
-                            ].map(([stage, label], index) => {
-                              const currentIndex = ['SCRAPED', 'SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].indexOf(String(batch.stage || ''))
+                          <div className={`grid gap-1.5 ${hasScript ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+                            {pathStages.map(([stage, label], index) => {
                               const reached = currentIndex >= index && currentIndex >= 0
+                              const hint = currentIndex === index ? 'Текущий' : reached ? 'Сохранён' : 'Не пройден'
                               return (
-                                <div key={stage} className={`rounded-lg border px-3 py-2 ${reached ? 'border-indigo-400/30 bg-indigo-500/10' : 'border-slate-800 bg-slate-900'}`}>
-                                  <div className={`text-xs font-semibold ${reached ? 'text-indigo-200' : 'text-slate-500'}`}>{index + 1}. {label}</div>
-                                  <div className="mt-1 text-[10px] text-slate-600">{stage === batch.stage ? 'Текущий этап' : reached ? 'Сохранён' : 'Ещё не пройден'}</div>
+                                <div key={stage} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${reached ? 'border-indigo-400/30 bg-indigo-500/10' : 'border-slate-800 bg-slate-900'}`}>
+                                  <div className={`truncate text-[11px] font-semibold ${reached ? 'text-indigo-200' : 'text-slate-500'}`}>{index + 1}. {label}</div>
+                                  <div className="shrink-0 text-[9px] text-slate-600">{hint}</div>
                                 </div>
                               )
                             })}
@@ -590,10 +587,14 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-400">{formatDate(file.created_at)}</td>
-                        <td className="px-6 py-4 text-sm font-semibold text-slate-300">{file.items_count || 0} шт.</td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-400">
+                          <div className="flex flex-col gap-0.5 leading-4">
+                            <span title="Дата начала">с {formatDate(file.created_at)}</span>
+                            <span className="text-xs text-slate-500" title="Период до">{file.end_date ? `до ${formatDate(file.end_date)}` : 'Весь период'}</span>
+                          </div>
+                        </td>
+                        <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-slate-300">{file.items_count || 0} шт.</td>
                         <td className="px-6 py-4"><StatusBadge status={file.status} loading={file.status === 'Запущено'} /></td>
-                        <td className="px-6 py-4 text-sm text-slate-400">{file.end_date || '—'}</td>
                         <td className="px-6 py-4 text-right">
                           {!file.is_virtual && <button
                             onClick={(event) => {
@@ -614,7 +615,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
               {visibleBatches.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-6 py-20 text-center text-slate-500">
+                  <td colSpan={6} className="px-6 py-20 text-center text-slate-500">
                     Истории выгрузок пока нет
                   </td>
                 </tr>

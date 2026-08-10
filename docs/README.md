@@ -8,6 +8,7 @@
 - [Admin sections](./admin-sections.md) — current UI areas.
 - [Chromoff catalog](./chromoff-catalog.md) — catalog ownership, import and operator workflow.
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
+- [Export history](./exports.md) — export history, stages and publication.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.
 - [Coolify deployment](./coolify-deployment.md) — environment and operations.
 - [Codex workflow](./CODEX_WORKFLOW.md) — project-specific agent rules.
