@@ -1154,13 +1154,46 @@ function normalizeMeasurementRowSizes(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const table = value as Record<string, unknown>
   if (!Array.isArray(table.rows)) return value
+  const rows = table.rows.map((row) => (
+    row && typeof row === 'object' && !Array.isArray(row)
+      ? { ...row, size: canonicalClothingSize((row as Record<string, unknown>).size) }
+      : row
+  ))
+  if (!Array.isArray(table.columns)) {
+    return { ...table, rows }
+  }
+  const columns = table.columns.filter((column) => {
+      if (!column || typeof column !== 'object' || Array.isArray(column)) return true
+      const item = column as Record<string, unknown>
+      const key = String(item.key || '').trim().toLowerCase()
+      const label = String(item.label || '').trim().toLowerCase().replace(/ё/g, 'е')
+      const isSizeColumn = key === 'size' || key === 'sizes' || label === 'размер' || label === 'размеры' || label === 'size' || label === 'sizes'
+      if (!isSizeColumn) return true
+      return rows.some((row) => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) return false
+        const values = (row as Record<string, unknown>).values
+        if (!values || typeof values !== 'object' || Array.isArray(values)) return false
+        return String((values as Record<string, unknown>)[String(item.key || '')] ?? '').trim() !== ''
+      })
+    })
+  const columnKeys = new Set(columns.flatMap((column) => {
+    if (!column || typeof column !== 'object' || Array.isArray(column)) return []
+    const key = String((column as Record<string, unknown>).key || '').trim()
+    return key ? [key] : []
+  }))
+  const cleanedRows = rows.map((row) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row
+    const values = (row as Record<string, unknown>).values
+    if (!values || typeof values !== 'object' || Array.isArray(values)) return row
+    return {
+      ...row,
+      values: Object.fromEntries(Object.entries(values).filter(([key]) => columnKeys.has(key))),
+    }
+  })
   return {
     ...table,
-    rows: table.rows.map((row) => (
-      row && typeof row === 'object' && !Array.isArray(row)
-        ? { ...row, size: canonicalClothingSize((row as Record<string, unknown>).size) }
-        : row
-    )),
+    columns,
+    rows: cleanedRows,
   }
 }
 
@@ -1285,7 +1318,7 @@ function extractSourcePriceAmounts(value: unknown): number[] {
     const values = [first, second].filter(Boolean).map((item) => Number(String(item).replace(',', '.')))
     amounts.push(...values.filter((item) => Number.isFinite(item) && item >= 10))
   }
-  const prefix = /(?:💰|¥|￥|rmb|人民币|元|价格|售价|price)\s*[:：]?\s*(\d{2,7}(?:[.,]\d+)?)\s*(?:[—–-]\s*(\d{2,7}(?:[.,]\d+)?))?/giu
+  const prefix = /(?:💰\s*(?:[^0-9]{0,30})?|(?:¥|￥|rmb|人民币|元|价格|售价|price)\s*[:：]?\s*)(\d{2,7}(?:[.,]\d+)?)\s*(?:[—–-]\s*(\d{2,7}(?:[.,]\d+)?))?/giu
   for (const match of text.matchAll(prefix)) add(match[1], match[2])
   const suffix = /(\d{2,7}(?:[.,]\d+)?)\s*(?:[—–-]\s*(\d{2,7}(?:[.,]\d+)?))?\s*(?:元|¥|￥|rmb|人民币)\b/giu
   for (const match of text.matchAll(suffix)) add(match[1], match[2])

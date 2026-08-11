@@ -241,6 +241,7 @@ describe('batch AI normalization', () => {
     expect(matchingPriceRule({ category: 'clothing', attributes: {} }, [{ ...rule, enabled: true, conditions: { category: 'clothing', ...rule.conditions } }])).toBeTruthy()
     expect(calculatePriceRulePrice(rule, '休闲裤 💰2399—4599 7-10天发货')).toBe(149000)
     expect(calculatePriceRulePrice({ ...rule, conditions: { price_formula: { ...rule.conditions.price_formula, rounding: 'up' } } }, '💰2399—4599')).toBe(150000)
+    expect(calculatePriceRulePrice({ ...rule, conditions: { ...rule.conditions, price_formula: { ...rule.conditions.price_formula, rounding: 'up' } } }, '💰带扣：780/实时价格 💰带身：1980/实时价格')).toBe(65000)
   })
 
   it('applies suggestions for already registered attributes instead of asking for approval', () => {
@@ -480,6 +481,37 @@ describe('batch AI normalization', () => {
           { size: 'XXXL', values: { waist: '101.5' } },
         ],
       },
+    })
+  })
+
+  it('removes an empty duplicate size column from measurements', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothing',
+        catalog_attributes: {
+          measurements: {
+            unit: 'см',
+            columns: [
+              { key: 'size', label: 'Размеры' },
+              { key: 'length', label: 'Длина' },
+            ],
+            rows: [{ size: 'M', values: { size: '', length: '65' } }],
+          },
+        },
+      },
+    }, {
+      product: { category: 'clothing', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      categoryNames: new Map([['clothing', 'Одежда']]),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'measurements']),
+    })
+
+    expect(result.product.attributes.measurements).toEqual({
+      unit: 'см',
+      columns: [{ key: 'length', label: 'Длина' }],
+      rows: [{ size: 'M', values: { length: '65' } }],
     })
   })
 

@@ -233,6 +233,27 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(payload.metadata.supplier_published_on).toBe('2026-08-02')
   })
 
+  it('overwrites a stale price-on-request flag when publishing an existing product', () => {
+    const pricedPayload = workflow.railsUpdatePayload({
+      external_id: 'item-1',
+      price: 91000,
+      _railsMetadata: { price_on_request: true, source: 'legacy' },
+      attributes: {},
+      photos: [],
+    }).product
+    const requestPayload = workflow.railsUpdatePayload({
+      external_id: 'item-2',
+      price: 0,
+      _railsMetadata: { price_on_request: false, source: 'legacy' },
+      attributes: {},
+      photos: [],
+    }).product
+
+    expect(pricedPayload.price_cents).toBe(9_100_000)
+    expect(pricedPayload.metadata.price_on_request).toBe(false)
+    expect(requestPayload.metadata.price_on_request).toBe(true)
+  })
+
   it('publishes hosted video and keeps supplier media fields out of catalog attributes', () => {
     const payload = workflow.railsUpdatePayload({
       external_id: 'item-1',

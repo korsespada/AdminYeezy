@@ -1645,12 +1645,15 @@ async function deleteRailsProductsByExternalIds(externalIds) {
 
 function railsUpdatePayload(product) {
   const sizes = Array.isArray(product.attributes?.sizes) ? product.attributes.sizes : [];
+  const priceCents = Math.round(Number(product.price || 0) * 100);
+  const priceOnRequest = priceCents <= 0;
   const metadata = {
     ...(product._railsMetadata && typeof product._railsMetadata === 'object' ? product._railsMetadata : {}),
     source_batch_id: product.batchId || product.batch_id || null,
     source_supplier_name: product.supplier_name || null,
     source_supplier_id: product.supplier_id || null,
     source_published_at: product.source_published_at || null,
+    price_on_request: priceOnRequest,
   };
   if (product.supplier_published_on) metadata.supplier_published_on = product.supplier_published_on;
   Object.assign(metadata, chromoffClassificationMetadata(product));
@@ -1664,8 +1667,7 @@ function railsUpdatePayload(product) {
       seo_title: product.seo_title || '',
       seo_description: product.seo_description || '',
       slug: product.slug || '',
-      price_cents: Math.round(Number(product.price || 0) * 100),
-      price_on_request: Number(product.price || 0) === 0,
+      price_cents: priceCents,
       status: 'active',
       primary_supplier_name: product.supplier_name || null,
       primary_supplier_avatar: product.supplier_avatar || null,
