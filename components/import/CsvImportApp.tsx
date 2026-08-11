@@ -3726,6 +3726,24 @@ function CsvProductDrawer({
                     placeholder="Найти категорию..."
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-500">
+                    Гендер
+                  </label>
+                  <select
+                    value={local.gender || ""}
+                    onChange={(event) => change("gender", event.target.value)}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white outline-none focus:border-indigo-500"
+                  >
+                    <option value="">Не указан</option>
+                    {local.gender && !["male", "female", "unisex"].includes(local.gender) && (
+                      <option value={local.gender}>{local.gender}</option>
+                    )}
+                    <option value="male">Для мужчин</option>
+                    <option value="female">Для женщин</option>
+                    <option value="unisex">Унисекс</option>
+                  </select>
+                </div>
                 <div className="space-y-1 md:col-span-2">
                   <label className="text-xs text-slate-500">
                     Подкатегория

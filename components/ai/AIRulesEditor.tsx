@@ -192,7 +192,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Сохранённые провайдеры</span>
                 <p className="mt-1 text-xs text-slate-500">Ключ хранится в БД зашифрованным и никогда не показывается обратно.</p>
               </div>
-              <button type="button" onClick={() => setShowProviderForm(true)} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+              <button type="button" onClick={() => { setMessage(null); setShowProviderForm(true) }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
                 <Plus className="h-4 w-4" /> Добавить AI-провайдера
               </button>
             </div>
@@ -355,7 +355,12 @@ export default function AIRulesEditor({ initialSettings }: Props) {
               <label className="space-y-2 text-sm text-slate-300"><span>API-ключ</span><input type="password" value={providerForm.apiKey} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} autoComplete="new-password" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /></label>
               <label className="space-y-2 text-sm text-slate-300"><span>Модель <span className="font-normal text-slate-500">(необязательно)</span></span><input value={providerForm.model} onChange={(event) => setProviderForm((current) => ({ ...current, model: event.target.value }))} placeholder="Оставьте пустым, если endpoint предоставляет /models" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Если endpoint поддерживает `/models`, система выберет первую модель автоматически. Иначе укажите модель вручную.</span></label>
             </div>
-            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={addProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Добавляем…' : 'Добавить провайдера'}</button></div>
+            {message?.type === 'error' && (
+              <div role="alert" className="mt-5 rounded-xl border border-red-500/30 bg-red-950/60 px-4 py-3 text-sm leading-relaxed text-red-200">
+                {message.text}
+              </div>
+            )}
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={addProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Проверяем endpoint…' : 'Добавить провайдера'}</button></div>
           </div>
         </div>
       )}
