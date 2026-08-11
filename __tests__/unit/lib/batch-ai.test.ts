@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerModelsUrl } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
@@ -171,6 +171,24 @@ describe('batch AI normalization', () => {
     expect(rule.id).toBe(2)
     expect(canonicalBatchSuggestionKey('Material')).toBe('materials')
     expect(canonicalBatchSuggestionKey('model_names')).toBe('model_name')
+  })
+
+  it('calculates a custom price rule from the maximum source price and rounds it', () => {
+    const rule = {
+      price: 0,
+      conditions: {
+        price_formula: {
+          source_price: 'max',
+          multiplier: 13,
+          secondary_multiplier: 2.5,
+          round_to: 1000,
+          rounding: 'nearest',
+        },
+      },
+    }
+    expect(matchingPriceRule({ category: 'clothing', attributes: {} }, [{ ...rule, enabled: true, conditions: { category: 'clothing', ...rule.conditions } }])).toBeTruthy()
+    expect(calculatePriceRulePrice(rule, '休闲裤 💰2399—4599 7-10天发货')).toBe(149000)
+    expect(calculatePriceRulePrice({ ...rule, conditions: { price_formula: { ...rule.conditions.price_formula, rounding: 'up' } } }, '💰2399—4599')).toBe(150000)
   })
 
   it('applies suggestions for already registered attributes instead of asking for approval', () => {

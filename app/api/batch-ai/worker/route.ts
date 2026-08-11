@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
+import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
@@ -154,8 +154,16 @@ async function complete(body: any) {
     product.price_source = input.product?.price_source || 'legacy'
   } else {
     const rule = input.mediaSeoOnly || input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
-    if (!input.mediaSeoOnly && !input.variantScanOnly && rule) {
-      product.price = Number(rule.price)
+    const calculatedPrice = !input.mediaSeoOnly && !input.variantScanOnly && rule
+      ? calculatePriceRulePrice(rule, [
+        input.product?.name,
+        input.product?.description,
+        product.name,
+        product.description,
+      ].filter(Boolean).join('\n'))
+      : null
+    if (calculatedPrice !== null) {
+      product.price = calculatedPrice
       product.price_source = 'rule'
     } else if (!input.mediaSeoOnly && !input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {
       product.price = Number(context.rows[0].default_price)

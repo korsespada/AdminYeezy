@@ -20,6 +20,7 @@ import {
   buildBatchAiUserPrompt,
   buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
+  calculatePriceRulePrice,
   matchingPriceRule,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
@@ -270,6 +271,21 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
       const price = finiteNumber(rule.price, 0)
       if (price < 0) throw new Error(`Правило ${index + 1}: цена не может быть отрицательной`)
       const ruleKey = String(rule.rule_key || `rule_${crypto.randomUUID()}`).trim().slice(0, 100)
+      const inputConditions = rule.conditions && typeof rule.conditions === 'object' ? { ...rule.conditions } : {}
+      if (inputConditions.price_formula && typeof inputConditions.price_formula === 'object') {
+        const formula = inputConditions.price_formula as Record<string, unknown>
+        inputConditions.price_formula = {
+          source_price: formula.source_price === 'min' ? 'min' : 'max',
+          multiplier: Math.max(0, finiteNumber(formula.multiplier, 1)),
+          secondary_multiplier: Math.max(0, finiteNumber(formula.secondary_multiplier, 1)),
+          round_to: Math.max(1, finiteNumber(formula.round_to, 1000)),
+          rounding: ['up', 'down'].includes(String(formula.rounding)) ? String(formula.rounding) : 'nearest',
+        }
+        inputConditions.price_instruction = String(inputConditions.price_instruction || '').trim().slice(0, 4000)
+      } else {
+        delete inputConditions.price_formula
+        delete inputConditions.price_instruction
+      }
       const referenceImages = Array.isArray(rule.reference_images)
         ? [...new Set(rule.reference_images.map(String).filter((url: string) => /^https:\/\//i.test(url)))].slice(0, 9)
         : []
@@ -280,7 +296,7 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         supplierId,
         String(rule.name || `Правило ${index + 1}`).slice(0, 160),
         Math.round(finiteNumber(rule.priority, 0)),
-        JSON.stringify(rule.conditions || {}),
+        JSON.stringify(inputConditions),
         price,
         rule.enabled !== false,
         ruleKey,
@@ -1459,8 +1475,16 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
       product.price_source = source.price_source || 'legacy'
     } else {
       const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
-      if (rule) {
-        product.price = Number(rule.price)
+      const calculatedPrice = rule
+        ? calculatePriceRulePrice(rule, [
+          source.name,
+          source.description,
+          product.name,
+          product.description,
+        ].filter(Boolean).join('\n'))
+        : null
+      if (calculatedPrice !== null) {
+        product.price = calculatedPrice
         product.price_source = 'rule'
       } else if (!Number(product.price) && Number(context.batch.default_price)) {
         product.price = Number(context.batch.default_price)
@@ -1596,8 +1620,16 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
     product.price_source = item.input_snapshot.product?.price_source || 'legacy'
   } else {
     const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
-    if (rule) {
-      product.price = Number(rule.price)
+    const calculatedPrice = rule
+      ? calculatePriceRulePrice(rule, [
+        item.input_snapshot?.product?.name,
+        item.input_snapshot?.product?.description,
+        product.name,
+        product.description,
+      ].filter(Boolean).join('\n'))
+      : null
+    if (calculatedPrice !== null) {
+      product.price = calculatedPrice
       product.price_source = 'rule'
     } else if (!Number(product.price) && Number(context.batch.default_price)) {
       product.price = Number(context.batch.default_price)
@@ -2132,10 +2164,13 @@ async function reviewBatchAiSuggestion(
       if (product.price_source === 'manual') continue
       const rules = await scrapingQuery('SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true', [product.supplier_id])
       const rule = matchingPriceRule(product, rules.rows)
+      const calculatedPrice = rule
+        ? calculatePriceRulePrice(rule, [product.name, product.description].filter(Boolean).join('\n'))
+        : null
       await scrapingQuery('UPDATE products SET price=$2,price_source=$3,updated_at=NOW() WHERE id=$1', [
         product.id,
-        rule ? Number(rule.price) : 0,
-        rule ? 'rule' : 'unpriced',
+        calculatedPrice ?? 0,
+        calculatedPrice !== null ? 'rule' : 'unpriced',
       ])
     }
   }

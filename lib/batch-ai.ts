@@ -86,6 +86,14 @@ export type BatchAiPriceRuleHint = {
   priority?: number
 }
 
+type SupplierPriceFormula = {
+  source_price?: 'max' | 'min'
+  multiplier?: number
+  secondary_multiplier?: number
+  round_to?: number
+  rounding?: 'nearest' | 'up' | 'down'
+}
+
 export type BatchAiFamilyDefinitionSource = 'internal_code' | 'visual_comparison'
 
 export type BatchAiFamilyDefinition = {
@@ -241,7 +249,7 @@ export function buildBatchAiUserPrompt(input: {
     ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
-    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
+    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
     'attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].',
     'subcategory_suggestion: {name,parent_category_id,reason,confidence} или null.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
@@ -1139,6 +1147,7 @@ export function matchingPriceRule(product: any, rules: any[]) {
     if (!rule.enabled) return false
     const conditions = rule.conditions || {}
     return Object.entries(conditions).every(([key, expected]) => {
+      if (key === 'price_formula' || key === 'price_instruction') return true
       const actual = key.startsWith('attributes.')
         ? product.attributes?.[key.slice('attributes.'.length)]
         : product[key]
@@ -1164,6 +1173,49 @@ export function matchingPriceRule(product: any, rules: any[]) {
     const specificity = score(right) - score(left)
     return specificity || Number(right.priority || 0) - Number(left.priority || 0)
   })[0] || null
+}
+
+export function calculatePriceRulePrice(rule: any, sourceText: unknown): number | null {
+  const formula = rule?.conditions?.price_formula as SupplierPriceFormula | undefined
+  if (!formula || typeof formula !== 'object') {
+    const fixed = Number(rule?.price)
+    return Number.isFinite(fixed) ? fixed : null
+  }
+
+  const amounts = extractSourcePriceAmounts(sourceText)
+  if (amounts.length === 0) return null
+  const sourcePrice = formula.source_price === 'min' ? Math.min(...amounts) : Math.max(...amounts)
+  const multiplier = finitePriceFormulaNumber(formula.multiplier, 1)
+  const secondaryMultiplier = finitePriceFormulaNumber(formula.secondary_multiplier, 1)
+  const raw = sourcePrice * multiplier * secondaryMultiplier
+  const roundTo = finitePriceFormulaNumber(formula.round_to, 1000)
+  if (!Number.isFinite(raw) || !Number.isFinite(roundTo) || roundTo <= 0) return null
+  const ratio = raw / roundTo
+  const rounded = formula.rounding === 'up'
+    ? Math.ceil(ratio) * roundTo
+    : formula.rounding === 'down'
+    ? Math.floor(ratio) * roundTo
+    : Math.round(ratio) * roundTo
+  return Number.isFinite(rounded) && rounded >= 0 ? Math.round(rounded) : null
+}
+
+function finitePriceFormulaNumber(value: unknown, fallback: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
+
+function extractSourcePriceAmounts(value: unknown): number[] {
+  const text = String(value || '')
+  const amounts: number[] = []
+  const add = (first: string, second?: string) => {
+    const values = [first, second].filter(Boolean).map((item) => Number(String(item).replace(',', '.')))
+    amounts.push(...values.filter((item) => Number.isFinite(item) && item >= 10))
+  }
+  const prefix = /(?:💰|¥|￥|rmb|人民币|元|价格|售价|price)\s*[:：]?\s*(\d{2,7}(?:[.,]\d+)?)\s*(?:[—–-]\s*(\d{2,7}(?:[.,]\d+)?))?/giu
+  for (const match of text.matchAll(prefix)) add(match[1], match[2])
+  const suffix = /(\d{2,7}(?:[.,]\d+)?)\s*(?:[—–-]\s*(\d{2,7}(?:[.,]\d+)?))?\s*(?:元|¥|￥|rmb|人民币)\b/giu
+  for (const match of text.matchAll(suffix)) add(match[1], match[2])
+  return amounts
 }
 
 const ATTRIBUTE_CODE_ALIASES: Record<string, string> = {

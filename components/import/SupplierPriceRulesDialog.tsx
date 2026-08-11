@@ -11,6 +11,13 @@ type Rule = {
   name: string
   priority: number
   price: number
+  pricingMode: 'fixed' | 'custom'
+  priceInstruction: string
+  sourcePrice: 'max' | 'min'
+  multiplier: number
+  secondaryMultiplier: number
+  roundingStep: number
+  roundingMode: 'nearest' | 'up' | 'down'
   enabled: boolean
   category?: string
   subcategory?: string
@@ -45,11 +52,21 @@ function storedTextCondition(value: unknown) {
 
 function fromStored(rule: any): Rule {
   const conditions = rule.conditions || {}
+  const formula = conditions.price_formula && typeof conditions.price_formula === 'object'
+    ? conditions.price_formula
+    : null
   return {
     id: rule.id,
     name: rule.name,
     priority: Number(rule.priority || 0),
     price: Number(rule.price || 0),
+    pricingMode: formula ? 'custom' : 'fixed',
+    priceInstruction: String(conditions.price_instruction || ''),
+    sourcePrice: formula?.source_price === 'min' ? 'min' : 'max',
+    multiplier: Number.isFinite(Number(formula?.multiplier)) ? Number(formula.multiplier) : 1,
+    secondaryMultiplier: Number.isFinite(Number(formula?.secondary_multiplier)) ? Number(formula.secondary_multiplier) : 1,
+    roundingStep: Number.isFinite(Number(formula?.round_to)) ? Number(formula.round_to) : 1000,
+    roundingMode: ['up', 'down'].includes(String(formula?.rounding)) ? formula.rounding : 'nearest',
     enabled: rule.enabled !== false,
     category: conditions.category || '',
     subcategory: conditions.subcategory || '',
@@ -92,7 +109,8 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
 
   const update = (index: number, patch: Partial<Rule>) => setRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
   const add = () => setRules((items) => [...items, {
-    name: `Правило ${items.length + 1}`, priority: 0, price: 0, enabled: true,
+    name: `Правило ${items.length + 1}`, priority: 0, price: 0, pricingMode: 'fixed', priceInstruction: '',
+    sourcePrice: 'max', multiplier: 1, secondaryMultiplier: 1, roundingStep: 1000, roundingMode: 'nearest', enabled: true,
     ruleKey: `rule_${Date.now()}_${items.length + 1}`, matchByReference: false, referenceImages: [],
   }])
   const range = (min?: number, max?: number) => {
@@ -136,6 +154,14 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
         'attributes.bag_width_cm': range(rule.minWidth, rule.maxWidth),
         'attributes.bag_height_cm': range(rule.minHeight, rule.maxHeight),
         price_rule_key: rule.matchByReference ? rule.ruleKey : '',
+        price_instruction: rule.pricingMode === 'custom' ? rule.priceInstruction : '',
+        price_formula: rule.pricingMode === 'custom' ? {
+          source_price: rule.sourcePrice,
+          multiplier: Number(rule.multiplier || 1),
+          secondary_multiplier: Number(rule.secondaryMultiplier || 1),
+          round_to: Number(rule.roundingStep || 1000),
+          rounding: rule.roundingMode,
+        } : '',
       }).filter(([, value]) => String(value || '').trim())),
       rule_key: rule.ruleKey,
       visual_hint: rule.visualHint,
@@ -162,7 +188,11 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                 <div className="flex items-center gap-2">
                   <input type="checkbox" checked={rule.enabled} onChange={(event) => update(index, { enabled: event.target.checked })} title="Включить правило" />
                   <input value={rule.name} onChange={(event) => update(index, { name: event.target.value })} className="min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm font-medium text-white" />
-                  <input type="number" min="0" value={rule.price} onChange={(event) => update(index, { price: Number(event.target.value) })} className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-right text-sm font-semibold text-emerald-300" title="Цена" />
+                  {rule.pricingMode === 'custom' ? (
+                    <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs font-semibold text-amber-200">AI-формула</span>
+                  ) : (
+                    <input type="number" min="0" value={rule.price} onChange={(event) => update(index, { price: Number(event.target.value) })} className="w-24 rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-right text-sm font-semibold text-emerald-300" title="Цена" />
+                  )}
                   <span className="text-xs text-slate-500">₽</span>
                   <button type="button" onClick={() => setRules((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="rounded p-1.5 text-red-400 hover:bg-red-500/10" title="Удалить правило"><Trash2 className="h-4 w-4" /></button>
                 </div>
@@ -191,6 +221,23 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                       <Field label="Материал"><input value={rule.material || ''} onChange={(event) => update(index, { material: event.target.value })} placeholder="кожа" className="price-rule-field" /></Field>
                       <Field label="Класс"><select value={rule.sizeClass || ''} onChange={(event) => update(index, { sizeClass: event.target.value })} className="price-rule-field"><option value="">Любой</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></Field>
                       <Field label="Приоритет"><input type="number" value={rule.priority} onChange={(event) => update(index, { priority: Number(event.target.value) })} className="price-rule-field" /></Field>
+                    </div>
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                      <label className="mb-2 block text-[10px] uppercase tracking-wide text-slate-500">Тип расчёта</label>
+                      <select value={rule.pricingMode} onChange={(event) => update(index, { pricingMode: event.target.value as Rule['pricingMode'] })} className="price-rule-field">
+                        <option value="fixed">Фиксированная цена</option>
+                        <option value="custom">Кастомная формула AI</option>
+                      </select>
+                      {rule.pricingMode === 'custom' && <>
+                        <textarea value={rule.priceInstruction} onChange={(event) => update(index, { priceInstruction: event.target.value })} placeholder="Например: возьми максимальную цену из диапазона в описании, умножь на 13 и 2.5" rows={2} className="price-rule-field mt-2 resize-none" />
+                        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-5">
+                          <Field label="Источник"><select value={rule.sourcePrice} onChange={(event) => update(index, { sourcePrice: event.target.value as Rule['sourcePrice'] })} className="price-rule-field"><option value="max">Максимум</option><option value="min">Минимум</option></select></Field>
+                          <Field label="Множитель"><input type="number" min="0" step="0.01" value={rule.multiplier} onChange={(event) => update(index, { multiplier: Number(event.target.value) })} className="price-rule-field" /></Field>
+                          <Field label="Доп. множитель"><input type="number" min="0" step="0.01" value={rule.secondaryMultiplier} onChange={(event) => update(index, { secondaryMultiplier: Number(event.target.value) })} className="price-rule-field" /></Field>
+                          <Field label="Округлять до"><input type="number" min="1" step="100" value={rule.roundingStep} onChange={(event) => update(index, { roundingStep: Number(event.target.value) })} className="price-rule-field" /></Field>
+                          <Field label="Режим"><select value={rule.roundingMode} onChange={(event) => update(index, { roundingMode: event.target.value as Rule['roundingMode'] })} className="price-rule-field"><option value="nearest">Ближайшее</option><option value="up">Вверх</option><option value="down">Вниз</option></select></Field>
+                        </div>
+                      </>}
                     </div>
                     <div className="grid grid-cols-2 gap-2"><Field label="Ширина, см"><RangeInputs min={rule.minWidth} max={rule.maxWidth} onChange={(min, max) => update(index, { minWidth: min, maxWidth: max })} /></Field><Field label="Высота, см"><RangeInputs min={rule.minHeight} max={rule.maxHeight} onChange={(min, max) => update(index, { minHeight: min, maxHeight: max })} /></Field></div>
                     <textarea value={rule.visualHint || ''} onChange={(event) => update(index, { visualHint: event.target.value })} placeholder="Как AI отличить эту модель по фото" rows={2} className="price-rule-field resize-none" />
