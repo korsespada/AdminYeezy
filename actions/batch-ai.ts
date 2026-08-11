@@ -65,6 +65,7 @@ import {
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
+import { openRouterChatCompletion } from '@/lib/openrouter'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import {
   decryptProviderApiKey,
@@ -727,6 +728,86 @@ export async function createAiProviderAction(input: {
     }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось добавить провайдера' }
+  }
+}
+
+function aiProviderRecord(row: any): AiProviderRecord {
+  return {
+    id: String(row.id), name: String(row.name || ''), kind: row.kind as AiProviderKind,
+    baseUrl: String(row.base_url || ''), model: String(row.model || ''),
+    models: Array.isArray(row.models) ? row.models : [], hasApiKey: true,
+    createdAt: String(row.created_at || ''), updatedAt: String(row.updated_at || ''),
+  }
+}
+
+export async function updateAiProviderAction(input: {
+  id: string
+  name: string
+  baseUrl: string
+  apiKey?: string
+  model: string
+}) {
+  await requireAdmin()
+  const id = String(input.id || '').trim()
+  const name = String(input.name || '').trim().slice(0, 120)
+  const requestedBaseUrl = String(input.baseUrl || '').trim()
+  const requestedApiKey = String(input.apiKey || '').trim()
+  const requestedModel = String(input.model || '').trim().slice(0, 200)
+  if (!id) return { success: false, error: 'Провайдер не указан' }
+  if (!name) return { success: false, error: 'Укажите название провайдера' }
+  if (!requestedBaseUrl) return { success: false, error: 'Укажите Base URL' }
+  try {
+    const current = await scrapingQuery(
+      'SELECT id,name,kind,base_url,api_key_ciphertext,model,models,created_at,updated_at FROM ai_providers WHERE id=$1',
+      [id],
+    )
+    const row = current.rows[0]
+    if (!row) return { success: false, error: 'Провайдер не найден' }
+    const baseUrl = normalizeProviderBaseUrl(requestedBaseUrl)
+    const apiKey = requestedApiKey || decryptProviderApiKey(row.api_key_ciphertext)
+    const models = await fetchProviderModels(baseUrl, apiKey).catch(() => [])
+    const model = requestedModel || models[0]?.value || String(row.model || '').trim()
+    if (!model) return { success: false, error: 'Укажите модель или используйте endpoint, который возвращает /models' }
+    const encrypted = requestedApiKey ? encryptProviderApiKey(requestedApiKey) : row.api_key_ciphertext
+    const updated = await scrapingQuery(`
+      UPDATE ai_providers
+      SET name=$2,base_url=$3,api_key_ciphertext=$4,model=$5,models=$6::jsonb,updated_at=NOW()
+      WHERE id=$1
+      RETURNING id,name,kind,base_url,model,models,created_at,updated_at
+    `, [id, name, baseUrl, encrypted, model, JSON.stringify(models)])
+    return { success: true, data: aiProviderRecord(updated.rows[0]) }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось изменить провайдера' }
+  }
+}
+
+export async function testAiProviderAction(providerId: string) {
+  await requireAdmin()
+  const id = String(providerId || '').trim()
+  if (!id) return { success: false, error: 'Провайдер не указан' }
+  try {
+    const result = await scrapingQuery(
+      'SELECT base_url,api_key_ciphertext,model,models FROM ai_providers WHERE id=$1',
+      [id],
+    )
+    const row = result.rows[0]
+    if (!row) return { success: false, error: 'Провайдер не найден' }
+    const apiKey = decryptProviderApiKey(row.api_key_ciphertext)
+    const models = await fetchProviderModels(row.base_url, apiKey).catch(() => [])
+    const model = String(row.model || '').trim() || models[0]?.value || ''
+    if (!model) return { success: false, error: 'Не удалось определить модель. Укажите её в редактировании провайдера.' }
+    const payload = await openRouterChatCompletion({
+      model,
+      messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
+      temperature: 0,
+      max_tokens: 1,
+    }, {}, { baseUrl: row.base_url, apiKey })
+    if (!Array.isArray(payload?.choices) || payload.choices.length === 0) {
+      throw new Error('Endpoint вернул ответ без choices')
+    }
+    return { success: true, data: { model } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось проверить провайдера' }
   }
 }
 

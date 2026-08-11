@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, Bot, CheckCircle2, Cpu, Image, Plus, RefreshCw, Save, Server, ShieldAlert, Trash2, X } from 'lucide-react'
-import { createAiProviderAction, deleteAiProviderAction, refreshAiProviderModelsAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, Server, ShieldAlert, Trash2, X } from 'lucide-react'
+import { createAiProviderAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
 import type { ByesuModelOption } from '@/lib/byesu'
@@ -50,6 +50,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [pending, startTransition] = useTransition()
   const [providers, setProviders] = useState<AiProviderRecord[]>(initialSettings.providers || [])
   const [showProviderForm, setShowProviderForm] = useState(false)
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(null)
   const [providerForm, setProviderForm] = useState({
     name: '', baseUrl: '', apiKey: '', model: '',
   })
@@ -80,19 +81,41 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     }))
   }
 
-  const addProvider = () => startTransition(async () => {
+  const openProviderForm = (provider?: AiProviderRecord) => {
     setMessage(null)
-    const result = await createAiProviderAction(providerForm)
+    setEditingProviderId(provider?.id || null)
+    setProviderForm(provider
+      ? { name: provider.name, baseUrl: provider.baseUrl, apiKey: '', model: provider.model }
+      : { name: '', baseUrl: '', apiKey: '', model: '' })
+    setShowProviderForm(true)
+  }
+
+  const saveProvider = () => startTransition(async () => {
+    setMessage(null)
+    const result = editingProviderId
+      ? await updateAiProviderAction({ ...providerForm, id: editingProviderId })
+      : await createAiProviderAction(providerForm)
     if (!result.success) {
-      setMessage({ type: 'error', text: result.error || 'Не удалось добавить провайдера' })
+      setMessage({ type: 'error', text: result.error || 'Не удалось сохранить провайдера' })
       return
     }
     const provider = result.data as AiProviderRecord
-    setProviders((current) => [provider, ...current])
+    setProviders((current) => editingProviderId
+      ? current.map((item) => item.id === provider.id ? provider : item)
+      : [provider, ...current])
     selectSavedProvider(provider)
     setProviderForm({ name: '', baseUrl: '', apiKey: '', model: '' })
+    setEditingProviderId(null)
     setShowProviderForm(false)
-    setMessage({ type: 'success', text: `Провайдер «${provider.name}» добавлен. Нажмите «Сохранить настройки».` })
+    setMessage({ type: 'success', text: `Провайдер «${provider.name}» сохранён. Нажмите «Сохранить настройки».` })
+  })
+
+  const testProvider = (provider: AiProviderRecord) => startTransition(async () => {
+    setMessage(null)
+    const result = await testAiProviderAction(provider.id)
+    setMessage(result.success
+      ? { type: 'success', text: `Провайдер «${provider.name}» работает. Модель: ${result.data?.model}.` }
+      : { type: 'error', text: result.error || 'Не удалось проверить провайдера' })
   })
 
   const removeProvider = (provider: AiProviderRecord) => {
@@ -192,7 +215,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Сохранённые провайдеры</span>
                 <p className="mt-1 text-xs text-slate-500">Ключ хранится в БД зашифрованным и никогда не показывается обратно.</p>
               </div>
-              <button type="button" onClick={() => { setMessage(null); setShowProviderForm(true) }} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+              <button type="button" onClick={() => openProviderForm()} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
                 <Plus className="h-4 w-4" /> Добавить AI-провайдера
               </button>
             </div>
@@ -207,6 +230,8 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                         <div className="mt-2 text-xs text-emerald-300">API-ключ сохранён · {provider.models.length ? `${provider.models.length} моделей` : 'модели не загружены'}</div>
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
+                        <button type="button" onClick={() => testProvider(provider)} disabled={pending} className="rounded-lg p-2 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 disabled:opacity-50" title="Проверить подключение"><PlayCircle className="h-4 w-4" /></button>
+                        <button type="button" onClick={() => openProviderForm(provider)} disabled={pending} className="rounded-lg p-2 text-indigo-300 hover:bg-indigo-500/10 hover:text-indigo-200 disabled:opacity-50" title="Редактировать провайдера"><Pencil className="h-4 w-4" /></button>
                         <button type="button" onClick={() => refreshModels(provider)} disabled={pending} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white disabled:opacity-50" title="Обновить список моделей"><RefreshCw className="h-4 w-4" /></button>
                         <button type="button" onClick={() => removeProvider(provider)} disabled={pending} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50" title="Удалить провайдера"><Trash2 className="h-4 w-4" /></button>
                       </div>
@@ -346,13 +371,13 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={() => setShowProviderForm(false)}>
           <div className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-3">
-              <div><h2 className="text-xl font-bold text-white">Добавить AI-провайдера</h2><p className="mt-1 text-sm text-slate-400">Любой OpenAI-compatible endpoint: OpenRouter, BYESU или другой совместимый сервис.</p></div>
+              <div><h2 className="text-xl font-bold text-white">{editingProviderId ? 'Редактировать AI-провайдера' : 'Добавить AI-провайдера'}</h2><p className="mt-1 text-sm text-slate-400">Любой OpenAI-compatible endpoint: OpenRouter, BYESU или другой совместимый сервис.</p></div>
               <button type="button" onClick={() => setShowProviderForm(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
             </div>
             <div className="mt-5 grid gap-4">
               <label className="space-y-2 text-sm text-slate-300"><span>Название</span><input value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Мой OpenRouter" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500" /></label>
               <label className="space-y-2 text-sm text-slate-300"><span>Base URL</span><input value={providerForm.baseUrl} onChange={(event) => setProviderForm((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://provider.example.com/v1" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Указывайте адрес до `/chat/completions`, обычно с `/v1` на конце.</span></label>
-              <label className="space-y-2 text-sm text-slate-300"><span>API-ключ</span><input type="password" value={providerForm.apiKey} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} autoComplete="new-password" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>API-ключ {editingProviderId && <span className="font-normal text-slate-500">(оставьте пустым, чтобы сохранить текущий)</span>}</span><input type="password" value={providerForm.apiKey} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} autoComplete="new-password" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /></label>
               <label className="space-y-2 text-sm text-slate-300"><span>Модель <span className="font-normal text-slate-500">(необязательно)</span></span><input value={providerForm.model} onChange={(event) => setProviderForm((current) => ({ ...current, model: event.target.value }))} placeholder="Оставьте пустым, если endpoint предоставляет /models" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Если endpoint поддерживает `/models`, система выберет первую модель автоматически. Иначе укажите модель вручную.</span></label>
             </div>
             {message?.type === 'error' && (
@@ -360,7 +385,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                 {message.text}
               </div>
             )}
-            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={addProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Проверяем endpoint…' : 'Добавить провайдера'}</button></div>
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={saveProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Проверяем endpoint…' : editingProviderId ? 'Сохранить изменения' : 'Добавить провайдера'}</button></div>
           </div>
         </div>
       )}
