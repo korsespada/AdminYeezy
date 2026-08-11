@@ -30,6 +30,11 @@ describe('catalog attribute schema', () => {
     expect(clothing).not.toContain('country_of_origin')
   })
 
+  it('keeps size attributes available when a mixed supplier has no category', () => {
+    const unclassified = getCatalogAttributeDefinitionsForCategory().map((item) => item.code)
+    expect(unclassified).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'size_system', 'measurements']))
+  })
+
   it('adds subcategory attributes without making sizes mandatory', () => {
     const rings = getCatalogAttributeDefinitionsForCategory('Ювелирные изделия', 'Кольца')
     expect(rings.map((item) => item.code)).toContain('jewelry_size')
