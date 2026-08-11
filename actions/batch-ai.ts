@@ -66,12 +66,14 @@ import {
 } from '@/lib/batch-ai-suggestions'
 import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { openRouterChatCompletion } from '@/lib/openrouter'
+import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import {
   decryptProviderApiKey,
   encryptProviderApiKey,
   fetchProviderModels,
   normalizeProviderBaseUrl,
+  providerProtocol,
   type AiProviderKind,
   type AiProviderRecord,
 } from '@/lib/ai-providers'
@@ -796,13 +798,23 @@ export async function testAiProviderAction(providerId: string) {
     const models = await fetchProviderModels(row.base_url, apiKey).catch(() => [])
     const model = String(row.model || '').trim() || models[0]?.value || ''
     if (!model) return { success: false, error: 'Не удалось определить модель. Укажите её в редактировании провайдера.' }
-    const payload = await openRouterChatCompletion({
-      model,
-      messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
-      temperature: 0,
-      max_tokens: 1,
-    }, {}, { baseUrl: row.base_url, apiKey })
-    if (!Array.isArray(payload?.choices) || payload.choices.length === 0) {
+    const payload = providerProtocol(row.base_url) === 'anthropic'
+      ? await anthropicMessagesCompletion({
+          model,
+          system: 'Отвечай только одним словом.',
+          messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
+          temperature: 0,
+          max_tokens: 8,
+        }, { baseUrl: row.base_url, apiKey })
+      : await openRouterChatCompletion({
+          model,
+          messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
+          temperature: 0,
+          max_tokens: 1,
+        }, {}, { baseUrl: row.base_url, apiKey })
+    if (providerProtocol(row.base_url) === 'anthropic') {
+      if (!Array.isArray(payload?.content) || payload.content.length === 0) throw new Error('Endpoint вернул ответ без content')
+    } else if (!Array.isArray(payload?.choices) || payload.choices.length === 0) {
       throw new Error('Endpoint вернул ответ без choices')
     }
     return { success: true, data: { model } }

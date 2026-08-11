@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
-import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerModelsUrl } from '@/lib/ai-providers'
+import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
   it('normalizes provider endpoints and encrypts API keys at rest', () => {
@@ -11,6 +11,10 @@ describe('batch AI normalization', () => {
       expect(normalizeProviderBaseUrl('https://provider.example.com/v1/models')).toBe('https://provider.example.com/v1')
       expect(providerChatUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/chat/completions')
       expect(providerModelsUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/models')
+      expect(providerProtocol('https://openrouter.ai/api/v1')).toBe('openai')
+      expect(providerProtocol('https://agentrouter.org/v1')).toBe('anthropic')
+      expect(providerMessagesUrl('https://agentrouter.org/v1')).toBe('https://agentrouter.org/v1/messages?beta=true')
+      expect(normalizeProviderBaseUrl('https://api.anthropic.com/v1/messages')).toBe('https://api.anthropic.com/v1/messages')
       const encrypted = encryptProviderApiKey('secret-key')
       expect(encrypted).not.toContain('secret-key')
       expect(decryptProviderApiKey(encrypted)).toBe('secret-key')

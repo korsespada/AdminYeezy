@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 
 export type AiProviderKind = 'openrouter' | 'byesu'
+export type AiProviderProtocol = 'openai' | 'anthropic'
 
 export type AiProviderRecord = {
   id: string
@@ -59,12 +60,38 @@ export function normalizeProviderBaseUrl(value: unknown, kind?: AiProviderKind) 
   return `${parsed.origin}${pathname}`
 }
 
+export function providerProtocol(baseUrl: string): AiProviderProtocol {
+  try {
+    const parsed = new URL(baseUrl)
+    const hostname = parsed.hostname.toLowerCase()
+    if (hostname === 'agentrouter.org' || hostname.endsWith('.agentrouter.org')) return 'anthropic'
+    if (hostname === 'anthropic.com' || hostname.endsWith('.anthropic.com')) return 'anthropic'
+    if (parsed.pathname.split('/').some((part) => part.toLowerCase() === 'messages')) return 'anthropic'
+  } catch {
+    // Invalid URLs are reported by normalizeProviderBaseUrl before a request starts.
+  }
+  return 'openai'
+}
+
 export function providerModelsUrl(baseUrl: string) {
-  return `${String(baseUrl).replace(/\/+$/, '')}/models`
+  const normalized = String(baseUrl).replace(/\/+$/, '')
+  return `${normalized.replace(/\/messages$/i, '')}/models`
 }
 
 export function providerChatUrl(baseUrl: string) {
   return `${String(baseUrl).replace(/\/+$/, '')}/chat/completions`
+}
+
+export function providerMessagesUrl(baseUrl: string) {
+  const normalized = String(baseUrl).replace(/\/+$/, '')
+  const path = providerProtocol(normalized) === 'anthropic' && /agentrouter\.org$/i.test(new URL(normalized).hostname)
+    ? `${normalized}/messages?beta=true`
+    : `${normalized}/messages`
+  if (/\/messages(?:\?beta=true)?$/i.test(normalized)) return normalized
+  if (/\/v1$/i.test(normalized)) return path
+  if (/anthropic\.com$/i.test(new URL(normalized).hostname)) return `${normalized}/v1/messages`
+  if (/agentrouter\.org$/i.test(new URL(normalized).hostname)) return `${normalized}/v1/messages?beta=true`
+  return path
 }
 
 export async function fetchProviderModels(baseUrl: string, apiKey: string) {

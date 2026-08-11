@@ -1,6 +1,8 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
+import { anthropicMessagesCompletion } from '@/lib/anthropic'
+import { providerProtocol } from '@/lib/ai-providers'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
@@ -57,6 +59,31 @@ export type BatchAiSettings = {
   concurrency: number
   systemPrompt: string
   processingOptions?: BatchAiProcessingOptions
+}
+
+function anthropicImageContent(url: string) {
+  const match = url.match(/^data:([^;,]+);base64,(.+)$/i)
+  if (match) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: match[1], data: match[2] },
+    }
+  }
+  return { type: 'image', source: { type: 'url', url } }
+}
+
+function toAnthropicContent(content: any[]) {
+  return content.flatMap((item): any[] => {
+    if (item?.type === 'text') return [{ type: 'text', text: String(item.text || '') }]
+    if (item?.type === 'image_url' && item.image_url?.url) return [anthropicImageContent(String(item.image_url.url))]
+    return []
+  })
+}
+
+function anthropicResponseText(payload: Record<string, any>) {
+  return Array.isArray(payload?.content)
+    ? payload.content.filter((block: any) => block?.type === 'text').map((block: any) => String(block.text || '')).join('\n').trim()
+    : ''
 }
 
 export type BatchAiLookup = { id: string; name: string; parent_id?: string | null }
@@ -495,6 +522,8 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
+  const protocol = providerProtocol(input.settings.providerBaseUrl || '')
+  const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
   const completion = input.settings.provider === 'byesu'
     ? (body: Record<string, any>) => byesuChatCompletion(body, {
         baseUrl: input.settings.providerBaseUrl,
@@ -504,17 +533,30 @@ export async function runBatchAiOpenRouter(input: {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
       })
-  const payload = await withBatchAiRetry(() => completion({
-      model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
-      messages: [
-        { role: 'system', content: input.systemPrompt },
-        { role: 'user', content },
-      ],
-      temperature: input.settings.temperature,
-      max_tokens: input.settings.maxTokens,
-      response_format: { type: 'json_object' },
-    }), 'AI batch')
-  const text = payload?.choices?.[0]?.message?.content
+  const payload = protocol === 'anthropic'
+    ? await withBatchAiRetry(() => anthropicMessagesCompletion({
+        model,
+        system: input.systemPrompt,
+        messages: [{ role: 'user', content: toAnthropicContent(content) }],
+        temperature: input.settings.temperature,
+        max_tokens: input.settings.maxTokens,
+      }, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      }), 'AI batch')
+    : await withBatchAiRetry(() => completion({
+        model,
+        messages: [
+          { role: 'system', content: input.systemPrompt },
+          { role: 'user', content },
+        ],
+        temperature: input.settings.temperature,
+        max_tokens: input.settings.maxTokens,
+        response_format: { type: 'json_object' },
+      }), 'AI batch')
+  const text = protocol === 'anthropic'
+    ? anthropicResponseText(payload)
+    : payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ')
   return parseBatchAiJson(String(text))
 }
@@ -551,6 +593,8 @@ export async function runBatchAiOpenRouterRefinement(input: {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
     content.push({ type: 'image_url', image_url: { url } })
   })
+  const protocol = providerProtocol(input.settings.providerBaseUrl || '')
+  const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
   const completion = input.settings.provider === 'byesu'
     ? (body: Record<string, any>) => byesuChatCompletion(body, {
         baseUrl: input.settings.providerBaseUrl,
@@ -560,14 +604,27 @@ export async function runBatchAiOpenRouterRefinement(input: {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
       })
-  const payload = await withBatchAiRetry(() => completion({
-      model: input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel,
-      messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
-      temperature: input.settings.temperature,
-      max_tokens: input.settings.maxTokens,
-      response_format: { type: 'json_object' },
-    }), 'AI refinement')
-  const text = payload?.choices?.[0]?.message?.content
+  const payload = protocol === 'anthropic'
+    ? await withBatchAiRetry(() => anthropicMessagesCompletion({
+        model,
+        system: input.systemPrompt,
+        messages: [{ role: 'user', content: toAnthropicContent(content) }],
+        temperature: input.settings.temperature,
+        max_tokens: input.settings.maxTokens,
+      }, {
+        baseUrl: input.settings.providerBaseUrl,
+        apiKey: input.settings.providerApiKey,
+      }), 'AI refinement')
+    : await withBatchAiRetry(() => completion({
+        model,
+        messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
+        temperature: input.settings.temperature,
+        max_tokens: input.settings.maxTokens,
+        response_format: { type: 'json_object' },
+      }), 'AI refinement')
+  const text = protocol === 'anthropic'
+    ? anthropicResponseText(payload)
+    : payload?.choices?.[0]?.message?.content
   if (!text) throw new Error('ИИ вернул пустой ответ при уточнении оригинала')
   return parseBatchAiJson(String(text))
 }
