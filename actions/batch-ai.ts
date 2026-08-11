@@ -510,7 +510,8 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const currentCatalog = await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
     SELECT b.*, s.ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
-           s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids
+           s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids,
+           s.ai_processing_options
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
   `, [batchId])
   if (!batch.rows[0]) throw new Error('Выгрузка не найдена')
@@ -841,8 +842,11 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       `, [batchId])
       if (sample.rows[0]?.settings_snapshot) settings = await hydrateBatchAiSettings(sample.rows[0].settings_snapshot)
     }
+    // Processing switches belong to the supplier, not to an individual launch.
+    // Keep the provider/model snapshot from the sample run, but always read the
+    // current supplier switches so both sample and full runs use the same policy.
     const normalizedProcessingOptions = normalizeBatchAiProcessingOptions(
-      processingOptions || settings.processingOptions || DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
+      context.batch.ai_processing_options || DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
     )
     settings = { ...settings, processingOptions: normalizedProcessingOptions }
     if (normalizedProcessingOptions.splitAlbumColors && settings.provider === 'cockpit') {

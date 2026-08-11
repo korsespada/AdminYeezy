@@ -10,6 +10,22 @@ import {
   getCatalogAttributeDefinitionsForCategory,
 } from '@/lib/catalog-attribute-schema'
 
+type SupplierAiProcessingOptions = {
+  colorFamilyByArticle: boolean
+  articleExample: string
+  splitAlbumColors: boolean
+  reorderFirstPhoto: boolean
+  skipModelOnlyAlbum: boolean
+}
+
+const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
+  colorFamilyByArticle: false,
+  articleExample: '',
+  splitAlbumColors: false,
+  reorderFirstPhoto: false,
+  skipModelOnlyAlbum: false,
+}
+
 interface Supplier {
   id: number
   name: string
@@ -41,6 +57,7 @@ interface Supplier {
   ai_deep_search_enabled: boolean
   ai_resize_enabled: boolean
   ai_instructions?: string | null
+  ai_processing_options?: SupplierAiProcessingOptions | null
   avatar_url?: string | null
   cookie?: string | null
   post_process_script?: string | null
@@ -142,6 +159,10 @@ export default function SupplierList({
     () => initialData.map((supplier) => ({
       ...supplier,
       default_attributes: normalizeSupplierAttributeCodes(supplier.default_attributes),
+      ai_processing_options: {
+        ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS,
+        ...(supplier.ai_processing_options || {}),
+      },
       allowed_category_ids: supplier.allowed_category_ids?.length ? supplier.allowed_category_ids : supplier.default_category ? [supplier.default_category] : [],
       allowed_subcategory_ids: supplier.allowed_subcategory_ids?.length ? supplier.allowed_subcategory_ids : supplier.default_subcategory ? [supplier.default_subcategory] : [],
       allowed_brand_ids: supplier.allowed_brand_ids?.length ? supplier.allowed_brand_ids : supplier.default_brand ? [supplier.default_brand] : [],
@@ -248,6 +269,7 @@ export default function SupplierList({
         ai_deep_search_enabled: false,
         ai_resize_enabled: true,
         ai_instructions: '',
+        ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS },
         ai_photo_models: '',
         ai_parallel_enabled: false,
         ai_parallel_count: 5,
@@ -316,6 +338,7 @@ export default function SupplierList({
     formData.set('allowed_category_ids', JSON.stringify(editingSupplier?.allowed_category_ids || []))
     formData.set('allowed_subcategory_ids', JSON.stringify(editingSupplier?.allowed_subcategory_ids || []))
     formData.set('allowed_brand_ids', JSON.stringify(editingSupplier?.allowed_brand_ids || []))
+    formData.set('ai_processing_options', JSON.stringify(editingSupplier?.ai_processing_options || DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS))
 
     let res
     if (editingSupplier && editingSupplier.id !== 0) {
@@ -810,6 +833,58 @@ export default function SupplierList({
                       className="w-full min-h-[120px] bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500 custom-scrollbar resize-y"
                     />
                     <p className="mt-2 text-[11px] text-slate-500">Не дублируйте здесь общий стиль и JSON-схему. Эти инструкции добавляются к системному промпту только для данного поставщика.</p>
+                  </div>
+
+                  <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-widest text-violet-200">Постоянные настройки AI-обработки</h4>
+                      <p className="mt-1 text-[11px] text-slate-500">Применяются автоматически к тесту 10 товаров и к полной обработке всех выгрузок этого поставщика.</p>
+                    </div>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.colorFamilyByArticle || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, colorFamilyByArticle: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Группировать цветовое семейство по артикулу</b><small className="text-xs text-slate-500">ИИ отделит цвет от общей основы артикула и запишет семью.</small></span>
+                    </label>
+                    <div className="ml-7">
+                      <label className="text-[11px] text-slate-500">Пример артикула с цветом</label>
+                      <input
+                        value={editingSupplier?.ai_processing_options?.articleExample || ''}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, articleExample: event.target.value } })}
+                        placeholder="Например: SP001 blue"
+                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
+                      />
+                    </div>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.splitAlbumColors || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, splitAlbumColors: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Разделять разные цвета внутри одного альбома</b><small className="text-xs text-slate-500">Один AI-запрос создаёт отдельные карточки и связывает их в одну семью.</small></span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.reorderFirstPhoto || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, reorderFirstPhoto: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Поставить лучший кадр первым</b><small className="text-xs text-slate-500">Меняется только первое фото, порядок остальных сохраняется.</small></span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.skipModelOnlyAlbum || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, skipModelOnlyAlbum: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Исключать альбом только с фото моделей</b><small className="text-xs text-slate-500">Товар убирается из текущей версии, исходник остаётся в снимке для отката.</small></span>
+                    </label>
                   </div>
                   
                   <div>

@@ -33,7 +33,8 @@ async function migrate() {
       ALTER TABLE suppliers
         ADD COLUMN IF NOT EXISTS allowed_category_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS allowed_subcategory_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        ADD COLUMN IF NOT EXISTS allowed_brand_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        ADD COLUMN IF NOT EXISTS allowed_brand_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS ai_processing_options JSONB NOT NULL DEFAULT '{}'::jsonb
     `)
     await client.query(`
       UPDATE suppliers SET allowed_category_ids=jsonb_build_array(default_category)

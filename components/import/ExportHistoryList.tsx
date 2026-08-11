@@ -42,8 +42,6 @@ import {
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
-import BatchAiProcessingSettingsDialog from './BatchAiProcessingSettingsDialog'
-import type { BatchAiProcessingOptions } from '@/lib/batch-ai'
 import { shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
 type ModalState = {
@@ -108,7 +106,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [modalState, setModalState] = useState<ModalState | null>(null)
   const [priceSupplier, setPriceSupplier] = useState<{ id: number; name: string } | null>(null)
   const [reviewBatch, setReviewBatch] = useState<ExportHistoryBatch | null>(null)
-  const [processingSettingsBatch, setProcessingSettingsBatch] = useState<ExportHistoryBatch | null>(null)
 
   const refresh = async () => {
     setIsRefreshing(true)
@@ -285,10 +282,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     else alert((result as any).error)
   }
 
-  const startAi = async (batch: ExportHistoryBatch, mode: 'sample' | 'full', processingOptions?: BatchAiProcessingOptions) => {
+  const startAi = async (batch: ExportHistoryBatch, mode: 'sample' | 'full') => {
     setPendingAction(`ai-${batch.id}`)
     try {
-      const result = await startBatchAiAction(batch.id, mode, undefined, processingOptions)
+      const result = await startBatchAiAction(batch.id, mode)
       if (result.success) {
         const data: any = result.data
         if (data?.runId) {
@@ -507,14 +504,13 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             className="absolute right-14 top-12 z-20 w-64 overflow-hidden rounded-lg border border-slate-700 bg-slate-950 py-1 text-left shadow-2xl"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            {!batch.isSynthetic && hasAiRemaining && batch.status !== 'Удалено из БД' && (
+                            {!batch.isSynthetic && batch.supplier_id && (
                               <button
-                                onClick={() => { setProcessingSettingsBatch(batch); setOpenMenuId(null) }}
-                                disabled={isBusy || ['queued', 'running'].includes(batch.ai_run_status || '')}
-                                className="flex w-full items-start gap-2 px-4 py-2 text-sm text-violet-300 transition-colors hover:bg-violet-500/10 disabled:text-slate-600"
+                                onClick={() => router.push(`/admin/suppliers?supplier=${batch.supplier_id}`)}
+                                className="flex w-full items-start gap-2 px-4 py-2 text-sm text-violet-300 transition-colors hover:bg-violet-500/10"
                               >
                                 <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span><b className="block">Точечная настройка ИИ</b><small className="text-slate-500">Настроить цвет, фото и альбом для теста или полной обработки</small></span>
+                                <span><b className="block">Настройки AI поставщика</b><small className="text-slate-500">Постоянные правила применяются к тесту и полной обработке</small></span>
                               </button>
                             )}
                             {!batch.isSynthetic && canPublish && (
@@ -653,17 +649,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       />
       {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
       {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={() => setReviewBatch(null)} />}
-      {processingSettingsBatch && (
-        <BatchAiProcessingSettingsDialog
-          batchName={processingSettingsBatch.name}
-          pending={pendingAction === `ai-${processingSettingsBatch.id}`}
-          onClose={() => setProcessingSettingsBatch(null)}
-          onStart={(mode, options) => {
-            setProcessingSettingsBatch(null)
-            void startAi(processingSettingsBatch, mode, options)
-          }}
-        />
-      )}
     </div>
   )
 }
