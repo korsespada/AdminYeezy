@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
-import { extractExplicitShoeAttributes, inferShoeGender } from '@/lib/product-attributes'
+import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
   inferGenericShoeSubcategoryName,
@@ -969,15 +969,18 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const aiGender = ['male', 'female', 'unisex'].includes(String(proposed.gender))
     ? String(proposed.gender)
     : ''
+  const genderEvidenceText = [
+    original.name,
+    original.description,
+    proposed.name,
+    proposed.description,
+    proposed.h1,
+    proposed.seo_description,
+  ].filter(Boolean).join('\n')
+  const explicitGender = isShoeCategory ? inferExplicitShoeGender(genderEvidenceText) : null
+  const sizeFallbackGender = isShoeCategory ? inferShoeGender(genderEvidenceText, attributes.sizes) : null
   const resolvedGender = isShoeCategory
-    ? (inferShoeGender([
-      original.name,
-      original.description,
-      proposed.name,
-      proposed.description,
-      proposed.h1,
-      proposed.seo_description,
-    ].filter(Boolean).join('\n'), attributes.sizes) || aiGender || original.gender)
+    ? (explicitGender || aiGender || sizeFallbackGender || original.gender)
     : (aiGender || original.gender)
 
   const rawColorFamily = raw?.color_family && typeof raw.color_family === 'object'

@@ -104,7 +104,7 @@ export function extractExplicitShoeAttributes(textValue: unknown): ProductAttrib
   if (!text.trim()) return {}
 
   const attributes: ProductAttributes = {}
-  const sizesRaw = labelledValue(text, /(?:(?:доступные|available)\s+)?(?:размеры?|sizes?)/i)
+  const sizesRaw = labelledValue(text, /(?:(?:доступные|available)\s+)?(?:размеры?|sizes?|码数|尺码|鞋码|鞋号)/i)
   const sizes = normalizeNumericSizes(sizesRaw)
   if (sizes.length > 0) attributes.sizes = sizes
 
@@ -140,6 +140,10 @@ export function inferShoeGender(textValue: unknown, sizeValue?: unknown): ShoeGe
   const labelled = extractExplicitShoeAttributes(text).sizes
   sizes.push(...numericShoeSizes(labelled))
   return inferShoeGenderFromNumericSizes(sizes)
+}
+
+export function inferExplicitShoeGender(textValue: unknown): ShoeGender | null {
+  return explicitShoeGender(String(textValue || '').replace(/ё/g, 'е'))
 }
 
 function explicitShoeGender(text: string): ShoeGender | null {
@@ -192,7 +196,7 @@ function inferShoeGenderFromNumericSizes(values: number[]): ShoeGender | null {
 }
 
 function labelledValue(text: string, label: RegExp): string {
-  const match = text.match(new RegExp(`(?:^|\\n|[.!?]\\s+)\\s*${label.source}\\s*[:\\-]\\s*([^\\n.!?]+)`, 'i'))
+  const match = text.match(new RegExp(`(?:^|[\\n.!?，,;；]\\s*|\\s+)${label.source}\\s*[:：\\-]\\s*([^\\n.!?]+)`, 'iu'))
   return match?.[1]?.trim() || ''
 }
 
@@ -214,9 +218,10 @@ function normalizeNumericSizes(raw: string): string[] {
   if (!raw) return []
   const cleaned = raw
     .replace(/\b(?:EU|US|UK|IT|RU)\b/gi, '')
-    .replace(/\s*(?:размер(?:ы|ный ряд)?|sizes?)\s*$/i, '')
+    .replace(/\s*(?:размер(?:ы|ный ряд)?|sizes?|码数|尺码|鞋码|鞋号)\s*$/i, '')
+    .replace(/\s*[（(].*$/u, '')
     .trim()
-  const range = cleaned.match(/^(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)$/)
+  const range = cleaned.match(/^(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)(?=$|\s|[，,;；/|])/u)
   if (range) {
     const from = Number(range[1].replace(',', '.'))
     const to = Number(range[2].replace(',', '.'))

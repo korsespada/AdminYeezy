@@ -62,6 +62,14 @@ describe('product attributes', () => {
     })
   })
 
+  it('extracts Chinese footwear size labels and ignores trailing supplier notes', () => {
+    expect(extractExplicitShoeAttributes(
+      'Chrome hearts x Converse 1970S 黑色高帮鞋 码数：38-46（大于44码需补差价） 五金：白铜镀银',
+    )).toMatchObject({
+      sizes: ['38', '39', '40', '41', '42', '43', '44', '45', '46'],
+    })
+  })
+
   it('keeps supplied structured values over text suggestions', () => {
     expect(extractProductAttributes({
       description: 'Размеры: 38-40',

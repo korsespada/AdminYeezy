@@ -245,6 +245,33 @@ describe('batch AI normalization', () => {
     })
   })
 
+  it('recovers Chinese footwear sizes when AI omits the attribute', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        description: 'Chrome Hearts x Converse 1970S 黑色高帮鞋-特制款 码数：38-46（大于44码需补差价）',
+        catalog_attributes: { colors: ['Чёрный'] },
+      },
+    }, {
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        photos: [],
+        attributes: {},
+      },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sneakers']),
+      subcategoryParents: new Map([['sneakers', 'shoes']]),
+      subcategoryNames: new Map([['sneakers', 'Кроссовки и кеды']]),
+      attributeCodes: new Set(['sizes', 'colors']),
+    })
+
+    expect(result.product.attributes.sizes).toEqual(['38', '39', '40', '41', '42', '43', '44', '45', '46'])
+  })
+
   it('normalizes footwear gender from explicit text and safe ranges', () => {
     const result = normalizeBatchAiOutput({
       product: {
