@@ -245,6 +245,82 @@ describe('batch AI normalization', () => {
     })
   })
 
+  it('normalizes footwear gender from explicit text and safe ranges', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        gender: 'female',
+        description: 'Мужские кроссовки. Размеры: EU 39–45.',
+        catalog_attributes: { sizes: ['39', '40', '41', '42', '43', '44', '45'] },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'sneakers', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sneakers']),
+      subcategoryParents: new Map([['sneakers', 'shoes']]),
+      subcategoryNames: new Map([['sneakers', 'Кроссовки и кеды']]),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.gender).toBe('male')
+  })
+
+  it('leaves ambiguous footwear ranges to the AI gender decision', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        gender: 'unisex',
+        description: 'Кроссовки. Размеры: EU 38–45.',
+        catalog_attributes: { sizes: ['38', '39', '40', '41', '42', '43', '44', '45'] },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'sneakers', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sneakers']),
+      subcategoryParents: new Map([['sneakers', 'shoes']]),
+      subcategoryNames: new Map([['sneakers', 'Кроссовки и кеды']]),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.gender).toBe('unisex')
+  })
+
+  it('preserves footwear size groups and their audience metadata', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        catalog_attributes: {
+          sizes: {
+            values: ['38', '39', '40', '41'],
+            groups: [{ audience: 'female', system: 'eu', values: ['38', '39', '40', '41'] }],
+          },
+        },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'sneakers', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sneakers']),
+      subcategoryParents: new Map([['sneakers', 'shoes']]),
+      subcategoryNames: new Map([['sneakers', 'Кроссовки и кеды']]),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.attributes.sizes).toEqual({
+      values: ['38', '39', '40', '41'],
+      groups: [{ audience: 'female', system: 'EU', values: ['38', '39', '40', '41'] }],
+    })
+    expect(result.product.gender).toBe('female')
+  })
+
   it('keeps measurements and merges explicit clothing sizes omitted by the model', () => {
     const measurements = {
       unit: 'см',

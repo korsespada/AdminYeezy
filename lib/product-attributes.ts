@@ -8,6 +8,8 @@ export type ProductAttributeValue =
 
 export type ProductAttributes = Record<string, ProductAttributeValue>
 
+export type ShoeGender = 'male' | 'female' | 'unisex'
+
 export const CORE_PRODUCT_FIELDS = new Set([
   'id',
   'external_id',
@@ -119,6 +121,74 @@ export function extractExplicitShoeAttributes(textValue: unknown): ProductAttrib
   if (heel) attributes.heel_height = `${heel[1].replace(',', '.')} ${normalizeUnit(heel[2])}`
 
   return attributes
+}
+
+/**
+ * Deterministic footwear gender fallback. Explicit wording and an explicit
+ * audience group always win; unsupported ranges remain unresolved instead of
+ * being guessed from one boundary number.
+ */
+export function inferShoeGender(textValue: unknown, sizeValue?: unknown): ShoeGender | null {
+  const text = String(textValue || '').replace(/ё/g, 'е')
+  const explicit = explicitShoeGender(text)
+  if (explicit) return explicit
+
+  const grouped = groupedShoeAudience(sizeValue)
+  if (grouped) return grouped
+
+  const sizes = numericShoeSizes(sizeValue)
+  const labelled = extractExplicitShoeAttributes(text).sizes
+  sizes.push(...numericShoeSizes(labelled))
+  return inferShoeGenderFromNumericSizes(sizes)
+}
+
+function explicitShoeGender(text: string): ShoeGender | null {
+  if (/(?:\bунисекс\b|\bunisex\b|男女(?:同款|通用)|男女鞋)/i.test(text)) return 'unisex'
+  if (/(?:мужск|для мужчин|\bmen(?:'s)?\b|\bmale\b|男(?:款|鞋|士))/i.test(text)) return 'male'
+  if (/(?:женск|для женщин|\bwomen(?:'s)?\b|\bfemale\b|女(?:款|鞋|士))/i.test(text)) return 'female'
+  return null
+}
+
+function groupedShoeAudience(value: unknown): ShoeGender | null {
+  if (!value || typeof value !== 'object') return null
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const audience = groupedShoeAudience(item)
+      if (audience) return audience
+    }
+    return null
+  }
+  const source = value as Record<string, unknown>
+  const audience = String(source.audience || '').trim().toLowerCase()
+  if (audience === 'male' || audience === 'female' || audience === 'unisex') return audience
+  for (const item of Object.values(source)) {
+    const nested = groupedShoeAudience(item)
+    if (nested) return nested
+  }
+  return null
+}
+
+function numericShoeSizes(value: unknown): number[] {
+  if (Array.isArray(value)) return value.flatMap(numericShoeSizes)
+  if (value && typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).flatMap(numericShoeSizes)
+  }
+  const match = String(value || '').replace(',', '.').match(/^\d{1,3}(?:\.5)?$/)
+  return match ? [Number(match[0])] : []
+}
+
+function inferShoeGenderFromNumericSizes(values: number[]): ShoeGender | null {
+  const sizes = [...new Set(values.filter((value) => value >= 30 && value <= 55))].sort((a, b) => a - b)
+  if (sizes.length === 0) return null
+  const min = sizes[0]
+  const max = sizes[sizes.length - 1]
+  if (min <= 36 && max >= 45) return 'unisex'
+  if (min >= 39 && max >= 45) return 'male'
+  // Common women’s EU ranges can extend to 41; require a low starting size
+  // so a narrow 39–41 range is not incorrectly labelled female.
+  if (min <= 37 && max <= 41) return 'female'
+  if (max < 39) return 'female'
+  return null
 }
 
 function labelledValue(text: string, label: RegExp): string {

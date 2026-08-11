@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extractExplicitShoeAttributes, extractProductAttributes, normalizeProductAttributes } from '@/lib/product-attributes'
+import { extractExplicitShoeAttributes, extractProductAttributes, inferShoeGender, normalizeProductAttributes } from '@/lib/product-attributes'
 import { validateProducts } from '@/lib/product-validation'
 
 describe('product attributes', () => {
@@ -70,6 +70,21 @@ describe('product attributes', () => {
       sizes: ['41'],
       size_system: 'IT',
     })
+  })
+
+  it('classifies shoe gender from explicit wording and safe EU ranges', () => {
+    expect(inferShoeGender('Женские босоножки. Размеры: EU 38–45')).toBe('female')
+    expect(inferShoeGender('Размеры: EU 36–45')).toBe('unisex')
+    expect(inferShoeGender('Размеры: EU 39–45')).toBe('male')
+    expect(inferShoeGender('Размеры: EU 36–41')).toBe('female')
+    expect(inferShoeGender('Размеры: EU 38–45')).toBeNull()
+  })
+
+  it('uses an explicit size-group audience before range heuristics', () => {
+    expect(inferShoeGender('Размеры EU 38–45', {
+      values: ['38', '39', '40', '41', '42', '43', '44', '45'],
+      groups: [{ audience: 'female', values: ['38', '39', '40', '41'] }],
+    })).toBe('female')
   })
 
   it('reports duplicate IDs and invalid attribute keys', () => {

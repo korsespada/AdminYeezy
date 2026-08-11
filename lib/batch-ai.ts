@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
-import { extractExplicitShoeAttributes } from '@/lib/product-attributes'
+import { extractExplicitShoeAttributes, inferShoeGender } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
   inferGenericShoeSubcategoryName,
@@ -725,13 +725,27 @@ export function normalizeBatchAiOutput(raw: any, input: {
       .find((value) => input.categoryIds.has(value)) || ''
     const isClothing = String(input.categoryNames?.get(categoryId) || '')
       .trim().toLowerCase().replace(/ё/g, 'е') === 'одежда'
+    const isShoe = String(input.categoryNames?.get(categoryId) || '')
+      .trim().toLowerCase().replace(/ё/g, 'е') === 'обувь'
+    const shoeSizeGroups = isShoe ? extractShoeSizeGroups(attributes.sizes) : []
     const sizeValues = [
       ...extractExplicitClothingSizes(sizeSourceText),
       ...(isClothing ? extractExplicitNumericClothingSizes(sizeSourceText) : []),
       ...attributeSizeValues(attributes.sizes),
       ...measurementRowSizes(attributes.measurements),
     ].map(canonicalClothingSize).filter(Boolean)
-    if (sizeValues.length > 0) attributes.sizes = [...new Set(sizeValues)]
+    if (sizeValues.length > 0) {
+      const normalizedSizes = [...new Set(sizeValues)]
+      attributes.sizes = shoeSizeGroups.length
+        ? {
+            values: normalizedSizes,
+            groups: shoeSizeGroups.map((group) => ({
+              ...group,
+              values: group.values.map(canonicalClothingSize),
+            })),
+          }
+        : normalizedSizes
+    }
     if (
       !attributes.size_system
       && input.attributeCodes.has('size_system')
@@ -951,6 +965,21 @@ export function normalizeBatchAiOutput(raw: any, input: {
     ? rawConfidence / 100
     : rawConfidence
 
+  const isShoeCategory = normalizedName(input.categoryNames?.get(category)) === 'обувь'
+  const aiGender = ['male', 'female', 'unisex'].includes(String(proposed.gender))
+    ? String(proposed.gender)
+    : ''
+  const resolvedGender = isShoeCategory
+    ? (inferShoeGender([
+      original.name,
+      original.description,
+      proposed.name,
+      proposed.description,
+      proposed.h1,
+      proposed.seo_description,
+    ].filter(Boolean).join('\n'), attributes.sizes) || aiGender || original.gender)
+    : (aiGender || original.gender)
+
   const rawColorFamily = raw?.color_family && typeof raw.color_family === 'object'
     ? { ...raw.color_family }
     : null
@@ -969,7 +998,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       brand: choose(proposed.brand, input.brandIds, original.brand),
       category,
       subcategory,
-      gender: ['male', 'female', 'unisex'].includes(String(proposed.gender)) ? proposed.gender : original.gender,
+      gender: resolvedGender,
       photos: photos.length > 0 ? photos : original.photos,
       photo_alts: photoAlts,
       attributes,
@@ -1001,6 +1030,28 @@ function attributeSizeValues(value: unknown): string[] {
     return attributeSizeValues(item.values ?? item.value ?? item.display_values ?? [])
   }
   return value === undefined || value === null ? [] : [String(value)]
+}
+
+function extractShoeSizeGroups(value: unknown): Array<Record<string, unknown> & { values: string[] }> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  const groups = (value as Record<string, unknown>).groups
+  if (!Array.isArray(groups)) return []
+  return groups.flatMap((group) => {
+    if (!group || typeof group !== 'object' || Array.isArray(group)) return []
+    const source = group as Record<string, unknown>
+    const values = attributeSizeValues(source.values)
+      .map(canonicalClothingSize)
+      .filter(Boolean)
+    if (values.length === 0) return []
+    const audience = String(source.audience || '').trim().toLowerCase()
+    return [{
+      ...(Number.isFinite(Number(source.min)) ? { min: Number(source.min) } : {}),
+      ...(Number.isFinite(Number(source.max)) ? { max: Number(source.max) } : {}),
+      ...(source.system ? { system: String(source.system).toUpperCase() } : {}),
+      ...(['male', 'female', 'unisex'].includes(audience) ? { audience } : {}),
+      values,
+    }]
+  })
 }
 
 function measurementRowSizes(value: unknown): string[] {
