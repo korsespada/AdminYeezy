@@ -13,6 +13,7 @@
     "db:migrate:scraping": "node scripts/migrate-scraping-schema.js && node scripts/migrate-batch-product-identity.js && node scripts/migrate-product-source-position.js && node scripts/migrate-task-history-jsonb.js && node scripts/migrate-batch-ai.js && node scripts/harden-batch-workflow.js && node scripts/migrate-shoe-taxonomy.js && node scripts/sanitize-supplier-ai-instructions.js && node scripts/merge-supplier-photo-instructions.js",
     "db:migrate:batch-ai": "node scripts/migrate-batch-ai.js",
     "db:migrate:media-seo": "node scripts/ensure-media-seo-schema.js",
+    "db:migrate:supplier-ai": "node scripts/ensure-supplier-ai-schema.js",
     "batch:reset-media-seo": "node scripts/reset-batch-media-seo.js",
     "db:migrate:supplier-catalog-ids": "node scripts/migrate-supplier-catalog-ids.js",
     "db:audit:batches": "node scripts/audit-batch-workflow.js",
