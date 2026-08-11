@@ -69,6 +69,23 @@ describe('batch AI normalization', () => {
     expect(result.coverPhotoIndex).toBe(3)
   })
 
+  it('keeps supplier publication date out of AI attributes and on the product', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Товар' },
+    }, {
+      product: {
+        name: '',
+        photos: [],
+        supplier_published_on: '2026-05-26',
+        attributes: { supplier_published_on: '2026-05-26' },
+      },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.supplier_published_on).toBe('2026-05-26')
+    expect(result.product.attributes).not.toHaveProperty('supplier_published_on')
+  })
+
   it('marks a model-only album for whole-product exclusion', () => {
     const result = normalizeBatchAiOutput({
       product: { name: 'Товар' },

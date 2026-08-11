@@ -638,6 +638,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const processingOptions = normalizeBatchAiProcessingOptions(input.processingOptions)
   const proposed = raw?.product || {}
   const original = input.product
+  const supplierPublishedOn = original.supplier_published_on || original.attributes?.supplier_published_on || null
   const choose = (value: unknown, allowed: Set<string>, fallback: unknown) => {
     const candidate = String(value || '')
     if (allowed.has(candidate)) return candidate
@@ -1006,6 +1007,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
   return {
     product: {
       ...original,
+      supplier_published_on: supplierPublishedOn,
       name: String(proposed.name || original.name || '').trim().slice(0, 250),
       description: String(proposed.description || original.description || '').trim().slice(0, 8000),
       h1: String(proposed.h1 || proposed.name || original.h1 || original.name || '').trim().slice(0, 250),

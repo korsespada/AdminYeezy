@@ -36,6 +36,7 @@ export const CORE_PRODUCT_FIELDS = new Set([
   'ai_confidence',
   'source_position',
   'attributes',
+  'supplier_published_on',
   'created_at',
   'updated_at',
 ])

@@ -40,6 +40,7 @@ describe('product attributes', () => {
       h1: 'Заголовок',
       seo_title: 'SEO',
       variant_group_key: 'group-1',
+      supplier_published_on: '2026-05-26',
       material: 'кожа',
     })).toEqual({ material: 'кожа' })
   })

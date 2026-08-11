@@ -1674,13 +1674,13 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
         name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
         brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,
         photo_alts=$13::jsonb,attributes=$14::jsonb,price=$15,price_source=$16,ai_processed=true,
-        ai_error=NULL,ai_confidence=$17,updated_at=NOW()
+        ai_error=NULL,ai_confidence=$17,supplier_published_on=COALESCE($18,supplier_published_on),updated_at=NOW()
       WHERE id=$1
     `, [
       item.product_id, product.name, product.description, product.h1, product.seo_title,
       product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
       product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
-      Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence,
+      Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence, product.supplier_published_on || null,
     ])
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
