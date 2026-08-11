@@ -72,6 +72,28 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('does not schedule video transfer when the video is already hosted locally or in Rails', () => {
+    const previousDomain = process.env.S3_PUBLIC_DOMAIN
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    try {
+      const sourceProduct = { attributes: { szwego_video_url: 'https://supplier.example/source.mov' } }
+      expect(workflow.needsVideoTransfer(sourceProduct)).toBe(true)
+      expect(workflow.needsVideoTransfer({
+        attributes: {
+          szwego_video_url: 'https://supplier.example/source.mov',
+          hosted_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+        },
+      })).toBe(false)
+      expect(workflow.needsVideoTransfer(sourceProduct, {
+        video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+        video_poster_url: 'https://static.yeezyunique.ru/batches/old/item-poster.webp',
+      })).toBe(false)
+    } finally {
+      if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
+      else process.env.S3_PUBLIC_DOMAIN = previousDomain
+    }
+  })
+
   it('reuses an already hosted photo without another S3 request', async () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
     const previousBucket = process.env.S3_BUCKET

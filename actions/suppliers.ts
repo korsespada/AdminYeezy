@@ -1273,7 +1273,10 @@ export async function previewBatchPublishAction(
     const deleteCount = replaceMissing
       ? [...knownIds].filter((externalId) => !targetIds.has(externalId)).length
       : 0
-    const videoCount = productRows.filter((row: any) => String(row.attributes?.szwego_video_url || '').trim()).length
+    const videoCount = productRows.filter((row: any) => {
+      const externalId = String(row.external_id || '').trim()
+      return workflow.needsVideoTransfer(row, existing.get(externalId))
+    }).length
     return {
       success: true,
       data: {

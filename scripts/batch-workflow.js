@@ -154,12 +154,28 @@ function chromoffClassificationMetadata(product) {
   return metadata;
 }
 
-function hostedVideo(product) {
+function hostedVideo(product, existingRailsProduct = null) {
   const attributes = normalizeAttributes(product?.attributes);
+  const localVideoUrl = String(attributes.hosted_video_url || '').trim()
+    || (isAlreadyHosted(attributes.video_url) ? String(attributes.video_url).trim() : '');
+  const localPosterUrl = String(attributes.hosted_video_poster_url || '').trim()
+    || (isAlreadyHosted(attributes.video_poster_url) ? String(attributes.video_poster_url).trim() : '');
   return {
-    url: String(attributes.hosted_video_url || '').trim() || null,
-    posterUrl: String(attributes.hosted_video_poster_url || '').trim() || null,
+    url: localVideoUrl || (isAlreadyHosted(existingRailsProduct?.video_url) ? String(existingRailsProduct.video_url).trim() : '') || null,
+    posterUrl: localPosterUrl || (isAlreadyHosted(existingRailsProduct?.video_poster_url) ? String(existingRailsProduct.video_poster_url).trim() : '') || null,
   };
+}
+
+function sourceVideo(product) {
+  const attributes = normalizeAttributes(product?.attributes);
+  const sourceUrl = String(attributes.szwego_video_url || '').trim();
+  if (sourceUrl) return sourceUrl;
+  const genericUrl = String(attributes.video_url || '').trim();
+  return genericUrl && !isAlreadyHosted(genericUrl) ? genericUrl : null;
+}
+
+function needsVideoTransfer(product, existingRailsProduct = null) {
+  return Boolean(sourceVideo(product) && !hostedVideo(product, existingRailsProduct).url);
 }
 
 function extractAttributes(row) {
@@ -1805,6 +1821,11 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
       ? railsProduct.metadata
       : undefined,
+    attributes: {
+      ...normalizeAttributes(product.attributes),
+      ...(hostedVideo(product, railsProduct).url ? { hosted_video_url: hostedVideo(product, railsProduct).url } : {}),
+      ...(hostedVideo(product, railsProduct).posterUrl ? { hosted_video_poster_url: hostedVideo(product, railsProduct).posterUrl } : {}),
+    },
   });
 
   const seenExternalIds = new Set();
@@ -1853,7 +1874,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     if (!existingExternalIds.has(externalId)) return [];
     if (seoMediaRun) return [externalId];
     const attributes = normalizeAttributes(product.attributes);
-    if (attributes.szwego_video_url && !hostedVideo(product).url) return [externalId];
+    if (needsVideoTransfer(product, existingProducts.get(externalId))) return [externalId];
     return previousPayloadHashes.get(externalId) === publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId))) ? [] : [externalId];
   }));
   const candidates = products
@@ -1877,6 +1898,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
     const { product: sourceProduct, index: productIndex } = candidates[candidateIndex];
     const product = { ...sourceProduct, batchId };
+    const existingRailsProduct = existingProducts.get(String(product.external_id || '').trim());
     const photos = [];
     let productFailed = false;
     const existingPhotoUrls = existingRailsPhotoMap(
@@ -1923,7 +1945,16 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
     product.photos = photos.filter(Boolean);
     const sourceAttributes = normalizeAttributes(product.attributes);
-    const sourceVideoUrl = String(sourceAttributes.szwego_video_url || sourceAttributes.video_url || '').trim();
+    const existingHostedVideo = hostedVideo(product, existingRailsProduct);
+    if (!hostedVideo(product).url && existingHostedVideo.url) {
+      product.attributes = {
+        ...sourceAttributes,
+        hosted_video_url: existingHostedVideo.url,
+        ...(existingHostedVideo.posterUrl ? { hosted_video_poster_url: existingHostedVideo.posterUrl } : {}),
+      };
+      batchProductsChanged = true;
+    }
+    const sourceVideoUrl = sourceVideo(product);
     if (sourceVideoUrl && !hostedVideo(product).url) {
       try {
         const safeVideoExternalId = String(sourceAttributes.source_parent_external_id || safeExternalId)
@@ -2118,6 +2149,7 @@ module.exports = {
   getLatestBatches,
   getSupplier,
   isAlreadyHosted,
+  needsVideoTransfer,
   lookupName,
   parseCsvObjects,
   publicationPayloadHash,
