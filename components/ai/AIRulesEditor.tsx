@@ -51,6 +51,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [providers, setProviders] = useState<AiProviderRecord[]>(initialSettings.providers || [])
   const [showProviderForm, setShowProviderForm] = useState(false)
   const [editingProviderId, setEditingProviderId] = useState<string | null>(null)
+  const [providerTest, setProviderTest] = useState<{ id: string; type: 'pending' | 'success' | 'error'; text: string } | null>(null)
   const [providerForm, setProviderForm] = useState({
     name: '', baseUrl: '', apiKey: '', model: '',
   })
@@ -111,11 +112,18 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   })
 
   const testProvider = (provider: AiProviderRecord) => startTransition(async () => {
+    setProviderTest({ id: provider.id, type: 'pending', text: 'Проверяем подключение…' })
     setMessage(null)
     const result = await testAiProviderAction(provider.id)
-    setMessage(result.success
-      ? { type: 'success', text: `Провайдер «${provider.name}» работает. Модель: ${result.data?.model}.` }
-      : { type: 'error', text: result.error || 'Не удалось проверить провайдера' })
+    if (result.success) {
+      const text = `Подключение работает · модель: ${result.data?.model}`
+      setProviderTest({ id: provider.id, type: 'success', text })
+      setMessage({ type: 'success', text: `Провайдер «${provider.name}» работает. Модель: ${result.data?.model}.` })
+    } else {
+      const text = result.error || 'Не удалось проверить провайдера'
+      setProviderTest({ id: provider.id, type: 'error', text })
+      setMessage({ type: 'error', text })
+    }
   })
 
   const removeProvider = (provider: AiProviderRecord) => {
@@ -236,6 +244,17 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                         <button type="button" onClick={() => removeProvider(provider)} disabled={pending} className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-50" title="Удалить провайдера"><Trash2 className="h-4 w-4" /></button>
                       </div>
                     </div>
+                    {providerTest?.id === provider.id && (
+                      <div role="status" className={`mt-3 rounded-lg border px-3 py-2 text-xs leading-relaxed ${
+                        providerTest.type === 'success'
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                          : providerTest.type === 'error'
+                            ? 'border-red-500/30 bg-red-950/50 text-red-200'
+                            : 'border-indigo-500/30 bg-indigo-500/10 text-indigo-200'
+                      }`}>
+                        {providerTest.text}
+                      </div>
+                    )}
                     {settings.activeProviderId === provider.id && <div className="mt-3 text-xs font-semibold text-indigo-300">Выбран для новых AI-запусков</div>}
                   </div>
                 ))}
