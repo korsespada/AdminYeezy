@@ -591,6 +591,7 @@ export default function CsvImportApp({
   const [filterModel, setFilterModel] = useState("");
   const [filterColor, setFilterColor] = useState("");
   const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
+  const [filterVideo, setFilterVideo] = useState<"" | "with" | "without">("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
   const [cardColumns, setCardColumns] = useState(4);
@@ -787,6 +788,10 @@ export default function CsvImportApp({
     const values = attributeValues(product.attributes?.colors ?? product.attributes?.color);
     return values.length ? values : [""];
   })), [products, attributeValues, countBy]);
+  const productsWithVideoCount = useMemo(
+    () => products.filter((product) => Boolean(productVideoForDisplay(product).url)).length,
+    [products],
+  );
   const variantGroups = useMemo(() => {
     const groups = new Map<string, CsvProduct[]>();
     for (const product of products) {
@@ -916,13 +921,16 @@ export default function CsvImportApp({
       const hasVariants = variantGroups.has(approvedVariantGroupKey(p));
       if (filterVariants === "with" && !hasVariants) return false;
       if (filterVariants === "without" && hasVariants) return false;
+      const hasVideo = Boolean(productVideoForDisplay(p).url);
+      if (filterVideo === "with" && !hasVideo) return false;
+      if (filterVideo === "without" && hasVideo) return false;
       const aiReady = p.ai_processed === true || p.ai_processed === "true";
       if (filterAiStatus === "raw" && aiReady) return false;
       if (filterAiStatus === "ready" && !aiReady) return false;
       if (filterAiStatus === "error" && (aiReady || !p.ai_error)) return false;
       return true;
     });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterVariants, filterAiStatus, attributeValues, variantGroups]);
+  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterVariants, filterVideo, filterAiStatus, attributeValues, variantGroups]);
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -2550,6 +2558,16 @@ export default function CsvImportApp({
                 <option value="without">Без вариантов ({products.length - productsWithVariantsCount})</option>
               </select>
 
+              <select
+                value={filterVideo}
+                onChange={(e) => setFilterVideo(e.target.value as "" | "with" | "without")}
+                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+              >
+                <option value="">Все видео ({products.length})</option>
+                <option value="with">С видео ({productsWithVideoCount})</option>
+                <option value="without">Без видео ({products.length - productsWithVideoCount})</option>
+              </select>
+
               {(filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
@@ -2558,6 +2576,7 @@ export default function CsvImportApp({
                 filterModel ||
                 filterColor ||
                 filterVariants ||
+                filterVideo ||
                 filterPrice !== "") && (
                   <button
                     onClick={() => {
@@ -2570,6 +2589,7 @@ export default function CsvImportApp({
                       setFilterModel("");
                       setFilterColor("");
                       setFilterVariants("");
+                      setFilterVideo("");
                     }}
                     className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-slate-700 transition-colors"
                   >
@@ -2585,6 +2605,7 @@ export default function CsvImportApp({
                 filterModel ||
                 filterColor ||
                 filterVariants ||
+                filterVideo ||
                 filterPrice !== "") && (
                   <span className="text-xs text-slate-500 ml-auto">
                     Показано{" "}

@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, CheckCheck, Eye, RefreshCw, X } from 'lucide-react'
+import { Check, CheckCheck, Eye, RefreshCw, X, XCircle } from 'lucide-react'
 import {
   getBatchAiRunAction,
   getBatchAiSuggestionsAction,
+  rejectAllBatchAiSuggestionsAction,
   reviewBatchAiSuggestionAction,
   startBatchAiAction,
 } from '@/actions/batch-ai'
@@ -29,6 +30,7 @@ export default function BatchAiReviewDialog({
   const [previewProduct, setPreviewProduct] = useState<any | null>(null)
   const [rebuilding, setRebuilding] = useState(false)
   const [acceptingAll, setAcceptingAll] = useState(false)
+  const [rejectingAll, setRejectingAll] = useState(false)
   const [pending, startTransition] = useTransition()
 
   const loadSuggestions = useCallback(async () => {
@@ -135,10 +137,25 @@ export default function BatchAiReviewDialog({
     }
   }
 
+  const rejectAll = async () => {
+    const pendingCount = items.filter((item) => item.status === 'pending').length
+    if (!pendingCount) return
+    if (!window.confirm(`Отклонить все ожидающие предложения (${pendingCount})? Их изменения не будут применены.`)) return
+    setRejectingAll(true)
+    try {
+      const result = await rejectAllBatchAiSuggestionsAction(batchId)
+      if (!result.success) return alert(result.error)
+      await loadSuggestions()
+      await onReviewed?.()
+    } finally {
+      setRejectingAll(false)
+    }
+  }
+
   return (
     <div className={`fixed inset-0 z-[125] overscroll-contain bg-slate-950/90 p-4 backdrop-blur-sm ${previewProduct ? 'overflow-hidden' : 'overflow-y-auto'}`}>
       <div className="mx-auto max-w-5xl rounded-xl border border-slate-700 bg-slate-900">
-        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2">{items.some((item) => item.status === 'pending') && <button onClick={acceptAll} disabled={acceptingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCheck className={`h-4 w-4 ${acceptingAll ? 'animate-pulse' : ''}`} />{acceptingAll ? 'Принимаем…' : 'Принять всё'}</button>}<button onClick={rebuild} disabled={rebuilding || acceptingAll || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={onClose} disabled={acceptingAll} className="rounded p-2 text-slate-400 hover:bg-slate-800 disabled:opacity-50"><X className="h-5 w-5" /></button></div></header>
+        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2">{items.some((item) => item.status === 'pending') && <><button onClick={acceptAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCheck className={`h-4 w-4 ${acceptingAll ? 'animate-pulse' : ''}`} />{acceptingAll ? 'Принимаем…' : 'Принять всё'}</button><button onClick={rejectAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 disabled:opacity-50"><XCircle className={`h-4 w-4 ${rejectingAll ? 'animate-pulse' : ''}`} />{rejectingAll ? 'Отклоняем…' : 'Отклонить всё'}</button></>}<button onClick={rebuild} disabled={rebuilding || acceptingAll || rejectingAll || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={onClose} disabled={acceptingAll || rejectingAll} className="rounded p-2 text-slate-400 hover:bg-slate-800 disabled:opacity-50"><X className="h-5 w-5" /></button></div></header>
         <div className="space-y-4 p-5">
           {items.map((item) => (
             <article key={item.id} className="rounded-lg border border-slate-700 bg-slate-950 p-4">

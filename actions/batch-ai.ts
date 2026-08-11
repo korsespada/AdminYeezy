@@ -2133,6 +2133,26 @@ export async function reviewBatchAiSuggestionAction(
   }
 }
 
+export async function rejectAllBatchAiSuggestionsAction(batchId: string) {
+  try {
+    await requireAdmin()
+    const result = await scrapingQuery(`
+      UPDATE batch_ai_suggestions AS suggestion
+      SET status='rejected', reviewed_at=NOW()
+      FROM batch_ai_runs AS run
+      WHERE suggestion.run_id=run.id
+        AND run.batch_id=$1
+        AND suggestion.status='pending'
+    `, [batchId])
+    revalidatePath('/admin/batches')
+    revalidatePath(`/admin/batches/${batchId}`)
+    return { success: true, data: { rejectedCount: result.rowCount || 0 } }
+  } catch (error: any) {
+    console.error('Failed to reject all batch AI suggestions', { batchId, error })
+    return { success: false, error: error?.message || 'Не удалось отклонить предложения ИИ' }
+  }
+}
+
 async function reviewBatchAiSuggestion(
   id: string,
   decision: 'approved' | 'rejected',

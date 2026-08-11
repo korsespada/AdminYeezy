@@ -24,6 +24,8 @@ export type BatchAiProcessingOptions = {
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
+  suggestSubcategories?: boolean
+  suggestAttributes?: boolean
 }
 
 export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
@@ -32,6 +34,8 @@ export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
   splitAlbumColors: false,
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
+  suggestSubcategories: false,
+  suggestAttributes: false,
 }
 
 export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProcessingOptions {
@@ -42,6 +46,8 @@ export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProces
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
+    suggestSubcategories: source.suggestSubcategories === true,
+    suggestAttributes: source.suggestAttributes === true,
   }
 }
 
@@ -174,9 +180,9 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
 - model_name — свободное каноничное название конкретной линейки/модели. При низкой уверенности оставь пустым.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
-- Используй существующие коды атрибутов. Новый атрибут вынеси только в attribute_suggestions.
-- Новую подкатегорию вынеси только в subcategory_suggestion; не подменяй ею исходную подкатегорию.
-- Перед предложением новой подкатегории сверь её со всем переданным справочником. Учитывай регистр, дефисы, число слов и близкие формулировки.
+- Используй существующие коды атрибутов. Новый атрибут выноси в attribute_suggestions только если это явно разрешено в пользовательском запросе.
+- Новую подкатегорию выноси в subcategory_suggestion только если это явно разрешено в пользовательском запросе; не подменяй ею исходную подкатегорию.
+- Если предложения разрешены, перед предложением новой подкатегории сверь её со всем переданным справочником. Учитывай регистр, дефисы, число слов и близкие формулировки.
 - Не создавай узкий синоним существующей подкатегории: например, «Сумки с верхней ручкой» и «Сумки с ручкой» считаются одной подкатегорией. Выбирай существующую более общую формулировку.
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
@@ -277,8 +283,12 @@ export function buildBatchAiUserPrompt(input: {
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
-    'attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].',
-    'subcategory_suggestion: {name,parent_category_id,reason,confidence} или null.',
+    processingOptions.suggestAttributes
+      ? 'Если нужен новый код атрибута, вынеси его в attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].'
+      : 'attribute_suggestions всегда возвращай пустым массивом: новые предложения атрибутов для этого поставщика выключены.',
+    processingOptions.suggestSubcategories
+      ? 'Если подходящей существующей подкатегории нет, вынеси новую в subcategory_suggestion: {name,parent_category_id,reason,confidence}; иначе верни null.'
+      : 'subcategory_suggestion всегда возвращай null: новые предложения подкатегорий для этого поставщика выключены.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
       `Определи цветовое семейство по артикулу/коду модели. Пример пользователя: «${processingOptions.articleExample || 'SP001 blue'}». Если в таких артикулах цвет идёт после общей основы (например, SP001 blue и SP001 green), в color_family.group_signature и ai_processing.article_key оставь только общую основу SP001, а цвет запиши отдельно в color. Не объединяй разные модели только из-за похожего артикула.`,
@@ -768,7 +778,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
     if (code && input.attributeCodes.has(code)) {
       if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = resolveDictionaryValue(code, suggestion.value)
-    } else if (!input.knownAttributeCodes?.has(code)) {
+    } else if (processingOptions.suggestAttributes && !input.knownAttributeCodes?.has(code)) {
       suggestions.push({ ...suggestion, code: code || suggestion?.code })
     }
   }
@@ -776,7 +786,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
     if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(resolveDictionaryValue(canonicalCode, value))
     else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = resolveDictionaryValue(canonicalCode, value)
-    else if (!input.knownAttributeCodes?.has(canonicalCode)) {
+    else if (processingOptions.suggestAttributes && !input.knownAttributeCodes?.has(canonicalCode)) {
       suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
     }
   }
@@ -1026,7 +1036,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (!subcategory || isGenericShoeSubcategory(input.subcategoryNames?.get(subcategory))) {
       throw new Error('Для категории «Обувь» требуется конкретная подкатегория вместо общей «Туфли»')
     }
-    if (subcategorySuggestion && !canonicalFromSuggestion) {
+    if (processingOptions.suggestSubcategories && subcategorySuggestion && !canonicalFromSuggestion) {
       throw new Error('Для категории «Обувь» нельзя создавать новую подкатегорию: выберите существующий тип конструкции')
     }
   }
@@ -1089,7 +1099,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       variant_group_name: original.variant_group_name || null,
     },
     suggestions,
-    subcategorySuggestion,
+    subcategorySuggestion: processingOptions.suggestSubcategories ? subcategorySuggestion : null,
     colorFamily: rawColorFamily,
     chromoffCategory,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },

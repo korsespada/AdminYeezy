@@ -16,6 +16,8 @@ type SupplierAiProcessingOptions = {
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
+  suggestSubcategories: boolean
+  suggestAttributes: boolean
 }
 
 const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
@@ -24,6 +26,8 @@ const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   splitAlbumColors: false,
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
+  suggestSubcategories: false,
+  suggestAttributes: false,
 }
 
 interface Supplier {
@@ -839,6 +843,30 @@ export default function SupplierList({
                     <div>
                       <h4 className="text-xs font-bold uppercase tracking-widest text-violet-200">Постоянные настройки AI-обработки</h4>
                       <p className="mt-1 text-[11px] text-slate-500">Применяются автоматически к тесту 10 товаров и к полной обработке всех выгрузок этого поставщика.</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-700/70 bg-slate-900/60 p-3 space-y-3">
+                      <div>
+                        <h5 className="text-xs font-semibold text-slate-200">Предлагать</h5>
+                        <p className="mt-1 text-[11px] text-slate-500">Выключено по умолчанию: AI не создаёт новые предложения, но продолжает выбирать существующие значения.</p>
+                      </div>
+                      <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={editingSupplier?.ai_processing_options?.suggestSubcategories || false}
+                          onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, suggestSubcategories: event.target.checked } })}
+                          className="mt-0.5 h-4 w-4 accent-violet-500"
+                        />
+                        <span><b className="block text-slate-100">Подкатегории</b><small className="text-xs text-slate-500">Разрешить предложения новых подкатегорий для ручного решения.</small></span>
+                      </label>
+                      <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={editingSupplier?.ai_processing_options?.suggestAttributes || false}
+                          onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, suggestAttributes: event.target.checked } })}
+                          className="mt-0.5 h-4 w-4 accent-violet-500"
+                        />
+                        <span><b className="block text-slate-100">Атрибуты</b><small className="text-xs text-slate-500">Разрешить предложения новых кодов и значений атрибутов.</small></span>
+                      </label>
                     </div>
                     <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
                       <input

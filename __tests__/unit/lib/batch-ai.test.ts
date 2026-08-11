@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
@@ -54,6 +54,35 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('SP001 green')
     expect(prompt).toContain('cover_photo_index')
     expect(prompt).toContain('skip_product=true')
+  })
+
+  it('does not create new taxonomy proposals unless the supplier enables them', () => {
+    const output = {
+      product: { category: 'accessories', subcategory: '', catalog_attributes: {} },
+      attribute_suggestions: [{ code: 'strap_type', label: 'Тип ремешка', value: 'Плетёный' }],
+      subcategory_suggestion: { name: 'Новая категория аксессуара', parent_category_id: 'accessories' },
+    }
+    const baseInput = {
+      product: { category: 'accessories', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set<string>(),
+      categoryIds: new Set(['accessories']),
+      categoryNames: new Map([['accessories', 'Аксессуары']]),
+      subcategoryIds: new Set<string>(),
+      subcategoryParents: new Map<string, string>(),
+      subcategoryNames: new Map<string, string>(),
+      attributeCodes: new Set<string>(),
+      knownAttributeCodes: new Set<string>(),
+    }
+    const disabled = normalizeBatchAiOutput(output, baseInput)
+    expect(disabled.suggestions).toEqual([])
+    expect(disabled.subcategorySuggestion).toBeNull()
+
+    const enabled = normalizeBatchAiOutput(output, {
+      ...baseInput,
+      processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, suggestSubcategories: true, suggestAttributes: true },
+    })
+    expect(enabled.suggestions).toHaveLength(1)
+    expect(enabled.subcategorySuggestion?.name).toBe('Новая категория аксессуара')
   })
 
   it('moves only the selected cover photo to the first position', () => {
@@ -173,6 +202,7 @@ describe('batch AI normalization', () => {
       subcategoryIds: new Set(['bags-generic']),
       attributeCodes: new Set(['colors']),
       priceRuleKeys: new Set(['known-rule']),
+      processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, suggestAttributes: true },
     })
 
     expect(result.product.brand).toBe('chanel')

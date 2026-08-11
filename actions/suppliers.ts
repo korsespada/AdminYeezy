@@ -181,6 +181,8 @@ function normalizeSupplierAiProcessingOptions(value: FormDataEntryValue | null) 
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
+    suggestSubcategories: source.suggestSubcategories === true,
+    suggestAttributes: source.suggestAttributes === true,
   }
 }
 
