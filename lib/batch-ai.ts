@@ -784,7 +784,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (cleaned === '' || (Array.isArray(cleaned) && cleaned.length === 0)) delete attributes[code]
     else attributes[code] = cleaned
   }
-  if (input.attributeCodes.has('sizes') && scalarAttribute(attributes.sizes).length === 0) {
+  if (input.attributeCodes.has('sizes')) {
     const explicit = extractExplicitShoeAttributes([
       original.name,
       original.description,
@@ -793,7 +793,12 @@ export function normalizeBatchAiOutput(raw: any, input: {
       proposed.h1,
       proposed.seo_description,
     ].filter(Boolean).join('\n'))
-    if (Array.isArray(explicit.sizes) && explicit.sizes.length > 0) attributes.sizes = explicit.sizes
+    if (Array.isArray(explicit.sizes) && explicit.sizes.length > 0) {
+      // Explicit source sizes are more reliable than an empty, partial or
+      // hallucinated AI attribute. This also recovers Chinese labels such as
+      // 码数：38-46 with notes after the range.
+      attributes.sizes = explicit.sizes
+    }
     if (!attributes.size_system && explicit.size_system && input.attributeCodes.has('size_system')) {
       attributes.size_system = explicit.size_system
     }

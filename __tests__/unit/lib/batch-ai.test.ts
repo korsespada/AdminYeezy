@@ -290,6 +290,28 @@ describe('batch AI normalization', () => {
     expect(result.product.attributes.sizes).toEqual(['38', '39', '40', '41', '42', '43', '44', '45', '46'])
   })
 
+  it('replaces an incomplete AI size attribute with the explicit source range', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'shoes',
+        subcategory: 'sneakers',
+        description: '高帮鞋 码数：38-46（大于44码需补差价）',
+        catalog_attributes: { sizes: ['40'] },
+      },
+    }, {
+      product: { category: 'shoes', subcategory: 'sneakers', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['sneakers']),
+      subcategoryParents: new Map([['sneakers', 'shoes']]),
+      subcategoryNames: new Map([['sneakers', 'Кроссовки и кеды']]),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.attributes.sizes).toEqual(['38', '39', '40', '41', '42', '43', '44', '45', '46'])
+  })
+
   it('normalizes footwear gender from explicit text and safe ranges', () => {
     const result = normalizeBatchAiOutput({
       product: {
