@@ -22,6 +22,9 @@ import {
   buildBatchAiVisualFamilyPrompt,
   matchingPriceRule,
   normalizeBatchAiOutput,
+  normalizeBatchAiProcessingOptions,
+  type BatchAiProcessingOptions,
+  DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
   CHROMOFF_AUTO_SUPPLIER_IDS,
   runBatchAiOpenRouter,
   runBatchAiOpenRouterRefinement,
@@ -743,7 +746,7 @@ export async function refreshAiProviderModelsAction(providerId: string) {
   }
 }
 
-export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
+export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[], processingOptions?: BatchAiProcessingOptions) {
   await requireAdmin()
   const runId = crypto.randomUUID()
   let operationClaimed = false
@@ -822,6 +825,13 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
       `, [batchId])
       if (sample.rows[0]?.settings_snapshot) settings = await hydrateBatchAiSettings(sample.rows[0].settings_snapshot)
     }
+    const normalizedProcessingOptions = normalizeBatchAiProcessingOptions(
+      processingOptions || settings.processingOptions || DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
+    )
+    settings = { ...settings, processingOptions: normalizedProcessingOptions }
+    if (normalizedProcessingOptions.splitAlbumColors && settings.provider === 'cockpit') {
+      return { success: false, error: 'Разделение цветов в точечной настройке доступно через BYESU или OpenRouter' }
+    }
 
     if (needsAiProvider && settings.provider === 'cockpit') {
       const worker = await scrapingQuery(`
@@ -850,6 +860,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         ? 'Ты сравниваешь фотографии товаров и находишь только точные цветовые варианты одной физической модели. Не изменяй товары. Не объединяй по одному бренду или общему названию. Верни строго запрошенный JSON.'
         : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
+      processingOptions: normalizedProcessingOptions,
     }
     if (!['variants', 'media_seo'].includes(mode)) {
       await snapshotBatch(
@@ -969,9 +980,10 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           ? []
           : priceRuleHints(context.priceRules, promptProduct)
         const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
+        const splitAlbumColors = normalizedProcessingOptions.splitAlbumColors && ['sample', 'full'].includes(mode)
         const userPrompt = mode === 'media_seo'
           ? buildBatchMediaSeoPrompt(promptProduct, brandName, generatedSlug)
-          : mode === 'split_colors'
+          : mode === 'split_colors' || splitAlbumColors
           ? buildBatchAiColorSplitPrompt({
               product: promptProduct,
               supplierInstructions,
@@ -982,6 +994,8 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
               priceRules,
               chromoffMode: context.chromoffMode,
               chromoffCategories: context.chromoffCategories,
+              processingOptions: normalizedProcessingOptions,
+              allowSingleVariant: splitAlbumColors,
             })
           : buildBatchAiUserPrompt({
           product: promptProduct,
@@ -995,6 +1009,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           priceRules,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
+          processingOptions: normalizedProcessingOptions,
         })
         await scrapingQuery(`
           INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
@@ -1002,7 +1017,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         `, [crypto.randomUUID(), runId, product.id, product.external_id, JSON.stringify({
           product: promptProduct, userPrompt, systemPrompt: snapshot.systemPrompt,
           variantScanOnly: false,
-          colorSplitOnly: mode === 'split_colors',
+          colorSplitOnly: mode === 'split_colors' || splitAlbumColors,
+          allowSingleVariant: splitAlbumColors,
+          processingOptions: normalizedProcessingOptions,
           mediaSeoOnly: mode === 'media_seo',
           generatedSlug,
           measurementRecoveryOnly: mode === 'recover_measurements',
@@ -1183,14 +1200,19 @@ function batchAiNormalizationOptions(input: any, context: any) {
     priceRuleKeys: new Set<string>((input.priceRules || []).map((row: any) => String(row.rule_key))),
     chromoffMode: input.chromoffMode === true,
     chromoffCategories: Array.isArray(input.chromoffCategories) ? input.chromoffCategories : [],
+    processingOptions: normalizeBatchAiProcessingOptions(input.processingOptions),
   }
 }
 
 function normalizeColorSplitOutput(raw: any, input: any, context: any) {
   const sourcePhotos = Array.isArray(input.product?.photos) ? input.product.photos.map(String) : []
   const variants = Array.isArray(raw?.variants) ? raw.variants : []
-  if (sourcePhotos.length < 2) throw new Error('Для разделения по цветам нужно минимум две фотографии')
-  if (variants.length < 2 || variants.length > 8) throw new Error('ИИ должен вернуть от 2 до 8 цветовых вариантов')
+  const processingOptions = normalizeBatchAiProcessingOptions(input.processingOptions)
+  const skipProduct = processingOptions.skipModelOnlyAlbum && raw?.skip_product === true
+  if (skipProduct) return { familyName: String(raw?.family_name || input.product?.name || 'Цветовые варианты').trim().slice(0, 250), skipProduct: true, variants: [] }
+  if (sourcePhotos.length < (input.allowSingleVariant === true ? 1 : 2)) throw new Error(`Для разделения по цветам нужно минимум ${input.allowSingleVariant === true ? 1 : 2} фотографий`)
+  const minVariants = input.allowSingleVariant === true ? 1 : 2
+  if (variants.length < minVariants || variants.length > 8) throw new Error(`ИИ должен вернуть от ${minVariants} до 8 цветовых вариантов`)
 
   const usedIndexes = new Set<number>()
   const usedColors = new Set<string>()
@@ -1209,11 +1231,18 @@ function normalizeColorSplitOutput(raw: any, input: any, context: any) {
     }
     const photos = indexes.map((index) => sourcePhotos[index - 1])
     const proposedAlts = Array.isArray(variant?.photo_alts) ? variant.photo_alts : []
+    const coverPhotoIndex = processingOptions.reorderFirstPhoto
+      ? indexes.indexOf(Number(variant?.cover_photo_index))
+      : -1
     const normalized = normalizeBatchAiOutput({
       ...variant,
       product: variant.product || {},
       photo_alts: photos.map((_: string, index: number) => String(proposedAlts[index] || '')),
       media: { discard_indexes: [], size_chart_indexes: [] },
+      ai_processing: {
+        ...(variant.ai_processing || {}),
+        cover_photo_index: coverPhotoIndex >= 0 ? coverPhotoIndex + 1 : null,
+      },
     }, {
       ...batchAiNormalizationOptions(input, context),
       product: { ...input.product, photos },
@@ -1228,6 +1257,7 @@ function normalizeColorSplitOutput(raw: any, input: any, context: any) {
 
   return {
     familyName: String(raw?.family_name || normalizedVariants[0]?.normalized?.product?.name || 'Цветовые варианты').trim().slice(0, 250),
+    skipProduct: false,
     variants: normalizedVariants,
   }
 }
@@ -1287,6 +1317,8 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       }
     }
     if (input.mediaSeoOnly) await applyCompletedMediaSeoItem(item, normalized)
+    else if (normalized.skipProduct) await applySkippedProduct(item, normalized, context)
+    else if (input.colorSplitOnly && normalized.variants?.length === 1) await applyCompletedItem(item, normalized.variants[0].normalized, context)
     else if (input.colorSplitOnly) await applyCompletedColorSplit(item, normalized, context)
     else if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
     else await applyCompletedItem(item, normalized, context)
@@ -1511,6 +1543,36 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
     await client.query(`
       UPDATE scraping_batches SET
         items_count=(SELECT COUNT(*)::int FROM products WHERE batch_id=$1),updated_at=NOW()
+      WHERE id=$1
+    `, [context.batch.id])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+async function applySkippedProduct(item: any, normalized: any, context: any) {
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT status FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
+    // The pre-AI snapshot contains the complete source row, so removing this
+    // product keeps the processed version clean while rollback can restore it.
+    await client.query('DELETE FROM products WHERE id=$1 AND batch_id=$2', [item.product_id, context.batch.id])
+    await client.query(`
+      UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,
+        completed_at=NOW(),updated_at=NOW(),product_id=NULL
+      WHERE id=$1
+    `, [item.id, JSON.stringify(normalized)])
+    await client.query(`
+      UPDATE scraping_batches SET items_count=(SELECT COUNT(*)::int FROM products WHERE batch_id=$1),updated_at=NOW()
       WHERE id=$1
     `, [context.batch.id])
     await client.query('COMMIT')

@@ -138,6 +138,8 @@ function catalogAttributes(value) {
       && !normalized.startsWith('hosted_video_')
       && !normalized.startsWith('chromoff_')
       && normalized !== 'video_transfer_error'
+      && normalized !== 'video_url'
+      && normalized !== 'video_poster_url'
       && normalized !== 'source_parent_external_id';
   }));
 }
@@ -1504,7 +1506,14 @@ async function uploadVideoIfNeeded(url, videoKey, posterKey) {
 
 async function cleanupUnusedBatchPhotos(batchId, products) {
   const prefix = `batches/${batchId}/`;
-  const keep = new Set(products.flatMap((product) => normalizePhotos(product.photos).map(ownedS3Key).filter(Boolean)));
+  const keep = new Set(products.flatMap((product) => {
+    const attributes = normalizeAttributes(product.attributes);
+    return [
+      ...normalizePhotos(product.photos),
+      attributes.hosted_video_url,
+      attributes.hosted_video_poster_url,
+    ].map(ownedS3Key).filter(Boolean);
+  }));
   let continuationToken;
   do {
     const listed = await s3Client.send(new ListObjectsV2Command({
@@ -1912,7 +1921,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
     product.photos = photos.filter(Boolean);
     const sourceAttributes = normalizeAttributes(product.attributes);
-    const sourceVideoUrl = String(sourceAttributes.szwego_video_url || '').trim();
+    const sourceVideoUrl = String(sourceAttributes.szwego_video_url || sourceAttributes.video_url || '').trim();
     if (sourceVideoUrl && !hostedVideo(product).url) {
       try {
         const safeVideoExternalId = String(sourceAttributes.source_parent_external_id || safeExternalId)

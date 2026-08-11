@@ -137,6 +137,62 @@ def get_item_date(item, session, album_id, headers):
         if d: return d
     return None
 
+VIDEO_URL_KEYS = {
+    "videoUrl", "videoURL", "video_url", "video", "playUrl", "playURL", "play_url",
+    "src", "url", "source", "downloadUrl", "download_url",
+}
+POSTER_URL_KEYS = {
+    "poster", "posterUrl", "posterURL", "poster_url", "cover", "coverUrl", "cover_url",
+    "coverImage", "cover_image", "thumbnail", "thumb", "firstFrame", "first_frame",
+}
+
+def _normalize_media_url(value):
+    if not isinstance(value, str):
+        return ""
+    url = value.strip()
+    if url.startswith("//"):
+        return "https:" + url
+    return url
+
+def _find_video_url(value):
+    """Szwego has returned videoUrl both at the item root and nested in media objects."""
+    if isinstance(value, dict):
+        for key in VIDEO_URL_KEYS:
+            candidate = _find_video_url(value.get(key))
+            if candidate:
+                return candidate
+        for child in value.values():
+            candidate = _find_video_url(child)
+            if candidate:
+                return candidate
+    elif isinstance(value, list):
+        for child in value:
+            candidate = _find_video_url(child)
+            if candidate:
+                return candidate
+    elif isinstance(value, str):
+        candidate = _normalize_media_url(value)
+        if re.search(r"(?:\.mp4(?:$|[?#])|/pvod/|\.m3u8(?:$|[?#]))", candidate, re.IGNORECASE):
+            return candidate
+    return ""
+
+def _find_video_poster(value):
+    if isinstance(value, dict):
+        for key in POSTER_URL_KEYS:
+            candidate = _normalize_media_url(value.get(key))
+            if candidate and re.search(r"\.(?:jpe?g|png|webp)(?:$|[?#])", candidate, re.IGNORECASE):
+                return candidate
+        for child in value.values():
+            candidate = _find_video_poster(child)
+            if candidate:
+                return candidate
+    elif isinstance(value, list):
+        for child in value:
+            candidate = _find_video_poster(child)
+            if candidate:
+                return candidate
+    return ""
+
 def main():
     parser = argparse.ArgumentParser(description="Szwego Parser")
     parser.add_argument("--album_id", required=True, help="Album ID")
@@ -312,14 +368,20 @@ def main():
 
                 imgs_src = item.get("imgsSrc", []) or item.get("imgs", []) or []
                 photos = [u.strip() for u in imgs_src if u and u.strip()]
-                video_url = item.get("videoUrl", "") or item.get("videoURL", "") or ""
+                video_url = _find_video_url(item)
+                video_poster_url = _find_video_poster(item)
 
                 # Szwego может вернуть обычные фотографии и videoUrl в одной
                 # публикации. Сохраняем изображения, а само видео передаём
                 # отдельно в технических атрибутах.
-                photos = [photo for photo in photos if ".mp4" not in photo.lower()]
+                photos = [
+                    photo for photo in photos
+                    if photo != video_url and not re.search(r"(?:\.mp4(?:$|[?#])|/pvod/)", photo, re.IGNORECASE)
+                ]
 
-                if args.parse_mode == "images" and len(photos) < args.min_photos:
+                # Видео само по себе является товарным медиа: не отбрасываем
+                # альбом с видео только потому, что в нем меньше обычных фото.
+                if args.parse_mode == "images" and len(photos) < args.min_photos and not video_url:
                     skip_reasons["few_photos"] = skip_reasons.get("few_photos", 0) + 1
                     continue
 
@@ -345,6 +407,8 @@ def main():
                 }
                 if video_url:
                     attributes["szwego_video_url"] = video_url
+                if video_poster_url:
+                    attributes["szwego_video_poster_url"] = video_poster_url
                 attributes = {key: value for key, value in attributes.items() if value not in (None, "")}
 
                 row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False), attributes, item_date.isoformat() if item_date else None]

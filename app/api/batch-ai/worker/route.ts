@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
@@ -137,6 +137,7 @@ async function complete(body: any) {
     knownAttributeCodes: new Set((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
     priceRuleKeys: new Set(priceRules.map((row: any) => String(row.rule_key))),
+    processingOptions: normalizeBatchAiProcessingOptions(input.processingOptions),
   })
   const product = normalized.product
   if (!input.mediaSeoOnly && !input.variantScanOnly && !String(input.product?.slug || '').trim()) {
@@ -169,7 +170,14 @@ async function complete(body: any) {
       await client.query('ROLLBACK')
       return NextResponse.json({ error: 'run_cancelled' }, { status: 409 })
     }
-    if (input.mediaSeoOnly) {
+    if (normalized.skipProduct) {
+      await client.query('DELETE FROM products WHERE id=$1 AND batch_id=$2', [item.product_id, item.batch_id])
+      await client.query(`
+        UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
+          completed_at=NOW(),updated_at=NOW(),product_id=NULL WHERE id=$1 AND lease_token=$2
+      `, [item.id, body.lease_token, JSON.stringify(normalized)])
+      await client.query('UPDATE scraping_batches SET items_count=(SELECT COUNT(*)::int FROM products WHERE batch_id=$1),updated_at=NOW() WHERE id=$1', [item.batch_id])
+    } else if (input.mediaSeoOnly) {
       await client.query(`
         UPDATE products SET slug=$2,photo_alts=$3::jsonb,updated_at=NOW()
         WHERE id=$1
@@ -200,7 +208,7 @@ async function complete(body: any) {
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,
         completed_at=NOW(),updated_at=NOW() WHERE id=$1 AND lease_token=$2
     `, [item.id, body.lease_token, JSON.stringify(normalized)])
-    if (input.mediaSeoOnly || measurementRecoveryOnly) {
+    if (normalized.skipProduct || input.mediaSeoOnly || measurementRecoveryOnly) {
       // В режиме восстановления меняется только таблица замеров товара.
     } else if (Array.isArray(normalized.shadeVariants)) {
       await applyShadeVariantsToSuggestion(client, item.run_id, normalized)

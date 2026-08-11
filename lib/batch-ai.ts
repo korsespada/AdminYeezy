@@ -16,6 +16,33 @@ import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
+export type BatchAiProcessingOptions = {
+  colorFamilyByArticle: boolean
+  articleExample: string
+  splitAlbumColors: boolean
+  reorderFirstPhoto: boolean
+  skipModelOnlyAlbum: boolean
+}
+
+export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
+  colorFamilyByArticle: false,
+  articleExample: '',
+  splitAlbumColors: false,
+  reorderFirstPhoto: false,
+  skipModelOnlyAlbum: false,
+}
+
+export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProcessingOptions {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    colorFamilyByArticle: source.colorFamilyByArticle === true,
+    articleExample: String(source.articleExample || '').trim().slice(0, 500),
+    splitAlbumColors: source.splitAlbumColors === true,
+    reorderFirstPhoto: source.reorderFirstPhoto === true,
+    skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
+  }
+}
+
 export type BatchAiSettings = {
   provider: BatchAiProvider
   providerId?: string
@@ -29,6 +56,7 @@ export type BatchAiSettings = {
   maxTokens: number
   concurrency: number
   systemPrompt: string
+  processingOptions?: BatchAiProcessingOptions
 }
 
 export type BatchAiLookup = { id: string; name: string; parent_id?: string | null }
@@ -154,8 +182,9 @@ export function buildBatchAiUserPrompt(input: {
   priceRules?: BatchAiPriceRuleHint[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
+  processingOptions?: BatchAiProcessingOptions
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [] } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
     || (categories.length === 1 ? categories[0] : null)
   const categoryRule = batchAiCategoryRuleFor(selectedCategory?.name)
@@ -187,6 +216,11 @@ export function buildBatchAiUserPrompt(input: {
       subcategory_suggestion: null,
       attribute_suggestions: [],
       color_family: null,
+      ai_processing: {
+        skip_product: false,
+        cover_photo_index: null,
+        article_key: '',
+      },
     }),
     'Индексы фотографий начинаются с 1 и подписаны на contact sheet.',
     'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, логотипа, таблицы замеров или конфликта между исходным текстом и фотографиями.',
@@ -211,6 +245,15 @@ export function buildBatchAiUserPrompt(input: {
     'attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].',
     'subcategory_suggestion: {name,parent_category_id,reason,confidence} или null.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
+    ...(processingOptions.colorFamilyByArticle ? [
+      `Определи цветовое семейство по артикулу/коду модели. Пример пользователя: «${processingOptions.articleExample || 'SP001 blue'}». Если в таких артикулах цвет идёт после общей основы (например, SP001 blue и SP001 green), в color_family.group_signature и ai_processing.article_key оставь только общую основу SP001, а цвет запиши отдельно в color. Не объединяй разные модели только из-за похожего артикула.`,
+    ] : []),
+    ...(processingOptions.reorderFirstPhoto ? [
+      'Подбери лучший продающий кадр и верни его исходный номер в ai_processing.cover_photo_index. Разрешено менять только первое фото, остальные оставь в исходном порядке.',
+    ] : []),
+    ...(processingOptions.skipModelOnlyAlbum ? [
+      'Если весь альбом состоит только из фотографий моделей/людей и на них нельзя уверенно оценить сам товар, верни ai_processing.skip_product=true. Это исключит весь товар из текущей версии, а не отдельные фотографии. Если товар показан хотя бы на одном информативном кадре, skip_product=false.',
+    ] : []),
   ].join('\n\n')
 }
 
@@ -278,18 +321,30 @@ export function buildBatchAiColorSplitPrompt(input: {
   priceRules?: BatchAiPriceRuleHint[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
+  processingOptions?: BatchAiProcessingOptions
+  allowSingleVariant?: boolean
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [] } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS, allowSingleVariant = false } = input
   return [
     'Один исходный альбом содержит несколько отдельно продаваемых цветовых вариантов одной физической модели.',
     'За один ответ раздели фотографии по цветам и полностью обработай каждый получившийся товар. Второго AI-прохода не будет.',
     'Не разделяй один многоцветный дизайн. Создай варианты только когда на фотографиях показаны отдельные экземпляры одной модели разных цветов.',
     'Каждый номер фотографии разрешено включить максимум в один вариант. Общие кадры, где одновременно показаны разные цвета, рекламные кадры и таблицы не включай ни в один вариант.',
-    'Нужно вернуть от 2 до 8 вариантов. Для каждого варианта обязательно укажи непустой уникальный color_key на русском и минимум одну фотографию.',
+    `Нужно вернуть от ${allowSingleVariant ? '1' : '2'} до 8 вариантов. Для каждого варианта обязательно укажи непустой уникальный color_key на русском и минимум одну фотографию.${allowSingleVariant ? ' Если отдельные цвета не найдены, верни один обычный вариант со всеми информативными фотографиями.' : ''}`,
+    ...(processingOptions.skipModelOnlyAlbum ? [
+      'Если весь альбом состоит только из фотографий моделей/людей и сам товар не имеет товарной ценности, верни skip_product=true и пустой variants. Если товар есть хотя бы на одном информативном кадре, skip_product=false.',
+    ] : []),
+    ...(processingOptions.reorderFirstPhoto ? [
+      'Для каждого варианта укажи cover_photo_index — исходный номер лучшего продающего кадра из его photo_indexes. Разрешено менять только первое фото варианта.',
+    ] : []),
+    ...(processingOptions.colorFamilyByArticle ? [
+      `При определении общей семьи используй пример артикула «${processingOptions.articleExample || 'SP001 blue'}»: SP001 blue и SP001 green имеют общую основу SP001, цвет не включай в family_name/group_signature.`,
+    ] : []),
     'Каждый product должен быть полностью готов как после обычной AI-обработки: название, описание, SEO, классификация, пол, атрибуты, ценовое правило и confidence.',
     'Верни строго JSON без markdown следующей формы:',
     JSON.stringify({
       family_name: '',
+      skip_product: false,
       variants: [{
         color_key: '',
         photo_indexes: [],
@@ -300,6 +355,7 @@ export function buildBatchAiColorSplitPrompt(input: {
         },
         chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
         photo_alts: [],
+        cover_photo_index: null,
         media: { discard_indexes: [], size_chart_indexes: [] },
         subcategory_suggestion: null,
         attribute_suggestions: [],
@@ -569,7 +625,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
   priceRuleKeys?: Set<string>
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
+  processingOptions?: BatchAiProcessingOptions
 }) {
+  const processingOptions = normalizeBatchAiProcessingOptions(input.processingOptions)
   const proposed = raw?.product || {}
   const original = input.product
   const choose = (value: unknown, allowed: Set<string>, fallback: unknown) => {
@@ -581,7 +639,16 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const attributes: Record<string, unknown> = {}
   for (const [code, value] of Object.entries(original.attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
-    if (input.attributeCodes.has(canonicalCode) || canonicalCode.startsWith('chromoff_')) attributes[canonicalCode] = value
+    if (
+      input.attributeCodes.has(canonicalCode)
+      || canonicalCode.startsWith('chromoff_')
+      || canonicalCode.startsWith('szwego_')
+      || canonicalCode.startsWith('hosted_video_')
+      || canonicalCode === 'video_transfer_error'
+      || canonicalCode === 'video_url'
+      || canonicalCode === 'video_poster_url'
+      || canonicalCode === 'source_parent_external_id'
+    ) attributes[canonicalCode] = value
   }
   const suggestions: any[] = []
   const dictionaryByCode = new Map<string, Map<string, string>>()
@@ -711,16 +778,29 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
   const sizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
-  const photos = Array.isArray(original.photos)
-    ? original.photos.filter((_: string, index: number) => !discard.has(index + 1) && !sizeCharts.has(index + 1))
-    : []
-  const photoAlts = normalizeRetainedPhotoAlts(
+  const originalPhotos = Array.isArray(original.photos) ? original.photos : []
+  const retainedIndexes = originalPhotos
+    .map((_: string, index: number) => index + 1)
+    .filter((index: number) => !discard.has(index) && !sizeCharts.has(index))
+  let photos = retainedIndexes.map((index: number) => originalPhotos[index - 1])
+  let photoAlts = normalizeRetainedPhotoAlts(
     raw?.photo_alts || proposed.photo_alts,
-    Array.isArray(original.photos) ? original.photos.length : 0,
+    originalPhotos.length,
     discard,
     sizeCharts,
     String(proposed.name || original.name || '').trim(),
   )
+  const rawProcessing = raw?.ai_processing && typeof raw.ai_processing === 'object' ? raw.ai_processing : {}
+  const requestedCoverIndex = Number(rawProcessing.cover_photo_index)
+  const coverPosition = processingOptions.reorderFirstPhoto
+    ? retainedIndexes.indexOf(requestedCoverIndex)
+    : -1
+  if (coverPosition > 0) {
+    const [coverPhoto] = photos.splice(coverPosition, 1)
+    photos.unshift(coverPhoto)
+    const [coverAlt] = photoAlts.splice(coverPosition, 1)
+    photoAlts.unshift(coverAlt)
+  }
   let subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
   const proposedCategory = choose(proposed.category, input.categoryIds, original.category)
   const parentCategory = subcategory ? input.subcategoryParents?.get(subcategory) : undefined
@@ -871,6 +951,13 @@ export function normalizeBatchAiOutput(raw: any, input: {
     ? rawConfidence / 100
     : rawConfidence
 
+  const rawColorFamily = raw?.color_family && typeof raw.color_family === 'object'
+    ? { ...raw.color_family }
+    : null
+  const articleKey = String(rawProcessing.article_key || '').trim().slice(0, 250)
+  if (processingOptions.colorFamilyByArticle && rawColorFamily && articleKey) {
+    rawColorFamily.group_signature = articleKey
+  }
   return {
     product: {
       ...original,
@@ -899,9 +986,11 @@ export function normalizeBatchAiOutput(raw: any, input: {
     },
     suggestions,
     subcategorySuggestion,
-    colorFamily: raw?.color_family || null,
+    colorFamily: rawColorFamily,
     chromoffCategory,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },
+    skipProduct: processingOptions.skipModelOnlyAlbum && rawProcessing.skip_product === true,
+    coverPhotoIndex: coverPosition >= 0 ? requestedCoverIndex : null,
   }
 }
 

@@ -33,6 +33,57 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('catalog_attributes')
   })
 
+  it('includes the selected targeted processing rules in the AI prompt', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { external_id: 'SP001-blue', photos: ['1.jpg', '2.jpg'] },
+      brands: [], categories: [], subcategories: [], attributes: [],
+      processingOptions: {
+        colorFamilyByArticle: true,
+        articleExample: 'SP001 blue',
+        splitAlbumColors: false,
+        reorderFirstPhoto: true,
+        skipModelOnlyAlbum: true,
+      },
+    })
+    expect(prompt).toContain('SP001 blue')
+    expect(prompt).toContain('SP001 green')
+    expect(prompt).toContain('cover_photo_index')
+    expect(prompt).toContain('skip_product=true')
+  })
+
+  it('moves only the selected cover photo to the first position', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Товар' },
+      photo_alts: ['Первый', 'Второй', 'Третий'],
+      ai_processing: { cover_photo_index: 3 },
+    }, {
+      product: { name: '', photos: ['1.jpg', '2.jpg', '3.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+      processingOptions: {
+        colorFamilyByArticle: false, articleExample: '', splitAlbumColors: false,
+        reorderFirstPhoto: true, skipModelOnlyAlbum: false,
+      },
+    })
+    expect(result.product.photos).toEqual(['3.jpg', '1.jpg', '2.jpg'])
+    expect(result.product.photo_alts).toEqual(['Третий', 'Первый', 'Второй'])
+    expect(result.coverPhotoIndex).toBe(3)
+  })
+
+  it('marks a model-only album for whole-product exclusion', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Товар' },
+      ai_processing: { skip_product: true },
+    }, {
+      product: { name: '', photos: ['1.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+      processingOptions: {
+        colorFamilyByArticle: false, articleExample: '', splitAlbumColors: false,
+        reorderFirstPhoto: false, skipModelOnlyAlbum: true,
+      },
+    })
+    expect(result.skipProduct).toBe(true)
+  })
+
   it('uses the Chromoff taxonomy for approved suppliers without changing the common taxonomy', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { external_id: 'ch-1', category: '', subcategory: '' },

@@ -122,6 +122,23 @@ function chromoffCategoryForDisplay(product: CsvProduct) {
   }
 }
 
+function productVideoForDisplay(product: CsvProduct) {
+  const attributes = product.attributes || {};
+  const url = String(
+    attributes.hosted_video_url
+      || attributes.szwego_video_url
+      || (attributes as any).video_url
+      || "",
+  ).trim();
+  const posterUrl = String(
+    attributes.hosted_video_poster_url
+      || attributes.szwego_video_poster_url
+      || (attributes as any).video_poster_url
+      || "",
+  ).trim();
+  return { url, posterUrl };
+}
+
 function approvedVariantGroupKey(product: CsvProduct) {
   const key = String(product.variant_group_key || "").trim();
   return /^[0-9a-f]{32}$/i.test(key) ? key : "";
@@ -3011,6 +3028,7 @@ function CsvProductRow({
   const categoryName = lookups ? resolveName(product.category, lookups.categories) : product.category;
   const subcategoryName = lookups ? resolveName(product.subcategory, lookups.subcategories) : product.subcategory;
   const chromoffCategory = chromoffCategoryForDisplay(product);
+  const video = productVideoForDisplay(product);
 
   return (
     <div
@@ -3059,6 +3077,7 @@ function CsvProductRow({
         ) : (
           <div className="flex h-full items-center justify-center text-[9px] uppercase text-slate-600">Нет</div>
         )}
+        {video.url && <span className="absolute -right-1 -top-1 rounded bg-cyan-700 px-1 text-[8px] font-bold text-white">▶</span>}
       </div>
 
       <div>
@@ -3160,6 +3179,7 @@ function CsvProductCard({
     ? resolveName(product.subcategory, lookups.subcategories)
     : product.subcategory;
   const chromoffCategory = chromoffCategoryForDisplay(product);
+  const video = productVideoForDisplay(product);
 
   const startEdit = (field: "name" | "price", e: React.MouseEvent) => {
     e.stopPropagation();
@@ -3236,6 +3256,7 @@ function CsvProductCard({
         <span className="absolute bottom-3 left-3 px-2 py-1 text-xs font-mono bg-slate-900/80 backdrop-blur-sm rounded-md text-slate-300 z-10">
           #{index + 1}
         </span>
+        {video.url && <span className="absolute top-3 left-3 rounded-md border border-cyan-300/30 bg-cyan-950/80 px-2 py-1 text-[10px] font-semibold text-cyan-200 z-10">Видео</span>}
 
         {/* Photo Count Tag & Quick Actions */}
         <div className="absolute bottom-3 right-3 flex items-center gap-1.5 z-10">
@@ -3414,6 +3435,7 @@ function CsvProductDrawer({
   };
 
   const attributes = local.attributes || {};
+  const video = productVideoForDisplay(local);
   const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
   const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
   const isShoe = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "обувь";
@@ -3553,6 +3575,26 @@ function CsvProductDrawer({
                 onRemove={removePhoto}
               />
             </section>
+
+            {video.url && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Видео товара</h3>
+                  <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">
+                    {video.url === String(attributes.hosted_video_url || '').trim() ? 'S3' : 'Источник'}
+                  </span>
+                </div>
+                <video
+                  className="max-h-[420px] w-full rounded-xl border border-slate-700 bg-black object-contain"
+                  src={video.url}
+                  poster={video.posterUrl || undefined}
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+                <p className="break-all text-[10px] text-slate-600">{video.url}</p>
+              </section>
+            )}
 
             <section className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
