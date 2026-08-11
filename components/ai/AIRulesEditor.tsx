@@ -7,7 +7,7 @@ import { createAiProviderAction, deleteAiProviderAction, refreshAiProviderModels
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
 import type { ByesuModelOption } from '@/lib/byesu'
-import type { AiProviderKind, AiProviderRecord } from '@/lib/ai-providers'
+import type { AiProviderRecord } from '@/lib/ai-providers'
 
 type WorkerState = {
   available?: boolean
@@ -51,7 +51,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [providers, setProviders] = useState<AiProviderRecord[]>(initialSettings.providers || [])
   const [showProviderForm, setShowProviderForm] = useState(false)
   const [providerForm, setProviderForm] = useState({
-    name: '', kind: 'openrouter' as AiProviderKind, baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '',
+    name: '', baseUrl: '', apiKey: '', model: '',
   })
   const worker = initialSettings.cockpitWorker
   const credentials = initialSettings.credentials
@@ -90,7 +90,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     const provider = result.data as AiProviderRecord
     setProviders((current) => [provider, ...current])
     selectSavedProvider(provider)
-    setProviderForm({ name: '', kind: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: '' })
+    setProviderForm({ name: '', baseUrl: '', apiKey: '', model: '' })
     setShowProviderForm(false)
     setMessage({ type: 'success', text: `Провайдер «${provider.name}» добавлен. Нажмите «Сохранить настройки».` })
   })
@@ -203,7 +203,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
                     <div className="flex items-start justify-between gap-3">
                       <button type="button" onClick={() => selectSavedProvider(provider)} className="min-w-0 text-left">
                         <div className="truncate font-semibold text-white">{provider.name}</div>
-                        <div className="mt-1 truncate font-mono text-xs text-slate-500">{provider.kind} · {provider.baseUrl}</div>
+                        <div className="mt-1 truncate font-mono text-xs text-slate-500">{provider.baseUrl}</div>
                         <div className="mt-2 text-xs text-emerald-300">API-ключ сохранён · {provider.models.length ? `${provider.models.length} моделей` : 'модели не загружены'}</div>
                       </button>
                       <div className="flex shrink-0 items-center gap-1">
@@ -346,15 +346,14 @@ export default function AIRulesEditor({ initialSettings }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onMouseDown={() => setShowProviderForm(false)}>
           <div className="w-full max-w-xl rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-3">
-              <div><h2 className="text-xl font-bold text-white">Добавить AI-провайдера</h2><p className="mt-1 text-sm text-slate-400">Можно указать OpenRouter или BYESU совместимый endpoint.</p></div>
+              <div><h2 className="text-xl font-bold text-white">Добавить AI-провайдера</h2><p className="mt-1 text-sm text-slate-400">Любой OpenAI-compatible endpoint: OpenRouter, BYESU или другой совместимый сервис.</p></div>
               <button type="button" onClick={() => setShowProviderForm(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
             </div>
             <div className="mt-5 grid gap-4">
               <label className="space-y-2 text-sm text-slate-300"><span>Название</span><input value={providerForm.name} onChange={(event) => setProviderForm((current) => ({ ...current, name: event.target.value }))} placeholder="Мой OpenRouter" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500" /></label>
-              <label className="space-y-2 text-sm text-slate-300"><span>Тип</span><select value={providerForm.kind} onChange={(event) => setProviderForm((current) => ({ ...current, kind: event.target.value as AiProviderKind, baseUrl: event.target.value === 'byesu' ? 'https://byesu.com/v1' : 'https://openrouter.ai/api/v1' }))} className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"><option value="openrouter">OpenRouter</option><option value="byesu">BYESU</option></select></label>
-              <label className="space-y-2 text-sm text-slate-300"><span>Base URL</span><input value={providerForm.baseUrl} onChange={(event) => setProviderForm((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://openrouter.ai/api/v1" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Указывайте адрес до `/chat/completions`, обычно с `/v1` на конце.</span></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>Base URL</span><input value={providerForm.baseUrl} onChange={(event) => setProviderForm((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://provider.example.com/v1" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Указывайте адрес до `/chat/completions`, обычно с `/v1` на конце.</span></label>
               <label className="space-y-2 text-sm text-slate-300"><span>API-ключ</span><input type="password" value={providerForm.apiKey} onChange={(event) => setProviderForm((current) => ({ ...current, apiKey: event.target.value }))} autoComplete="new-password" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /></label>
-              <label className="space-y-2 text-sm text-slate-300"><span>Модель</span><input value={providerForm.model} onChange={(event) => setProviderForm((current) => ({ ...current, model: event.target.value }))} placeholder="google/gemini-2.5-flash" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">При добавлении система попробует автоматически получить список моделей. Если endpoint это поддерживает, список будет доступен для обновления.</span></label>
+              <label className="space-y-2 text-sm text-slate-300"><span>Модель <span className="font-normal text-slate-500">(необязательно)</span></span><input value={providerForm.model} onChange={(event) => setProviderForm((current) => ({ ...current, model: event.target.value }))} placeholder="Оставьте пустым, если endpoint предоставляет /models" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500" /><span className="block text-xs text-slate-500">Если endpoint поддерживает `/models`, система выберет первую модель автоматически. Иначе укажите модель вручную.</span></label>
             </div>
             <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setShowProviderForm(false)} className="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Отмена</button><button type="button" onClick={addProvider} disabled={pending} className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">{pending ? 'Добавляем…' : 'Добавить провайдера'}</button></div>
           </div>

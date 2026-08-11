@@ -691,8 +691,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
 
 export async function createAiProviderAction(input: {
   name: string
-  kind: AiProviderKind
-  baseUrl?: string
+  baseUrl: string
   apiKey: string
   model: string
 }) {
@@ -701,10 +700,13 @@ export async function createAiProviderAction(input: {
   const apiKey = String(input.apiKey || '').trim()
   const requestedModel = String(input.model || '').trim().slice(0, 200)
   if (!name) return { success: false, error: 'Укажите название провайдера' }
+  if (!String(input.baseUrl || '').trim()) return { success: false, error: 'Укажите Base URL' }
   if (!apiKey) return { success: false, error: 'Укажите API-ключ' }
-  if (!['openrouter', 'byesu'].includes(input.kind)) return { success: false, error: 'Неподдерживаемый тип провайдера' }
   try {
-    const baseUrl = normalizeProviderBaseUrl(input.baseUrl, input.kind)
+    // All saved external providers use the same OpenAI-compatible transport.
+    // The legacy kind column remains for existing records and internal routing.
+    const kind: AiProviderKind = 'openrouter'
+    const baseUrl = normalizeProviderBaseUrl(input.baseUrl)
     const models = await fetchProviderModels(baseUrl, apiKey).catch(() => [])
     const model = requestedModel || models[0]?.value || ''
     if (!model) return { success: false, error: 'Укажите модель или используйте endpoint, который возвращает /models' }
@@ -713,7 +715,7 @@ export async function createAiProviderAction(input: {
       INSERT INTO ai_providers(id,name,kind,base_url,api_key_ciphertext,model,models,updated_at)
       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
       RETURNING id,name,kind,base_url,model,models,created_at,updated_at
-    `, [crypto.randomUUID(), name, input.kind, baseUrl, encrypted, model, JSON.stringify(models)])
+    `, [crypto.randomUUID(), name, kind, baseUrl, encrypted, model, JSON.stringify(models)])
     const row = result.rows[0]
     return {
       success: true,

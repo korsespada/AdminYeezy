@@ -8,6 +8,7 @@ describe('batch AI normalization', () => {
     process.env.AI_PROVIDER_ENCRYPTION_KEY = 'unit-test-key'
     try {
       expect(normalizeProviderBaseUrl('https://openrouter.ai/api/v1/chat/completions', 'openrouter')).toBe('https://openrouter.ai/api/v1')
+      expect(normalizeProviderBaseUrl('https://provider.example.com/v1/models')).toBe('https://provider.example.com/v1')
       expect(providerChatUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/chat/completions')
       expect(providerModelsUrl('https://byesu.com/v1')).toBe('https://byesu.com/v1/models')
       const encrypted = encryptProviderApiKey('secret-key')

@@ -44,8 +44,8 @@ export function defaultProviderBaseUrl(kind: AiProviderKind) {
   return kind === 'byesu' ? 'https://byesu.com/v1' : 'https://openrouter.ai/api/v1'
 }
 
-export function normalizeProviderBaseUrl(value: unknown, kind: AiProviderKind) {
-  const raw = String(value || '').trim() || defaultProviderBaseUrl(kind)
+export function normalizeProviderBaseUrl(value: unknown, kind?: AiProviderKind) {
+  const raw = String(value || '').trim() || (kind ? defaultProviderBaseUrl(kind) : '')
   let parsed: URL
   try {
     parsed = new URL(raw)
