@@ -135,6 +135,7 @@ interface TagRow {
   type: 'tag' | 'group'
   label: string
   value: string
+  enabled: boolean
 }
 
 type CatalogLookup = {
@@ -233,15 +234,24 @@ export default function SupplierList({
     return tagsStr.split('\n')
       .map(line => line.trim())
       .filter(line => line.includes('=') && line.includes(':'))
-      .map(line => {
-        const [typePart, rest] = line.split(':')
-        const [label, value] = rest.split('=')
+      .map((line) => {
+        const [rawLine, state] = line.split('|', 2)
+        const colonIndex = rawLine.indexOf(':')
+        const equalsIndex = rawLine.indexOf('=', colonIndex + 1)
+        if (colonIndex < 1 || equalsIndex < colonIndex + 2) return null
+        const rawType = rawLine.slice(0, colonIndex).trim()
+        if (rawType !== 'tag' && rawType !== 'group') return null
+        const type: TagRow['type'] = rawType
         return {
-          type: typePart.trim() as 'tag' | 'group',
-          label: label.trim(),
-          value: value.trim()
+          type,
+          label: rawLine.slice(colonIndex + 1, equalsIndex).trim(),
+          value: rawLine.slice(equalsIndex + 1).trim(),
+          // Older rows had no selection state and previously never changed the
+          // default parser scope. Keep them disabled until the operator opts in.
+          enabled: state === 'enabled',
         }
       })
+      .filter((tag): tag is TagRow => Boolean(tag?.label && tag.value))
   }
 
   const handleOpenModal = (supplier: Supplier | null = null) => {
@@ -299,18 +309,23 @@ export default function SupplierList({
   }, [searchParams, normalizedInitialData])
 
   const handleAddTagRow = () => {
-    setModalTags([...modalTags, { type: 'tag', label: '', value: '' }])
+    setModalTags([...modalTags, { type: 'tag', label: '', value: '', enabled: true }])
   }
 
   const handleRemoveTagRow = (index: number) => {
     setModalTags(modalTags.filter((_, i) => i !== index))
   }
 
-  const handleTagChange = (index: number, key: keyof TagRow, val: string) => {
-    const newTags = [...modalTags]
-    // @ts-ignore
-    newTags[index][key] = val
-    setModalTags(newTags)
+  const handleTagChange = (index: number, key: 'type' | 'label' | 'value', val: string) => {
+    setModalTags(modalTags.map((tag, tagIndex) => {
+      if (tagIndex !== index) return tag
+      if (key === 'type') return { ...tag, type: val as TagRow['type'] }
+      return { ...tag, [key]: val }
+    }))
+  }
+
+  const handleTagEnabledChange = (index: number, enabled: boolean) => {
+    setModalTags(modalTags.map((tag, tagIndex) => tagIndex === index ? { ...tag, enabled } : tag))
   }
 
   const handleDiscoverSzwegoTags = async () => {
@@ -326,11 +341,11 @@ export default function SupplierList({
       return
     }
 
-    const discovered = Array.isArray(res.data) ? res.data as TagRow[] : []
+    const discovered = Array.isArray(res.data) ? res.data as Array<Omit<TagRow, 'enabled'>> : []
     const existing = new Map(modalTags.map((tag) => [`${tag.type}:${tag.value}`, tag]))
     for (const tag of discovered) {
       const key = `${tag.type}:${tag.value}`
-      if (!existing.has(key)) existing.set(key, tag)
+      if (!existing.has(key)) existing.set(key, { ...tag, enabled: false })
     }
     setModalTags([...existing.values()])
     alert(discovered.length ? `Найдено ${discovered.length} тегов и групп. Проверьте список и сохраните настройки.` : 'Szwego не вернул тегов или групп для этого альбома.')
@@ -340,10 +355,11 @@ export default function SupplierList({
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
 
-    // Join tags back into string with format type:label=value
+    // New rows keep an explicit state. Legacy rows without it are treated as
+    // disabled so a discovered category never widens the default parse scope.
     const tagsStr = modalTags
       .filter(t => t.label.trim() && t.value.trim())
-      .map(t => `${t.type}:${t.label.trim()}=${t.value.trim()}`)
+      .map(t => `${t.type}:${t.label.trim()}=${t.value.trim()}|${t.enabled ? 'enabled' : 'disabled'}`)
       .join('\n')
 
     formData.set('brand_tags', tagsStr)
@@ -408,6 +424,13 @@ export default function SupplierList({
 
   const handleStartScrape = async () => {
     if (!selectedSupplierId) return
+
+    const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
+    const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
+    if (configuredTags.length > 0 && !overrideValue) {
+      alert('Выберите включённый альбом или категорию для выгрузки.')
+      return
+    }
 
     let tag: string | undefined = undefined
     let group: string | undefined = undefined
@@ -1008,7 +1031,7 @@ export default function SupplierList({
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Тэги групп и подгрупп</h4>
-                      <p className="text-[10px] text-slate-500 mt-1">Если выбрано в списке при запуске, основные ID (ниже) будут проигнорированы.</p>
+                      <p className="text-[10px] text-slate-500 mt-1">Отметьте только те категории или альбомы, которые можно выбрать для выгрузки.</p>
                     </div>
                     <button type="button" onClick={handleAddTagRow} className="flex items-center gap-1.5 text-sm text-emerald-500 hover:text-emerald-400 transition-colors py-1 px-2 hover:bg-emerald-500/10 rounded-lg">
                       <PlusCircle size={16} />
@@ -1016,7 +1039,7 @@ export default function SupplierList({
                     </button>
                   </div>
                   <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
-                    <p className="text-xs text-slate-400">Получить названия и ID из API Szwego. Браузерная ссылка альбома для этого не нужна.</p>
+                    <p className="text-xs text-slate-400">Получить дерево «Категория → альбомы» из API Szwego. Это один запрос, до 15 секунд.</p>
                     <button
                       type="button"
                       onClick={handleDiscoverSzwegoTags}
@@ -1030,6 +1053,15 @@ export default function SupplierList({
                   <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
                     {modalTags.map((tag, idx) => (
                       <div key={idx} className="flex gap-2 items-center group/row">
+                        <label className="flex h-9 w-7 shrink-0 cursor-pointer items-center justify-center" title={tag.enabled ? 'Включено для выгрузки' : 'Исключено из выгрузки'}>
+                          <input
+                            type="checkbox"
+                            checked={tag.enabled}
+                            onChange={(event) => handleTagEnabledChange(idx, event.target.checked)}
+                            aria-label={`Включить ${tag.label || 'тег'} для выгрузки`}
+                            className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-emerald-500"
+                          />
+                        </label>
                         <div className="w-32">
                           <select
                             value={tag.type}
@@ -1089,23 +1121,28 @@ export default function SupplierList({
 
               <div className="space-y-4">
                 {/* Unified Selector */}
-                {selectedSupplierId && suppliers.find(s => s.id === selectedSupplierId)?.brand_tags && (
+                {selectedSupplierId && (() => {
+                  const configuredTags = parseBrandTags(suppliers.find(s => s.id === selectedSupplierId)?.brand_tags || '')
+                  const enabledTags = configuredTags.filter((tag) => tag.enabled)
+                  return configuredTags.length > 0 ? (
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-2">Выберите Бренд / Категорию (ID)</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Выберите включённый альбом или категорию</label>
                     <select
                       value={overrideValue}
                       onChange={(e) => setOverrideValue(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-indigo-500"
                     >
-                      <option value="">По умолчанию (весь альбом)</option>
-                      {parseBrandTags(suppliers.find(s => s.id === selectedSupplierId)!.brand_tags).map(bt => (
+                      <option value="">{enabledTags.length ? 'Выберите…' : 'Нет включённых тегов'}</option>
+                      {enabledTags.map(bt => (
                         <option key={`${bt.type}:${bt.value}`} value={`${bt.type}:${bt.value}`}>
                           {bt.type === 'tag' ? '🏷️ Тэг' : '📁 Груп.'} | {bt.label}
                         </option>
                       ))}
                     </select>
+                    {!enabledTags.length && <p className="mt-1 text-xs text-amber-300">Вернитесь в настройки поставщика и отметьте нужные строки.</p>}
                   </div>
-                )}
+                  ) : null
+                })()}
 
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Остановиться на дате</label>

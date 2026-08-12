@@ -197,46 +197,40 @@ def _collect_szwego_tags(value, found, seen, parent_key=""):
         _collect_szwego_tags(child, found, seen, key)
 
 def _fetch_szwego_tag_references(session, album_id, headers):
-    """Read Szwego's API data and return its visible tag/group name-to-ID pairs."""
-    timestamp_val = int(time.time() * 1000)
+    """Read the category tree from one Szwego response, never the whole product feed."""
     found = []
     seen = set()
 
-    while True:
-        params = {
-            "albumId": album_id,
-            "searchValue": "",
-            "searchImg": "",
-            "startDate": "",
-            "endDate": "",
-            "transLang": "en",
-            "requestDataType": "",
-            "timestamp": timestamp_val,
-        }
-        response = request_with_retry(
-            session,
-            "GET",
-            "https://www.szwego.com/album/personal/image",
-            params=params,
-            headers=headers,
-        )
-        if not response:
-            raise RuntimeError("Не удалось получить данные альбома от Szwego")
-        data = response.json()
-        if not data.get("success"):
-            if data.get("errcode") == 9:
-                raise RuntimeError("Сессия Szwego истекла. Обновите Cookie поставщика.")
-            raise RuntimeError(data.get("errmsg") or "Szwego не вернул список тегов")
+    params = {
+        "albumId": album_id,
+        "searchValue": "",
+        "searchImg": "",
+        "startDate": "",
+        "endDate": "",
+        "transLang": "en",
+        "requestDataType": "",
+        "timestamp": int(time.time() * 1000),
+    }
+    response = request_with_retry(
+        session,
+        "GET",
+        "https://www.szwego.com/album/personal/image",
+        params=params,
+        headers=headers,
+        max_retries=1,
+        timeout=15,
+    )
+    if not response:
+        raise RuntimeError("Не удалось получить дерево категорий от Szwego")
+    data = response.json()
+    if not data.get("success"):
+        if data.get("errcode") == 9:
+            raise RuntimeError("Сессия Szwego истекла. Обновите Cookie поставщика.")
+        raise RuntimeError(data.get("errmsg") or "Szwego не вернул дерево категорий")
 
-        result = data.get("result") or {}
-        _collect_szwego_tags(result, found, seen)
-        pagination = result.get("pagination") or {}
-        if not pagination.get("isLoadMore"):
-            break
-        next_timestamp = pagination.get("pageTimestamp")
-        if not next_timestamp or next_timestamp == timestamp_val:
-            break
-        timestamp_val = next_timestamp
+    # The category dialog is populated from this response: groups have
+    # `groupId`/`groupName`; albums inside them have `tagId`/`tagName`.
+    _collect_szwego_tags(data.get("result") or {}, found, seen)
 
     return found
 
