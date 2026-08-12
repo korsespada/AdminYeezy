@@ -77,6 +77,47 @@ describe('supplier JSON post-process contract', () => {
     expect(result[0].external_id).toBe('real-product')
   })
 
+  it('keeps missing CH tank tops and hockey jerseys while dropping marked promo and lifestyle albums', async () => {
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
+      { external_id: 'tank-red', description: 'Chrome Hearts 克罗心ch 针织 经典中古款 红色十字架梵文印花背心 红黑撞色很飒 大爆款 面料采用220g螺纹弹性面料，尺码：S M L', photos: ['tank-red.jpg'], source_position: 0, attributes: {} },
+      { external_id: 'tank-white', description: 'Chrome Hearts 克罗心ch 针织 经典中古款 爱心蔓藤白色限定款印花背心 大爆款 面料采用220g螺纹弹性面料，尺码：S M L', photos: ['tank-white.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'hockey', description: 'chrome hearts ch 克罗心 真正1:1顶级出货 双层网眼运动休闲双面背心，男女同款。定织定染白色网眼面料，双层设计更有质感。', photos: ['hockey.jpg'], source_position: 2, attributes: {} },
+      { external_id: 'development', description: '‼️原版开发克罗心最高版本 palo裙 手工缝 925 银扣', photos: ['development.jpg'], source_position: 3, attributes: {} },
+      { external_id: 'showcase', description: '这红色就像往脸上打光了一样显白', photos: ['showcase.jpg'], source_position: 4, attributes: {} },
+      { external_id: 'mattyboy', description: 'YB展示 Mattyboy最后一次联名', photos: ['mattyboy.jpg'], source_position: 5, attributes: {} },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['tank-red', 'tank-white', 'hockey'])
+  })
+
+  it('merges an adjacent long presentation album with its short matching album, without merging ordinary colour cards', async () => {
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
+      {
+        external_id: 'velvet-presentation',
+        description: 'chrome hearts ch 克罗心 丝绒十字架镂空肚兜 面料采用定制原版高端丝绒材质，达到YB 100%相似度。',
+        photos: Array.from({ length: 10 }, (_, index) => `presentation-${index}.jpg`), source_position: 0, attributes: {},
+      },
+      {
+        external_id: 'velvet-set',
+        description: 'chrome hearts ch 克罗心 丝绒十字架镂空吊带 面料采用定制原版高端丝绒材质，达到YB 100%相似度。',
+        photos: Array.from({ length: 4 }, (_, index) => `set-${index}.jpg`), source_position: 1, attributes: {},
+      },
+      {
+        external_id: 'grey-shorts',
+        description: 'Chrome Hearts 克罗心 灰色十字架短裤，面料与原版一致。',
+        photos: ['grey-1.jpg', 'grey-2.jpg', 'grey-3.jpg', 'grey-4.jpg'], source_position: 2, attributes: {},
+      },
+      {
+        external_id: 'black-shorts',
+        description: 'Chrome Hearts 克罗心 黑色十字架短裤，面料与原版一致。',
+        photos: ['black-1.jpg', 'black-2.jpg', 'black-3.jpg', 'black-4.jpg'], source_position: 3, attributes: {},
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['velvet-presentation', 'grey-shorts', 'black-shorts'])
+    expect(result[0].photos).toHaveLength(14)
+  })
+
   it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {
     const products = [
       {
