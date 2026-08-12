@@ -3444,9 +3444,13 @@ function CsvProductDrawer({
   supplierId,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
+  const [photoUrlInput, setPhotoUrlInput] = useState("");
+  const [photoUrlError, setPhotoUrlError] = useState<string | null>(null);
 
   useEffect(() => {
     setLocal(product ? { ...product } : null);
+    setPhotoUrlInput("");
+    setPhotoUrlError(null);
   }, [product, isOpen]);
 
   useEffect(() => {
@@ -3461,6 +3465,46 @@ function CsvProductDrawer({
   const change = (field: keyof CsvProduct, value: any) => {
     setLocal((prev) => (prev ? { ...prev, [field]: value } : null));
     onUpdate(index, field, value);
+  };
+
+  const addPhotoByUrl = () => {
+    const url = photoUrlInput.trim();
+    if (!url) {
+      setPhotoUrlError("Вставьте ссылку на изображение");
+      return;
+    }
+
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      setPhotoUrlError("Нужна корректная ссылка http:// или https://");
+      return;
+    }
+    if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+      setPhotoUrlError("Нужна корректная ссылка http:// или https://");
+      return;
+    }
+    if (local.photos.some((photo) => photo.trim() === url)) {
+      setPhotoUrlError("Это фото уже добавлено");
+      return;
+    }
+
+    const photos = [...local.photos, url];
+    const photoAlts = Array.from(
+      { length: photos.length },
+      (_, photoIndex) => local.photo_alts?.[photoIndex] || local.name || `Фото товара ${photoIndex + 1}`,
+    );
+    const photoSlugs = Array.from(
+      { length: photos.length },
+      (_, photoIndex) => local.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`,
+    );
+    setLocal((prev) => prev ? { ...prev, photos, photo_alts: photoAlts, photo_slugs: photoSlugs } : null);
+    onUpdate(index, "photos", photos);
+    onUpdate(index, "photo_alts", photoAlts);
+    onUpdate(index, "photo_slugs", photoSlugs);
+    setPhotoUrlInput("");
+    setPhotoUrlError(null);
   };
 
   const attributes = local.attributes || {};
@@ -3615,6 +3659,34 @@ function CsvProductDrawer({
                 onMove={movePhoto}
                 onRemove={removePhoto}
               />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="url"
+                  value={photoUrlInput}
+                  onChange={(event) => {
+                    setPhotoUrlInput(event.target.value);
+                    if (photoUrlError) setPhotoUrlError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addPhotoByUrl();
+                    }
+                  }}
+                  placeholder="Вставить ссылку на фото"
+                  aria-label="Ссылка на фото товара"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={addPhotoByUrl}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-500/20"
+                >
+                  <Link2 className="h-4 w-4" />
+                  Добавить фото
+                </button>
+              </div>
+              {photoUrlError && <p className="text-xs text-rose-300">{photoUrlError}</p>}
             </section>
 
             <section className="space-y-3">
