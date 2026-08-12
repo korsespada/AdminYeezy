@@ -125,13 +125,15 @@ function chromoffCategoryForDisplay(product: CsvProduct) {
 function productVideoForDisplay(product: CsvProduct) {
   const attributes = product.attributes || {};
   const url = String(
-    attributes.hosted_video_url
+    attributes.manual_video_url
+      || attributes.hosted_video_url
       || attributes.szwego_video_url
       || (attributes as any).video_url
       || "",
   ).trim();
   const posterUrl = String(
-    attributes.hosted_video_poster_url
+    attributes.manual_video_poster_url
+      || attributes.hosted_video_poster_url
       || attributes.szwego_video_poster_url
       || (attributes as any).video_poster_url
       || "",
@@ -3493,6 +3495,18 @@ function CsvProductDrawer({
     change("attributes", next);
   };
 
+  const updateManualVideo = (key: "manual_video_url" | "manual_video_poster_url", value: string) => {
+    const next = { ...attributes };
+    const trimmed = value.trim();
+    if (trimmed) next[key] = trimmed;
+    else delete next[key];
+    if (key === "manual_video_url") {
+      delete next.hosted_video_url;
+      delete next.hosted_video_poster_url;
+    }
+    change("attributes", next);
+  };
+
   const removePhoto = (i: number) => {
     const photos = local.photos.filter((_, j) => j !== i);
     const currentPhotoAlts = Array.from(
@@ -3598,25 +3612,37 @@ function CsvProductDrawer({
               />
             </section>
 
-            {video.url && (
-              <section className="space-y-3">
+            <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Видео товара</h3>
-                  <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">
-                    {video.url === String(attributes.hosted_video_url || '').trim() ? 'S3' : 'Источник'}
-                  </span>
+                  {video.url && <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">
+                    {video.url === String(attributes.manual_video_url || '').trim() ? 'Вручную' : video.url === String(attributes.hosted_video_url || '').trim() ? 'S3' : 'Источник'}
+                  </span>}
                 </div>
-                <video
+                {video.url && <video
                   className="max-h-[420px] w-full rounded-xl border border-slate-700 bg-black object-contain"
                   src={video.url}
                   poster={video.posterUrl || undefined}
                   controls
                   playsInline
                   preload="metadata"
+                />}
+                <input
+                  type="url"
+                  value={String(attributes.manual_video_url || "")}
+                  onChange={(event) => updateManualVideo("manual_video_url", event.target.value)}
+                  placeholder="Вставить или заменить ссылку на видео"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
                 />
-                <p className="break-all text-[10px] text-slate-600">{video.url}</p>
+                <input
+                  type="url"
+                  value={String(attributes.manual_video_poster_url || "")}
+                  onChange={(event) => updateManualVideo("manual_video_poster_url", event.target.value)}
+                  placeholder="Ссылка на постер видео (необязательно)"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
+                />
+                {video.url && <p className="break-all text-[10px] text-slate-600">{video.url}</p>}
               </section>
-            )}
 
             <section className="space-y-3">
                 <div className="flex items-center justify-between gap-3">

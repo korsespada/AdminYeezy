@@ -30,7 +30,16 @@ COLLECTION_RE = re.compile(r"集合图|图集|拼图|上新(?:预告|合集)?|�
 REFERENCE_RE = re.compile(r"(?:上身图|上身照|模特|真人).*(?:同款|参考)|(?:虞书欣|钟欣潼).*(?:同款|参考)", re.IGNORECASE)
 HARDWARE_RE = re.compile(r"原版五金|925\s*(?:制银|银)|纯银|纽扣|拉链|百达灵|百灵达", re.IGNORECASE)
 BRAND_RE = re.compile(r"chrome\s*hearts|克罗心", re.IGNORECASE)
-PROMO_RE = re.compile(r"面料像缎子|显白天花板|真的太帅|哪个颜色都好看|随便搭配", re.IGNORECASE)
+PROMO_RE = re.compile(
+    r"面料像缎子|显白天花板|真的太帅|哪个颜色都好看|随便搭配|"
+    r"谁能拒绝.*?配色|暗黑系公主.*?(?:内搭|完美)|"
+    r"荧光绿色.*?(?:冲击力|好看)",
+    re.IGNORECASE,
+)
+# For this supplier the double-exclamation glyph marks a service, stock or
+# factory album, never a useful product description. Drop the whole album,
+# including variants with an emoji variation selector.
+EXCLAMATION_PROMO_RE = re.compile(r"‼")
 # These are supplier-wide advertising albums, not product cards.  Require the
 # announcement marker, but not a second marker: this supplier uses both forms
 # (`‼️原版开发‼️` and `‼️原版开发克罗心…`).  A normal description such as
@@ -97,7 +106,8 @@ def _is_primary(product: dict[str, Any], description: str) -> bool:
         return False
     if any(pattern.search(description) for pattern in (
         SIZE_RE, MODEL_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE,
-        PROMO_RE, DEVELOPMENT_PROMO_RE, STANDALONE_PROMO_RE, SHOWCASE_PROMO_RE,
+        PROMO_RE, EXCLAMATION_PROMO_RE, DEVELOPMENT_PROMO_RE, STANDALONE_PROMO_RE,
+        SHOWCASE_PROMO_RE,
     )):
         return False
     # Product descriptions often mention the included packaging or 925 hardware.

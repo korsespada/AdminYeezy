@@ -720,6 +720,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       || canonicalCode.startsWith('chromoff_')
       || canonicalCode.startsWith('szwego_')
       || canonicalCode.startsWith('hosted_video_')
+      || canonicalCode.startsWith('manual_video_')
       || canonicalCode === 'video_transfer_error'
       || canonicalCode === 'video_url'
       || canonicalCode === 'video_poster_url'

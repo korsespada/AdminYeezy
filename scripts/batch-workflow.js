@@ -136,6 +136,7 @@ function catalogAttributes(value) {
     const normalized = key.trim().toLowerCase();
     return !normalized.startsWith('szwego_')
       && !normalized.startsWith('hosted_video_')
+      && !normalized.startsWith('manual_video_')
       && !normalized.startsWith('chromoff_')
       && normalized !== 'video_transfer_error'
       && normalized !== 'video_url'
@@ -156,6 +157,18 @@ function chromoffClassificationMetadata(product) {
 
 function hostedVideo(product, existingRailsProduct = null) {
   const attributes = normalizeAttributes(product?.attributes);
+  const manualVideoUrl = String(attributes.manual_video_url || '').trim();
+  const manualPosterUrl = String(attributes.manual_video_poster_url || '').trim();
+  if (manualVideoUrl) {
+    return {
+      url: isAlreadyHosted(manualVideoUrl)
+        ? manualVideoUrl
+        : String(attributes.hosted_video_url || '').trim() || null,
+      posterUrl: isAlreadyHosted(manualPosterUrl)
+        ? manualPosterUrl
+        : String(attributes.hosted_video_poster_url || '').trim() || null,
+    };
+  }
   const localVideoUrl = String(attributes.hosted_video_url || '').trim()
     || (isAlreadyHosted(attributes.video_url) ? String(attributes.video_url).trim() : '');
   const localPosterUrl = String(attributes.hosted_video_poster_url || '').trim()
@@ -168,6 +181,8 @@ function hostedVideo(product, existingRailsProduct = null) {
 
 function sourceVideo(product) {
   const attributes = normalizeAttributes(product?.attributes);
+  const manualUrl = String(attributes.manual_video_url || '').trim();
+  if (manualUrl && !isAlreadyHosted(manualUrl)) return manualUrl;
   const sourceUrl = String(attributes.szwego_video_url || '').trim();
   if (sourceUrl) return sourceUrl;
   const genericUrl = String(attributes.video_url || '').trim();
@@ -175,6 +190,8 @@ function sourceVideo(product) {
 }
 
 function needsVideoTransfer(product, existingRailsProduct = null) {
+  const manualVideoUrl = String(normalizeAttributes(product?.attributes).manual_video_url || '').trim();
+  if (manualVideoUrl && !isAlreadyHosted(manualVideoUrl)) return true;
   return Boolean(sourceVideo(product) && !hostedVideo(product, existingRailsProduct).url);
 }
 

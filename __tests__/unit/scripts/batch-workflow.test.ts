@@ -94,6 +94,23 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('uses a manually supplied video instead of an older Szwego or hosted video', () => {
+    const previousDomain = process.env.S3_PUBLIC_DOMAIN
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    try {
+      expect(workflow.needsVideoTransfer({
+        attributes: {
+          manual_video_url: 'https://operator.example/replacement.mp4',
+          szwego_video_url: 'https://supplier.example/original.mov',
+          hosted_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+        },
+      })).toBe(true)
+    } finally {
+      if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
+      else process.env.S3_PUBLIC_DOMAIN = previousDomain
+    }
+  })
+
   it('reuses an already hosted photo without another S3 request', async () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
     const previousBucket = process.env.S3_BUCKET

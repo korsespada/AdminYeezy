@@ -118,6 +118,19 @@ describe('supplier JSON post-process contract', () => {
     expect(result[0].photos).toHaveLength(14)
   })
 
+  it('drops marked stock, factory and model-showcase albums without dropping a plain product card', async () => {
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
+      { external_id: 'stock', description: '顶级 套装系列 秒发‼️', photos: ['stock.jpg'], source_position: 0, attributes: {} },
+      { external_id: 'quality', description: '辅料 质检 三层升级‼️', photos: ['quality.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'factory', description: '顶级 生产 实拍素材‼️', photos: ['factory.jpg'], source_position: 2, attributes: {} },
+      { external_id: 'fabric', description: '自然光下 直线距离感受一下 原版暗纹面料‼️', photos: ['fabric.jpg'], source_position: 3, attributes: {} },
+      { external_id: 'lookbook', description: '暗黑系公主 做内搭都完美', photos: ['model.jpg'], source_position: 4, attributes: {} },
+      { external_id: 'real', description: 'Chrome Hearts 克罗心长袖T恤，定织纯棉面料，黑色荧光绿刺绣图案，尺码 S M L。', photos: ['real.jpg'], source_position: 5, attributes: {} },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['real'])
+  })
+
   it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {
     const products = [
       {
