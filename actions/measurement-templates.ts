@@ -187,14 +187,14 @@ async function measurementRecognitionImageDataUrl(imageUrl: string) {
 
 const MEASUREMENT_RECOGNITION_PROMPT = `Ты распознаёшь ТОЛЬКО размерную таблицу на исходном скриншоте. Верни строгий JSON без Markdown: {"unreadable":false,"unit":"см","columns":[{"key":"waist","label":"Талия"}],"rows":[{"size":"S","values":{"waist":"72"}}],"note":""}. Сначала прочитай видимую сетку: размеры в её шапке становятся rows, названия строк слева становятся columns. Количество rows и columns обязано точно совпадать с количеством видимых размеров и строк сетки. Переписывай только текст и числа, которые действительно видны: не добавляй стандартные размеры, российские размеры в скобках, параметры тела, диапазоны или типовые таблицы одежды. Десятичные значения сохраняй точно. В values допускается только одно точное значение из ячейки, без единиц и диапазонов. Текст вне сетки, включая «ручное измерение», «допуск/погрешность 1–2 см», «±1–2 см» и аналогичные указания, переноси целиком в note. Например, при ячейке «86» и подписи «погрешность 1–2 см» верни values: {"waist":"86"}, note: "Допуск ручного измерения: 1–2 см"; никогда не возвращай «86–90 см» в values. Если сетка или текст не читаются достаточно уверенно, верни только {"unreadable":true} — не угадывай и не подставляй примерную таблицу.`
 
-function measurementTableFingerprint(value: unknown) {
+function measurementTableCellFingerprint(value: unknown) {
   const table = normalizeMeasurementTable(value)
   if (!table) return null
   return JSON.stringify({
-    columns: table.columns.map((column) => ({ key: column.key, label: column.label.trim().toLocaleLowerCase('ru-RU') })),
+    columnCount: table.columns.length,
     rows: table.rows.map((row) => ({
       size: row.size.trim().toLocaleLowerCase('ru-RU'),
-      values: Object.fromEntries(Object.entries(row.values).map(([key, cell]) => [key, cell.trim()])),
+      values: table.columns.map((column) => String(row.values[column.key] || '').trim()),
     })),
   })
 }
@@ -221,7 +221,7 @@ export async function recognizeMeasurementTemplateAction(sourceImageUrl: string)
       throw new Error('ИИ не смог уверенно прочитать таблицу. Загрузите более чёткий скриншот или заполните её вручную.')
     }
     const firstMeasurements = (firstOutput as any)?.measurements || firstOutput
-    if (!measurementTableFingerprint(firstMeasurements)) {
+    if (!measurementTableCellFingerprint(firstMeasurements)) {
       throw new Error('ИИ не вернул распознаваемую таблицу. Проверьте скриншот или заполните таблицу вручную.')
     }
 
@@ -241,7 +241,7 @@ export async function recognizeMeasurementTemplateAction(sourceImageUrl: string)
     }
     const measurements = normalizeMeasurementTable((output as any)?.measurements || output)
     if (!measurements) throw new Error('ИИ не вернул распознаваемую таблицу. Проверьте скриншот или заполните таблицу вручную.')
-    if (measurementTableFingerprint(firstMeasurements) !== measurementTableFingerprint(measurements)) {
+    if (measurementTableCellFingerprint(firstMeasurements) !== measurementTableCellFingerprint(measurements)) {
       throw new Error('ИИ получил разные результаты при повторной проверке. Таблица не была применена — попробуйте другой скриншот или заполните её вручную.')
     }
     return { success: true, data: measurements }
