@@ -530,7 +530,7 @@ export async function runBatchAiOpenRouter(input: {
   userPrompt: string
   contactSheets: string[]
   referenceSheets?: string[]
-  extraImages?: Array<{ label: string; url: string }>
+  extraImages?: Array<{ label: string; url: string; detail?: 'low' | 'high' | 'auto' }>
 }) {
   const content: any[] = [{ type: 'text', text: input.userPrompt }]
   input.contactSheets.forEach((url, index) => {
@@ -544,7 +544,7 @@ export async function runBatchAiOpenRouter(input: {
   ;(input.extraImages || []).forEach((image) => {
     if (!image?.url) return
     content.push({ type: 'text', text: image.label })
-    content.push({ type: 'image_url', image_url: { url: image.url } })
+    content.push({ type: 'image_url', image_url: { url: image.url, ...(image.detail ? { detail: image.detail } : {}) } })
   })
   const protocol = providerProtocol(input.settings.providerBaseUrl || '')
   const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
