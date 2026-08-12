@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
@@ -239,6 +239,25 @@ describe('batch AI normalization', () => {
     expect(rule.id).toBe(2)
     expect(canonicalBatchSuggestionKey('Material')).toBe('materials')
     expect(canonicalBatchSuggestionKey('model_names')).toBe('model_name')
+  })
+
+  it('normalizes legacy and human-readable catalog values in supplier price rules', () => {
+    const mappings = [
+      { entity_type: 'subcategory', legacy_id: 'legacy-hoodie', canonical_id: 'hoodie-current', name: 'Худи и толстовки' },
+    ]
+    const [rule] = normalizePriceRulesCatalogReferences([
+      { enabled: true, conditions: { subcategory: 'legacy-hoodie' }, price: 24_000 },
+      { enabled: true, conditions: { subcategory: 'Худи и толстовки' }, price: 24_000 },
+    ], mappings)
+
+    expect(rule.conditions?.subcategory).toBe('hoodie-current')
+    expect(matchingPriceRule({ subcategory: 'hoodie-current', attributes: {} }, [rule])?.price).toBe(24_000)
+  })
+
+  it('does not preserve an unpriced zero when a new rule can fill it', () => {
+    expect(shouldPreserveExistingPrice({ price: 0, price_source: 'legacy' })).toBe(false)
+    expect(shouldPreserveExistingPrice({ price: 24_000, price_source: 'rule' })).toBe(true)
+    expect(shouldPreserveExistingPrice({ price: 0, price_source: 'manual' })).toBe(true)
   })
 
   it('calculates a custom price rule from the maximum source price and rounds it', () => {

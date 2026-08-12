@@ -22,6 +22,8 @@ import {
   buildBatchAiVisualFamilyPrompt,
   calculatePriceRulePrice,
   matchingPriceRule,
+  normalizePriceRulesCatalogReferences,
+  shouldPreserveExistingPrice,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
   DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
@@ -261,11 +263,21 @@ export async function getSupplierPriceRulesAction(supplierId: number) {
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 ORDER BY priority DESC, id',
     [supplierId],
   )
-  return { success: true, data: result.rows }
+  const mappings = await scrapingQuery(`
+    SELECT entity_type,legacy_id,canonical_id,name
+    FROM catalog_id_mappings
+    WHERE entity_type IN ('brand','category','subcategory')
+  `)
+  return { success: true, data: normalizePriceRulesCatalogReferences(result.rows, mappings.rows) }
 }
 
 export async function saveSupplierPriceRulesAction(supplierId: number, rules: any[]) {
   await requireAdmin()
+  const mappings = await scrapingQuery(`
+    SELECT entity_type,legacy_id,canonical_id,name
+    FROM catalog_id_mappings
+    WHERE entity_type IN ('brand','category','subcategory')
+  `)
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
@@ -275,19 +287,23 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
       if (price < 0) throw new Error(`Правило ${index + 1}: цена не может быть отрицательной`)
       const ruleKey = String(rule.rule_key || `rule_${crypto.randomUUID()}`).trim().slice(0, 100)
       const inputConditions = rule.conditions && typeof rule.conditions === 'object' ? { ...rule.conditions } : {}
-      if (inputConditions.price_formula && typeof inputConditions.price_formula === 'object') {
-        const formula = inputConditions.price_formula as Record<string, unknown>
-        inputConditions.price_formula = {
+      const normalizedConditions = normalizePriceRulesCatalogReferences(
+        [{ conditions: inputConditions }],
+        mappings.rows,
+      )[0].conditions || {}
+      if (normalizedConditions.price_formula && typeof normalizedConditions.price_formula === 'object') {
+        const formula = normalizedConditions.price_formula as Record<string, unknown>
+        normalizedConditions.price_formula = {
           source_price: formula.source_price === 'min' ? 'min' : 'max',
           multiplier: Math.max(0, finiteNumber(formula.multiplier, 1)),
           secondary_multiplier: Math.max(0, finiteNumber(formula.secondary_multiplier, 1)),
           round_to: Math.max(1, finiteNumber(formula.round_to, 1000)),
           rounding: ['up', 'down'].includes(String(formula.rounding)) ? String(formula.rounding) : 'nearest',
         }
-        inputConditions.price_instruction = String(inputConditions.price_instruction || '').trim().slice(0, 4000)
+        normalizedConditions.price_instruction = String(normalizedConditions.price_instruction || '').trim().slice(0, 4000)
       } else {
-        delete inputConditions.price_formula
-        delete inputConditions.price_instruction
+        delete normalizedConditions.price_formula
+        delete normalizedConditions.price_instruction
       }
       const referenceImages = Array.isArray(rule.reference_images)
         ? [...new Set(rule.reference_images.map(String).filter((url: string) => /^https:\/\//i.test(url)))].slice(0, 9)
@@ -299,7 +315,7 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         supplierId,
         String(rule.name || `Правило ${index + 1}`).slice(0, 160),
         Math.round(finiteNumber(rule.priority, 0)),
-        JSON.stringify(inputConditions),
+        JSON.stringify(normalizedConditions),
         price,
         rule.enabled !== false,
         ruleKey,
@@ -707,7 +723,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     subcategories: allowedSubcategories
       ? subcategories.filter((row) => allowedSubcategories.has(String(row.id)))
       : subcategories,
-    priceRules: priceRules.rows,
+    priceRules: normalizePriceRulesCatalogReferences(priceRules.rows, mappings.rows),
     measurementTemplates,
     chromoffMode,
     chromoffCategories: resolvedChromoffCategories,
@@ -1172,7 +1188,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           videoPreviewUrl: mode === 'split_colors' || splitAlbumColors ? videoPosterPreviewUrl(promptProduct) : '',
           photoEnabled: mode === 'recover_measurements' || ['media_seo', 'split_colors'].includes(mode) || context.batch.ai_photo_enabled === true,
           fullSizeRefinementEnabled: mode === 'recover_measurements' || (!['media_seo', 'split_colors'].includes(mode) && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
-          preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
+          preserveExistingPrice: shouldPreserveExistingPrice(product),
           brands: context.brands,
           categories: context.categories,
           subcategories: promptSubcategories,
@@ -1611,7 +1627,7 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
     const product = index === videoVariantIndex
       ? entry.normalized.product
       : withoutInheritedSourceVideo(entry.normalized.product)
-    if (item.input_snapshot?.preserveExistingPrice) {
+    if (item.input_snapshot?.preserveExistingPrice && shouldPreserveExistingPrice(source)) {
       product.price = Number(source.price || 0)
       product.price_source = source.price_source || 'legacy'
     } else {
@@ -1774,7 +1790,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
-  if (item.input_snapshot?.preserveExistingPrice) {
+  if (item.input_snapshot?.preserveExistingPrice && shouldPreserveExistingPrice(item.input_snapshot?.product)) {
     product.price = Number(item.input_snapshot.product?.price || 0)
     product.price_source = item.input_snapshot.product?.price_source || 'legacy'
   } else {
@@ -2364,7 +2380,12 @@ async function reviewBatchAiSuggestion(
     for (const product of products.rows) {
       if (product.price_source === 'manual') continue
       const rules = await scrapingQuery('SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true', [product.supplier_id])
-      const rule = matchingPriceRule(product, rules.rows)
+      const mappings = await scrapingQuery(`
+        SELECT entity_type,legacy_id,canonical_id,name
+        FROM catalog_id_mappings
+        WHERE entity_type IN ('brand','category','subcategory')
+      `)
+      const rule = matchingPriceRule(product, normalizePriceRulesCatalogReferences(rules.rows, mappings.rows))
       const calculatedPrice = rule
         ? calculatePriceRulePrice(rule, [product.name, product.description].filter(Boolean).join('\n'))
         : null

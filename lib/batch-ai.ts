@@ -1264,6 +1264,51 @@ function scalarAttribute(value: any): string[] {
   return value === undefined || value === null ? [] : [String(value).trim().toLowerCase()]
 }
 
+type PriceRuleCatalogMapping = {
+  entity_type: string
+  legacy_id?: string | null
+  canonical_id?: string | null
+  name?: string | null
+}
+
+function normalizePriceRuleCatalogValue(value: unknown, entityType: 'brand' | 'category' | 'subcategory', mappings: PriceRuleCatalogMapping[]): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizePriceRuleCatalogValue(item, entityType, mappings))
+  }
+  const raw = String(value || '').trim()
+  if (!raw) return value
+  const normalized = raw.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' ')
+  const mapping = mappings.find((item) => item.entity_type === entityType && (
+    String(item.legacy_id || '') === raw
+    || String(item.canonical_id || '') === raw
+    || String(item.name || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' ') === normalized
+  ))
+  return mapping?.canonical_id ? String(mapping.canonical_id) : value
+}
+
+/**
+ * Price rules are configured through Rails catalog IDs, while old suppliers
+ * may still contain legacy IDs or human-readable names. Resolve all catalog
+ * conditions to the current canonical ID before matching a product.
+ */
+export function normalizePriceRulesCatalogReferences<T extends { conditions?: Record<string, unknown> }>(
+  rules: T[],
+  mappings: PriceRuleCatalogMapping[],
+) {
+  return rules.map((rule) => ({
+    ...rule,
+    conditions: Object.fromEntries(Object.entries(rule.conditions || {}).map(([key, value]) => {
+      const entityType = key === 'brand' || key === 'category' || key === 'subcategory' ? key : null
+      return [key, entityType ? normalizePriceRuleCatalogValue(value, entityType, mappings) : value]
+    })),
+  }))
+}
+
+export function shouldPreserveExistingPrice(product: any) {
+  const source = String(product?.price_source || '').trim().toLowerCase()
+  return source === 'manual' || Number(product?.price) > 0
+}
+
 export function matchingPriceRule(product: any, rules: any[]) {
   const candidates = rules.filter((rule) => {
     if (!rule.enabled) return false

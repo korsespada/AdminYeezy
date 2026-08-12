@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
+import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
@@ -101,9 +101,14 @@ async function complete(body: any) {
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
     [context.rows[0]?.supplier_id],
   )
+  const priceRuleMappings = await scrapingQuery(`
+    SELECT entity_type,legacy_id,canonical_id,name
+    FROM catalog_id_mappings
+    WHERE entity_type IN ('brand','category','subcategory')
+  `)
   // Правила из БД являются источником истины: очередь могла быть создана до
   // добавления/изменения правила, поэтому input_snapshot может быть устаревшим.
-  const priceRules = storedRules.rows
+  const priceRules = normalizePriceRulesCatalogReferences(storedRules.rows, priceRuleMappings.rows)
   const normalized: any = input.mediaSeoOnly ? normalizeMediaSeoOutput(body.output, input) : input.shadeFamilyScan ? {
     product: input.product,
     suggestions: [],
@@ -149,7 +154,7 @@ async function complete(body: any) {
   if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
-  if (!input.mediaSeoOnly && !input.variantScanOnly && input.preserveExistingPrice) {
+  if (!input.mediaSeoOnly && !input.variantScanOnly && input.preserveExistingPrice && shouldPreserveExistingPrice(input.product)) {
     product.price = Number(input.product?.price || 0)
     product.price_source = input.product?.price_source || 'legacy'
   } else {
