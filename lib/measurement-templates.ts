@@ -35,6 +35,50 @@ export function measurementTemplateGarmentLabel(value: string) {
   return MEASUREMENT_TEMPLATE_GARMENTS.find((item) => item.value === value)?.label || 'Другое'
 }
 
+function normalizedProductTypeText(value: unknown) {
+  return String(value || '')
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/gi, ' ')
+    .trim()
+}
+
+export function measurementTemplateGarmentForProduct(value: {
+  name?: unknown
+  h1?: unknown
+  subcategoryName?: unknown
+}): MeasurementTemplateGarment | null {
+  // Description deliberately does not participate: it can mention a matching
+  // item as an outfit suggestion and must not cause a wrong size chart.
+  const text = [value.name, value.h1, value.subcategoryName]
+    .map(normalizedProductTypeText)
+    .filter(Boolean)
+    .join(' ')
+  if (!text) return null
+
+  const matches = new Set<MeasurementTemplateGarment>()
+  if (/(вафельн\w*\s+лонгслив|лонгслив\w*\s+вафельн)/i.test(text)) matches.add('waffle_longsleeve')
+  if (/(зип\s*худи|zip\s*hoodie|худи.{0,24}(молни|zip)|(?:кофта|толстовка).{0,24}(молни|zip))/i.test(text)) {
+    matches.add('zip_hoodie')
+  } else if (/(?:^|\s)(?:худи|hoodie|толстовк\w*)(?:\s|$)/i.test(text)) {
+    matches.add('hoodie')
+  }
+  if (/(шорт\w*|бермуд\w*|\bshorts?\b)/i.test(text)) matches.add('shorts')
+  if (/(брюк\w*|штан\w*|джоггер\w*|треник\w*|\b(?:pants|trousers|sweatpants)\b)/i.test(text)) matches.add('pants')
+
+  return matches.size === 1 ? [...matches][0] : null
+}
+
+export function measurementTemplateForProduct(
+  templates: MeasurementTemplate[],
+  product: { name?: unknown; h1?: unknown; subcategoryName?: unknown },
+) {
+  const garmentType = measurementTemplateGarmentForProduct(product)
+  if (!garmentType) return null
+  const candidates = templates.filter((template) => template.garmentType === garmentType)
+  return candidates.length === 1 ? candidates[0] : null
+}
+
 function shortText(value: unknown, limit: number) {
   return String(value ?? '').trim().slice(0, limit)
 }

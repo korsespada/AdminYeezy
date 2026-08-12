@@ -47,6 +47,7 @@ import {
   sanitizeSupplierAiInstructions,
   type CatalogIdMapping,
 } from '@/lib/catalog-reference-normalizer'
+import { measurementTemplateForProduct, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { uploadToS3 } from '@/lib/s3'
 import {
   applyShadeVariantsToSuggestion,
@@ -654,6 +655,27 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
     [batch.rows[0].supplier_id],
   )
+  const measurementTemplatesResult = await scrapingQuery(`
+    SELECT id,supplier_id,name,garment_type,measurements,source_image_url,notes
+    FROM measurement_templates
+    WHERE supplier_id=$1
+    ORDER BY garment_type ASC,name ASC,id ASC
+  `, [batch.rows[0].supplier_id]).catch((error: any) => {
+    if (String(error?.message || '').includes('measurement_templates')) return { rows: [] as any[] }
+    throw error
+  })
+  const measurementTemplates: MeasurementTemplate[] = measurementTemplatesResult.rows.flatMap((row: any) => {
+    if (!row?.measurements || typeof row.measurements !== 'object') return []
+    return [{
+      id: Number(row.id),
+      supplierId: Number(row.supplier_id),
+      name: String(row.name || ''),
+      garmentType: String(row.garment_type || 'other') as MeasurementTemplate['garmentType'],
+      measurements: row.measurements,
+      sourceImageUrl: row.source_image_url ? String(row.source_image_url) : null,
+      notes: String(row.notes || ''),
+    }]
+  })
   const allowedIds = (value: unknown) => Array.isArray(value) ? new Set(value.map(String)) : new Set<string>()
   const allowedIdsToCurrent = (value: unknown, entityType: string, currentRows: any[]) => {
     const rawIds = allowedIds(value)
@@ -686,6 +708,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
       ? subcategories.filter((row) => allowedSubcategories.has(String(row.id)))
       : subcategories,
     priceRules: priceRules.rows,
+    measurementTemplates,
     chromoffMode,
     chromoffCategories: resolvedChromoffCategories,
   }
@@ -1774,6 +1797,16 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   }
   if (!String(item.input_snapshot?.product?.slug || '').trim()) {
     product.slug = buildProductSeoSlug(product, catalogName(product.brand, 'brand', context.mappings))
+  }
+  if (!product?.attributes?.measurements) {
+    const template = measurementTemplateForProduct(context.measurementTemplates || [], {
+      name: product.name,
+      h1: product.h1,
+      subcategoryName: catalogName(product.subcategory, 'subcategory', context.mappings),
+    })
+    if (template) {
+      product.attributes = { ...(product.attributes || {}), measurements: template.measurements }
+    }
   }
   const client = await getScrapingClient()
   try {
