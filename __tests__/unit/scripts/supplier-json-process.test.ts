@@ -15,16 +15,17 @@ describe('supplier JSON post-process contract', () => {
       { external_id: 'packaging', description: '标配：配套YB雪梨纸 手提袋+6', photos: ['bag.jpg'], source_position: 4, attributes: { szwego_parse_mode: 'all' } },
       { external_id: 'detail-red', description: '红色局部细节参考', photos: ['detail-1.jpg', 'detail-2.jpg'], source_position: 5, attributes: { szwego_parse_mode: 'all' } },
       { external_id: 'detail-red-2', description: '红色局部细节', photos: ['detail-3.jpg'], source_position: 6, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'shorts-hardware', description: '原版五金一致 925制银做旧纽扣', photos: ['button.jpg'], source_position: 7, attributes: { szwego_parse_mode: 'all' } },
       {
-        external_id: 'red-dress', description: '顶级版本 Chrome Hearts 克罗心 刺绣针织背心裙 面料与原版一致，全码现货。',
-        photos: ['red-main-1.jpg', 'red-main-2.jpg'], source_position: 7, attributes: { szwego_parse_mode: 'all' },
+        external_id: 'red-dress', description: '顶级版本 Chrome Hearts 克罗心 刺绣针织背心裙，配套雪梨纸全套包装，面料与原版一致，全码现货。',
+        photos: ['red-main-1.jpg', 'red-main-2.jpg'], source_position: 8, attributes: { szwego_parse_mode: 'all' },
       },
-      { external_id: 'blue-detail', description: '局部细节参考', photos: ['blue-detail.jpg'], source_position: 8, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'blue-detail', description: '局部细节参考', photos: ['blue-detail.jpg'], source_position: 9, attributes: { szwego_parse_mode: 'all' } },
       {
         external_id: 'blue-top', description: 'Chrome hearts 克罗心蓝黄撞色 七分袖数字马蹄印花撞色T恤 女款长袖T恤，夏天可以当防晒穿。',
-        photos: ['blue-main.jpg'], source_position: 9, attributes: { szwego_parse_mode: 'all' },
+        photos: ['blue-main.jpg'], source_position: 10, attributes: { szwego_parse_mode: 'all' },
       },
-      { external_id: 'outfit', description: '配工装裤，随性松弛；搭短裙，甜辣平衡！', photos: ['outfit.jpg'], source_position: 10, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'outfit', description: '配工装裤，随性松弛；搭短裙，甜辣平衡！', photos: ['outfit.jpg'], source_position: 11, attributes: { szwego_parse_mode: 'all' } },
     ]
 
     const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', products)
@@ -32,7 +33,7 @@ describe('supplier JSON post-process contract', () => {
     expect(result).toHaveLength(2)
     expect(result[0]).toMatchObject({
       external_id: 'red-dress',
-      photos: ['red-main-1.jpg', 'red-main-2.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg'],
+      photos: ['red-main-1.jpg', 'red-main-2.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg', 'button.jpg'],
       attributes: {
         szwego_video_url: 'https://video/red.mp4',
         szwego_video_poster_url: 'https://video/red.webp',
@@ -42,6 +43,19 @@ describe('supplier JSON post-process contract', () => {
       external_id: 'blue-top',
       photos: ['blue-main.jpg', 'blue-detail.jpg'],
     })
+  })
+
+  it('keeps a main CH item when its description also mentions packaging', async () => {
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
+      {
+        external_id: 'leather-shorts',
+        description: 'Chrome Hearts CH克罗心 羊皮十字架卷轴五金短裤，CH 配套雪梨纸全套包装，全码现货。',
+        photos: ['shorts.jpg'], source_position: 0, attributes: { szwego_parse_mode: 'all' },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].external_id).toBe('leather-shorts')
   })
 
   it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {

@@ -23,6 +23,9 @@ DETAIL_RE = re.compile(r"局部细节|细节(?:参考|图)?|细节参考", re.IG
 VIDEO_RE = re.compile(r"(?:实拍|上身)?视频", re.IGNORECASE)
 COLLECTION_RE = re.compile(r"集合图|图集|拼图|上新(?:预告|合集)?|新品推荐", re.IGNORECASE)
 REFERENCE_RE = re.compile(r"同款|参考", re.IGNORECASE)
+HARDWARE_RE = re.compile(r"原版五金|925\s*(?:制银|银)|纯银|纽扣|拉链|百达灵|百灵达", re.IGNORECASE)
+BRAND_RE = re.compile(r"chrome\s*hearts|克罗心", re.IGNORECASE)
+PROMO_RE = re.compile(r"面料像缎子|显白天花板|真的太帅|哪个颜色都好看|随便搭配", re.IGNORECASE)
 
 
 def _description(product: dict[str, Any]) -> str:
@@ -56,9 +59,15 @@ def _is_primary(product: dict[str, Any], description: str) -> bool:
     """A real card has a substantive description, not a service-caption."""
     if len(description) < 12 or not (_photos(product) or _video(product)[0]):
         return False
-    return not any(pattern.search(description) for pattern in (
-        SIZE_RE, MODEL_RE, PACKAGING_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE,
-    ))
+    if any(pattern.search(description) for pattern in (
+        SIZE_RE, MODEL_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE, PROMO_RE,
+    )):
+        return False
+    # Product descriptions often mention the included packaging or 925 hardware.
+    # Those words mean "service album" only when the card does not identify CH.
+    if (PACKAGING_RE.search(description) or HARDWARE_RE.search(description)) and not BRAND_RE.search(description):
+        return False
+    return True
 
 
 def _unique(items: list[str]) -> list[str]:
@@ -88,20 +97,22 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
     result: list[dict[str, Any]] = []
     pending_photos: list[str] = []
-    pending_video: tuple[str | None, str | None] = (None, None)
+    pending_videos: list[tuple[str | None, str | None]] = []
 
     for product in ordered:
         description = _description(product)
         if SEPARATOR_RE.match(description):
             # Never carry an incomplete service block into the next explicit one.
             pending_photos = []
-            pending_video = (None, None)
+            pending_videos = []
             continue
 
         if _is_primary(product, description):
+            # A supplier can publish several videos before several colour/product
+            # cards. Keep their source order instead of overwriting the previous URL.
+            pending_video = pending_videos.pop(0) if pending_videos else (None, None)
             result.append(_merge_pending(product, pending_photos, pending_video))
             pending_photos = []
-            pending_video = (None, None)
             continue
 
         video = _video(product)
@@ -109,10 +120,10 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # The video card is usually before the primary card, including when
             # the supplier omitted a `➨` separator.
             if video[0]:
-                pending_video = video
+                pending_videos.append(video)
             continue
 
-        if DETAIL_RE.search(description):
+        if DETAIL_RE.search(description) or (HARDWARE_RE.search(description) and not BRAND_RE.search(description)):
             pending_photos.extend(_photos(product))
             continue
 
