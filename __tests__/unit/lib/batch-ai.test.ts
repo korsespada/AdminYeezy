@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
@@ -38,6 +38,17 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('catalog_attributes')
   })
 
+  it('asks for a video color only when a separate video preview is available', () => {
+    const prompt = buildBatchAiColorSplitPrompt({
+      product: { external_id: 'album-1', photos: ['1.jpg', '2.jpg'] },
+      brands: [], categories: [], subcategories: [], attributes: [],
+      videoPreviewAvailable: true,
+    })
+
+    expect(prompt).toContain('video_color_key')
+    expect(prompt).toContain('отдельный кадр-превью исходного видео')
+  })
+
   it('includes the selected targeted processing rules in the AI prompt', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { external_id: 'SP001-blue', photos: ['1.jpg', '2.jpg'] },
@@ -54,6 +65,11 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('SP001 green')
     expect(prompt).toContain('cover_photo_index')
     expect(prompt).toContain('skip_product=true')
+  })
+
+  it('keeps consecutive-family matching disabled unless the supplier enables it', () => {
+    expect(normalizeBatchAiProcessingOptions({}).colorFamilyBySequence).toBe(false)
+    expect(normalizeBatchAiProcessingOptions({ colorFamilyBySequence: true }).colorFamilyBySequence).toBe(true)
   })
 
   it('does not create new taxonomy proposals unless the supplier enables them', () => {

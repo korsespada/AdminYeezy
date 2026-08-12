@@ -266,7 +266,7 @@ function normalizedProductName(product: any) {
     .join('_')
 }
 
-export function colorFamilyRebuildPlan(products: any[]) {
+export function colorFamilyRebuildPlan(products: any[], options: { includeSequentialCandidates?: boolean } = {}) {
   const coded = new Map<string, any[]>()
   const visual = new Map<string, any[]>()
   for (const product of products) {
@@ -332,7 +332,51 @@ export function colorFamilyRebuildPlan(products: any[]) {
       : []
   })
 
-  return { deterministicFamilies, visualCandidates, shadeCandidates }
+  const existingVisualProductIds = new Set(visualCandidates.flatMap((candidate) => candidate.products.map((product) => Number(product.id))))
+  const sequentialCandidates = options.includeSequentialCandidates
+    ? sequentialColorFamilyCandidates(products, existingVisualProductIds)
+    : []
+
+  return { deterministicFamilies, visualCandidates: [...visualCandidates, ...sequentialCandidates], shadeCandidates }
+}
+
+function sequentialColorFamilyCandidates(products: any[], excludedProductIds: Set<number>) {
+  const ordered = [...products]
+    .filter((product) => !excludedProductIds.has(Number(product?.id)))
+    .sort((left, right) => Number(left?.source_position ?? Number.MAX_SAFE_INTEGER) - Number(right?.source_position ?? Number.MAX_SAFE_INTEGER)
+      || Number(left?.id || 0) - Number(right?.id || 0))
+  const result: Array<{ candidateKey: string; products: any[] }> = []
+  let run: any[] = []
+  const flush = () => {
+    if (run.length >= 2) {
+      result.push({ candidateKey: `sequential|${run.map((product) => Number(product.id)).join('|')}`, products: run })
+    }
+    run = []
+  }
+  for (const product of ordered) {
+    if (!hasComparableFirstPhoto(product)) {
+      flush()
+      continue
+    }
+    const previous = run[run.length - 1]
+    const positionsAreAdjacent = previous
+      ? (() => {
+          const leftPosition = Number(previous?.source_position)
+          const rightPosition = Number(product?.source_position)
+          return !Number.isFinite(leftPosition) || !Number.isFinite(rightPosition) || rightPosition - leftPosition <= 1
+        })()
+      : true
+    const sameCatalogScope = !previous
+      || (String(previous?.brand || '') === String(product?.brand || '') && String(previous?.category || '') === String(product?.category || ''))
+    if (!positionsAreAdjacent || !sameCatalogScope || run.length >= 8) flush()
+    run.push(product)
+  }
+  flush()
+  return result
+}
+
+function hasComparableFirstPhoto(product: any) {
+  return Array.isArray(product?.photos) && Boolean(product.photos[0])
 }
 
 export function normalizeShadeScanOutput(raw: any, candidates: any[]) {

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Users, Package, Settings2 } from 'lucide-react'
+import { Ruler, Users, Package, Settings2 } from 'lucide-react'
 
 export default function ImportTabs() {
   const pathname = usePathname()
@@ -10,6 +10,7 @@ export default function ImportTabs() {
   const tabs = [
     { label: 'История выгрузок', href: '/admin/batches', icon: Package },
     { label: 'Поставщики', href: '/admin/suppliers', icon: Users },
+    { label: 'Шаблоны замеров', href: '/admin/measurement-templates', icon: Ruler },
   ]
 
   return (

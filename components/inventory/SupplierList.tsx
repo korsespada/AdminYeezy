@@ -12,6 +12,7 @@ import {
 
 type SupplierAiProcessingOptions = {
   colorFamilyByArticle: boolean
+  colorFamilyBySequence?: boolean
   articleExample: string
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
@@ -22,6 +23,7 @@ type SupplierAiProcessingOptions = {
 
 const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   colorFamilyByArticle: false,
+  colorFamilyBySequence: false,
   articleExample: '',
   splitAlbumColors: false,
   reorderFirstPhoto: false,
@@ -933,6 +935,15 @@ export default function SupplierList({
                         className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
                       />
                     </div>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.colorFamilyBySequence || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, colorFamilyBySequence: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Проверять подряд идущие товары как цветовое семейство</b><small className="text-xs text-slate-500">После полной AI-обработки ИИ автоматически сравнит соседние карточки по фото, даже без общего артикула. Он только предложит семью — фото не объединяются.</small></span>
+                    </label>
                     <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
                       <input
                         type="checkbox"

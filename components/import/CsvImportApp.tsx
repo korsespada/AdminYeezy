@@ -84,6 +84,7 @@ import AdminProductCard from "@/components/products/ProductCard";
 import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
+import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -3002,6 +3003,7 @@ export default function CsvImportApp({
           if (nextIndex >= 0) setSelectedIdx(nextIndex);
         }}
         supplierName={initialSupplierName || undefined}
+        supplierId={supplierId}
       />
       {showAiSuggestions && batchId && (
         <BatchAiReviewDialog
@@ -3418,6 +3420,7 @@ interface CsvProductDrawerProps {
   onVariantsChanged: (productIds: number[], groupKey: string | null, groupName?: string) => void;
   onOpenVariant: (product: CsvProduct) => void;
   supplierName?: string;
+  supplierId?: number | null;
 }
 
 function CsvProductDrawer({
@@ -3437,6 +3440,7 @@ function CsvProductDrawer({
   onVariantsChanged,
   onOpenVariant,
   supplierName,
+  supplierId,
 }: CsvProductDrawerProps) {
   const [local, setLocal] = useState<CsvProduct | null>(null);
 
@@ -3811,11 +3815,17 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
-                {(isClothing || isShoe) && <MeasurementsField
-                  value={attributes.measurements}
-                  onChange={updateMeasurements}
-                  shoe={isShoe}
-                />}
+                {(isClothing || isShoe) && <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-2.5 py-2">
+                    <span className="text-[11px] text-slate-500">Подставить сохранённую таблицу</span>
+                    <MeasurementTemplatePicker supplierId={supplierId} onApply={updateMeasurements} />
+                  </div>
+                  <MeasurementsField
+                    value={attributes.measurements}
+                    onChange={updateMeasurements}
+                    shoe={isShoe}
+                  />
+                </div>}
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs text-slate-500">Дополнительные атрибуты</label>

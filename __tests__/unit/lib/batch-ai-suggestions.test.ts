@@ -137,6 +137,28 @@ describe('colorFamilyRebuildPlan', () => {
     expect(plan.visualCandidates).toHaveLength(1)
     expect(plan.deterministicFamilies).toHaveLength(0)
   })
+
+  it('uses only explicitly enabled adjacent source cards as an additional visual candidate', () => {
+    const products = [
+      { id: 1, source_position: 20, name: 'Майка с крестом', brand: 'ch', category: 'clothes', photos: ['black.jpg'], attributes: { colors: ['Чёрный'] } },
+      { id: 2, source_position: 21, name: 'Майка с готическим принтом', brand: 'ch', category: 'clothes', photos: ['white.jpg'], attributes: { colors: ['Белый'] } },
+    ]
+
+    expect(colorFamilyRebuildPlan(products).visualCandidates).toEqual([])
+    const enabled = colorFamilyRebuildPlan(products, { includeSequentialCandidates: true })
+    expect(enabled.visualCandidates).toHaveLength(1)
+    expect(enabled.visualCandidates[0].candidateKey).toBe('sequential|1|2')
+    expect(enabled.visualCandidates[0].products.map((product) => product.id)).toEqual([1, 2])
+  })
+
+  it('does not treat products with a gap in the source feed as consecutive', () => {
+    const plan = colorFamilyRebuildPlan([
+      { id: 1, source_position: 20, name: 'Майка с крестом', brand: 'ch', category: 'clothes', photos: ['black.jpg'], attributes: { colors: ['Чёрный'] } },
+      { id: 2, source_position: 22, name: 'Майка с готическим принтом', brand: 'ch', category: 'clothes', photos: ['white.jpg'], attributes: { colors: ['Белый'] } },
+    ], { includeSequentialCandidates: true })
+
+    expect(plan.visualCandidates).toEqual([])
+  })
 })
 
 describe('normalizeShadeScanOutput', () => {

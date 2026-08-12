@@ -24,7 +24,6 @@ import {
   matchingPriceRule,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
-  type BatchAiProcessingOptions,
   DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
   CHROMOFF_AUTO_SUPPLIER_IDS,
   runBatchAiOpenRouter,
@@ -858,8 +857,12 @@ export async function refreshAiProviderModelsAction(providerId: string) {
   }
 }
 
-export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[], processingOptions?: BatchAiProcessingOptions) {
+export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   await requireAdmin()
+  return startBatchAiRun(batchId, mode, productId)
+}
+
+async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   const runId = crypto.randomUUID()
   let operationClaimed = false
   try {
@@ -882,7 +885,9 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
         WHERE r.batch_id=$1 AND s.kind='color_family' AND s.status='approved'
       `, [batchId])
       const approvedIds = new Set(approved.rows.map((row) => Number(row.product_id)))
-      const completePlan = colorFamilyRebuildPlan(context.products)
+      const completePlan = colorFamilyRebuildPlan(context.products, {
+        includeSequentialCandidates: normalizeBatchAiProcessingOptions(context.batch.ai_processing_options).colorFamilyBySequence === true,
+      })
       // Уже принятые товары остаются якорями семьи. Иначе частично принятое
       // семейство невозможно дополнить пропущенными цветами при пересборке.
       const needsRebuild = (family: { products: any[] }) => {
@@ -1108,9 +1113,10 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
               attributes: attributeDefinitions,
               priceRules,
               chromoffMode: context.chromoffMode,
-              chromoffCategories: context.chromoffCategories,
-              processingOptions: normalizedProcessingOptions,
-              allowSingleVariant: splitAlbumColors,
+            chromoffCategories: context.chromoffCategories,
+            processingOptions: normalizedProcessingOptions,
+            allowSingleVariant: splitAlbumColors,
+            videoPreviewAvailable: Boolean(videoPosterPreviewUrl(promptProduct)),
             })
           : buildBatchAiUserPrompt({
           product: promptProduct,
@@ -1140,6 +1146,7 @@ export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode =
           measurementRecoveryOnly: mode === 'recover_measurements',
           measurementTargetProductIds,
           photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : ['media_seo', 'split_colors'].includes(mode) ? product.photos || [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
+          videoPreviewUrl: mode === 'split_colors' || splitAlbumColors ? videoPosterPreviewUrl(promptProduct) : '',
           photoEnabled: mode === 'recover_measurements' || ['media_seo', 'split_colors'].includes(mode) || context.batch.ai_photo_enabled === true,
           fullSizeRefinementEnabled: mode === 'recover_measurements' || (!['media_seo', 'split_colors'].includes(mode) && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: mode === 'reprocess' || context.batch.stage === 'PUSHED' || product.ai_processed === true,
@@ -1372,9 +1379,16 @@ function normalizeColorSplitOutput(raw: any, input: any, context: any) {
 
   return {
     familyName: String(raw?.family_name || normalizedVariants[0]?.normalized?.product?.name || 'Цветовые варианты').trim().slice(0, 250),
+    videoColorKey: String(raw?.video_color_key || '').trim().slice(0, 100),
     skipProduct: false,
     variants: normalizedVariants,
   }
+}
+
+function videoPosterPreviewUrl(product: any) {
+  const attributes = product?.attributes || {}
+  const url = String(attributes.szwego_video_poster_url || attributes.video_poster_url || '').trim()
+  return /^https?:\/\//i.test(url) ? url : ''
 }
 
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
@@ -1397,6 +1411,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       userPrompt: input.userPrompt,
       contactSheets: sheets,
       referenceSheets,
+      extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
     })
     rawOutput = raw
     if (input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
@@ -1567,8 +1582,12 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
     .update(`${context.batch.supplier_id || ''}:${sourceExternalId}`)
     .digest('hex')
   const familyName = String(normalized.familyName || source.name || 'Цветовые варианты').trim().slice(0, 250)
-  const variants = (normalized.variants || []).map((entry: any, index: number) => {
-    const product = entry.normalized.product
+  const variants = normalized.variants || []
+  const videoVariantIndex = colorSplitVideoVariantIndex(normalized.videoColorKey, variants)
+  const preparedVariants = variants.map((entry: any, index: number) => {
+    const product = index === videoVariantIndex
+      ? entry.normalized.product
+      : withoutInheritedSourceVideo(entry.normalized.product)
     if (item.input_snapshot?.preserveExistingPrice) {
       product.price = Number(source.price || 0)
       product.price_source = source.price_source || 'legacy'
@@ -1614,8 +1633,8 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
     )
     if (!lockedSource.rows[0]) throw new Error('Исходный товар для разделения не найден')
 
-    for (let index = 0; index < variants.length; index += 1) {
-      const { product, externalId } = variants[index]
+    for (let index = 0; index < preparedVariants.length; index += 1) {
+      const { product, externalId } = preparedVariants[index]
       if (index === 0) {
         await client.query(`
           UPDATE products SET
@@ -1675,6 +1694,24 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
   } finally {
     client.release()
   }
+}
+
+function withoutInheritedSourceVideo(product: any) {
+  const attributes = { ...(product?.attributes || {}) }
+  for (const key of [
+    'szwego_video_url', 'szwego_video_poster_url',
+    'hosted_video_url', 'hosted_video_poster_url',
+    'manual_video_url', 'manual_video_poster_url',
+    'video_url', 'video_poster_url', 'video_transfer_error',
+  ]) delete attributes[key]
+  return { ...product, attributes }
+}
+
+function colorSplitVideoVariantIndex(videoColorKey: unknown, variants: any[]) {
+  const target = normalizedColorFamilyValue(videoColorKey)
+  if (!target) return 0
+  const index = variants.findIndex((entry) => normalizedColorFamilyValue(entry?.color) === target)
+  return index >= 0 ? index : 0
 }
 
 async function applySkippedProduct(item: any, normalized: any, context: any) {
@@ -1811,6 +1848,7 @@ async function finalizeRun(runId: string) {
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
     const currentRun = run.rows[0]
+    let shouldStartSequentialFamilyScan = false
     try {
       if (currentRun?.mode === 'recover_measurements') {
         await snapshotBatch(currentRun.batch_id, 'PUSHED', 'Замеры восстановлены', currentRun.settings_snapshot)
@@ -1827,12 +1865,23 @@ async function finalizeRun(runId: string) {
       }
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
+        shouldStartSequentialFamilyScan = currentRun?.mode === 'full'
+          && normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
       }
       if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
         await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
       }
     } finally {
       await releaseBatchOperation(String(currentRun.batch_id), runId)
+    }
+    if (shouldStartSequentialFamilyScan) {
+      after(async () => {
+        try {
+          await startBatchAiRun(String(currentRun.batch_id), 'variants')
+        } catch (error) {
+          console.error(`Не удалось автоматически найти цветовые семьи для выгрузки ${currentRun.batch_id}:`, error)
+        }
+      })
     }
   } else if (row.pending === 0) {
     const finishedRun = await scrapingQuery('SELECT batch_id FROM batch_ai_runs WHERE id=$1', [runId])

@@ -20,6 +20,7 @@ export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
 export type BatchAiProcessingOptions = {
   colorFamilyByArticle: boolean
+  colorFamilyBySequence?: boolean
   articleExample: string
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
@@ -30,6 +31,7 @@ export type BatchAiProcessingOptions = {
 
 export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
   colorFamilyByArticle: false,
+  colorFamilyBySequence: false,
   articleExample: '',
   splitAlbumColors: false,
   reorderFirstPhoto: false,
@@ -42,6 +44,7 @@ export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProces
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   return {
     colorFamilyByArticle: source.colorFamilyByArticle === true,
+    colorFamilyBySequence: source.colorFamilyBySequence === true,
     articleExample: String(source.articleExample || '').trim().slice(0, 500),
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
@@ -368,8 +371,9 @@ export function buildBatchAiColorSplitPrompt(input: {
   chromoffCategories?: BatchAiChromoffCategory[]
   processingOptions?: BatchAiProcessingOptions
   allowSingleVariant?: boolean
+  videoPreviewAvailable?: boolean
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS, allowSingleVariant = false } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS, allowSingleVariant = false, videoPreviewAvailable = false } = input
   return [
     'Один исходный альбом содержит несколько отдельно продаваемых цветовых вариантов одной физической модели.',
     'За один ответ раздели фотографии по цветам и полностью обработай каждый получившийся товар. Второго AI-прохода не будет.',
@@ -385,10 +389,14 @@ export function buildBatchAiColorSplitPrompt(input: {
     ...(processingOptions.colorFamilyByArticle ? [
       `При определении общей семьи используй пример артикула «${processingOptions.articleExample || 'SP001 blue'}»: SP001 blue и SP001 green имеют общую основу SP001, цвет не включай в family_name/group_signature.`,
     ] : []),
+    ...(videoPreviewAvailable ? [
+      'После contact sheet приложен отдельный кадр-превью исходного видео. Он не является фотографией товара, не включай его в photo_indexes. Верни video_color_key: точный color_key одного варианта, если по этому кадру цвет виден однозначно; иначе пустую строку. Если на видео несколько цветов, тоже верни пустую строку.',
+    ] : []),
     'Каждый product должен быть полностью готов как после обычной AI-обработки: название, описание, SEO, классификация, пол, атрибуты, ценовое правило и confidence.',
     'Верни строго JSON без markdown следующей формы:',
     JSON.stringify({
       family_name: '',
+      video_color_key: '',
       skip_product: false,
       variants: [{
         color_key: '',
@@ -522,6 +530,7 @@ export async function runBatchAiOpenRouter(input: {
   userPrompt: string
   contactSheets: string[]
   referenceSheets?: string[]
+  extraImages?: Array<{ label: string; url: string }>
 }) {
   const content: any[] = [{ type: 'text', text: input.userPrompt }]
   input.contactSheets.forEach((url, index) => {
@@ -531,6 +540,11 @@ export async function runBatchAiOpenRouter(input: {
   ;(input.referenceSheets || []).forEach((url, index) => {
     content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
+  })
+  ;(input.extraImages || []).forEach((image) => {
+    if (!image?.url) return
+    content.push({ type: 'text', text: image.label })
+    content.push({ type: 'image_url', image_url: { url: image.url } })
   })
   const protocol = providerProtocol(input.settings.providerBaseUrl || '')
   const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel

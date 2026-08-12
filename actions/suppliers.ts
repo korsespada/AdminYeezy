@@ -177,6 +177,7 @@ function normalizeSupplierAiProcessingOptions(value: FormDataEntryValue | null) 
   } catch { /* use defaults */ }
   return {
     colorFamilyByArticle: source.colorFamilyByArticle === true,
+    colorFamilyBySequence: source.colorFamilyBySequence === true,
     articleExample: String(source.articleExample || '').trim().slice(0, 500),
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 
 describe('Anthropic provider adapter', () => {
-  afterEach(() => vi.restoreAllMocks())
+  afterEach(() => { vi.restoreAllMocks() })
 
   it('sends AgentRouter requests to Messages API with the Claude Code wire headers', async () => {
     const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(

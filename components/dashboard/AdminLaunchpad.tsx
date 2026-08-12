@@ -10,6 +10,7 @@ import {
   ListChecks,
   PackageSearch,
   RefreshCw,
+  Ruler,
   Settings2,
   SlidersHorizontal,
   Sparkles,
@@ -63,6 +64,13 @@ const sections = [
     href: '/admin/suppliers',
     icon: Users,
     tone: 'text-emerald-300',
+  },
+  {
+    title: 'Шаблоны замеров',
+    description: 'Переиспользуемые таблицы размеров со скриншотами для назначения в карточках выгрузок.',
+    href: '/admin/measurement-templates',
+    icon: Ruler,
+    tone: 'text-cyan-300',
   },
   {
     title: 'Scraping',
