@@ -146,6 +146,100 @@ POSTER_URL_KEYS = {
     "coverImage", "cover_image", "thumbnail", "thumb", "firstFrame", "first_frame",
 }
 
+TAG_ID_KEYS = ("tagId", "tag_id")
+TAG_NAME_KEYS = ("tagName", "tag_name", "name")
+GROUP_ID_KEYS = ("tagGroupId", "tag_group_id", "groupId", "group_id")
+GROUP_NAME_KEYS = ("tagGroupName", "tag_group_name", "groupName", "group_name", "name")
+
+def _first_nonempty_string(data, keys):
+    if not isinstance(data, dict):
+        return ""
+    for key in keys:
+        value = data.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+def _collect_szwego_tags(value, found, seen, parent_key=""):
+    """Collect typed tag/group references without treating arbitrary item IDs as tags."""
+    if isinstance(value, list):
+        for item in value:
+            _collect_szwego_tags(item, found, seen, parent_key)
+        return
+    if not isinstance(value, dict):
+        return
+
+    parent_is_tag = "tag" in parent_key.lower()
+    parent_is_group = "group" in parent_key.lower()
+    tag_id = _first_nonempty_string(value, TAG_ID_KEYS)
+    tag_name = _first_nonempty_string(value, TAG_NAME_KEYS)
+    group_id = _first_nonempty_string(value, GROUP_ID_KEYS)
+    group_name = _first_nonempty_string(value, GROUP_NAME_KEYS)
+
+    # Some Szwego responses nest a tag/group object under a descriptive key and
+    # use a generic `id`; accept that only together with a human-readable name.
+    generic_id = _first_nonempty_string(value, ("id",))
+    if not tag_id and parent_is_tag and not parent_is_group and tag_name:
+        tag_id = generic_id
+    if not group_id and parent_is_group and group_name:
+        group_id = generic_id
+
+    for item_type, label, item_id in (("tag", tag_name, tag_id), ("group", group_name, group_id)):
+        if not label or not item_id:
+            continue
+        key = f"{item_type}:{item_id}"
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append({"type": item_type, "label": label, "value": item_id})
+
+    for key, child in value.items():
+        _collect_szwego_tags(child, found, seen, key)
+
+def _fetch_szwego_tag_references(session, album_id, headers):
+    """Read Szwego's API data and return its visible tag/group name-to-ID pairs."""
+    timestamp_val = int(time.time() * 1000)
+    found = []
+    seen = set()
+
+    while True:
+        params = {
+            "albumId": album_id,
+            "searchValue": "",
+            "searchImg": "",
+            "startDate": "",
+            "endDate": "",
+            "transLang": "en",
+            "requestDataType": "",
+            "timestamp": timestamp_val,
+        }
+        response = request_with_retry(
+            session,
+            "GET",
+            "https://www.szwego.com/album/personal/image",
+            params=params,
+            headers=headers,
+        )
+        if not response:
+            raise RuntimeError("Не удалось получить данные альбома от Szwego")
+        data = response.json()
+        if not data.get("success"):
+            if data.get("errcode") == 9:
+                raise RuntimeError("Сессия Szwego истекла. Обновите Cookie поставщика.")
+            raise RuntimeError(data.get("errmsg") or "Szwego не вернул список тегов")
+
+        result = data.get("result") or {}
+        _collect_szwego_tags(result, found, seen)
+        pagination = result.get("pagination") or {}
+        if not pagination.get("isLoadMore"):
+            break
+        next_timestamp = pagination.get("pageTimestamp")
+        if not next_timestamp or next_timestamp == timestamp_val:
+            break
+        timestamp_val = next_timestamp
+
+    return found
+
 def _normalize_media_url(value):
     if not isinstance(value, str):
         return ""
@@ -216,6 +310,7 @@ def main():
     parser.add_argument("--gender", default="")
     parser.add_argument("--default_price", type=float, default=0.0)
     parser.add_argument("--parse_tags", action="store_true")
+    parser.add_argument("--list_tags", action="store_true", help="List visible Szwego tag/group names with their IDs and exit")
     
     parser.add_argument('--get_avatar', action='store_true', help='Only fetch shop avatar and exit')
     args = parser.parse_args()
@@ -264,6 +359,16 @@ def main():
     }
 
     session = get_session()
+
+    if args.list_tags:
+        try:
+            tags = _fetch_szwego_tag_references(session, args.album_id, headers)
+            print("SZWEGO_TAGS_RESULT:" + json.dumps(tags, ensure_ascii=False))
+        except Exception as e:
+            print(f"SZWEGO_TAGS_ERROR:{e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
     all_rows = []
     skip_reasons = {}
     seen_photo_keys = {}

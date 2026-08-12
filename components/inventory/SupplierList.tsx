@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
-import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
+import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
@@ -226,6 +226,7 @@ export default function SupplierList({
 
   // Dynamic tags in modal
   const [modalTags, setModalTags] = useState<TagRow[]>([])
+  const [isDiscoveringTags, setIsDiscoveringTags] = useState(false)
 
   const parseBrandTags = (tagsStr: string): TagRow[] => {
     if (!tagsStr) return []
@@ -310,6 +311,29 @@ export default function SupplierList({
     // @ts-ignore
     newTags[index][key] = val
     setModalTags(newTags)
+  }
+
+  const handleDiscoverSzwegoTags = async () => {
+    if (!editingSupplier || editingSupplier.id === 0) {
+      alert('Сначала сохраните поставщика с Album ID и Cookie Szwego, затем откройте его настройки снова.')
+      return
+    }
+    setIsDiscoveringTags(true)
+    const res = await discoverSupplierSzwegoTagsAction(editingSupplier.id)
+    setIsDiscoveringTags(false)
+    if (!res.success) {
+      alert(res.error)
+      return
+    }
+
+    const discovered = Array.isArray(res.data) ? res.data as TagRow[] : []
+    const existing = new Map(modalTags.map((tag) => [`${tag.type}:${tag.value}`, tag]))
+    for (const tag of discovered) {
+      const key = `${tag.type}:${tag.value}`
+      if (!existing.has(key)) existing.set(key, tag)
+    }
+    setModalTags([...existing.values()])
+    alert(discovered.length ? `Найдено ${discovered.length} тегов и групп. Проверьте список и сохраните настройки.` : 'Szwego не вернул тегов или групп для этого альбома.')
   }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -989,6 +1013,17 @@ export default function SupplierList({
                     <button type="button" onClick={handleAddTagRow} className="flex items-center gap-1.5 text-sm text-emerald-500 hover:text-emerald-400 transition-colors py-1 px-2 hover:bg-emerald-500/10 rounded-lg">
                       <PlusCircle size={16} />
                       Добавить строку
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+                    <p className="text-xs text-slate-400">Получить названия и ID из API Szwego. Браузерная ссылка альбома для этого не нужна.</p>
+                    <button
+                      type="button"
+                      onClick={handleDiscoverSzwegoTags}
+                      disabled={isDiscoveringTags || !editingSupplier || editingSupplier.id === 0}
+                      className="shrink-0 rounded-lg border border-indigo-500/50 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isDiscoveringTags ? 'Получаем…' : 'Обновить из Szwego'}
                     </button>
                   </div>
 

@@ -358,6 +358,52 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
   }
 }
 
+export async function discoverSupplierSzwegoTagsAction(supplierId: number): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const res = await scrapingQuery('SELECT album_id, cookie FROM suppliers WHERE id=$1', [supplierId])
+    const supplier = res.rows[0]
+    if (!supplier) return { success: false, error: 'Поставщик не найден' }
+
+    const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || ''
+    if (!cookie) return { success: false, error: 'Для получения тегов нужен действующий Cookie Szwego у поставщика' }
+
+    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
+    return new Promise((resolve) => {
+      const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', [
+        /*turbopackIgnore: true*/ scriptPath,
+        '--album_id', supplier.album_id,
+        '--cookie', cookie,
+        '--list_tags',
+      ])
+      let stdout = ''
+      let stderr = ''
+
+      pythonProcess.stdout.on('data', (data) => { stdout += data.toString() })
+      pythonProcess.stderr.on('data', (data) => { stderr += data.toString() })
+      pythonProcess.on('error', (error) => resolve({ success: false, error: `Не удалось запустить парсер Szwego: ${error.message}` }))
+      pythonProcess.on('close', (code) => {
+        const resultLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_TAGS_RESULT:'))
+        if (code !== 0 || !resultLine) {
+          const scraperError = stderr.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_TAGS_ERROR:'))
+          return resolve({ success: false, error: scraperError?.replace('SZWEGO_TAGS_ERROR:', '').trim() || stderr || 'Szwego не вернул список тегов' })
+        }
+        try {
+          const parsed = JSON.parse(resultLine.replace('SZWEGO_TAGS_RESULT:', ''))
+          const tags = Array.isArray(parsed)
+            ? parsed.filter((item) => item && (item.type === 'tag' || item.type === 'group') && typeof item.label === 'string' && typeof item.value === 'string')
+            : []
+          return resolve({ success: true, data: tags })
+        } catch {
+          return resolve({ success: false, error: 'Получен некорректный список тегов от Szwego' })
+        }
+      })
+    })
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function deleteSupplierAction(id: number): Promise<ActionResponse> {
   try {
     await requireAdmin()
