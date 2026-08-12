@@ -3,6 +3,46 @@ import { describe, expect, it } from 'vitest'
 const { runSupplierJsonProcess } = require('../../../scripts/lib/supplier-json-process')
 
 describe('supplier JSON post-process contract', () => {
+  it('builds CH clothing products from preceding detail albums and video cards', async () => {
+    const products = [
+      { external_id: 'separator-1', description: '➨', photos: [], source_position: 0, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'size', description: '尺码表', photos: ['size.jpg'], source_position: 1, attributes: { szwego_parse_mode: 'all' } },
+      {
+        external_id: 'video-red', description: '实拍视频 三色', photos: ['video-poster.jpg'], source_position: 2,
+        attributes: { szwego_parse_mode: 'all', szwego_video_url: 'https://video/red.mp4', szwego_video_poster_url: 'https://video/red.webp' },
+      },
+      { external_id: 'model-red', description: '上身图参考 巨美啊', photos: ['model.jpg'], source_position: 3, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'packaging', description: '标配：配套YB雪梨纸 手提袋+6', photos: ['bag.jpg'], source_position: 4, attributes: { szwego_parse_mode: 'all' } },
+      { external_id: 'detail-red', description: '红色局部细节参考', photos: ['detail-1.jpg', 'detail-2.jpg'], source_position: 5, attributes: { szwego_parse_mode: 'all' } },
+      {
+        external_id: 'red-dress', description: '顶级版本 Chrome Hearts 克罗心 刺绣针织背心裙 面料与原版一致，全码现货。',
+        photos: ['red-main-1.jpg', 'red-main-2.jpg'], source_position: 6, attributes: { szwego_parse_mode: 'all' },
+      },
+      { external_id: 'blue-detail', description: '局部细节参考', photos: ['blue-detail.jpg'], source_position: 7, attributes: { szwego_parse_mode: 'all' } },
+      {
+        external_id: 'blue-top', description: 'Chrome hearts 克罗心蓝黄撞色 七分袖数字马蹄印花撞色T恤 女款长袖T恤，夏天可以当防晒穿。',
+        photos: ['blue-main.jpg'], source_position: 8, attributes: { szwego_parse_mode: 'all' },
+      },
+      { external_id: 'outfit', description: '配工装裤，随性松弛；搭短裙，甜辣平衡！', photos: ['outfit.jpg'], source_position: 9, attributes: { szwego_parse_mode: 'all' } },
+    ]
+
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', products)
+
+    expect(result).toHaveLength(2)
+    expect(result[0]).toMatchObject({
+      external_id: 'red-dress',
+      photos: ['red-main-1.jpg', 'red-main-2.jpg', 'detail-1.jpg', 'detail-2.jpg'],
+      attributes: {
+        szwego_video_url: 'https://video/red.mp4',
+        szwego_video_poster_url: 'https://video/red.webp',
+      },
+    })
+    expect(result[1]).toMatchObject({
+      external_id: 'blue-top',
+      photos: ['blue-main.jpg', 'blue-detail.jpg'],
+    })
+  })
+
   it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {
     const products = [
       {
