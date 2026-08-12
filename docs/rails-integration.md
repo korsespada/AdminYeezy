@@ -102,6 +102,11 @@ GET  /api/v1/admin/telegram_notification_recipients
 POST /api/v1/admin/telegram_notification_recipients
 ```
 
+Получатель CRM может быть включён отдельно для `notify_site` (регистрации и
+заказы сайта от auth-бота) и `notify_telegram_mini_app` (заявки Mini App от
+`@YeezyUniqueBot`). Тестовый запрос передаёт `channel=site` или
+`channel=telegram_mini_app`, чтобы проверить нужного бота.
+
 В CRM остаются четыре вкладки: «Заказы», «Клиенты», «Telegram-сообщения» и
 «Настройки CRM». В заказах используются только статусы `payment_pending`,
 `paid`, `shipped`, `delivered`, `refund_pending`, `cancelled`; подтверждение

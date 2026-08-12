@@ -166,6 +166,8 @@ export interface RailsTelegramNotificationRecipient {
   id: string
   telegram_id: string
   label?: string | null
+  notify_site: boolean
+  notify_telegram_mini_app: boolean
   notify_new_orders: boolean
   notify_new_customers: boolean
   is_active: boolean
@@ -1331,8 +1333,8 @@ export async function listRailsTelegramNotificationRecipients(): Promise<RailsTe
 export async function createRailsTelegramNotificationRecipient(input: {
   telegramId: string
   label?: string
-  notifyNewOrders: boolean
-  notifyNewCustomers: boolean
+  notifySite: boolean
+  notifyTelegramMiniApp: boolean
   isActive: boolean
 }) {
   const result = await railsFetch<{ recipient: RailsTelegramNotificationRecipient }>(
@@ -1342,8 +1344,8 @@ export async function createRailsTelegramNotificationRecipient(input: {
       body: JSON.stringify({
         telegram_id: input.telegramId,
         label: input.label || '',
-        notify_new_orders: input.notifyNewOrders,
-        notify_new_customers: input.notifyNewCustomers,
+        notify_site: input.notifySite,
+        notify_telegram_mini_app: input.notifyTelegramMiniApp,
         is_active: input.isActive,
       }),
     }
@@ -1356,8 +1358,8 @@ export async function updateRailsTelegramNotificationRecipient(
   input: {
     telegramId: string
     label?: string
-    notifyNewOrders: boolean
-    notifyNewCustomers: boolean
+    notifySite: boolean
+    notifyTelegramMiniApp: boolean
     isActive: boolean
   }
 ) {
@@ -1368,8 +1370,8 @@ export async function updateRailsTelegramNotificationRecipient(
       body: JSON.stringify({
         telegram_id: input.telegramId,
         label: input.label || '',
-        notify_new_orders: input.notifyNewOrders,
-        notify_new_customers: input.notifyNewCustomers,
+        notify_site: input.notifySite,
+        notify_telegram_mini_app: input.notifyTelegramMiniApp,
         is_active: input.isActive,
       }),
     }
@@ -1384,10 +1386,10 @@ export async function deleteRailsTelegramNotificationRecipient(id: string) {
   )
 }
 
-export async function testRailsTelegramNotificationRecipient(id: string) {
+export async function testRailsTelegramNotificationRecipient(id: string, channel: 'site' | 'telegram_mini_app') {
   await railsFetch<{ delivered: boolean }>(
     `/admin/telegram_notification_recipients/${encodeURIComponent(id)}/test_delivery`,
-    { method: 'POST' }
+    { method: 'POST', body: JSON.stringify({ channel }) }
   )
 }
 

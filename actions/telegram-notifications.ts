@@ -21,8 +21,8 @@ function notificationInput(formData: FormData) {
   return {
     telegramId: requiredString(formData, 'telegramId'),
     label: String(formData.get('label') || '').trim(),
-    notifyNewOrders: true,
-    notifyNewCustomers: true,
+    notifySite: formData.get('notifySite') === 'on',
+    notifyTelegramMiniApp: formData.get('notifyTelegramMiniApp') === 'on',
     isActive: true,
   }
 }
@@ -53,6 +53,7 @@ export async function deleteTelegramNotificationRecipientAction(formData: FormDa
 
 export async function testTelegramNotificationRecipientAction(formData: FormData) {
   await requireAdmin()
-  await testRailsTelegramNotificationRecipient(requiredString(formData, 'id'))
+  const channel = formData.get('channel') === 'telegram_mini_app' ? 'telegram_mini_app' : 'site'
+  await testRailsTelegramNotificationRecipient(requiredString(formData, 'id'), channel)
   revalidateNotifications()
 }

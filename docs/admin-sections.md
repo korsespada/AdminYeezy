@@ -75,7 +75,7 @@ yeezy_scraping batch
 | `/admin/crm/customers` | Клиенты, фильтр по источнику регистрации и адреса | `GET /admin/customers` |
 | `/admin/crm/customers/[id]` | Контакты, адреса и история клиента | `GET /admin/customers/:id` |
 | `/admin/crm/telegram` | Telegram-сообщения и рассылки | `GET/POST /admin/store_telegram_*` |
-| `/admin/crm/settings` | Получатели всех CRM-уведомлений | `GET/POST /admin/telegram_notification_recipients` |
+| `/admin/crm/settings` | Получатели уведомлений сайта и Mini App, с отдельными тестами ботов | `GET/POST /admin/telegram_notification_recipients` |
 
 Карточка заказа включает:
 
