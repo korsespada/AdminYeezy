@@ -49,13 +49,32 @@ describe('supplier JSON post-process contract', () => {
     const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
       {
         external_id: 'leather-shorts',
-        description: 'Chrome Hearts CH克罗心 羊皮十字架卷轴五金短裤，CH 配套雪梨纸全套包装，全码现货。',
+        description: 'Chrome Hearts CH克罗心 羊皮十字架卷轴五金短裤，925制银拉链，版型细节全部还原YB，CH 配套雪梨纸全套包装，全码现货。',
         photos: ['shorts.jpg'], source_position: 0, attributes: { szwego_parse_mode: 'all' },
       },
     ])
 
     expect(result).toHaveLength(1)
     expect(result[0].external_id).toBe('leather-shorts')
+  })
+
+  it('drops CH promotional and factory albums without dropping a real product that mentions the same material or shipping terms', async () => {
+    const result = await runSupplierJsonProcess('process_ch_clothing_timeline.py', [
+      { external_id: 'development-promo', description: '‼️原版开发‼️克罗心 最高版本 750 克 重磅 黑色 短裤 出货‼️', photos: ['promo.jpg'], source_position: 0, attributes: {} },
+      { external_id: 'shipping-promo', description: '顶级 长袖 现货 秒发‼️', photos: ['shipping.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'stock-promo', description: '发货 发到过年 100个新款 在仓 现货秒发‼️', photos: ['stock.jpg'], source_position: 2, attributes: {} },
+      { external_id: 'factory-promo', description: '真正顶级工艺：热固油材质印花‼️', photos: ['factory.jpg'], source_position: 3, attributes: {} },
+      { external_id: 'fabric-promo', description: '自然光下 直线距离感受一下 原版暗纹面料‼️', photos: ['fabric.jpg'], source_position: 4, attributes: {} },
+      { external_id: 'craft-promo', description: '真正的手工制作工艺 手工热固油‼️ 成本是普通的三倍', photos: ['craft.jpg'], source_position: 5, attributes: {} },
+      {
+        external_id: 'real-product',
+        description: 'Chrome Hearts 克罗心短袖T恤，成衣采用热固油材质印花，尺码 S M L XL，全码现货秒发。',
+        photos: ['real-product.jpg'], source_position: 6, attributes: {},
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].external_id).toBe('real-product')
   })
 
   it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {

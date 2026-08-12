@@ -19,13 +19,34 @@ SIZE_RE = re.compile(r"尺码表|尺寸表|size\s*(?:chart|guide|table)", re.IGN
 MODEL_RE = re.compile(r"上身图|上身照|模特|真人|穿搭|试穿|二手|中古", re.IGNORECASE)
 PACKAGING_RE = re.compile(r"标配|雪梨纸|手提袋|包装|配套", re.IGNORECASE)
 OUTFIT_RE = re.compile(r"搭(?:配|短裙|工装裤)|配工装裤|配短裙|穿搭", re.IGNORECASE)
-DETAIL_RE = re.compile(r"局部细节|细节(?:参考|图)?|细节参考", re.IGNORECASE)
+# Do not match the ordinary word 细节 in a product description, such as
+# "版型细节全部还原". Only album-style captions belong to this category.
+DETAIL_RE = re.compile(r"局部细节|细节(?:参考|图)", re.IGNORECASE)
 VIDEO_RE = re.compile(r"(?:实拍|上身)?视频", re.IGNORECASE)
 COLLECTION_RE = re.compile(r"集合图|图集|拼图|上新(?:预告|合集)?|新品推荐", re.IGNORECASE)
 REFERENCE_RE = re.compile(r"同款|参考", re.IGNORECASE)
 HARDWARE_RE = re.compile(r"原版五金|925\s*(?:制银|银)|纯银|纽扣|拉链|百达灵|百灵达", re.IGNORECASE)
 BRAND_RE = re.compile(r"chrome\s*hearts|克罗心", re.IGNORECASE)
 PROMO_RE = re.compile(r"面料像缎子|显白天花板|真的太帅|哪个颜色都好看|随便搭配", re.IGNORECASE)
+# These are supplier-wide advertising albums, not product cards.  Deliberately
+# require the surrounding double-exclamation marker: ordinary descriptions can
+# legitimately say that a garment was developed from the original version.
+DEVELOPMENT_PROMO_RE = re.compile(r"‼\ufe0f?\s*原版开发\s*‼\ufe0f?", re.IGNORECASE)
+# Keep these narrow and caption-shaped.  For example, a genuine long product
+# description may mention `热固油材质印花` or `全码现货秒发`.
+STANDALONE_PROMO_RE = re.compile(
+    r"^(?:"
+    r"顶级\s*(?:长袖|短袖)\s*现货\s*秒发|"
+    r"发货\s*发到过年.*?(?:新款.*?在仓|在仓).*?现货\s*秒发|"
+    r"真正顶级工艺[：:].*?热固油材质印花|"
+    r"自然光下.*?原版暗纹面料|"
+    r"手工制作工艺.*?热固油|"
+    r"正品原厂.*?(?:面料供应|原版一致)|"
+    r"直线距离.*?感受一下|"
+    r"真正的手工制作工艺.*?热固油"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _description(product: dict[str, Any]) -> str:
@@ -60,7 +81,8 @@ def _is_primary(product: dict[str, Any], description: str) -> bool:
     if len(description) < 12 or not (_photos(product) or _video(product)[0]):
         return False
     if any(pattern.search(description) for pattern in (
-        SIZE_RE, MODEL_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE, PROMO_RE,
+        SIZE_RE, MODEL_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE,
+        PROMO_RE, DEVELOPMENT_PROMO_RE, STANDALONE_PROMO_RE,
     )):
         return False
     # Product descriptions often mention the included packaging or 925 hardware.

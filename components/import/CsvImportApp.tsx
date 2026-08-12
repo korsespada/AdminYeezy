@@ -2770,6 +2770,7 @@ export default function CsvImportApp({
                 ) : isBatchSource ? (
                   <AdminProductCard
                     product={adminProduct}
+                    showAttributeSummary={false}
                     onEdit={() => setSelectedIdx(realIndex)}
                     onDelete={() => handleRemove(realIndex)}
                     onUpdate={() => undefined}

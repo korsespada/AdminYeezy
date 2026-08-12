@@ -45,9 +45,10 @@ interface ProductCardProps {
     onAiProcess?: () => void;
     variantCount?: number;
     variantColors?: string[];
+    showAttributeSummary?: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [] }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -353,7 +354,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 )}
 
                 <div className="flex-1">
-                    <ProductAttributeSummary product={product} compact />
+                    {showAttributeSummary && <ProductAttributeSummary product={product} compact />}
                     {variantCount > 1 && (
                         <button type="button" onClick={() => onEdit(product)} className="mb-2 mt-1 flex w-full items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/10 px-2.5 py-2 text-left hover:bg-violet-500/15">
                             <Palette className="h-4 w-4 shrink-0 text-violet-300" />
