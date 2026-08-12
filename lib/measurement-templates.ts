@@ -31,6 +31,39 @@ export type MeasurementTemplate = {
   updatedAt?: string
 }
 
+/** Размеры, указанные строками таблицы, используются также как варианты товара. */
+export function measurementTableSizes(value: unknown): string[] {
+  const table = normalizeMeasurementTable(value)
+  if (!table) return []
+  return [...new Set(table.rows
+    .map((row) => String(row.size || '').trim())
+    .filter(Boolean))]
+}
+
+export function applyMeasurementTableAttributes(
+  attributes: Record<string, any> | null | undefined,
+  measurements: unknown,
+) {
+  const next: Record<string, any> = { ...(attributes || {}), measurements }
+  const sizes = measurementTableSizes(measurements)
+  if (!sizes.length) return next
+
+  const existing = next.sizes
+  const existingValues = Array.isArray(existing)
+    ? existing.map(String)
+    : existing && typeof existing === 'object' && Array.isArray(existing.values)
+      ? existing.values.map(String)
+      : existing === undefined || existing === null || existing === '' ? [] : [String(existing)]
+  const mergedSizes = [...new Set([...existingValues, ...sizes].map((value) => value.trim()).filter(Boolean))]
+  next.sizes = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? { ...existing, values: mergedSizes }
+    : mergedSizes
+  if (!next.size_system && mergedSizes.some((size) => /^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|[2-6]XL)$/i.test(size))) {
+    next.size_system = 'International'
+  }
+  return next
+}
+
 export function measurementTemplateGarmentLabel(value: string) {
   return MEASUREMENT_TEMPLATE_GARMENTS.find((item) => item.value === value)?.label || 'Другое'
 }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
+import { applyMeasurementTableAttributes, measurementTemplateForProduct, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
@@ -154,6 +155,18 @@ async function complete(body: any) {
   if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
+  if (!measurementRecoveryOnly && product?.attributes?.measurements) {
+    product.attributes = applyMeasurementTableAttributes(product.attributes, product.attributes.measurements)
+  } else if (!measurementRecoveryOnly) {
+    const templates = Array.isArray(input.measurementTemplates) ? input.measurementTemplates as MeasurementTemplate[] : []
+    const subcategoryName = (input.subcategories || []).find((row: any) => String(row.id) === String(product.subcategory))?.name || product.subcategory
+    const template = measurementTemplateForProduct(templates, {
+      name: product.name,
+      h1: product.h1,
+      subcategoryName,
+    })
+    if (template) product.attributes = applyMeasurementTableAttributes(product.attributes, template.measurements)
+  }
   if (!input.mediaSeoOnly && !input.variantScanOnly && input.preserveExistingPrice && shouldPreserveExistingPrice(input.product)) {
     product.price = Number(input.product?.price || 0)
     product.price_source = input.product?.price_source || 'legacy'
@@ -202,10 +215,10 @@ async function complete(body: any) {
       if (targetIds.length === 0) throw new Error('Не найдены товары для привязки таблицы замеров')
       await client.query(`
         UPDATE products SET
-          attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),'{measurements}',$2::jsonb,true),
+          attributes=COALESCE(attributes,'{}'::jsonb) || $2::jsonb,
           updated_at=NOW()
         WHERE batch_id=$1 AND id=ANY($3::int[])
-      `, [item.batch_id, JSON.stringify(recoveredMeasurements), targetIds])
+      `, [item.batch_id, JSON.stringify(applyMeasurementTableAttributes(null, recoveredMeasurements)), targetIds])
     } else if (!input.variantScanOnly) {
       await client.query(`
         UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,

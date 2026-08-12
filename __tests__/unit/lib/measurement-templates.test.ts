@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   measurementTemplateForProduct,
   measurementTemplateGarmentForProduct,
+  applyMeasurementTableAttributes,
+  measurementTableSizes,
   normalizeMeasurementTable,
   type MeasurementTemplate,
 } from '@/lib/measurement-templates'
@@ -40,5 +42,18 @@ describe('measurement template normalization', () => {
     expect(measurementTemplateGarmentForProduct({ name: 'Спортивные штаны' })).toBe('pants')
     expect(measurementTemplateForProduct(templates, { name: 'Спортивные штаны' })?.id).toBe(1)
     expect(measurementTemplateForProduct(templates, { name: 'Комплект: брюки и шорты' })).toBeNull()
+  })
+
+  it('copies template row sizes to the variant sizes attribute', () => {
+    const table = { unit: 'см', columns: [{ key: 'length', label: 'Длина' }], rows: [
+      { size: 'S', values: { length: '51.5' } },
+      { size: 'M', values: { length: '53' } },
+      { size: 'L', values: { length: '54.5' } },
+      { size: 'XL', values: { length: '56' } },
+    ] }
+    expect(measurementTableSizes(table)).toEqual(['S', 'M', 'L', 'XL'])
+    expect(applyMeasurementTableAttributes({ colors: ['Чёрный'] }, table)).toMatchObject({
+      colors: ['Чёрный'], sizes: ['S', 'M', 'L', 'XL'], size_system: 'International', measurements: table,
+    })
   })
 })

@@ -49,7 +49,7 @@ import {
   sanitizeSupplierAiInstructions,
   type CatalogIdMapping,
 } from '@/lib/catalog-reference-normalizer'
-import { measurementTemplateForProduct, type MeasurementTemplate } from '@/lib/measurement-templates'
+import { applyMeasurementTableAttributes, measurementTemplateForProduct, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { uploadToS3 } from '@/lib/s3'
 import {
   applyShadeVariantsToSuggestion,
@@ -1196,6 +1196,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           knownAttributeCodes: context.definitions.map((item: any) => item.code),
           attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
           priceRules,
+          measurementTemplates: context.measurementTemplates,
           priceReferenceUrls,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
@@ -1814,15 +1815,15 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   if (!String(item.input_snapshot?.product?.slug || '').trim()) {
     product.slug = buildProductSeoSlug(product, catalogName(product.brand, 'brand', context.mappings))
   }
-  if (!product?.attributes?.measurements) {
-    const template = measurementTemplateForProduct(context.measurementTemplates || [], {
-      name: product.name,
-      h1: product.h1,
-      subcategoryName: catalogName(product.subcategory, 'subcategory', context.mappings),
-    })
-    if (template) {
-      product.attributes = { ...(product.attributes || {}), measurements: template.measurements }
-    }
+  const template = measurementTemplateForProduct(context.measurementTemplates || [], {
+    name: product.name,
+    h1: product.h1,
+    subcategoryName: catalogName(product.subcategory, 'subcategory', context.mappings),
+  })
+  if (product?.attributes?.measurements) {
+    product.attributes = applyMeasurementTableAttributes(product.attributes, product.attributes.measurements)
+  } else if (template) {
+    product.attributes = applyMeasurementTableAttributes(product.attributes, template.measurements)
   }
   const client = await getScrapingClient()
   try {
@@ -1839,10 +1840,10 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
       if (targetIds.length === 0) throw new Error('Не найдены товары для привязки таблицы замеров')
       await client.query(`
         UPDATE products SET
-          attributes=jsonb_set(COALESCE(attributes,'{}'::jsonb),'{measurements}',$2::jsonb,true),
+          attributes=COALESCE(attributes,'{}'::jsonb) || $2::jsonb,
           updated_at=NOW()
         WHERE batch_id=$1 AND id=ANY($3::int[])
-      `, [context.batch.id, JSON.stringify(recoveredMeasurements), targetIds])
+      `, [context.batch.id, JSON.stringify(applyMeasurementTableAttributes(null, recoveredMeasurements)), targetIds])
       await client.query(`
         UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
         WHERE id=$1

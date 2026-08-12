@@ -85,6 +85,7 @@ import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
+import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
@@ -3495,7 +3496,7 @@ function CsvProductDrawer({
   const updateMeasurements = (value: unknown) => {
     const next = { ...attributes };
     if (value === undefined || value === null || value === "") delete next.measurements;
-    else next.measurements = value as any;
+    else Object.assign(next, applyMeasurementTableAttributes(attributes, value));
     change("attributes", next);
   };
 
