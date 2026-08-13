@@ -60,7 +60,8 @@ Rails API и server actions AdminYeezy.
 ## Автосинхронизация поставщиков
 
 После успешного пуша товара в Rails API создаётся или обновляется
-`ChromoffListing`, если поставщик входит в список `CHROMOFF_AUTO_SUPPLIER_IDS`.
+`ChromoffListing`, если его `suppliers.album_id` входит в список
+`CHROMOFF_AUTO_SUPPLIER_IDS`; внутренний числовой ID поставщика для этого не используется.
 Бренд товара на включение в режим Chromoff не влияет.
 
 По умолчанию список состоит из трёх поставщиков:
@@ -131,7 +132,7 @@ Chromoff-категориями. Данные заказов, корзин, Tele
 
 ```text
 GET/PATCH /api/v1/admin/chromoff/categories
-GET/POST/PATCH /api/v1/admin/chromoff/listings
+GET/POST/PATCH/DELETE /api/v1/admin/chromoff/listings
 POST /api/v1/admin/chromoff/imports
 ```
 

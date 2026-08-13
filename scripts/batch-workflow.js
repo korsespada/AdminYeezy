@@ -565,7 +565,7 @@ function normalizeProductCatalogReferences(product, mappings) {
   };
 }
 
-async function postRailsImportBatch({ name, products, supplierId, supplierName, supplierAvatar, publishedAt }) {
+async function postRailsImportBatch({ name, products, sourceSupplierId, supplierName, supplierAvatar, publishedAt }) {
   return fetchJsonWithRetry(railsApiUrl('/admin/import_batches'), {
     method: 'POST',
     headers: {
@@ -577,7 +577,7 @@ async function postRailsImportBatch({ name, products, supplierId, supplierName, 
       name,
       supplier_name: supplierName || null,
       supplier_avatar: supplierAvatar || null,
-      source_supplier_id: supplierId || null,
+      source_supplier_id: sourceSupplierId || null,
       published_at: publishedAt || null,
       wait: true,
       products,
@@ -739,7 +739,7 @@ async function listAllSuppliers() {
 
 async function getBatch(batchId) {
   const res = await scrapingPool.query(`
-    SELECT b.*, s.name AS supplier_name, s.avatar_url AS supplier_avatar
+    SELECT b.*, s.name AS supplier_name, s.avatar_url AS supplier_avatar, s.album_id AS supplier_album_id
     FROM scraping_batches b
     LEFT JOIN suppliers s ON s.id = b.supplier_id
     WHERE b.id=$1
@@ -749,7 +749,7 @@ async function getBatch(batchId) {
 
 async function getLatestBatches(limit = 10) {
   const res = await scrapingPool.query(`
-    SELECT b.*, s.name AS supplier_name, s.avatar_url AS supplier_avatar
+    SELECT b.*, s.name AS supplier_name, s.avatar_url AS supplier_avatar, s.album_id AS supplier_album_id
     FROM scraping_batches b
     LEFT JOIN suppliers s ON s.id = b.supplier_id
     WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
@@ -1848,6 +1848,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     ...product,
     supplier_name: batch.supplier_name || null,
     supplier_avatar: batch.supplier_avatar || null,
+    supplier_id: batch.supplier_album_id || null,
     _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
       ? railsProduct.metadata
       : undefined,
@@ -2092,7 +2093,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const payload = await postRailsImportBatch({
       name: `${batch?.name || `AdminYeezy batch ${batchId}`} (${index + 1})`,
       products: chunk,
-      supplierId: batch?.supplier_id,
+      sourceSupplierId: batch?.supplier_album_id,
       supplierName: batch?.supplier_name,
       supplierAvatar: batch?.supplier_avatar,
       publishedAt: publicationTimestamp,

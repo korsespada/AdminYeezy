@@ -276,7 +276,7 @@ describe('batch workflow CSV compatibility adapter', () => {
   it('includes supplier identity and publication time in Rails updates', () => {
     const payload = workflow.railsUpdatePayload({
       external_id: 'item-1',
-      supplier_id: 28,
+      supplier_id: 'supplier-album-id',
       supplier_name: 'LP, Zegna, BC Мужская одежда',
       source_published_at: '2026-08-03T12:00:00.000Z',
       supplier_published_on: '2026-08-02',
@@ -286,7 +286,7 @@ describe('batch workflow CSV compatibility adapter', () => {
 
     expect(payload.primary_supplier_name).toBe('LP, Zegna, BC Мужская одежда')
     expect(payload.published_at).toBe('2026-08-03T12:00:00.000Z')
-    expect(payload.metadata.source_supplier_id).toBe(28)
+    expect(payload.metadata.source_supplier_id).toBe('supplier-album-id')
     expect(payload.metadata.source_published_at).toBe('2026-08-03T12:00:00.000Z')
     expect(payload.metadata.supplier_published_on).toBe('2026-08-02')
   })

@@ -79,7 +79,8 @@ snapshot товары этой партии удаляются из Rails по `
 проверяются связи с другими партиями. Медиа переиспользуются по уже известным
 URL; повторная загрузка нужна только для новых или изменённых фотографий.
 
-При публикации партия также передаёт исходный `source_supplier_id`, дату публикации
+При публикации партия также передаёт исходный `source_supplier_id` (это
+`suppliers.album_id` поставщика, не внутренний числовой `suppliers.id`), дату публикации
 у поставщика `supplier_published_on` и `published_at`. Так как scraping DB и Rails CRM используют разные базы и разные
 идентификаторы, Rails связывает товар с поставщиком по имени как с основной
 связью, а исходный ID сохраняется в `metadata.source_supplier_id`. Время пуша
@@ -129,6 +130,7 @@ GET    /api/v1/admin/chromoff/categories
 PATCH  /api/v1/admin/chromoff/categories/:id
 GET    /api/v1/admin/chromoff/listings
 PATCH  /api/v1/admin/chromoff/listings/:id
+DELETE /api/v1/admin/chromoff/listings/:id
 ```
 
 Публичная витрина Chromoff получает только опубликованные listings через
