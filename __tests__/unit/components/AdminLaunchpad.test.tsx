@@ -3,6 +3,35 @@ import { describe, expect, it } from 'vitest'
 import AdminLaunchpad from '@/components/dashboard/AdminLaunchpad'
 
 describe('AdminLaunchpad', () => {
+  it('keeps launchpad cards as the required navigable core route map', () => {
+    render(
+      <AdminLaunchpad
+        railsConfigured={false}
+        scrapingConfigured={false}
+      />
+    )
+
+    expect(screen.getByRole('link', { name: 'Открыть раздел: Товары' })).toHaveAttribute('href', '/admin')
+    expect(screen.getByRole('link', { name: 'Открыть раздел: Chromoff' })).toHaveAttribute('href', '/admin/chromoff')
+    expect(screen.getByRole('link', { name: 'Открыть раздел: CRM' })).toHaveAttribute('href', '/admin/crm')
+    expect(screen.getByRole('link', { name: 'Открыть раздел: Выгрузки' })).toHaveAttribute('href', '/admin/batches')
+  })
+
+  it('distinguishes an unavailable configured source from an unconfigured source', () => {
+    render(
+      <AdminLaunchpad
+        railsConfigured
+        scrapingConfigured
+        railsStatus="unavailable"
+        scrapingStatus="connected"
+      />,
+    )
+
+    expect(screen.getByText('Недоступен, данные не загружены')).toBeInTheDocument()
+    expect(screen.getByText('Подключена, техническая БД доступна')).toBeInTheDocument()
+    expect(screen.getAllByText('—')).toHaveLength(3)
+  })
+
   it('renders core admin sections and environment status', () => {
     render(
       <AdminLaunchpad
@@ -26,8 +55,8 @@ describe('AdminLaunchpad', () => {
     expect(screen.getByRole('link', { name: 'Открыть раздел: Схема атрибутов' })).toHaveAttribute('href', '/admin/filter-characteristics')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Правила AI' })).toHaveAttribute('href', '/admin/ai-rules')
     expect(screen.queryByRole('link', { name: 'Открыть раздел: Гендер' })).not.toBeInTheDocument()
-    expect(screen.getByText('Готов к CRM/API')).toBeInTheDocument()
-    expect(screen.getByText('Нужен SCRAPING_DATABASE_URL')).toBeInTheDocument()
+    expect(screen.getByText('Подключён, CRM/API доступны')).toBeInTheDocument()
+    expect(screen.getByText('Не настроена: нужен SCRAPING_DATABASE_URL')).toBeInTheDocument()
     expect(screen.getByText('120')).toBeInTheDocument()
     expect(screen.getByText('24')).toBeInTheDocument()
     expect(screen.getByText('18')).toBeInTheDocument()

@@ -24,6 +24,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 interface AdminLaunchpadProps {
   railsConfigured: boolean
   scrapingConfigured: boolean
+  railsStatus?: 'connected' | 'unavailable' | 'not_configured'
+  scrapingStatus?: 'connected' | 'unavailable' | 'not_configured'
   productCount?: number | null
   brandCount?: number | null
   categoryCount?: number | null
@@ -140,19 +142,21 @@ const sections = [
 export default function AdminLaunchpad({
   railsConfigured,
   scrapingConfigured,
+  railsStatus,
+  scrapingStatus,
   productCount,
   brandCount,
   categoryCount,
 }: AdminLaunchpadProps) {
   return (
-    <main className="min-h-full bg-slate-950 px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl space-y-8">
-        <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-          <div>
+    <main className="min-h-full min-w-0 bg-slate-950 px-4 py-6 text-slate-100 sm:px-6 sm:py-8 lg:px-8">
+      <div className="mx-auto max-w-7xl min-w-0 space-y-6 sm:space-y-8">
+        <section className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0">
             <Badge className="border-indigo-500/30 bg-indigo-500/10 text-indigo-200 hover:bg-indigo-500/10">
               AdminYeezy
             </Badge>
-            <h1 className="mt-4 text-4xl font-bold tracking-normal text-white sm:text-5xl">
+            <h1 className="mt-4 text-3xl font-bold tracking-normal text-white sm:text-5xl">
               Операционная панель
             </h1>
             <p className="mt-4 max-w-3xl text-sm leading-6 text-slate-400">
@@ -171,10 +175,22 @@ export default function AdminLaunchpad({
                 Быстрая проверка, какие источники настроены в окружении.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <StatusRow label="Rails API" ok={railsConfigured} okText="Готов к CRM/API" failText="Нужен RAILS_API_URL" />
-              <StatusRow label="Scraping DB" ok={scrapingConfigured} okText="Техническая БД подключена" failText="Нужен SCRAPING_DATABASE_URL" />
-              <div className="grid grid-cols-3 gap-2 pt-2">
+            <CardContent className="min-w-0 space-y-3">
+              <StatusRow
+                label="Rails API"
+                status={railsStatus ?? (railsConfigured ? 'connected' : 'not_configured')}
+                okText="Подключён, CRM/API доступны"
+                unavailableText="Недоступен, данные не загружены"
+                notConfiguredText="Не настроен: нужен RAILS_API_URL"
+              />
+              <StatusRow
+                label="Scraping DB"
+                status={scrapingStatus ?? (scrapingConfigured ? 'connected' : 'not_configured')}
+                okText="Подключена, техническая БД доступна"
+                unavailableText="Недоступна, данные не загружены"
+                notConfiguredText="Не настроена: нужен SCRAPING_DATABASE_URL"
+              />
+              <div className="grid grid-cols-1 gap-2 pt-2 min-[380px]:grid-cols-3">
                 <Metric label="Товаров" value={productCount} />
                 <Metric label="Брендов" value={brandCount} />
                 <Metric label="Категорий" value={categoryCount} />
@@ -183,7 +199,7 @@ export default function AdminLaunchpad({
           </Card>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {sections.map((section) => {
             const Icon = section.icon
             return (
@@ -193,7 +209,7 @@ export default function AdminLaunchpad({
                 aria-label={`Открыть раздел: ${section.title}`}
                 className="group rounded-lg border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-800"
               >
-                <div className="flex h-full min-h-[164px] flex-col">
+                <div className="flex h-full min-h-[164px] min-w-0 flex-col">
                   <div className="flex items-center justify-between gap-3">
                     <span className={`inline-flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 ${section.tone}`}>
                       <Icon className="h-5 w-5" />
@@ -203,14 +219,14 @@ export default function AdminLaunchpad({
                     </span>
                   </div>
                   <h2 className="mt-5 text-xl font-semibold text-white">{section.title}</h2>
-                  <p className="mt-3 text-sm leading-6 text-slate-400">{section.description}</p>
+                  <p className="mt-3 break-words text-sm leading-6 text-slate-400">{section.description}</p>
                 </div>
               </Link>
             )
           })}
         </section>
 
-        <section className="rounded-lg border border-slate-800 bg-slate-900 p-5">
+        <section className="min-w-0 rounded-lg border border-slate-800 bg-slate-900 p-5">
           <div className="flex items-start gap-3">
             <Boxes className="mt-0.5 h-5 w-5 text-indigo-300" />
             <div>
@@ -229,20 +245,24 @@ export default function AdminLaunchpad({
 
 function StatusRow({
   label,
-  ok,
   okText,
-  failText,
+  unavailableText,
+  notConfiguredText,
+  status,
 }: {
   label: string
-  ok: boolean
   okText: string
-  failText: string
+  unavailableText: string
+  notConfiguredText: string
+  status: 'connected' | 'unavailable' | 'not_configured'
 }) {
+  const isConnected = status === 'connected'
+  const text = isConnected ? okText : status === 'unavailable' ? unavailableText : notConfiguredText
   return (
     <div className="flex items-center justify-between gap-4 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
       <span className="text-sm font-medium text-slate-300">{label}</span>
-      <Badge className={ok ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/15' : 'bg-amber-500/15 text-amber-200 hover:bg-amber-500/15'}>
-        {ok ? okText : failText}
+      <Badge role="status" className={isConnected ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/15' : 'bg-amber-500/15 text-amber-200 hover:bg-amber-500/15'}>
+        {text}
       </Badge>
     </div>
   )

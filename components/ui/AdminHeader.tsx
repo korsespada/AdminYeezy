@@ -3,123 +3,191 @@
 import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal, Gem } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal, Gem, X, PackageSearch } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 
-interface AdminHeaderProps {
-  onMenuClick?: () => void
+const coreNavigation = [
+  { href: '/admin/home', label: 'Home', icon: PackageSearch, tone: 'text-indigo-300' },
+  { href: '/admin', label: 'Товары', icon: PackageSearch, tone: 'text-sky-300' },
+  { href: '/admin/chromoff', label: 'Chromoff', icon: Gem, tone: 'text-violet-300' },
+  { href: '/admin/batches', label: 'Выгрузки', icon: RefreshCw, tone: 'text-orange-300' },
+  { href: '/admin/crm', label: 'CRM', icon: ClipboardList, tone: 'text-sky-300' },
+]
+
+const utilityNavigation = [
+  { href: '/admin/analytics', label: 'Аналитика', icon: BarChart3, tone: 'text-indigo-400' },
+  { href: '/admin/seo-ai', label: 'AI-каталог', icon: Sparkles, tone: 'text-fuchsia-400' },
+  { href: '/admin/catalog-attributes', label: 'Атрибуты', icon: ListChecks, tone: 'text-emerald-400' },
+  { href: '/admin/filter-characteristics', label: 'Схема', icon: SlidersHorizontal, tone: 'text-cyan-400' },
+  { href: '/admin/trash', label: 'Корзина', icon: Trash2, tone: 'text-red-400' },
+]
+
+function isActive(pathname: string, href: string) {
+  return href === '/admin/home' || href === '/admin'
+    ? pathname === href
+    : pathname === href || pathname.startsWith(`${href}/`)
 }
 
-export default function AdminHeader({ onMenuClick }: AdminHeaderProps) {
+export default function AdminHeader() {
   const pathname = usePathname()
   const sticky = !/^\/admin\/batches\/[^/]+/.test(pathname || '')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLElement>(null)
+  const closeMenu = () => setMenuOpen(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const firstFocusable = menuRef.current?.querySelector<HTMLElement>('a, button')
+    firstFocusable?.focus()
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMenuOpen(false)
+        return
+      }
+
+      if (event.key !== 'Tab' || !menuRef.current) return
+      const focusable = Array.from(menuRef.current.querySelectorAll<HTMLElement>('a, button'))
+      if (focusable.length === 0) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!menuOpen) menuTriggerRef.current?.focus()
+  }, [menuOpen])
 
   return (
-    <header className={`${sticky ? 'sticky top-0 z-30' : 'relative'} flex min-w-0 items-center gap-2 border-b border-slate-700 bg-slate-800 px-2 py-3 shadow-sm sm:px-4 xl:px-6`}>
-      <div className="flex shrink-0 items-center gap-4">
-        {onMenuClick && (
+    <>
+      <header className={`${sticky ? 'sticky top-0 z-30' : 'relative'} flex min-w-0 items-center gap-2 border-b border-slate-700 bg-slate-800 px-3 py-2 shadow-sm sm:px-4 xl:px-6`}>
+        <Button
+          ref={menuTriggerRef}
+          variant="ghost"
+          size="icon"
+          onClick={() => setMenuOpen(true)}
+          aria-label="Открыть навигацию"
+          aria-expanded={menuOpen}
+          aria-controls="admin-mobile-navigation"
+          className="h-11 w-11 shrink-0 text-slate-300 hover:bg-slate-700 hover:text-white lg:hidden"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+
+        <Link href="/admin/home" aria-label="Yeezy Unique, Home" className="flex min-h-11 min-w-0 shrink-0 items-center rounded-md px-1 py-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+          <h1 className="flex items-center gap-1 text-base font-bold text-slate-100 sm:text-xl">
+            <span className="text-indigo-500">Yeezy</span>
+            <span>Unique</span>
+            <span className="ml-1 hidden text-sm font-normal text-slate-500 sm:inline">Админка</span>
+          </h1>
+        </Link>
+
+        <nav aria-label="Навигация рабочего стола" className="hidden min-w-0 flex-1 items-center justify-end gap-1 lg:flex xl:gap-2">
+          {coreNavigation.slice(1).map((item) => <NavigationLink key={item.href} item={item} pathname={pathname || ''} />)}
+          <div className="ml-1 hidden min-w-0 items-center gap-1 xl:flex">
+            {utilityNavigation.map((item) => <NavigationLink key={item.href} item={item} pathname={pathname || ''} utility />)}
+          </div>
+        </nav>
+
+        <form action={logoutAction} className="ml-auto flex shrink-0 items-center">
           <Button
             variant="ghost"
             size="icon"
-            onClick={onMenuClick}
-            className="lg:hidden text-slate-400 hover:bg-slate-700 hover:text-white"
+            type="submit"
+            aria-label="Выйти"
+            title="Выйти"
+            className="h-11 w-11 text-slate-300 hover:bg-red-400/10 hover:text-red-400"
           >
-            <Menu className="w-5 h-5" />
+            <LogOut size={20} />
           </Button>
-        )}
-        <div className="hidden sm:block">
-          <Link href="/admin/home" className="hover:opacity-80 transition-opacity">
-            <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-              <span className="text-indigo-500">Yeezy</span>
-              <span>Unique</span>
-              <span className="text-slate-500 text-sm font-normal ml-2">Админка</span>
-            </h1>
-          </Link>
-        </div>
-      </div>
-
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto [scrollbar-width:none] sm:gap-2 [&::-webkit-scrollbar]:hidden">
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="CRM">
-          <Link href="/admin/crm">
-            <ClipboardList size={20} className="text-sky-400" />
-            <span className="hidden min-[2100px]:inline">CRM</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Chromoff">
-          <Link href="/admin/chromoff">
-            <Gem size={20} className="text-violet-400" />
-            <span className="hidden min-[2100px]:inline">Chromoff</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Выгрузка и парсинг">
-          <Link href="/admin/batches">
-            <RefreshCw size={20} className="text-orange-400" />
-            <span className="hidden min-[2100px]:inline">Выгрузка</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Аналитика">
-          <Link href="/admin/analytics">
-            <BarChart3 size={20} className="text-indigo-400" />
-            <span className="hidden min-[2100px]:inline">Аналитика</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="AI SEO Studio">
-          <Link href="/admin/seo-ai">
-            <Sparkles size={20} className="text-fuchsia-400" />
-            <span className="hidden min-[2100px]:inline">AI-каталог</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Атрибуты товаров">
-          <Link href="/admin/catalog-attributes">
-            <ListChecks size={20} className="text-emerald-400" />
-            <span className="hidden min-[2100px]:inline">Атрибуты</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Схема атрибутов">
-          <Link href="/admin/filter-characteristics">
-            <SlidersHorizontal size={20} className="text-cyan-400" />
-            <span className="hidden min-[2100px]:inline">Схема</span>
-          </Link>
-        </Button>
-
-        <Button asChild variant="ghost" size="sm" className="text-slate-400 hover:bg-slate-700/50 hover:text-white" title="Корзина">
-          <Link href="/admin/trash">
-            <Trash2 size={20} className="text-red-400" />
-            <span className="hidden min-[2100px]:inline">Корзина</span>
-          </Link>
-        </Button>
-
-        <Separator orientation="vertical" className="mx-1 hidden h-6 bg-slate-700 min-[2100px]:block" />
-
-        <div className="flex shrink-0 items-center gap-1 min-[2100px]:gap-3">
-          <div className="hidden items-center gap-2 rounded-full border border-slate-700 bg-slate-700/30 py-1 pl-2 pr-1 min-[2100px]:flex">
-            <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-xs border border-indigo-500/30">
-              AD
+        </form>
+      </header>
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden" role="presentation">
+          <div aria-hidden="true" className="absolute inset-0 bg-slate-950/75" onClick={closeMenu} />
+          <nav
+            id="admin-mobile-navigation"
+            ref={menuRef}
+            aria-label="Основная навигация"
+            className="relative flex h-full w-[min(22rem,calc(100vw-2rem))] min-w-0 flex-col overflow-y-auto border-r border-slate-700 bg-slate-900 p-4 pt-[calc(1rem+env(safe-area-inset-top))] shadow-2xl"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Разделы</span>
+              <Button type="button" variant="ghost" size="icon" aria-label="Закрыть навигацию" onClick={closeMenu} className="h-11 w-11 text-slate-300 hover:bg-slate-800 hover:text-white">
+                <X className="h-5 w-5" />
+              </Button>
             </div>
-            <span className="text-sm font-medium text-slate-300 hidden sm:block pr-2">Admin</span>
-          </div>
-
-          <form action={logoutAction} className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
-              type="submit"
-              title="Выйти"
-              className="text-slate-400 hover:bg-red-400/10 hover:text-red-400"
-            >
-              <LogOut size={20} />
-            </Button>
-          </form>
+            <div className="flex flex-col gap-1">
+              {coreNavigation.map((item) => <MobileNavigationLink key={item.href} item={item} pathname={pathname || ''} onNavigate={closeMenu} />)}
+            </div>
+          </nav>
         </div>
-      </div>
-    </header>
+      )}
+    </>
+  )
+}
+
+function NavigationLink({
+  item,
+  pathname,
+  utility = false,
+}: {
+  item: (typeof coreNavigation)[number]
+  pathname: string
+  utility?: boolean
+}) {
+  const active = isActive(pathname, item.href)
+  const Icon = item.icon
+  return (
+    <Button asChild variant="ghost" size="sm" className={`min-h-11 shrink-0 px-2 text-xs ${active ? 'bg-slate-700 text-white' : 'text-slate-400 hover:bg-slate-700/50 hover:text-white'} ${utility ? 'hidden 2xl:inline-flex' : ''}`}>
+      <Link href={item.href} aria-current={active ? 'page' : undefined} title={item.label}>
+        <Icon size={18} className={item.tone} />
+        <span>{item.label}</span>
+      </Link>
+    </Button>
+  )
+}
+
+function MobileNavigationLink({
+  item,
+  pathname,
+  onNavigate,
+}: {
+  item: (typeof coreNavigation)[number]
+  pathname: string
+  onNavigate: () => void
+}) {
+  const active = isActive(pathname, item.href)
+  const Icon = item.icon
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      className={`flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${active ? 'bg-indigo-500/15 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+    >
+      <Icon size={19} className={item.tone} />
+      <span>{item.label}</span>
+    </Link>
   )
 }
