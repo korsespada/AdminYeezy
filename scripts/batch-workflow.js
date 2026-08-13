@@ -1710,6 +1710,7 @@ function railsUpdatePayload(product) {
       ...(categoryId ? { category_id: categoryId } : {}),
       gender: normalizeCatalogGender(product.gender) || null,
       catalog_attributes: catalogAttributes(product.attributes),
+      variant_group_key: product.variant_group_key || null,
       video_url: hostedVideo(product).url,
       video_poster_url: hostedVideo(product).posterUrl,
       media: normalizePhotos(product.photos).map((url, index) => ({

@@ -825,6 +825,11 @@ describe('rails admin product adapter', () => {
       seo_description: 'SEO description',
       h1: 'H1',
       canonical_url: 'https://example.com/product',
+      variant_group_key: 'family-1',
+      color_variants: [
+        { id: 'variant-1', name: 'Белый', color: 'Белый', current: true },
+        { id: 'variant-2', name: 'Чёрный', color: 'Чёрный', current: false },
+      ],
       metadata: { gender: 'Для мужчин', source: 'rails', price_on_request: true },
       catalog_attributes: { material: ['leather'] },
       brand: { id: 'brand-id', name: 'Brand' },
@@ -854,11 +859,16 @@ describe('rails admin product adapter', () => {
       category: 'category-id',
       subcategory: 'subcategory-id',
       gender: 'Для мужчин',
-      fulfillment_mode: 'ready_to_ship',
+      fulfillment_mode: 'made_to_order',
       availability_confidence: 'high',
       indexing_status: 'noindex',
       photos: ['a-preview.jpg', 'b-preview.jpg'],
       thumb: 'a-preview.jpg',
+      variant_group_key: 'family-1',
+      color_variants: [
+        { id: 'variant-1', color: 'Белый', current: true },
+        { id: 'variant-2', color: 'Чёрный', current: false },
+      ],
     })
     expect(product.media?.map((item) => item.original_url)).toEqual(['a.jpg', 'b.jpg'])
   })

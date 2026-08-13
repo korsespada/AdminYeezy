@@ -4,6 +4,7 @@ import {
   type CatalogValueFacet,
   type Category,
   type Product,
+  type ProductColorVariant,
   type ProductFilterFacets,
   type ProductMedia,
   type SeoAiBatch,
@@ -684,6 +685,17 @@ export function mapRailsProduct(product: any): Product {
   const catalogAttributes = product.catalog_attributes && typeof product.catalog_attributes === 'object'
     ? product.catalog_attributes
     : (product.attributes && typeof product.attributes === 'object' ? product.attributes : {})
+  const colorVariants: ProductColorVariant[] = Array.isArray(product.color_variants)
+    ? product.color_variants.map((variant: any) => ({
+      id: String(variant.id),
+      slug: variant.slug || '',
+      name: variant.name || '',
+      color: variant.color || null,
+      price_cents: Number(variant.price_cents || 0),
+      image_url: variant.image_url || null,
+      current: Boolean(variant.current),
+    }))
+    : []
 
   return {
     id: String(product.id),
@@ -731,6 +743,8 @@ export function mapRailsProduct(product: any): Product {
     metadata,
     catalog_attributes: catalogAttributes,
     attributes: catalogAttributes,
+    variant_group_key: product.variant_group_key || null,
+    color_variants: colorVariants,
     created: product.created_at || '',
     updated: product.updated_at || '',
     collectionId: '',

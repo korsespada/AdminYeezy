@@ -346,6 +346,12 @@ export default function ProductList({
                           onToggleSelect={handleToggleSelect}
                           categories={categories}
                           subcategories={subcategories}
+                          variantCount={product.color_variants?.length || 0}
+                          variantColors={Array.from(new Set(
+                            (product.color_variants || [])
+                              .map((variant) => variant.color)
+                              .filter((color): color is string => Boolean(color)),
+                          ))}
                         />
                       ))}
                     </div>

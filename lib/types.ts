@@ -71,6 +71,16 @@ export interface ProductMedia {
   processing_status: 'pending' | 'processed' | 'failed'
 }
 
+export interface ProductColorVariant {
+  id: string
+  slug?: string
+  name?: string
+  color?: string | null
+  price_cents?: number
+  image_url?: string | null
+  current?: boolean
+}
+
 export interface ProductSupplier {
   id: string
   name: string
@@ -123,6 +133,8 @@ export interface Product {
   /** Structured catalog attributes from Rails; `attributes` is a compatibility alias. */
   catalog_attributes?: Record<string, any>
   attributes?: Record<string, any>
+  variant_group_key?: string | null
+  color_variants?: ProductColorVariant[]
   created: string
   updated: string
   collectionId: string

@@ -293,6 +293,18 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(requestPayload.metadata.price_on_request).toBe(true)
   })
 
+  it('keeps the color family when updating an existing Rails product', () => {
+    const payload = workflow.railsUpdatePayload({
+      external_id: 'item-1',
+      variant_group_key: 'color-family-1',
+      attributes: { colors: ['Белый'], sizes: ['S', 'M'] },
+      photos: [],
+    }).product
+
+    expect(payload.variant_group_key).toBe('color-family-1')
+    expect(payload.variants.map((variant: { size: string }) => variant.size)).toEqual(['S', 'M'])
+  })
+
   it('publishes hosted video and keeps supplier media fields out of catalog attributes', () => {
     const payload = workflow.railsUpdatePayload({
       external_id: 'item-1',
