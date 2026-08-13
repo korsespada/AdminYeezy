@@ -376,8 +376,64 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         {!['all', 'ungrouped'].includes(folderFilter) && <><button onClick={renameFolder} className="text-xs text-slate-400 hover:text-white">Переименовать</button><button onClick={deleteFolder} className="text-xs text-red-400 hover:text-red-300">Удалить папку</button></>}
       </div>
 
+      <div className="space-y-3 lg:hidden">
+        {visibleBatches.map((batch) => {
+          const isExpanded = expandedIds.has(batch.id)
+          const isBusy = pendingAction?.endsWith(batch.id)
+          const aiProductCount = Number(batch.ai_product_count || 0)
+          const productCount = Number(batch.product_count || batch.items_count || 0)
+          const hasAiRemaining = productCount > 0 && aiProductCount < productCount
+          const aiMode = aiProductCount > 0 ? 'full' : 'sample'
+          const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
+          const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
+          const publishing = Boolean(batch.active_operation?.includes('publish'))
+          const parsing = batch.status === 'Запущено'
+          const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
+
+          return (
+            <article key={`mobile-${batch.id}`} className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 shadow-lg">
+              <div className="space-y-4 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-slate-600 bg-slate-700">
+                      {batch.supplier_avatar ? <img src={batch.supplier_avatar} alt={batch.supplier_name || ''} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-300">{batch.supplier_name?.charAt(0).toUpperCase() || '?'}</div>}
+                    </div>
+                    <div className="min-w-0"><h3 className="break-words font-semibold text-white">{batch.supplier_name || 'Поставщик не найден'}</h3><p className="mt-1 break-words text-xs text-slate-500">{batch.name}</p></div>
+                  </div>
+                  <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                </div>
+                <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <div><dt className="text-xs text-slate-500">Период</dt><dd className="mt-1 text-slate-300">с {formatDate(batch.created_at)}{batch.end_date ? ` · до ${formatDate(batch.end_date)}` : ''}</dd></div>
+                  <div><dt className="text-xs text-slate-500">Товаров</dt><dd className="mt-1 font-semibold text-slate-100">{batch.items_count} шт.</dd></div>
+                </dl>
+                <select value={batch.folder_id || ''} onChange={(event) => moveBatch(batch, event.target.value)} disabled={batch.isSynthetic} aria-label={`Папка партии ${batch.name}`} className="h-11 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-300 disabled:opacity-40">
+                  <option value="">Без папки</option>
+                  {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => toggleBatch(batch.id)} className="min-h-11 rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-slate-200 hover:bg-slate-700">{isExpanded ? 'Скрыть этапы' : 'Показать этапы'}</button>
+                  {canPublish && <button type="button" onClick={() => router.push(`/admin/batches/${encodeURIComponent(batch.id)}`)} className="min-h-11 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-medium text-emerald-200 hover:bg-emerald-500/20">Открыть партию</button>}
+                  {!canPublish && hasAiRemaining && <button type="button" onClick={() => startAi(batch, aiMode)} disabled={isBusy || aiRunning} className="min-h-11 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 text-sm font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50">{aiMode === 'full' ? 'Продолжить ИИ' : 'Тест ИИ'}</button>}
+                </div>
+                {isExpanded && (
+                  <div className="space-y-2 border-t border-slate-700 pt-3">
+                    {batch.files.map((file) => (
+                      <button type="button" key={`mobile-file-${file.id}`} onClick={() => openFile(batch, file)} disabled={file.snapshot_missing} className="flex min-h-14 w-full items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-left hover:border-indigo-400/50 disabled:cursor-not-allowed disabled:opacity-60">
+                        <span className="min-w-0"><span className="block break-words text-sm font-medium text-slate-100">{file.label || fileName(file.result_path)}</span><span className="mt-1 block text-xs text-slate-500">{file.snapshot_missing ? 'Исторический снимок недоступен' : file.is_current ? 'Текущая версия' : file.is_virtual ? 'Состояние партии' : 'Только просмотр'} · {file.items_count || 0} шт.</span></span>
+                        <StatusBadge status={file.status} loading={file.status === 'Запущено'} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </article>
+          )
+        })}
+        {visibleBatches.length === 0 && <div className="rounded-xl border border-dashed border-slate-700 bg-slate-800/50 px-4 py-16 text-center text-slate-500">Истории выгрузок пока нет</div>}
+      </div>
+
       <div className="overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-xl">
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full min-w-[1120px] table-fixed text-left">
             <colgroup>
               <col className="w-[30%]" /><col className="w-[13%]" /><col className="w-[14%]" />

@@ -32,9 +32,9 @@ describe('CrmCustomersList', () => {
 
     expect(screen.getByRole('heading', { name: 'Клиенты' })).toBeInTheDocument()
     expect(screen.getByDisplayValue('vip')).toBeInTheDocument()
-    expect(screen.getByText('VIP Customer')).toBeInTheDocument()
-    expect(screen.getByText('vip@example.com')).toBeInTheDocument()
-    expect(screen.getByText('@vip_customer')).toBeInTheDocument()
+    expect(screen.getAllByText('VIP Customer')).not.toHaveLength(0)
+    expect(screen.getAllByText('vip@example.com')).not.toHaveLength(0)
+    expect(screen.getAllByText('@vip_customer')).not.toHaveLength(0)
     expect(screen.getAllByText('Сайт').length).toBeGreaterThanOrEqual(1)
   })
 })

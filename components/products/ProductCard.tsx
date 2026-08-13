@@ -17,6 +17,14 @@ import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
 
+function variantCountLabel(count: number) {
+    const remainder10 = count % 10
+    const remainder100 = count % 100
+    if (remainder10 === 1 && remainder100 !== 11) return 'вариант'
+    if (remainder10 >= 2 && remainder10 <= 4 && (remainder100 < 10 || remainder100 >= 20)) return 'варианта'
+    return 'вариантов'
+}
+
 interface ProductCardProps {
     product: Product;
     onEdit: (product: Product) => void;
@@ -326,7 +334,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     {variantCount > 1 && (
                         <button type="button" onClick={() => onEdit(product)} className="mb-2 mt-1 flex w-full items-center gap-2 rounded-lg border border-violet-500/25 bg-violet-500/10 px-2.5 py-2 text-left hover:bg-violet-500/15">
                             <Palette className="h-4 w-4 shrink-0 text-violet-300" />
-                            <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-violet-200">{variantCount} вариантов</span><span className="block truncate text-[10px] text-slate-400">{variantColors.join(', ')}</span></span>
+                            <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-violet-200">{variantCount} {variantCountLabel(variantCount)}</span><span className="block truncate text-[10px] text-slate-400">{variantColors.join(', ')}</span></span>
                         </button>
                     )}
                     {product.description && (

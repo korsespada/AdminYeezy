@@ -116,4 +116,22 @@ describe('catalog attribute schema', () => {
       }],
     })).toEqual({ colors: ['Чёрный'] })
   })
+
+  it('preserves structured measurement tables when saving other product fields', () => {
+    expect(normalizeCatalogAttributes({
+      measurements: {
+        unit: 'см',
+        columns: [{ key: 'length', label: 'Длина' }],
+        rows: [{ size: 'M', values: { length: '66' } }],
+        note: 'Допуск 1–2 см',
+      },
+    }, { categoryName: 'Одежда' })).toEqual({
+      measurements: {
+        unit: 'см',
+        columns: [{ key: 'length', label: 'Длина' }],
+        rows: [{ size: 'M', values: { length: '66' } }],
+        note: 'Допуск 1–2 см',
+      },
+    })
+  })
 })

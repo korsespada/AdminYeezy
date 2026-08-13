@@ -21,9 +21,12 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
+import MeasurementTemplatePicker from '@/components/import/MeasurementTemplatePicker'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
+import MeasurementImageRecognizer from '@/components/catalog-attributes/MeasurementImageRecognizer'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
+import { applyMeasurementTableAttributes } from '@/lib/measurement-templates'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 
 interface ProductFormProps {
@@ -99,6 +102,11 @@ export default function ProductForm({
     () => subcategories.find((item) => item.id === subcategory)?.name || '',
     [subcategories, subcategory],
   )
+  const measurementSupplierId = useMemo(() => {
+    const sourceId = product?.metadata?.source_supplier_id || product?.supplier?.id
+    const parsed = Number(sourceId)
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  }, [product?.metadata?.source_supplier_id, product?.supplier?.id])
 
   const handleDownload = async (url: string, index: number) => {
     try {
@@ -461,8 +469,8 @@ export default function ProductForm({
     <Sheet open={isOpen} onOpenChange={(open) => {
       if (!open) onClose()
     }}>
-      <SheetContent side="right" className="flex w-full max-w-2xl flex-col overflow-y-auto bg-gray-800 p-0 sm:max-w-2xl">
-          <SheetHeader className="sticky top-0 z-10 flex-row items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-5 py-3">
+      <SheetContent side="right" className="flex h-[100dvh] w-full max-w-none flex-col overflow-hidden bg-gray-800 p-0 lg:max-w-2xl">
+          <SheetHeader className="flex shrink-0 flex-row items-center justify-between gap-3 border-b border-gray-700 bg-gray-900 px-4 py-3 pr-12 sm:px-5">
             <SheetTitle>{product ? 'Изменить товар' : 'Новый товар'}</SheetTitle>
             <SheetDescription className="sr-only">
               Редактирование данных, цены и фотографий товара
@@ -482,7 +490,7 @@ export default function ProductForm({
           </SheetHeader>
 
           {/* Form */}
-          <form ref={formRef} onSubmit={handleSubmit} className="flex-1 p-5 space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-6 sm:p-5">
             {error && (
               <Alert variant="destructive" className="border-red-800 bg-red-900/20 text-red-400">
                 <AlertDescription>{error}</AlertDescription>
@@ -715,6 +723,26 @@ export default function ProductForm({
             </div>
 
             <div className="border-t border-gray-700 pt-4">
+              <div className="mb-3 rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-indigo-100">Распознать таблицу замеров</div>
+                    <p className="mt-1 text-[11px] text-slate-400">Загрузите, вставьте из буфера или скопируйте фото таблицы — ИИ перенесёт размеры и значения ниже.</p>
+                  </div>
+                </div>
+                <MeasurementImageRecognizer
+                  disabled={isPending}
+                  onRecognized={(measurements) => setCatalogAttributes((current) => applyMeasurementTableAttributes(current, measurements))}
+                />
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-indigo-500/15 pt-3">
+                  <span className="text-[11px] text-slate-400">Или выбрать шаблон поставщика</span>
+                  <MeasurementTemplatePicker
+                    key={`${product?.id || 'new'}-${measurementSupplierId || 'none'}`}
+                    supplierId={measurementSupplierId}
+                    onApply={(measurements) => setCatalogAttributes((current) => applyMeasurementTableAttributes(current, measurements))}
+                  />
+                </div>
+              </div>
               <CatalogAttributeFields
                 value={catalogAttributes}
                 onChange={setCatalogAttributes}
@@ -879,13 +907,13 @@ export default function ProductForm({
           </form>
 
           {/* Footer */}
-          <div className="sticky bottom-0 flex justify-end space-x-3 border-t border-gray-700 bg-gray-900 px-5 py-3">
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-700 bg-gray-900 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row sm:justify-end sm:space-x-3 sm:px-5 sm:pb-3">
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
               disabled={isPending}
-              className="border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
+              className="w-full border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white sm:w-auto"
             >
               Отмена
             </Button>
@@ -894,6 +922,7 @@ export default function ProductForm({
               onClick={() => formRef.current?.requestSubmit()}
               disabled={isPending}
               title="Сохранить (Ctrl+S)"
+              className="w-full sm:w-auto"
             >
               {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
             </Button>

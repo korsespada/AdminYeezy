@@ -83,6 +83,7 @@ import AdminProductCard from "@/components/products/ProductCard";
 import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
+import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
 import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
 
@@ -1673,7 +1674,7 @@ export default function CsvImportApp({
           {saveMsg}
         </div>
       )}
-      <div className="mx-auto max-w-[1800px] p-3 sm:p-4">
+      <div className="mx-auto min-w-0 max-w-[1800px] p-3 sm:p-4">
         {(onClose || backHref) && (
           <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
             <div className="min-w-0">
@@ -1753,8 +1754,8 @@ export default function CsvImportApp({
         
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
-          <div ref={actionBarRef} className="sticky top-0 z-30 mb-2 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row">
-            <div className="flex items-center gap-4">
+          <div ref={actionBarRef} className="sticky top-0 z-30 mb-2 flex flex-col items-stretch justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row md:items-center">
+            <div className="flex min-w-0 flex-wrap items-center gap-4">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Выбрано</span>
                 <span className="text-base font-bold text-white">
@@ -1788,20 +1789,20 @@ export default function CsvImportApp({
                     </div>
                     <div className="flex flex-col">
                       <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Поставщик</span>
-                      <span className="text-sm font-bold text-white leading-tight">{initialSupplierName}</span>
+                    <span className="break-words text-sm font-bold leading-tight text-white">{initialSupplierName}</span>
                     </div>
                   </div>
                 </>
               )}
             </div>
 
-            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+            <div className="flex w-full flex-wrap items-stretch gap-2 md:w-auto md:items-center md:justify-end">
               {(importMode === "local" || isBatchSource) && isDirty && !isSnapshotSource && (
                 <div className="flex flex-col items-center relative">
                   <button
                     onClick={handleSaveToFile}
                     disabled={isSaving || !isDirty}
-                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${isDirty
+                    className={`min-h-11 w-full justify-center px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2 md:w-auto ${isDirty
                         ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20"
                         : "bg-slate-700/50 text-slate-500 cursor-not-allowed"
                       }`}
@@ -1812,7 +1813,7 @@ export default function CsvImportApp({
                   <button
                     onClick={handleUndoChanges}
                     disabled={isSaving}
-                    className="mt-1 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-white disabled:opacity-50"
+                    className="mt-1 min-h-10 px-2 py-1 text-[11px] font-medium text-slate-400 hover:text-white disabled:opacity-50"
                   >
                     Отменить изменения
                   </button>
@@ -1822,7 +1823,7 @@ export default function CsvImportApp({
               {!isBatchSource && !isSnapshotSource && (
                 <button
                   onClick={handleClear}
-                  className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                  className="min-h-11 w-full px-4 py-2 text-sm font-medium text-slate-400 hover:bg-red-400/10 hover:text-red-400 rounded-lg transition-all md:w-auto"
                 >
                   Очистить
                 </button>
@@ -2403,7 +2404,7 @@ export default function CsvImportApp({
         {/* Filters */}
         {products.length > 0 && (
             <div
-              className="sticky z-20 mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-4 shadow-xl backdrop-blur-md"
+              className="sticky z-20 mb-6 grid grid-cols-1 items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-3 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-4 lg:flex lg:flex-wrap"
               style={{ top: actionBarHeight + 8 }}
             >
               <div className="flex items-center gap-2 text-slate-500 mr-1">
@@ -2413,7 +2414,7 @@ export default function CsvImportApp({
                 </span>
               </div>
 
-              <div className="relative min-w-[240px] flex-1 basis-full lg:basis-auto">
+              <div className="relative w-full min-w-0 flex-1 basis-full lg:min-w-[240px] lg:basis-auto">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <input
                   value={filterSearch}
@@ -2427,7 +2428,7 @@ export default function CsvImportApp({
                 <select
                   value={filterBrand}
                   onChange={(e) => setFilterBrand(e.target.value)}
-                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
+                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[160px]"
                 >
                   <option value="">Все бренды ({facetProducts.brand.length})</option>
                   {uniqueBrands.map((id) => (
@@ -2444,7 +2445,7 @@ export default function CsvImportApp({
                 <select
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
-                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
+                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[160px]"
                 >
                   <option value="">Все категории ({facetProducts.category.length})</option>
                   {uniqueCategories.map((id) => (
@@ -2461,7 +2462,7 @@ export default function CsvImportApp({
                 <select
                   value={filterSubcategory}
                   onChange={(e) => setFilterSubcategory(e.target.value)}
-                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[180px]"
+                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[180px]"
                 >
                   <option value="">Все подкатегории ({facetProducts.subcategory.length})</option>
                   {uniqueSubcategories.map((id) => (
@@ -2478,7 +2479,7 @@ export default function CsvImportApp({
                 <select
                   value={filterGender}
                   onChange={(e) => setFilterGender(e.target.value)}
-                  className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]"
+                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[140px]"
                 >
                   <option value="">Все гендеры ({facetProducts.gender.length})</option>
                   {uniqueGenders.map((g) => (
@@ -2492,7 +2493,7 @@ export default function CsvImportApp({
               <select
                 value={filterAiStatus}
                 onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready" | "error")}
-                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
               >
                 <option value="">Все по ИИ ({facetProducts.ai.length})</option>
                 <option value="raw">Сырой ({facetProducts.ai.filter((product) => !(product.ai_processed === true || product.ai_processed === "true")).length})</option>
@@ -2503,7 +2504,7 @@ export default function CsvImportApp({
               <select
                 value={filterPrice}
                 onChange={(e) => setFilterPrice(e.target.value)}
-                className="min-w-[140px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[140px]"
               >
                 <option value="">Все цены ({facetProducts.price.length})</option>
                 {uniquePrices.map((price) => (
@@ -2516,7 +2517,7 @@ export default function CsvImportApp({
               <select
                 value={filterColor}
                 onChange={(e) => setFilterColor(e.target.value)}
-                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
               >
                 <option value="">Все цвета ({facetProducts.color.length})</option>
                 {uniqueColors.map((color) => (
@@ -2527,7 +2528,7 @@ export default function CsvImportApp({
               <select
                 value={filterVariants}
                 onChange={(e) => setFilterVariants(e.target.value as "" | "with" | "without")}
-                className="min-w-[170px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[170px]"
               >
                 <option value="">Все варианты ({facetProducts.variants.length})</option>
                 <option value="with">Есть варианты ({productsWithVariantsCount})</option>
@@ -2537,7 +2538,7 @@ export default function CsvImportApp({
               <select
                 value={filterVideo}
                 onChange={(e) => setFilterVideo(e.target.value as "" | "with" | "without")}
-                className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
+                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
               >
                 <option value="">Все видео ({facetProducts.video.length})</option>
                 <option value="with">С видео ({productsWithVideoCount})</option>
@@ -2685,10 +2686,9 @@ export default function CsvImportApp({
             </div>
             <div
               className={viewMode === "cards"
-                ? "grid gap-5 pb-48"
+                ? `grid grid-cols-1 gap-5 pb-48 sm:grid-cols-2 ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
                 : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
               }
-              style={viewMode === "cards" ? { gridTemplateColumns: `repeat(${cardColumns}, minmax(0, 1fr))` } : undefined}
             >
               {viewMode === "rows" && (
                 <div className="grid min-w-[1160px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -2735,16 +2735,57 @@ export default function CsvImportApp({
                     <div className={`${viewMode === "rows" ? "min-w-[1120px] px-4 py-3" : "col-span-full mt-2 pt-4"} border-t border-slate-700 text-sm font-semibold text-slate-300`}>Остальные товары · {filteredProducts.length - sampleProducts.length}</div>
                   )}
                 {viewMode === "rows" ? (
-                  <CsvProductRow
-                    product={product}
-                    index={realIndex}
-                    lookups={lookups}
-                    isSelected={selectionOrder !== -1}
-                    selectionOrder={selectionOrder + 1}
-                    onToggleSelection={(event) => toggleMergeSelection(realIndex, Boolean(event?.shiftKey))}
-                    onRemove={handleRemove}
-                    onClick={() => setSelectedIdx(realIndex)}
-                  />
+                  <>
+                    <div className="hidden lg:block">
+                      <CsvProductRow
+                        product={product}
+                        index={realIndex}
+                        lookups={lookups}
+                        isSelected={selectionOrder !== -1}
+                        selectionOrder={selectionOrder + 1}
+                        onToggleSelection={(event) => toggleMergeSelection(realIndex, Boolean(event?.shiftKey))}
+                        onRemove={handleRemove}
+                        onClick={() => setSelectedIdx(realIndex)}
+                      />
+                    </div>
+                    <div className="lg:hidden">
+                      {isBatchSource ? (
+                        <AdminProductCard
+                          product={adminProduct}
+                          showAttributeSummary={false}
+                          onEdit={() => setSelectedIdx(realIndex)}
+                          onDelete={() => handleRemove(realIndex)}
+                          onUpdate={() => undefined}
+                          selected={selectionOrder !== -1}
+                          onToggleSelect={() => toggleMergeSelection(realIndex)}
+                          onSelectionClick={(event) => toggleMergeSelection(realIndex, event.shiftKey)}
+                          brands={(lookups?.brands || []) as any}
+                          categories={(lookups?.categories || []) as any}
+                          subcategories={(lookups?.subcategories || []) as any}
+                          allowDuplicate={false}
+                          variantCount={variants.length}
+                          variantColors={variantColors}
+                          onInlineUpdate={async (_current, patch) => {
+                            if (patch.name !== undefined) updateProduct(realIndex, 'name', String(patch.name));
+                            if (patch.price !== undefined) updateProduct(realIndex, 'price', Number(patch.price));
+                          }}
+                        />
+                      ) : (
+                        <CsvProductCard
+                          product={product}
+                          index={realIndex}
+                          lookups={lookups}
+                          isSelected={selectionOrder !== -1}
+                          selectionOrder={selectionOrder + 1}
+                          onToggleSelection={(event) => toggleMergeSelection(realIndex, Boolean(event?.shiftKey))}
+                          onRemove={handleRemove}
+                          onUpdate={updateProduct}
+                          onClick={() => setSelectedIdx(realIndex)}
+                          localPath={localPath}
+                        />
+                      )}
+                    </div>
+                  </>
                 ) : isBatchSource ? (
                   <AdminProductCard
                     product={adminProduct}
@@ -3593,18 +3634,18 @@ function CsvProductDrawer({
         className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
         onClick={onClose}
       />
-      <div className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl overflow-y-auto overscroll-contain border-l border-slate-700 bg-slate-900 shadow-2xl">
+      <div className="fixed inset-y-0 right-0 z-50 flex h-[100dvh] w-full max-w-none flex-col overflow-hidden overscroll-contain border-l border-slate-700 bg-slate-900 shadow-2xl lg:max-w-2xl">
         <div className="h-full flex flex-col">
-          <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between bg-slate-800 sticky top-0 z-10">
-            <div className="flex items-center gap-3">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-4 py-3 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="p-2 bg-indigo-500/10 rounded-lg">
                 <Edit3 className="w-5 h-5 text-indigo-400" />
               </div>
-              <h2 className="text-lg font-semibold text-white">
+              <h2 className="break-words text-base font-semibold text-white sm:text-lg">
                 Редактирование #{index + 1}
               </h2>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {onRollbackAi && (
                 <button
                   onClick={onRollbackAi}
@@ -3629,7 +3670,7 @@ function CsvProductDrawer({
             </div>
           </div>
 
-          <div className="flex-1 p-6 space-y-8 pb-32">
+          <div className="min-h-0 flex-1 space-y-8 overflow-y-auto p-4 pb-32 sm:p-6">
             {/* Photos */}
             <section className="space-y-3">
               <div className="flex items-center justify-between">
@@ -3881,6 +3922,13 @@ function CsvProductDrawer({
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
                 {(isClothing || isShoe) && <div className="space-y-2">
+                  <div className="rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-2.5">
+                    <div className="mb-2 text-[11px] font-semibold text-indigo-100">Распознать таблицу по фото</div>
+                    <MeasurementImageRecognizer
+                      disabled={aiBusy}
+                      onRecognized={updateMeasurements}
+                    />
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-950/40 px-2.5 py-2">
                     <span className="text-[11px] text-slate-500">Подставить сохранённую таблицу</span>
                     <MeasurementTemplatePicker supplierId={supplierId} onApply={updateMeasurements} />

@@ -13,8 +13,8 @@ export default async function BatchesPage() {
     const db = res.data?.kind === 'scraping_db_unreachable' ? res.data.db : null
 
     return (
-      <div className="p-8">
-        <div className="mx-auto max-w-[1800px] space-y-8">
+      <div className="p-4 sm:p-8">
+        <div className="mx-auto max-w-[1800px] space-y-6 sm:space-y-8">
           <ImportTabs />
           <Alert className="border-red-500/30 bg-red-950/30 text-red-100">
             <AlertTitle className="text-base text-red-200">Выгрузка временно недоступна</AlertTitle>
@@ -46,8 +46,8 @@ export default async function BatchesPage() {
   const foldersResult = await getExportFoldersAction()
 
   return (
-    <div className="p-8">
-      <div className="mx-auto max-w-[1800px] space-y-8">
+    <div className="min-w-0 p-4 sm:p-8">
+      <div className="mx-auto max-w-[1800px] space-y-6 sm:space-y-8">
         <ImportTabs />
         <ExportHistoryList initialData={res.data} initialFolders={foldersResult.data || []} />
       </div>

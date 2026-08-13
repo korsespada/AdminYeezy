@@ -25,22 +25,38 @@ export default function CrmCustomersList({ customers, totalItems, totalPages, pa
             <h1 className="mt-2 text-3xl font-bold text-white">Клиенты</h1>
             <p className="mt-2 text-sm text-slate-500">Контакты, источник регистрации, адреса и история заказов.</p>
           </div>
-          <form action="/admin/crm/customers" className="flex w-full flex-wrap gap-2 lg:w-auto lg:flex-nowrap">
+          <form action="/admin/crm/customers" className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto lg:flex-nowrap">
             <div className="relative min-w-0 flex-1 lg:w-96">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input name="search" defaultValue={search} placeholder="Имя, электронная почта, телефон, Telegram" className="w-full rounded-md border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-sm text-white outline-none focus:border-sky-500" />
             </div>
-            <select name="source" defaultValue={source} aria-label="Источник регистрации" className="rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500">
+            <select name="source" defaultValue={source} aria-label="Источник регистрации" className="h-11 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-sky-500 sm:w-auto">
               <option value="">Все источники</option>
               <option value="site">Сайт</option>
               <option value="telegram_mini_app">Telegram Mini App</option>
             </select>
-            <Button type="submit" className="bg-sky-600 hover:bg-sky-500">Найти</Button>
+            <Button type="submit" className="h-11 w-full bg-sky-600 hover:bg-sky-500 sm:w-auto">Найти</Button>
           </form>
         </div>
         <section className="rounded-lg border border-slate-800 bg-slate-900">
           <div className="border-b border-slate-800 p-4 text-sm text-slate-400">Найдено <span className="font-semibold text-slate-200">{totalItems.toLocaleString('ru-RU')}</span></div>
-          <div className="overflow-x-auto">
+          <div className="space-y-3 p-3 lg:hidden">
+            {customers.map((customer) => (
+              <Link key={`mobile-${customer.id}`} href={`/admin/crm/customers/${customer.id}`} className="block rounded-lg border border-slate-800 bg-slate-950/70 p-4 transition-colors hover:border-sky-500/60 hover:bg-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0"><div className="break-words font-semibold text-white">{customer.display_name || 'Без имени'}</div><div className="mt-1 text-xs text-slate-500">{customer.country || 'Страна не указана'}</div></div>
+                  <Badge variant="outline" className="shrink-0 border-slate-700 text-slate-300">{sourceLabel(customer.registration_source)}</Badge>
+                </div>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt className="text-slate-500">Контакты</dt><dd className="min-w-0 break-words text-right text-slate-200">{customer.email || '-'}<span className="block text-xs text-slate-500">{customer.phone || '-'}</span></dd></div>
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3"><dt className="text-slate-500">Telegram</dt><dd className="min-w-0 break-words text-right text-slate-200">{customer.telegram_username ? `@${customer.telegram_username}` : '-'}<span className="block text-xs text-slate-500">{customer.telegram_id || '-'}</span></dd></div>
+                  <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-3"><div><dt className="text-xs text-slate-500">Заказы</dt><dd className="mt-1 text-slate-200">{customer.order_count.toLocaleString('ru-RU')}</dd></div><div><dt className="text-xs text-slate-500">Регистрация</dt><dd className="mt-1 text-right text-slate-400">{formatDate(customer.created_at)}</dd></div></div>
+                </dl>
+              </Link>
+            ))}
+            {customers.length === 0 && <p className="px-2 py-8 text-center text-slate-500">Клиенты не найдены</p>}
+          </div>
+          <div className="hidden overflow-x-auto lg:block">
             <table className="min-w-full divide-y divide-slate-800 text-sm">
               <thead className="bg-slate-950/60 text-xs uppercase text-slate-500"><tr>
                 <th className="px-5 py-3 text-left font-medium">Клиент</th>

@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
-import { deleteProductAction } from '@/actions/products'
+import { deleteProductAction, getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
-import { LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
+import { Filter, LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
 import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
@@ -71,6 +71,8 @@ export default function ProductList({
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isNavigationPending, startNavigationTransition] = useTransition()
 
+  const closeFilters = useCallback(() => setIsSidebarOpen(false), [])
+
   // Update local state when initialData changes (e.g. after search/filter)
   useEffect(() => {
     setProducts(initialData)
@@ -95,9 +97,17 @@ export default function ProductList({
     setIsModalOpen(true)
   }
 
-  const handleEdit = useCallback((product: Product) => {
+  const handleEdit = useCallback(async (product: Product) => {
     setEditingProduct(product)
     setIsModalOpen(true)
+
+    // The list endpoint may be served by an older Rails deployment without
+    // the expanded color family. Refresh the selected product from the detail
+    // endpoint so the form always receives the complete family.
+    const result = await getProductAction(product.id)
+    if (result.success && result.data) {
+      setEditingProduct((current) => current?.id === product.id ? result.data as Product : current)
+    }
   }, [])
 
   const handleDelete = useCallback(async (id: string) => {
@@ -247,7 +257,7 @@ export default function ProductList({
         activeSubcategoryIds={activeSubcategoryIds}
         filterFacets={filterFacets}
         isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
+        onClose={closeFilters}
         count={totalItems}
         isNavigationPending={isNavigationPending}
         onNavigate={handleNavigation}
@@ -256,19 +266,28 @@ export default function ProductList({
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Scrollable Content */}
-        <div className={`flex-1 p-6 scroll-smooth ${selectedProductIds.length > 0 ? 'pb-24' : ''}`}>
+        <div className={`flex-1 px-4 py-5 sm:p-6 scroll-smooth ${selectedProductIds.length > 0 ? 'pb-40 lg:pb-24' : ''}`}>
           <div className="mx-auto max-w-[1600px]">
 
             {/* Page Header & Controls */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+            <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-100">Товары</h2>
                 <p className="text-slate-400 text-sm mt-1">Управление каталогом</p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="h-11 flex-1 border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 lg:hidden"
+                >
+                  <Filter className="h-4 w-4" />
+                  Фильтры
+                </Button>
                 {!showCategoryBrowser && (
-                  <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700 shadow-sm shrink-0">
+                  <div className="flex shrink-0 rounded-lg border border-slate-700 bg-slate-800 p-1 shadow-sm">
                     <Button
                       type="button"
                       variant={viewMode === 'grid' ? 'default' : 'ghost'}
@@ -293,7 +312,7 @@ export default function ProductList({
                 <Button
                   type="button"
                   onClick={handleCreate}
-                  className="shrink-0"
+                  className="h-11 shrink-0"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Добавить</span>
@@ -323,6 +342,29 @@ export default function ProductList({
               </div>
             ) : (
               <>
+                <div className="grid grid-cols-1 gap-4 lg:hidden">
+                  {products.map(product => (
+                    <ProductCard
+                      key={`mobile-${product.id}`}
+                      product={product}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                      onUpdate={handleProductUpdate}
+                      selected={selectedProductIds.includes(product.id)}
+                      onToggleSelect={handleToggleSelect}
+                      categories={categories}
+                      subcategories={subcategories}
+                      variantCount={product.color_variants?.length || 0}
+                      variantColors={Array.from(new Set(
+                        (product.color_variants || [])
+                          .map((variant) => variant.color)
+                          .filter((color): color is string => Boolean(color)),
+                      ))}
+                      showAttributeSummary={false}
+                    />
+                  ))}
+                </div>
+                <div className="hidden lg:block">
                 {viewMode === 'grid' ? (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between px-1">
@@ -346,7 +388,7 @@ export default function ProductList({
                         <span>{selectedProductIds.length === products.length ? 'Снять всё' : 'Выбрать все на странице'}</span>
                       </Button>
                     </div>
-                    <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                    <div className="mb-8 grid grid-cols-2 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
                       {products.map(product => (
                         <ProductCard
                           key={product.id}
@@ -384,6 +426,7 @@ export default function ProductList({
                     onUpdateProduct={handleProductUpdate}
                   />
                 )}
+                </div>
               </>
             )}
 
@@ -409,9 +452,9 @@ export default function ProductList({
       />
 
       {/* Bulk Action Toolbar */}
-      <div className={`fixed bottom-0 left-0 right-0 z-40 overflow-x-auto border-t border-slate-700 bg-slate-800 px-3 py-2 shadow-2xl shadow-black/40 transition-transform duration-300 lg:left-72 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
-        <div className="mx-auto flex min-w-max max-w-[1600px] items-center gap-2">
-          <div className="flex shrink-0 items-center gap-2 text-sm text-slate-300">
+      <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform duration-300 lg:left-72 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0">
             <Badge>{selectedProductIds.length}</Badge>
             <span>выбрано</span>
             <Button
@@ -427,17 +470,17 @@ export default function ProductList({
             </Button>
           </div>
 
-          <div className="h-7 w-px shrink-0 bg-slate-700" />
+          <div className="hidden h-7 w-px shrink-0 bg-slate-700 lg:block" />
 
-          <div className="flex flex-1 items-center justify-end gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:items-center lg:justify-end">
             {/* Gender Select */}
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <span className="text-xs text-slate-500">Пол</span>
               <Select
                 value={selectedGender || '__unchanged__'}
                 onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
               >
-                <SelectTrigger aria-label="Пол для выбранных товаров" className="h-9 w-36 bg-slate-700 px-2 text-slate-200">
+                <SelectTrigger aria-label="Пол для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-36 lg:flex-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -450,7 +493,7 @@ export default function ProductList({
             </div>
 
             {/* Category Select */}
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <span className="text-xs text-slate-500">Кат.</span>
               <Select
                 value={selectedCategory || '__unchanged__'}
@@ -459,7 +502,7 @@ export default function ProductList({
                   setSelectedSubcategory('') // Reset subcategory when category changes
                 }}
               >
-                <SelectTrigger aria-label="Категория для выбранных товаров" className="h-9 w-44 bg-slate-700 px-2 text-slate-200">
+                <SelectTrigger aria-label="Категория для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-44 lg:flex-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -472,14 +515,14 @@ export default function ProductList({
             </div>
 
             {/* Subcategory Select */}
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               <span className="text-xs text-slate-500">Подкат.</span>
               <Select
                 value={selectedSubcategory || '__unchanged__'}
                 onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
                 disabled={!selectedCategory}
               >
-                <SelectTrigger aria-label="Подкатегория для выбранных товаров" className="h-9 w-48 bg-slate-700 px-2 text-slate-200">
+                <SelectTrigger aria-label="Подкатегория для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-48 lg:flex-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -502,7 +545,7 @@ export default function ProductList({
               inputMode="decimal"
               aria-label="Цена для выбранных товаров"
               placeholder="Цена, ₽"
-              className="h-9 w-28 shrink-0 border-slate-600 bg-slate-700 px-2 text-sm text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className="h-10 w-full shrink-0 border-slate-600 bg-slate-700 px-2 text-sm text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none lg:w-28"
               disabled={isBulkUpdating || isBulkDeleting}
             />
 
@@ -516,7 +559,7 @@ export default function ProductList({
               type="button"
               onClick={handleBulkUpdate}
               disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting}
-              className="h-9 shrink-0 whitespace-nowrap px-4"
+              className="h-10 w-full shrink-0 whitespace-nowrap px-4 lg:w-auto"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
             </Button>

@@ -140,7 +140,16 @@ export default function CrmDashboard({ railsConfigured, recentOrders, counts, er
             </div>
             <Link href="/admin/crm/orders" className="text-sm font-medium text-sky-300 hover:text-sky-200">Все заказы</Link>
           </div>
-          <div className="overflow-x-auto">
+          <div className="space-y-3 p-3 lg:hidden">
+            {recentOrders.map((order) => (
+              <Link key={`mobile-${order.id}`} href={`/admin/crm/orders/${order.id}`} className="block rounded-lg border border-slate-800 bg-slate-950/70 p-4 transition-colors hover:border-sky-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500">
+                <div className="flex items-start justify-between gap-3"><span className="font-semibold text-white">{order.public_number}</span><Badge variant="outline" className="border-slate-700 text-slate-300">{statusLabels[order.status] || 'Неизвестно'}</Badge></div>
+                <div className="mt-3 flex items-end justify-between gap-3 text-sm"><span className="min-w-0 break-words text-slate-300">{customerLabel(order)}</span><span className="shrink-0 text-slate-200">{formatMoney(order.total_cents, order.currency)}</span></div>
+              </Link>
+            ))}
+            {recentOrders.length === 0 && <p className="px-2 py-8 text-center text-slate-500">Заказы не загружены</p>}
+          </div>
+          <div className="hidden overflow-x-auto lg:block">
             <table className="min-w-full divide-y divide-slate-800 text-sm">
               <thead className="bg-slate-950/60 text-xs uppercase text-slate-500">
                 <tr><th className="px-5 py-3 text-left font-medium">Номер</th><th className="px-5 py-3 text-left font-medium">Клиент</th><th className="px-5 py-3 text-left font-medium">Статус</th><th className="px-5 py-3 text-right font-medium">Сумма</th></tr>

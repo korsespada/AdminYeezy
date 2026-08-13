@@ -70,4 +70,27 @@ describe('ProductCard grid presentation', () => {
     expect(screen.getByTitle('Удалить')).toBeInTheDocument()
     expect(screen.queryByTitle('Дублировать')).not.toBeInTheDocument()
   })
+
+  it('shows a compact, grammatically correct color family badge', () => {
+    render(
+      <ProductCard
+        product={{
+          ...product,
+          color_variants: [
+            { id: 'variant-1', slug: 'white', name: 'Белый', color: 'Белый', price_cents: 4200000, image_url: null, current: true },
+            { id: 'variant-2', slug: 'black', name: 'Чёрный', color: 'Чёрный', price_cents: 4200000, image_url: null, current: false },
+          ],
+        }}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+        variantCount={2}
+        variantColors={['Белый', 'Чёрный']}
+      />,
+    )
+
+    expect(screen.getByText('2 варианта')).toBeInTheDocument()
+  })
 })

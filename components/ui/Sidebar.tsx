@@ -46,6 +46,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     const searchParams = useSearchParams()
     const searchParamsKey = searchParams.toString()
     const pendingParamsRef = useRef(searchParamsKey)
+    const closeButtonRef = useRef<HTMLButtonElement>(null)
+    const previouslyFocusedRef = useRef<HTMLElement | null>(null)
     const [brandSearch, setBrandSearch] = useState('')
     const [nameValue, setNameValue] = useState(searchParams.get('name') || searchParams.get('search') || '')
     const [descriptionValue, setDescriptionValue] = useState(searchParams.get('description') || '')
@@ -68,6 +70,27 @@ const Sidebar: React.FC<SidebarProps> = ({
     const hasActiveFilters = Boolean(
         currentBrand || currentSupplier || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
     )
+
+    useEffect(() => {
+        if (!isOpen) return
+
+        previouslyFocusedRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        const previousOverflow = document.body.style.overflow
+        document.body.style.overflow = 'hidden'
+        closeButtonRef.current?.focus()
+
+        const handleEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onClose()
+        }
+        document.addEventListener('keydown', handleEscape)
+
+        return () => {
+            document.body.style.overflow = previousOverflow
+            document.removeEventListener('keydown', handleEscape)
+            previouslyFocusedRef.current?.focus()
+            previouslyFocusedRef.current = null
+        }
+    }, [isOpen, onClose])
 
     const navigate = useCallback((url: string) => {
         if (onNavigate) {
@@ -323,14 +346,18 @@ const Sidebar: React.FC<SidebarProps> = ({
             />
 
             {/* Sidebar Container */}
-            <aside className={`
-        fixed lg:sticky top-0 left-0 h-screen w-72 bg-slate-800 border-r border-slate-700 z-50 overflow-y-auto transition-transform duration-300 ease-in-out
+            <aside
+                role={isOpen ? 'dialog' : 'complementary'}
+                aria-modal={isOpen ? true : undefined}
+                aria-labelledby="catalog-filters-title"
+                className={`
+        fixed lg:sticky top-0 left-0 h-[100dvh] w-full max-w-sm lg:h-screen lg:w-72 bg-slate-800 border-r border-slate-700 z-50 overflow-y-auto transition-transform duration-300 ease-in-out
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
                 <div className="p-6">
                     <div className="mb-8 flex items-start justify-between gap-4">
                         <div>
-                            <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                            <h2 id="catalog-filters-title" className="text-xl font-bold text-slate-100 flex items-center gap-2">
                                 <Filter className="w-5 h-5 text-indigo-400" />
                                 Фильтры
                             </h2>
@@ -351,7 +378,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 <RotateCcw aria-hidden="true" className="h-4 w-4" />
                             </Button>
                         )}
-                        <Button variant="ghost" size="icon" onClick={onClose} className="lg:hidden text-slate-400 hover:text-slate-200">
+                        <Button ref={closeButtonRef} variant="ghost" size="icon" onClick={onClose} className="h-11 w-11 lg:hidden text-slate-400 hover:text-slate-200" aria-label="Закрыть фильтры">
                             <X className="w-6 h-6" />
                         </Button>
                     </div>

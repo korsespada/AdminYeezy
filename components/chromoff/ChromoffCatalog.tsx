@@ -109,9 +109,9 @@ export default function ChromoffCatalog({
   }
 
   return (
-    <main className="min-h-full bg-slate-950 p-4 text-slate-100 sm:p-6 lg:p-8">
+    <main className="min-h-full min-w-0 bg-slate-950 p-4 text-slate-100 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <Badge className="bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">Отдельная витрина</Badge>
@@ -120,7 +120,7 @@ export default function ChromoffCatalog({
                 Выбранные поставщики: свои разделы, публикация и SEO; общий товар, цена и фотографии из YeezyUnique.
               </p>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950 px-4 py-3 text-sm">
+            <div className="rounded-lg border border-slate-800 bg-slate-950 px-4 py-3 text-sm sm:min-w-40">
               <div className="text-slate-500">По текущему фильтру</div>
               <div className="mt-1 text-2xl font-semibold text-white">{totalItems.toLocaleString('ru-RU')}</div>
             </div>
@@ -130,63 +130,63 @@ export default function ChromoffCatalog({
             <span>Сопоставлено с Rails: {mappedCategories.length}</span>
             <span>Непривязанных: {categories.length - mappedCategories.length}</span>
           </div>
-          <div className="mt-5 flex flex-wrap items-center gap-3">
-            <Button type="button" variant="outline" disabled={isPending} onClick={previewImport}>
+          <div className="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+            <Button type="button" variant="outline" className="h-11 sm:h-10" disabled={isPending} onClick={previewImport}>
               {isPending ? 'Проверяем…' : 'Проверить импорт'}
             </Button>
-            <Button type="button" disabled={!canImport || isPending} onClick={importCatalog}>
+            <Button type="button" className="h-11 sm:h-10" disabled={!canImport || isPending} onClick={importCatalog}>
               {isPending ? 'Импортируем…' : 'Импортировать каталог'}
             </Button>
             {importMessage && <span className="text-sm text-slate-300" role="status" aria-live="polite">{importMessage}</span>}
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
           <form action="/admin/chromoff" className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <input name="q" defaultValue={filters.q} placeholder="Поиск по названию" className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500 xl:col-span-2" />
-            <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+            <input name="q" defaultValue={filters.q} placeholder="Поиск по названию" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500 xl:col-span-2" />
+            <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
               <option value="">Все разделы</option>
               {rootCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
-            <select name="subcategory" defaultValue={filters.subcategory} className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+            <select name="subcategory" defaultValue={filters.subcategory} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
               <option value="">Все подкатегории</option>
               {subcategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
-            <input type="number" name="minPrice" min="0" step="1" defaultValue={filters.minPrice} placeholder="Цена от, ₽" className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-            <input type="number" name="maxPrice" min="0" step="1" defaultValue={filters.maxPrice} placeholder="Цена до, ₽" className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white placeholder:text-slate-500" />
-            <select name="published" defaultValue={filters.published} className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+            <input type="number" name="minPrice" min="0" step="1" defaultValue={filters.minPrice} placeholder="Цена от, ₽" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500" />
+            <input type="number" name="maxPrice" min="0" step="1" defaultValue={filters.maxPrice} placeholder="Цена до, ₽" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500" />
+            <select name="published" defaultValue={filters.published} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
               <option value="all">Все статусы</option>
               <option value="published">Опубликованные</option>
               <option value="hidden">Скрытые</option>
             </select>
-            <div className="flex gap-2 xl:col-span-2">
-              <Button type="submit">Применить</Button>
-              <Button asChild type="button" variant="outline"><a href="/admin/chromoff">Сбросить</a></Button>
+            <div className="flex flex-col gap-2 sm:flex-row xl:col-span-2">
+              <Button type="submit" className="h-11 sm:h-10">Применить</Button>
+              <Button asChild type="button" variant="outline" className="h-11 sm:h-10"><a href="/admin/chromoff">Сбросить</a></Button>
             </div>
           </form>
         </section>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
           <h2 className="text-lg font-semibold text-white">Добавить новый товар</h2>
           <p className="mt-1 text-sm text-slate-400">Товары, которых ещё нет в Chromoff; источник и бренд могут быть любыми.</p>
           <form className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" action={(formData) => startTransition(async () => {
             const response = await createChromoffListingAction(formData)
             setListingMessage(response.message)
           })}>
-            <select name="product_id" required className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+            <select name="product_id" required className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
               <option value="">Выбери товар</option>
               {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
             </select>
-            <select name="chromoff_category_id" required className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white">
+            <select name="chromoff_category_id" required className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
               <option value="">Выбери подкатегорию</option>
               {categories.filter((category) => category.parent_id).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
-            <div className="flex items-center gap-3"><input type="hidden" name="published" value="true" /><Button type="submit">Добавить и опубликовать</Button></div>
+            <div className="flex items-center gap-3"><input type="hidden" name="published" value="true" /><Button type="submit" className="h-11 w-full sm:h-10 md:w-auto">Добавить и опубликовать</Button></div>
           </form>
           {listingMessage && <p className="mt-3 text-sm text-slate-300">{listingMessage}</p>}
         </section>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
           <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-white">Товары Chromoff</h2>
@@ -256,7 +256,7 @@ export default function ChromoffCatalog({
             </div>
           ) : <div className="py-14 text-center text-sm text-slate-500">По этим фильтрам товаров нет.</div>}
           {totalPages > 1 && (
-            <nav className="mt-6 flex items-center justify-center gap-2" aria-label="Страницы товаров Chromoff">
+            <nav className="mt-6 flex flex-wrap items-center justify-center gap-2" aria-label="Страницы товаров Chromoff">
               <Button asChild variant="outline" size="sm" className={page === 1 ? 'pointer-events-none opacity-50' : ''}><a href={buildUrl(Math.max(1, page - 1))}>Назад</a></Button>
               {[...Array(totalPages)].map((_, index) => {
                 const itemPage = index + 1

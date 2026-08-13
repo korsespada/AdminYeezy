@@ -28,10 +28,15 @@ NocoDB         -> Rails CRM read-only access
 
 Rails CRM Postgres является единственным source of truth для сайта. `yeezy_scraping` не заменяет CRM-БД, а `shop` не должен использоваться как основная БД нового сайта.
 
-Responsive shell/home layout is presentation-only: mobile cards, the
-navigation surface, and desktop branches reuse the same routes, loaders,
-identifiers, callbacks, and source boundaries. The responsive breakpoint is
-1024 px; it does not introduce mobile routes or a second data-fetch path.
+Responsive layout is presentation-only across the in-scope admin surfaces:
+mobile cards, filter drawers/sheets, editors, navigation surfaces, and desktop
+branches reuse the same routes, loaders, identifiers, callbacks, and source
+boundaries. The responsive breakpoint is 1024 px; it does not introduce mobile
+routes, a second data-fetch path, or a second mutation contract. Ordinary
+catalog, CRM, Chromoff, and batch collections use cards below the breakpoint;
+desktop tables/rows remain available at and above it. Horizontal scrolling is
+reserved for real measurement/data matrices and is not used as a workaround
+for ordinary entity collections.
 
 ## Chromoff catalog
 
