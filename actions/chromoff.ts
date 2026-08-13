@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { buildChromoffImportPayload } from '@/lib/chromoff-source'
-import { bulkUpdateRailsChromoffListingsPublished, createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
 
 export async function setChromoffListingPublishedAction(formData: FormData) {
   const id = String(formData.get('id') || '').trim()
@@ -28,6 +28,45 @@ export async function setChromoffListingsPublishedAction(listingIds: string[], p
     return { success: true, updated: result.updated, message: published ? 'Товары опубликованы в Chromoff.' : 'Товары скрыты с Chromoff.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить публикацию.' }
+  }
+}
+
+export async function setChromoffListingsSupplierAction(listingIds: string[], sourceSupplierId: string, sourceSupplierName?: string) {
+  const ids = [...new Set(listingIds.map(String).map((value) => value.trim()).filter(Boolean))]
+  if (!ids.length) return { success: false, message: 'Не выбраны карточки Chromoff.' }
+  if (!sourceSupplierId) return { success: false, message: 'Выберите поставщика.' }
+
+  try {
+    const result = await bulkUpdateRailsChromoffListingsSupplier(ids, sourceSupplierId, sourceSupplierName)
+    revalidatePath('/admin/chromoff')
+    return { success: true, updated: result.updated, message: 'Поставщик обновлён у выбранных товаров.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить поставщика.' }
+  }
+}
+
+export async function updateChromoffCategoryAction(formData: FormData) {
+  const id = String(formData.get('id') || '').trim()
+  const name = String(formData.get('name') || '').trim()
+  const slug = String(formData.get('slug') || '').trim()
+  const sortOrder = Number(formData.get('sort_order'))
+  if (!id || !name || !slug || !Number.isInteger(sortOrder)) {
+    return { success: false, message: 'Заполните название, slug и порядок.' }
+  }
+
+  try {
+    await updateRailsChromoffCategory(id, {
+      catalogCategoryId: String(formData.get('catalog_category_id') || '').trim() || null,
+      name,
+      slug,
+      sortOrder,
+      active: String(formData.get('active') || '') === 'true',
+    })
+    revalidatePath('/admin/chromoff')
+    revalidatePath('/admin/chromoff/categories')
+    return { success: true, message: 'Раздел Chromoff сохранён.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить раздел.' }
   }
 }
 

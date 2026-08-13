@@ -5,16 +5,16 @@ import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-const PAGE_SIZE = 48
-const CHROMOFF_SUPPLIERS = [
-  { id: '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', name: 'CH Одежда' },
-  { id: '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', name: 'CH Одежда, обувь, ремни' },
-  { id: '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ', name: 'CH Ювелирка, сумки, ремни' },
-  { id: '__none__', name: 'Без поставщика' },
+const PAGE_SIZES = [40, 100, 500] as const
+const CHROMOFF_AUTO_SUPPLIER_IDS = [
+  '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I',
+  '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag',
+  '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ',
 ]
 
 type ChromoffSearchParams = {
   page?: string
+  perPage?: string
   q?: string
   category?: string
   subcategory?: string
@@ -35,6 +35,11 @@ function positivePage(value?: string) {
   return Number.isInteger(page) && page > 0 ? page : 1
 }
 
+function pageSize(value?: string) {
+  const parsed = Number(value)
+  return PAGE_SIZES.includes(parsed as typeof PAGE_SIZES[number]) ? parsed : PAGE_SIZES[0]
+}
+
 export default async function ChromoffPage({
   searchParams,
 }: {
@@ -43,6 +48,7 @@ export default async function ChromoffPage({
   await connection()
   const params = await searchParams
   const page = positivePage(params.page)
+  const perPage = pageSize(params.perPage)
   const filters = {
     q: params.q?.trim() || '',
     category: params.category || '',
@@ -52,7 +58,7 @@ export default async function ChromoffPage({
     description: params.description || '',
     gender: params.gender || '',
     source: ['auto', 'manual'].includes(params.source || '') ? params.source as 'auto' | 'manual' : undefined,
-    sourceSupplier: CHROMOFF_SUPPLIERS.some((item) => item.id === params.sourceSupplier) ? params.sourceSupplier : '',
+    sourceSupplier: params.sourceSupplier || '',
     aiStatus: ['ai_assigned', 'mapped', 'needs_review', 'manual'].includes(params.aiStatus || '') ? params.aiStatus as 'ai_assigned' | 'mapped' | 'needs_review' | 'manual' : undefined,
     chromoffCategory: params.chromoffCategory || '',
     chromoffSubcategory: params.chromoffSubcategory || '',
@@ -64,7 +70,7 @@ export default async function ChromoffPage({
       listRailsChromoffCategories(),
       listRailsChromoffListings({
         page,
-        perPage: PAGE_SIZE,
+        perPage,
         search: filters.q,
         categoryId: filters.chromoffSubcategory || filters.chromoffCategory,
         minPrice: filters.minPrice,
@@ -91,10 +97,22 @@ export default async function ChromoffPage({
         catalogSubcategories={lookups.subcategories}
         brands={lookups.brands}
         attributeDefinitions={attributeDefinitions}
-        suppliers={CHROMOFF_SUPPLIERS}
+        suppliers={[
+          ...listings.supplierOptions
+            .filter((item) => item.id)
+            .sort((left, right) => {
+              const leftIndex = CHROMOFF_AUTO_SUPPLIER_IDS.indexOf(left.id)
+              const rightIndex = CHROMOFF_AUTO_SUPPLIER_IDS.indexOf(right.id)
+              const leftPriority = leftIndex === -1 ? CHROMOFF_AUTO_SUPPLIER_IDS.length : leftIndex
+              const rightPriority = rightIndex === -1 ? CHROMOFF_AUTO_SUPPLIER_IDS.length : rightIndex
+              return leftPriority - rightPriority || left.name.localeCompare(right.name, 'ru')
+            }),
+          { id: '__none__', name: 'Без поставщика', count: 0 },
+        ]}
         totalItems={listings.totalItems}
         totalPages={listings.totalPages}
         page={page}
+        perPage={perPage}
       />
     )
   } catch (error) {

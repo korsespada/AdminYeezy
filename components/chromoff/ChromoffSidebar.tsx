@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label'
 export interface ChromoffSupplierOption {
   id: string
   name: string
+  count?: number
 }
 
 interface ChromoffSidebarProps {
@@ -55,7 +56,7 @@ export default function ChromoffSidebar({
   const rootChromoffCategories = chromoffCategories.filter((item) => !item.parent_id)
   const selectedChromoffRoot = current.get('chromoffCategory') || ''
   const chromoffSubcategories = chromoffCategories.filter((item) => item.parent_id === selectedChromoffRoot)
-  const active = Boolean([...current.entries()].some(([key]) => key !== 'page'))
+  const active = Boolean([...current.entries()].some(([key]) => key !== 'page' && key !== 'perPage'))
 
   const navigate = (next: URLSearchParams) => {
     next.delete('page')
@@ -118,7 +119,7 @@ export default function ChromoffSidebar({
 
             <FilterSelect label="Раздел Chromoff" value={selectedChromoffRoot} onChange={(value) => setFilter('chromoffCategory', value, 'chromoffSubcategory')} options={rootChromoffCategories.map((item) => ({ value: item.id, label: item.name }))} />
             <FilterSelect label="Подраздел Chromoff" value={current.get('chromoffSubcategory') || ''} onChange={(value) => setFilter('chromoffSubcategory', value)} options={chromoffSubcategories.map((item) => ({ value: item.id, label: item.name }))} />
-            <FilterSelect label="Поставщик Chromoff" value={current.get('sourceSupplier') || ''} onChange={(value) => setFilter('sourceSupplier', value)} options={suppliers.map((item) => ({ value: item.id, label: item.name }))} />
+            <FilterSelect label="Поставщик Chromoff" value={current.get('sourceSupplier') || ''} onChange={(value) => setFilter('sourceSupplier', value)} options={suppliers.map((item) => ({ value: item.id, label: item.count ? `${item.name} (${item.count})` : item.name }))} />
             <FilterSelect label="Публикация Chromoff" value={current.get('published') || ''} onChange={(value) => setFilter('published', value)} options={[{ value: 'published', label: 'Опубликованные' }, { value: 'hidden', label: 'Скрытые' }]} />
             <FilterSelect label="Категория товара" value={current.get('category') || ''} onChange={(value) => setFilter('category', value, 'subcategory')} options={categories.map((item) => ({ value: item.id, label: item.name }))} />
             <FilterSelect label="Подкатегория товара" value={current.get('subcategory') || ''} onChange={(value) => setFilter('subcategory', value)} options={subcategories.filter((item) => !current.get('category') || item.category === current.get('category')).map((item) => ({ value: item.id, label: item.name }))} />

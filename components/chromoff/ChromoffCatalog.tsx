@@ -1,19 +1,18 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { CheckSquare, Filter, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
+import { CheckSquare, Filter, FolderTree, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Brand, Category, Product, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { getProductAction } from '@/actions/products'
 import { bulkDeleteProductsAction, bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
-import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction } from '@/actions/chromoff'
+import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
 import ProductCard from '@/components/products/ProductCard'
 import ProductForm from '@/components/products/ProductForm'
-import MeasurementTemplateBulkPicker from '@/components/products/MeasurementTemplateBulkPicker'
 import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chromoff/ChromoffSidebar'
-import { applyMeasurementTableAttributes, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -33,6 +32,7 @@ interface ChromoffCatalogProps {
   totalItems: number
   totalPages: number
   page: number
+  perPage: number
 }
 
 function listingProductId(listing: RailsChromoffListing) {
@@ -136,6 +136,7 @@ export default function ChromoffCatalog({
   totalItems,
   totalPages,
   page,
+  perPage,
 }: ChromoffCatalogProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -153,11 +154,12 @@ export default function ChromoffCatalog({
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
   const [selectedPrice, setSelectedPrice] = useState('')
-  const [selectedMeasurementTemplate, setSelectedMeasurementTemplate] = useState<MeasurementTemplate | null>(null)
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isBulkPublishing, setIsBulkPublishing] = useState(false)
+  const [isBulkSupplierUpdating, setIsBulkSupplierUpdating] = useState(false)
   const [selectedPublication, setSelectedPublication] = useState<'published' | 'hidden' | ''>('')
+  const [selectedSupplier, setSelectedSupplier] = useState('')
   const [gridColumns, setGridColumns] = useState(4)
 
   useEffect(() => {
@@ -166,7 +168,7 @@ export default function ChromoffCatalog({
   }, [initialListings])
 
   const products = useMemo(() => listings.map(listingToProduct), [listings])
-  const hasBulkUpdates = Boolean(selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate)
+  const hasBulkUpdates = Boolean(selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim())
   const isCompactGrid = gridColumns >= 5
   const gridClassName = gridColumns === 4 ? 'lg:grid-cols-4' : gridColumns === 5 ? 'lg:grid-cols-5' : gridColumns === 6 ? 'lg:grid-cols-6' : gridColumns === 7 ? 'lg:grid-cols-7' : gridColumns === 8 ? 'lg:grid-cols-8' : gridColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'
 
@@ -178,6 +180,13 @@ export default function ChromoffCatalog({
   const changeGridColumns = (value: number) => {
     setGridColumns(value)
     window.localStorage.setItem('chromoffGridColumns', String(value))
+  }
+
+  const changePageSize = (value: number) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('perPage', String(value))
+    next.delete('page')
+    router.push(`/admin/chromoff?${next}`)
   }
 
   const updateListingFromProduct = (updatedProduct: Product) => {
@@ -228,20 +237,16 @@ export default function ChromoffCatalog({
     if (selectedSubcategory) updates.subcategory = selectedSubcategory
     if (selectedGender) updates.gender = selectedGender
     if (selectedPrice.trim()) updates.price = price
-    if (selectedMeasurementTemplate) updates.measurementTemplate = selectedMeasurementTemplate.measurements
     const result = await bulkUpdateProductsAction(selectedIds, updates)
     if (!result.success) window.alert(result.error || 'Не удалось обновить товары')
     else {
       setListings((current) => current.map((listing) => {
         if (!selectedIds.includes(listingProductId(listing))) return listing
-        const product = listingToProduct(listing)
-        const attributes = selectedMeasurementTemplate ? applyMeasurementTableAttributes(product.catalog_attributes || {}, selectedMeasurementTemplate.measurements) : product.catalog_attributes
         return {
           ...listing,
           ...(selectedCategory ? { category: { ...(listing.category || { id: selectedCategory, name: '', slug: '' }), id: selectedCategory } } : {}),
           ...(selectedPrice.trim() ? { price_cents: Math.round(price * 100), price_on_request: isPriceOnRequest(price) } : {}),
           ...(selectedGender ? { gender: selectedGender } : {}),
-          ...(attributes ? { catalog_attributes: attributes } : {}),
         }
       }))
       setSelectedIds([])
@@ -249,7 +254,6 @@ export default function ChromoffCatalog({
       setSelectedSubcategory('')
       setSelectedGender('')
       setSelectedPrice('')
-      setSelectedMeasurementTemplate(null)
       router.refresh()
     }
     setIsBulkUpdating(false)
@@ -284,6 +288,32 @@ export default function ChromoffCatalog({
     })
   }
 
+  const handleBulkSupplier = () => {
+    if (!selectedSupplier) return
+    const selectedListingIds = listings.filter((listing) => selectedIds.includes(listingProductId(listing))).map((listing) => listing.id)
+    if (!selectedListingIds.length) return
+    const supplier = suppliers.find((item) => item.id === selectedSupplier)
+    if (!supplier) return
+    if (!confirm(`Изменить поставщика у ${selectedListingIds.length} товаров?`)) return
+    setIsBulkSupplierUpdating(true)
+    startTransition(async () => {
+      const result = await setChromoffListingsSupplierAction(selectedListingIds, supplier.id, supplier.id === '__none__' ? undefined : supplier.name)
+      if (result.success) {
+        const isAuto = ['_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ'].includes(supplier.id)
+        setListings((current) => current.map((listing) => selectedListingIds.includes(listing.id) ? {
+          ...listing,
+          source_supplier_id: supplier.id === '__none__' ? null : supplier.id,
+          source_supplier_name: supplier.id === '__none__' ? null : supplier.name,
+          sync_mode: isAuto ? 'auto' : 'manual',
+        } : listing))
+        setSelectedIds([])
+        setSelectedSupplier('')
+        router.refresh()
+      } else window.alert(result.message)
+      setIsBulkSupplierUpdating(false)
+    })
+  }
+
   const previewImport = () => startTransition(async () => {
     const result = await previewChromoffImportAction()
     setImportMessage(result.success ? `Проверено: ${Number(result.result?.products_received || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
@@ -305,6 +335,7 @@ export default function ChromoffCatalog({
             <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <Button type="button" variant="outline" onClick={() => setIsSidebarOpen(true)} className="h-11 flex-1 border-slate-700 bg-slate-800 text-slate-200 lg:hidden"><Filter className="h-4 w-4" />Фильтры</Button>
               <Button type="button" variant="outline" onClick={() => setIsImportOpen(true)} className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Upload className="h-4 w-4" />Импорт</Button>
+              <Button asChild type="button" variant="outline" className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Link href="/admin/chromoff/categories"><FolderTree className="h-4 w-4" />Категории</Link></Button>
               <Button type="button" onClick={() => setIsAddOpen(true)} className="h-11"><Plus className="h-4 w-4" />Добавить</Button>
             </div>
           </header>
@@ -314,7 +345,7 @@ export default function ChromoffCatalog({
               {selectedIds.length === products.length && products.length > 0 ? <CheckSquare className="h-5 w-5 text-violet-400" /> : <Square className="h-5 w-5" />}
               {selectedIds.length === products.length && products.length > 0 ? 'Снять всё' : 'Выбрать все на странице'}
             </Button>
-            <div className="flex items-center gap-2"><label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-xs text-slate-400 xl:flex"><span className="whitespace-nowrap">В ряд: {gridColumns}</span><input type="range" min="4" max="10" step="1" value={gridColumns} onChange={(event) => changeGridColumns(Number(event.target.value))} className="h-1.5 w-24 cursor-pointer accent-violet-500" aria-label="Количество карточек в ряду" /></label><div className="flex items-center gap-2 text-sm text-slate-400"><LayoutGrid className="h-4 w-4 text-violet-300" />{totalItems.toLocaleString('ru-RU')} товаров · страница {page} из {Math.max(totalPages, 1)}</div></div>
+            <div className="flex items-center gap-2"><label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-xs text-slate-400 xl:flex"><span className="whitespace-nowrap">В ряд: {gridColumns}</span><input type="range" min="4" max="10" step="1" value={gridColumns} onChange={(event) => changeGridColumns(Number(event.target.value))} className="h-1.5 w-24 cursor-pointer accent-violet-500" aria-label="Количество карточек в ряду" /></label><label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-xs text-slate-400"><span className="whitespace-nowrap">На странице</span><select value={perPage} onChange={(event) => changePageSize(Number(event.target.value))} className="bg-transparent text-slate-200 outline-none"><option value="40">40</option><option value="100">100</option><option value="500">500</option></select></label><div className="flex items-center gap-2 text-sm text-slate-400"><LayoutGrid className="h-4 w-4 text-violet-300" />{totalItems.toLocaleString('ru-RU')} товаров · страница {page} из {Math.max(totalPages, 1)}</div></div>
           </div>
 
           {products.length > 0 ? <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${gridClassName}`}>
@@ -351,11 +382,12 @@ export default function ChromoffCatalog({
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
           <Select value={selectedPublication || '__unchanged__'} onValueChange={(value) => setSelectedPublication(value === '__unchanged__' ? '' : value as 'published' | 'hidden')}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Публикация Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Chromoff: без изменений</SelectItem><SelectItem value="published">Опубликовать</SelectItem><SelectItem value="hidden">Скрыть</SelectItem></SelectContent></Select>
           <Button type="button" variant="secondary" onClick={handleBulkPublication} disabled={!selectedPublication || isBulkPublishing || isPending} className="h-10">{isBulkPublishing ? 'Публикация…' : 'Применить Chromoff'}</Button>
+          <Select value={selectedSupplier || '__unchanged__'} onValueChange={(value) => setSelectedSupplier(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Поставщик Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Поставщик: без изменений</SelectItem>{suppliers.map((supplier) => <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>)}</SelectContent></Select>
+          <Button type="button" variant="secondary" onClick={handleBulkSupplier} disabled={!selectedSupplier || isBulkSupplierUpdating || isPending} className="h-10">{isBulkSupplierUpdating ? 'Поставщик…' : 'Применить поставщика'}</Button>
           <Select value={selectedGender || '__unchanged__'} onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Пол" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Пол: без изменений</SelectItem><SelectItem value="Для мужчин">Для мужчин</SelectItem><SelectItem value="Для женщин">Для женщин</SelectItem><SelectItem value="Унисекс">Унисекс</SelectItem></SelectContent></Select>
           <Select value={selectedCategory || '__unchanged__'} onValueChange={(value) => { setSelectedCategory(value === '__unchanged__' ? '' : value); setSelectedSubcategory('') }}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Категория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Категория: без изменений</SelectItem>{catalogCategories.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
           <Select value={selectedSubcategory || '__unchanged__'} onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)} disabled={!selectedCategory}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Подкатегория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Подкатегория: без изменений</SelectItem><SelectItem value="__none__">Сбросить подкатегорию</SelectItem>{catalogSubcategories.filter((item) => item.category === selectedCategory).map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
           <Input type="number" min="0" value={selectedPrice} onChange={(event) => setSelectedPrice(event.target.value)} placeholder="Цена, ₽" className="h-10 bg-slate-700 text-slate-200" />
-          <MeasurementTemplateBulkPicker value={selectedMeasurementTemplate} onChange={setSelectedMeasurementTemplate} disabled={isBulkUpdating || isBulkDeleting} />
           <Button type="button" onClick={handleBulkUpdate} disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting} className="h-10">{isBulkUpdating ? 'Обновление…' : 'Применить'}</Button><Button type="button" variant="destructive" size="icon" onClick={handleBulkDelete} disabled={isBulkUpdating || isBulkDeleting} className="h-10 w-10" title="В корзину"><Trash2 className="h-4 w-4" /></Button>
         </div></div>
       </div>
