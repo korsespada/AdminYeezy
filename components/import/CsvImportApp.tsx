@@ -2404,23 +2404,23 @@ export default function CsvImportApp({
         {/* Filters */}
         {products.length > 0 && (
             <div
-              className="sticky z-20 mb-6 grid grid-cols-1 items-center gap-3 rounded-xl border border-slate-700/50 bg-slate-800/95 p-3 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-4 lg:flex lg:flex-wrap"
+              className="sticky z-20 mb-4 grid grid-cols-1 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/95 p-2 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-3 lg:flex lg:flex-wrap"
               style={{ top: actionBarHeight + 8 }}
             >
-              <div className="flex items-center gap-2 text-slate-500 mr-1">
-                <Filter className="w-4 h-4" />
-                <span className="text-xs font-medium uppercase tracking-wider">
+              <div className="flex items-center gap-1.5 text-slate-500 mr-1">
+                <Filter className="h-3.5 w-3.5" />
+                <span className="text-[10px] font-medium uppercase tracking-wider">
                   Фильтры
                 </span>
               </div>
 
-              <div className="relative w-full min-w-0 flex-1 basis-full lg:min-w-[240px] lg:basis-auto">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+              <div className="relative w-full min-w-0 flex-1 basis-full lg:w-auto lg:min-w-[220px] lg:flex-[2_1_280px] lg:basis-auto">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
                 <input
                   value={filterSearch}
                   onChange={(event) => setFilterSearch(event.target.value)}
                   placeholder="Поиск по названию или external ID"
-                  className="w-full rounded-lg border border-slate-600 bg-slate-800 py-1.5 pl-9 pr-3 text-sm text-white outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500"
+                  className="h-9 w-full rounded-md border border-slate-600 bg-slate-800 py-1 pl-8 pr-2.5 text-xs text-white outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500"
                 />
               </div>
 
@@ -2428,7 +2428,7 @@ export default function CsvImportApp({
                 <select
                   value={filterBrand}
                   onChange={(e) => setFilterBrand(e.target.value)}
-                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[160px]"
+                  className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[140px] lg:flex-[1_1_140px]"
                 >
                   <option value="">Все бренды ({facetProducts.brand.length})</option>
                   {uniqueBrands.map((id) => (
@@ -2445,7 +2445,7 @@ export default function CsvImportApp({
                 <select
                   value={filterCategory}
                   onChange={(e) => setFilterCategory(e.target.value)}
-                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[160px]"
+                  className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[140px] lg:flex-[1_1_140px]"
                 >
                   <option value="">Все категории ({facetProducts.category.length})</option>
                   {uniqueCategories.map((id) => (
@@ -2462,7 +2462,7 @@ export default function CsvImportApp({
                 <select
                   value={filterSubcategory}
                   onChange={(e) => setFilterSubcategory(e.target.value)}
-                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[180px]"
+                  className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[150px] lg:flex-[1_1_150px]"
                 >
                   <option value="">Все подкатегории ({facetProducts.subcategory.length})</option>
                   {uniqueSubcategories.map((id) => (
@@ -2479,7 +2479,7 @@ export default function CsvImportApp({
                 <select
                   value={filterGender}
                   onChange={(e) => setFilterGender(e.target.value)}
-                  className="h-11 w-full min-w-0 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors lg:h-auto lg:min-w-[140px]"
+                  className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[120px] lg:flex-[1_1_120px]"
                 >
                   <option value="">Все гендеры ({facetProducts.gender.length})</option>
                   {uniqueGenders.map((g) => (
@@ -2493,7 +2493,7 @@ export default function CsvImportApp({
               <select
                 value={filterAiStatus}
                 onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready" | "error")}
-                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
+                className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[130px] lg:flex-[1_1_130px]"
               >
                 <option value="">Все по ИИ ({facetProducts.ai.length})</option>
                 <option value="raw">Сырой ({facetProducts.ai.filter((product) => !(product.ai_processed === true || product.ai_processed === "true")).length})</option>
@@ -2504,7 +2504,7 @@ export default function CsvImportApp({
               <select
                 value={filterPrice}
                 onChange={(e) => setFilterPrice(e.target.value)}
-                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[140px]"
+                className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[120px] lg:flex-[1_1_120px]"
               >
                 <option value="">Все цены ({facetProducts.price.length})</option>
                 {uniquePrices.map((price) => (
@@ -2517,7 +2517,7 @@ export default function CsvImportApp({
               <select
                 value={filterColor}
                 onChange={(e) => setFilterColor(e.target.value)}
-                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
+                className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[130px] lg:flex-[1_1_130px]"
               >
                 <option value="">Все цвета ({facetProducts.color.length})</option>
                 {uniqueColors.map((color) => (
@@ -2528,7 +2528,7 @@ export default function CsvImportApp({
               <select
                 value={filterVariants}
                 onChange={(e) => setFilterVariants(e.target.value as "" | "with" | "without")}
-                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[170px]"
+                className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[140px] lg:flex-[1_1_140px]"
               >
                 <option value="">Все варианты ({facetProducts.variants.length})</option>
                 <option value="with">Есть варианты ({productsWithVariantsCount})</option>
@@ -2538,7 +2538,7 @@ export default function CsvImportApp({
               <select
                 value={filterVideo}
                 onChange={(e) => setFilterVideo(e.target.value as "" | "with" | "without")}
-                className="h-11 w-full min-w-0 rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500 lg:h-auto lg:min-w-[150px]"
+                className="h-9 w-full min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2 py-1 text-xs text-white outline-none transition-colors focus:border-indigo-500 lg:w-auto lg:min-w-[130px] lg:flex-[1_1_130px]"
               >
                 <option value="">Все видео ({facetProducts.video.length})</option>
                 <option value="with">С видео ({productsWithVideoCount})</option>
