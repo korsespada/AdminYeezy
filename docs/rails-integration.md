@@ -43,6 +43,7 @@ GET    /api/v1/admin/products/:id
 POST   /api/v1/admin/products
 PATCH  /api/v1/admin/products/:id
 DELETE /api/v1/admin/products/:id
+DELETE /api/v1/admin/products/:id/force_destroy
 POST   /api/v1/admin/products/:id/reindex
 ```
 
@@ -71,6 +72,11 @@ CSV adapter должен:
 - показывать ошибки партии в UI.
 
 Для JSON-публикации адаптер передаёт технический `external_id`, slug товара, необязательные `video_url`/`video_poster_url` и массив `media`, где у каждого изображения есть HTTPS URL, `alt_text`, `sort_order` и `processing_status`. Rails сохраняет `external_id` только как ключ идемпотентной синхронизации. Финальный slug Rails формирует централизованно из бренда, названия, подтверждённых модели и цвета, а также внутреннего SEO-артикула; длинный `external_id` не попадает ни в slug товара, ни в имя изображения. При прямом обновлении существующего товара используется `PATCH /api/v1/admin/products/:id` с тем же набором медиа-полей.
+
+Если архивная карточка удерживается только историческими `order_items`, owner/admin
+может удалить её через `DELETE /api/v1/admin/products/:id/force_destroy`: снимки
+названия, цены и изображения в заказе остаются, удаляется лишь ссылка на товар.
+Карточка с replacement offer этим endpoint не удаляется.
 
 Из исторического AI-snapshot можно выполнить отдельную синхронизацию в Rails:
 snapshot используется как источник товаров, текущая версия партии в scraping DB
