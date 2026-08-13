@@ -110,6 +110,22 @@ export default function ProductList({
     }
   }, [])
 
+  const handleOpenProduct = useCallback(async (productId: string) => {
+    const productFromList = products.find((product) => product.id === productId)
+    if (productFromList) {
+      await handleEdit(productFromList)
+      return
+    }
+
+    const result = await getProductAction(productId)
+    if (result.success && result.data) {
+      setEditingProduct(result.data as Product)
+      setIsModalOpen(true)
+    } else {
+      alert(result.error || 'Не удалось открыть вариант товара')
+    }
+  }, [handleEdit, products])
+
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm('Переместить этот товар в корзину?')) return
 
@@ -449,6 +465,7 @@ export default function ProductList({
           setEditingProduct(null)
         }}
         onSave={handleProductUpdate}
+        onOpenProduct={handleOpenProduct}
       />
 
       {/* Bulk Action Toolbar */}

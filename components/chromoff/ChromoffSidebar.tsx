@@ -87,13 +87,13 @@ export default function ChromoffSidebar({
         role={isOpen ? 'dialog' : 'complementary'}
         aria-modal={isOpen ? true : undefined}
         aria-labelledby="chromoff-filters-title"
-        className={`fixed left-0 top-0 z-50 h-[100dvh] w-full max-w-sm overflow-y-auto border-r border-slate-700 bg-slate-800 transition-transform duration-300 lg:sticky lg:h-screen lg:w-72 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`fixed left-0 top-0 z-50 h-[100dvh] w-full max-w-sm overflow-hidden overscroll-contain border-r border-slate-700 bg-slate-800 transition-transform duration-300 lg:sticky lg:h-[100dvh] lg:w-72 ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        <div className="p-5 sm:p-6">
-          <div className="mb-7 flex items-start justify-between gap-3">
+        <div className="h-full overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable] sm:p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 id="chromoff-filters-title" className="flex items-center gap-2 text-xl font-bold text-slate-100"><Filter className="h-5 w-5 text-violet-300" />Фильтры</h2>
-              <div className="mt-2 text-sm text-slate-400"><span className="font-semibold text-slate-200">{count}</span> товаров Chromoff</div>
+              <div className="mt-1 text-xs text-slate-400"><span className="font-semibold text-slate-200">{count}</span> товаров Chromoff</div>
             </div>
             <div className="flex gap-1">
               {active && <Button type="button" variant="outline" size="icon" onClick={reset} aria-label="Сбросить фильтры" className="border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600"><RotateCcw className="h-4 w-4" /></Button>}
@@ -101,20 +101,20 @@ export default function ChromoffSidebar({
             </div>
           </div>
 
-          <form onSubmit={submitTextAndPrice} className="space-y-5">
-            <div className="space-y-2">
+          <form onSubmit={submitTextAndPrice} className="space-y-3">
+            <div className="space-y-1">
               <Label htmlFor="chromoff-name" className="text-slate-300">Название</Label>
-              <div className="relative"><Input id="chromoff-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название или артикул..." className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500" /><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" /></div>
+              <div className="relative"><Input id="chromoff-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название или артикул..." className="h-9 bg-slate-700 pl-9 text-sm text-slate-200 placeholder:text-slate-500" /><Search className="absolute left-3 top-2 h-4 w-4 text-slate-500" /></div>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="chromoff-description" className="text-slate-300">Описание</Label>
-              <Input id="chromoff-description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Поиск по описанию..." className="bg-slate-700 text-slate-200 placeholder:text-slate-500" />
+              <Input id="chromoff-description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Поиск по описанию..." className="h-9 bg-slate-700 text-sm text-slate-200 placeholder:text-slate-500" />
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-2"><Label htmlFor="chromoff-price-min" className="text-slate-300">Цена от</Label><Input id="chromoff-price-min" type="number" min="0" value={priceMin} onChange={(event) => setPriceMin(event.target.value)} className="bg-slate-700 text-slate-200" /></div>
-              <div className="space-y-2"><Label htmlFor="chromoff-price-max" className="text-slate-300">Цена до</Label><Input id="chromoff-price-max" type="number" min="0" value={priceMax} onChange={(event) => setPriceMax(event.target.value)} className="bg-slate-700 text-slate-200" /></div>
+              <div className="space-y-1"><Label htmlFor="chromoff-price-min" className="text-xs text-slate-300">Цена от</Label><Input id="chromoff-price-min" type="number" min="0" value={priceMin} onChange={(event) => setPriceMin(event.target.value)} className="h-9 bg-slate-700 text-sm text-slate-200" /></div>
+              <div className="space-y-1"><Label htmlFor="chromoff-price-max" className="text-xs text-slate-300">Цена до</Label><Input id="chromoff-price-max" type="number" min="0" value={priceMax} onChange={(event) => setPriceMax(event.target.value)} className="h-9 bg-slate-700 text-sm text-slate-200" /></div>
             </div>
-            <Button type="submit" className="w-full" disabled={isNavigationPending}><Search className="h-4 w-4" />Найти</Button>
+            <Button type="submit" className="h-9 w-full" disabled={isNavigationPending}><Search className="h-4 w-4" />Найти</Button>
 
             <FilterSelect label="Поставщик" value={current.get('supplier') || ''} onChange={(value) => setFilter('supplier', value)} options={suppliers.map((item) => ({ value: item.id, label: item.name }))} />
             <FilterSelect label="Категория товара" value={current.get('category') || ''} onChange={(value) => setFilter('category', value, 'subcategory')} options={categories.map((item) => ({ value: item.id, label: item.name }))} />
@@ -134,9 +134,9 @@ export default function ChromoffSidebar({
 
 function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
   return (
-    <div className="space-y-2">
-      <Label className="text-slate-300">{label}</Label>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-10 w-full rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-200 outline-none focus:border-violet-400">
+    <div className="space-y-1">
+      <Label className="text-xs text-slate-300">{label}</Label>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-9 w-full rounded-md border border-slate-600 bg-slate-700 px-2.5 text-xs text-slate-200 outline-none focus:border-violet-400">
         <option value="">Все</option>
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>

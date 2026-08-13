@@ -40,6 +40,7 @@ interface ProductFormProps {
   isOpen: boolean
   onClose: () => void
   onSave?: (updatedProduct: Product) => void
+  onOpenProduct?: (productId: string) => void
   chromoffListing?: RailsChromoffListing | null
   chromoffCategories?: RailsChromoffCategory[]
 }
@@ -63,6 +64,7 @@ export default function ProductForm({
   isOpen,
   onClose,
   onSave,
+  onOpenProduct,
   chromoffListing = null,
   chromoffCategories = [],
 }: ProductFormProps) {
@@ -801,11 +803,10 @@ export default function ProductForm({
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {product.color_variants.map((variant) => (
-                    <a
+                    <button
                       key={variant.id}
-                      href={`${process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://yeezyunique.ru'}/product/${variant.slug || product.slug || ''}`}
-                      target="_blank"
-                      rel="noreferrer"
+                      type="button"
+                      onClick={() => onOpenProduct?.(variant.id)}
                       className={`overflow-hidden rounded-lg border text-left transition hover:border-violet-400 ${variant.current ? 'border-violet-400 bg-violet-500/15' : 'border-slate-700 bg-slate-900/60'}`}
                     >
                       <div className="relative aspect-[4/3] bg-slate-950">
@@ -819,7 +820,7 @@ export default function ProductForm({
                         <div className="truncate text-xs font-semibold text-slate-200">{variant.color || 'Цвет не указан'}</div>
                         <div className="line-clamp-2 text-[10px] text-slate-500">{variant.name || 'Открыть товар'}</div>
                       </div>
-                    </a>
+                    </button>
                   ))}
                 </div>
               </section>
