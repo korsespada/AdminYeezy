@@ -43,7 +43,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main aria-labelledby="login-title" className="flex min-h-screen min-w-0 items-center justify-center overflow-x-hidden bg-gray-50 p-4 dark:bg-gray-900">
+    <main aria-labelledby="login-title" className="flex min-h-screen min-w-0 max-w-full items-center justify-center bg-gray-50 p-4 dark:bg-gray-900">
       <div className="w-full max-w-md min-w-0 rounded-2xl border border-gray-100 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-800 sm:p-8">
         <div className="flex flex-col items-center mb-8">
           <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center text-white mb-4 shadow-lg shadow-blue-900/20">

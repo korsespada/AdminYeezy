@@ -74,4 +74,16 @@ describe('AdminHeader', () => {
 
     expect(screen.getByRole('link', { name: 'Yeezy Unique, Home' })).toHaveAttribute('aria-current', 'page')
   })
+
+  it('keeps the desktop route map explicit and complete', () => {
+    render(<AdminHeader />)
+
+    const desktopNavigation = screen.getByRole('navigation', { name: 'Навигация рабочего стола' })
+    expect(within(desktopNavigation).getByRole('link', { name: 'Товары' })).toHaveAttribute('href', '/admin')
+    expect(within(desktopNavigation).getByRole('link', { name: 'Chromoff' })).toHaveAttribute('href', '/admin/chromoff')
+    expect(within(desktopNavigation).getByRole('link', { name: 'Выгрузки' })).toHaveAttribute('href', '/admin/batches')
+    expect(within(desktopNavigation).getByRole('link', { name: 'CRM' })).toHaveAttribute('href', '/admin/crm')
+    expect(screen.getByRole('link', { name: 'Yeezy Unique, Home' })).toHaveAttribute('href', '/admin/home')
+    expect(screen.getByRole('button', { name: 'Выйти' })).toBeInTheDocument()
+  })
 })

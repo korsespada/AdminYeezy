@@ -199,7 +199,7 @@ export default function AdminLaunchpad({
           </Card>
         </section>
 
-        <section className="grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {sections.map((section) => {
             const Icon = section.icon
             return (

@@ -49,6 +49,18 @@ describe('AdminLaunchpad', () => {
     expect(screen.getByText('Категорий').parentElement).toHaveClass('min-w-0')
   })
 
+  it('uses one column on phones and a bounded tablet grid for launchpad cards', () => {
+    render(
+      <AdminLaunchpad
+        railsConfigured={false}
+        scrapingConfigured={false}
+      />,
+    )
+
+    const cards = screen.getByRole('link', { name: 'Открыть раздел: CRM' }).parentElement
+    expect(cards).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'xl:grid-cols-4')
+  })
+
   it('renders core admin sections and environment status', () => {
     render(
       <AdminLaunchpad
