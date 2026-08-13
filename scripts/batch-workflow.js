@@ -195,6 +195,17 @@ function needsVideoTransfer(product, existingRailsProduct = null) {
   return Boolean(sourceVideo(product) && !hostedVideo(product, existingRailsProduct).url);
 }
 
+function videoStorageKeys(sourceUrl) {
+  const fingerprint = crypto
+    .createHash('sha256')
+    .update(String(sourceUrl || '').trim())
+    .digest('hex');
+  return {
+    videoKey: `videos/${fingerprint}.mp4`,
+    posterKey: `videos/${fingerprint}-poster.webp`,
+  };
+}
+
 function extractAttributes(row) {
   const attributes = normalizeAttributes(row.attributes);
   for (const [key, value] of Object.entries(row)) {
@@ -1880,6 +1891,15 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     },
   );
   const existingExternalIds = new Set(existingProducts.keys());
+  const existingHostedVideosBySource = new Map();
+  for (const product of products) {
+    const sourceUrl = sourceVideo(product);
+    if (!sourceUrl) continue;
+    const hosted = hostedVideo(product, existingProducts.get(String(product.external_id || '').trim()));
+    if (hosted.url && !existingHostedVideosBySource.has(sourceUrl)) {
+      existingHostedVideosBySource.set(sourceUrl, hosted);
+    }
+  }
   const previousPayloadHashes = mode === 'upsert'
     ? await batchPublicationHashes(batchId, products.map((product) => product.external_id))
     : new Map();
@@ -1963,24 +1983,26 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
     product.photos = photos.filter(Boolean);
     const sourceAttributes = normalizeAttributes(product.attributes);
+    const sourceVideoUrl = sourceVideo(product);
     const existingHostedVideo = hostedVideo(product, existingRailsProduct);
-    if (!hostedVideo(product).url && existingHostedVideo.url) {
+    const knownHostedVideo = existingHostedVideo.url
+      ? existingHostedVideo
+      : existingHostedVideosBySource.get(sourceVideoUrl);
+    if (!hostedVideo(product).url && knownHostedVideo?.url) {
       product.attributes = {
         ...sourceAttributes,
-        hosted_video_url: existingHostedVideo.url,
-        ...(existingHostedVideo.posterUrl ? { hosted_video_poster_url: existingHostedVideo.posterUrl } : {}),
+        hosted_video_url: knownHostedVideo.url,
+        ...(knownHostedVideo.posterUrl ? { hosted_video_poster_url: knownHostedVideo.posterUrl } : {}),
       };
       batchProductsChanged = true;
     }
-    const sourceVideoUrl = sourceVideo(product);
     if (sourceVideoUrl && !hostedVideo(product).url) {
       try {
-        const safeVideoExternalId = String(sourceAttributes.source_parent_external_id || safeExternalId)
-          .replace(/[^a-zA-Z0-9_.-]+/g, '_');
+        const videoKeys = videoStorageKeys(sourceVideoUrl);
         const uploaded = await uploadVideoIfNeeded(
           sourceVideoUrl,
-          `batches/${batchId}/${safeVideoExternalId}.mp4`,
-          `batches/${batchId}/${safeVideoExternalId}-video-poster.webp`,
+          videoKeys.videoKey,
+          videoKeys.posterKey,
         );
         product.attributes = {
           ...sourceAttributes,
@@ -2168,6 +2190,7 @@ module.exports = {
   getSupplier,
   isAlreadyHosted,
   needsVideoTransfer,
+  videoStorageKeys,
   lookupName,
   parseCsvObjects,
   publicationPayloadHash,

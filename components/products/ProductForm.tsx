@@ -434,6 +434,14 @@ export default function ProductForm({
     if (!isOpen) return
 
     const handleSaveShortcut = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (isPhotoModalOpen) return
+
+        event.preventDefault()
+        onClose()
+        return
+      }
+
       const isSaveShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's'
       if (!isSaveShortcut) return
 
@@ -445,7 +453,7 @@ export default function ProductForm({
 
     window.addEventListener('keydown', handleSaveShortcut)
     return () => window.removeEventListener('keydown', handleSaveShortcut)
-  }, [isOpen, isPending, isPhotoModalOpen])
+  }, [isOpen, isPending, isPhotoModalOpen, onClose])
 
   if (!isOpen) return null
 

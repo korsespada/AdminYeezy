@@ -94,6 +94,15 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('uses one stable S3 key for the same source video URL', () => {
+    expect(workflow.videoStorageKeys(' https://supplier.example/video.mp4 '))
+      .toEqual(workflow.videoStorageKeys('https://supplier.example/video.mp4'))
+    expect(workflow.videoStorageKeys('https://supplier.example/video.mp4').videoKey)
+      .toMatch(/^videos\/[a-f0-9]{64}\.mp4$/)
+    expect(workflow.videoStorageKeys('https://supplier.example/other.mp4').videoKey)
+      .not.toBe(workflow.videoStorageKeys('https://supplier.example/video.mp4').videoKey)
+  })
+
   it('uses a manually supplied video instead of an older Szwego or hosted video', () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
     process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'

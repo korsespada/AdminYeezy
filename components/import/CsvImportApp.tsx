@@ -111,6 +111,22 @@ function attributeValuesForDisplay(value: unknown) {
   return values.map((item) => String(item).trim()).filter(Boolean);
 }
 
+function normalizedGenderValue(value: unknown) {
+  const normalized = String(value || "").trim().toLocaleLowerCase("ru-RU");
+  if (["male", "мужской", "мужское", "для мужчин", "мужчины"].includes(normalized)) return "male";
+  if (["female", "женский", "женское", "для женщин", "женщины"].includes(normalized)) return "female";
+  if (["unisex", "унисекс"].includes(normalized)) return "unisex";
+  return normalized;
+}
+
+function genderLabel(value: unknown) {
+  const normalized = normalizedGenderValue(value);
+  if (normalized === "male") return "Мужское";
+  if (normalized === "female") return "Женское";
+  if (normalized === "unisex") return "Унисекс";
+  return String(value || "").trim() || "Без гендера";
+}
+
 function chromoffCategoryForDisplay(product: CsvProduct) {
   const attributes = product.attributes || {}
   const name = String(attributes.chromoff_category_name || '').trim()
@@ -586,12 +602,12 @@ export default function CsvImportApp({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
+  const [filterSearch, setFilterSearch] = useState("");
   const [filterBrand, setFilterBrand] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSubcategory, setFilterSubcategory] = useState("");
   const [filterGender, setFilterGender] = useState("");
   const [filterPrice, setFilterPrice] = useState("");
-  const [filterModel, setFilterModel] = useState("");
   const [filterColor, setFilterColor] = useState("");
   const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
   const [filterVideo, setFilterVideo] = useState<"" | "with" | "without">("");
@@ -713,72 +729,15 @@ export default function CsvImportApp({
     };
   }, [isPushing, batchId, initialBatchId, products.length]);
 
-  // Unique values for filters (derived from all products)
-  const uniqueBrands = useMemo(() => {
-    const brands = [...new Set(products.map((p) => p.brand).filter(Boolean))];
-    if (products.some((p) => !p.brand)) brands.push("__EMPTY__");
-    return brands;
-  }, [products]);
-
-  const uniqueCategories = useMemo(() => {
-    const cats = [...new Set(products.map((p) => p.category).filter(Boolean))];
-    if (products.some((p) => !p.category)) cats.push("__EMPTY__");
-    return cats;
-  }, [products]);
-
-  const uniqueSubcategories = useMemo(() => {
-    const subcats = [
-      ...new Set(products.map((p) => p.subcategory).filter(Boolean)),
-    ];
-    if (products.some((p) => !p.subcategory)) subcats.push("__EMPTY__");
-    return subcats;
-  }, [products]);
-
-  const uniqueGenders = useMemo(() => {
-    const genders = [...new Set(products.map((p) => p.gender).filter(Boolean))];
-    if (products.some((p) => !p.gender)) genders.push("__EMPTY__");
-    return genders;
-  }, [products]);
-
-  const uniquePrices = useMemo(
-    () => [...new Set([0, ...products.map((product) => Number(product.price) || 0)])].sort((a, b) => a - b),
-    [products],
-  );
   const countBy = useCallback((values: string[]) => {
     const counts = new Map<string, number>();
     values.forEach((value) => counts.set(value || "__EMPTY__", (counts.get(value || "__EMPTY__") || 0) + 1));
     return counts;
   }, []);
-  const brandCounts = useMemo(() => countBy(products.map((product) => String(product.brand || ""))), [products, countBy]);
-  const categoryCounts = useMemo(() => countBy(products.map((product) => String(product.category || ""))), [products, countBy]);
-  const subcategoryCounts = useMemo(() => countBy(products.map((product) => String(product.subcategory || ""))), [products, countBy]);
-  const genderCounts = useMemo(() => countBy(products.map((product) => String(product.gender || ""))), [products, countBy]);
   const attributeValues = useCallback((value: unknown) => {
     const values = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
     return values.map((item) => String(item).trim()).filter(Boolean);
   }, []);
-  const uniqueModels = useMemo(() => {
-    const values = [...new Set(products.flatMap((product) => attributeValues(product.attributes?.model_name)))].sort();
-    if (products.some((product) => attributeValues(product.attributes?.model_name).length === 0)) values.unshift("__EMPTY__");
-    return values;
-  }, [products, attributeValues]);
-  const uniqueColors = useMemo(() => {
-    const values = [...new Set(products.flatMap((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color)))].sort();
-    if (products.some((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color).length === 0)) values.unshift("__EMPTY__");
-    return values;
-  }, [products, attributeValues]);
-  const modelCounts = useMemo(() => countBy(products.flatMap((product) => {
-    const values = attributeValues(product.attributes?.model_name);
-    return values.length ? values : [""];
-  })), [products, attributeValues, countBy]);
-  const colorCounts = useMemo(() => countBy(products.flatMap((product) => {
-    const values = attributeValues(product.attributes?.colors ?? product.attributes?.color);
-    return values.length ? values : [""];
-  })), [products, attributeValues, countBy]);
-  const productsWithVideoCount = useMemo(
-    () => products.filter((product) => Boolean(productVideoForDisplay(product).url)).length,
-    [products],
-  );
   const variantGroups = useMemo(() => {
     const groups = new Map<string, CsvProduct[]>();
     for (const product of products) {
@@ -791,10 +750,95 @@ export default function CsvImportApp({
     }
     return groups;
   }, [products]);
-  const productsWithVariantsCount = useMemo(
-    () => products.filter((product) => variantGroups.has(approvedVariantGroupKey(product))).length,
-    [products, variantGroups],
+
+  const facetProducts = useMemo(() => {
+    const matches = (product: CsvProduct, excluded: string) => {
+      const search = filterSearch.trim().toLocaleLowerCase("ru-RU");
+      if (search && excluded !== "search" && ![product.name, product.external_id]
+        .some((value) => String(value || "").toLocaleLowerCase("ru-RU").includes(search))) return false;
+      if (excluded !== "brand" && filterBrand && (filterBrand === "__EMPTY__" ? product.brand : product.brand !== filterBrand)) return false;
+      if (excluded !== "category" && filterCategory && (filterCategory === "__EMPTY__" ? product.category : product.category !== filterCategory)) return false;
+      if (excluded !== "subcategory" && filterSubcategory && (filterSubcategory === "__EMPTY__" ? product.subcategory : product.subcategory !== filterSubcategory)) return false;
+      if (excluded !== "gender" && filterGender && (filterGender === "__EMPTY__" ? product.gender : normalizedGenderValue(product.gender) !== filterGender)) return false;
+      if (excluded !== "ai" && filterAiStatus) {
+        const aiReady = product.ai_processed === true || product.ai_processed === "true";
+        if (filterAiStatus === "raw" && aiReady) return false;
+        if (filterAiStatus === "ready" && !aiReady) return false;
+        if (filterAiStatus === "error" && (aiReady || !product.ai_error)) return false;
+      }
+      if (excluded !== "price" && filterPrice !== "" && (Number(product.price) || 0) !== Number(filterPrice)) return false;
+      const colors = attributeValues(product.attributes?.colors ?? product.attributes?.color);
+      if (excluded !== "color" && filterColor && (filterColor === "__EMPTY__" ? colors.length > 0 : !colors.includes(filterColor))) return false;
+      const hasVariants = variantGroups.has(approvedVariantGroupKey(product));
+      if (excluded !== "variants" && filterVariants && ((filterVariants === "with") !== hasVariants)) return false;
+      const hasVideo = Boolean(productVideoForDisplay(product).url);
+      if (excluded !== "video" && filterVideo && ((filterVideo === "with") !== hasVideo)) return false;
+      return true;
+    };
+    return {
+      all: products.filter((product) => matches(product, "")),
+      brand: products.filter((product) => matches(product, "brand")),
+      category: products.filter((product) => matches(product, "category")),
+      subcategory: products.filter((product) => matches(product, "subcategory")),
+      gender: products.filter((product) => matches(product, "gender")),
+      ai: products.filter((product) => matches(product, "ai")),
+      price: products.filter((product) => matches(product, "price")),
+      color: products.filter((product) => matches(product, "color")),
+      variants: products.filter((product) => matches(product, "variants")),
+      video: products.filter((product) => matches(product, "video")),
+    };
+  }, [products, filterSearch, filterBrand, filterCategory, filterSubcategory, filterGender, filterAiStatus, filterPrice, filterColor, filterVariants, filterVideo, attributeValues, variantGroups]);
+
+  const uniqueBrands = useMemo(() => {
+    const values = [...new Set(facetProducts.brand.map((product) => product.brand).filter(Boolean))];
+    if (facetProducts.brand.some((product) => !product.brand)) values.push("__EMPTY__");
+    return values;
+  }, [facetProducts.brand]);
+  const uniqueCategories = useMemo(() => {
+    const values = [...new Set(facetProducts.category.map((product) => product.category).filter(Boolean))];
+    if (facetProducts.category.some((product) => !product.category)) values.push("__EMPTY__");
+    return values;
+  }, [facetProducts.category]);
+  const uniqueSubcategories = useMemo(() => {
+    const values = [...new Set(facetProducts.subcategory.map((product) => product.subcategory).filter(Boolean))];
+    if (facetProducts.subcategory.some((product) => !product.subcategory)) values.push("__EMPTY__");
+    return values;
+  }, [facetProducts.subcategory]);
+  const uniqueGenders = useMemo(() => {
+    const values = [...new Set(facetProducts.gender.map((product) => normalizedGenderValue(product.gender)).filter(Boolean))];
+    if (facetProducts.gender.some((product) => !product.gender)) values.push("__EMPTY__");
+    return values;
+  }, [facetProducts.gender]);
+  const uniquePrices = useMemo(
+    () => [...new Set([0, ...facetProducts.price.map((product) => Number(product.price) || 0)])].sort((a, b) => a - b),
+    [facetProducts.price],
   );
+  const uniqueColors = useMemo(() => {
+    const values = [...new Set(facetProducts.color.flatMap((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color)))].sort();
+    if (facetProducts.color.some((product) => attributeValues(product.attributes?.colors ?? product.attributes?.color).length === 0)) values.unshift("__EMPTY__");
+    return values;
+  }, [facetProducts.color, attributeValues]);
+  const brandCounts = countBy(facetProducts.brand.map((product) => String(product.brand || "")));
+  const categoryCounts = countBy(facetProducts.category.map((product) => String(product.category || "")));
+  const subcategoryCounts = countBy(facetProducts.subcategory.map((product) => String(product.subcategory || "")));
+  const genderCounts = countBy(facetProducts.gender.map((product) => normalizedGenderValue(product.gender)));
+  const priceCounts = countBy(facetProducts.price.map((product) => String(Number(product.price) || 0)));
+  const colorCounts = countBy(facetProducts.color.flatMap((product) => {
+    const values = attributeValues(product.attributes?.colors ?? product.attributes?.color);
+    return values.length ? values : [""];
+  }));
+  const productsWithVideoCount = facetProducts.video.filter((product) => Boolean(productVideoForDisplay(product).url)).length;
+  const productsWithVariantsCount = facetProducts.variants.filter((product) => variantGroups.has(approvedVariantGroupKey(product))).length;
+
+  useEffect(() => {
+    if (filterBrand && !uniqueBrands.includes(filterBrand)) setFilterBrand("");
+    if (filterCategory && !uniqueCategories.includes(filterCategory)) setFilterCategory("");
+    if (filterSubcategory && !uniqueSubcategories.includes(filterSubcategory)) setFilterSubcategory("");
+    if (filterGender && !uniqueGenders.includes(filterGender)) setFilterGender("");
+    if (filterColor && !uniqueColors.includes(filterColor)) setFilterColor("");
+    if (filterPrice !== "" && !uniquePrices.includes(Number(filterPrice))) setFilterPrice("");
+  }, [filterBrand, filterCategory, filterSubcategory, filterGender, filterColor, filterPrice, uniqueBrands, uniqueCategories, uniqueSubcategories, uniqueGenders, uniqueColors, uniquePrices]);
+
   const variantFamilyList = useMemo(() => (
     [...variantGroups.entries()]
       .map(([key, familyProducts]) => ({
@@ -805,7 +849,6 @@ export default function CsvImportApp({
       }))
       .sort((left, right) => left.title.localeCompare(right.title, "ru"))
   ), [variantGroups]);
-  const priceCounts = useMemo(() => countBy(products.map((product) => String(Number(product.price) || 0))), [products, countBy]);
 
   const aiReadyCount = useMemo(
     () => products.filter((product) => product.ai_processed === true || product.ai_processed === "true").length,
@@ -861,57 +904,9 @@ export default function CsvImportApp({
     : latestAiRun?.mode === "media_seo";
   const mediaSeoRunFinished = isMediaSeoRun && ["completed", "failed", "cancelled"].includes(String(latestAiRun?.status || ""));
 
-  // Filtered products for display
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
-      if (filterBrand) {
-        if (filterBrand === "__EMPTY__") {
-          if (p.brand) return false;
-        } else if (p.brand !== filterBrand) {
-          return false;
-        }
-      }
-      if (filterCategory) {
-        if (filterCategory === "__EMPTY__") {
-          if (p.category) return false;
-        } else if (p.category !== filterCategory) {
-          return false;
-        }
-      }
-      if (filterSubcategory) {
-        if (filterSubcategory === "__EMPTY__") {
-          if (p.subcategory) return false;
-        } else if (p.subcategory !== filterSubcategory) {
-          return false;
-        }
-      }
-      if (filterGender) {
-        if (filterGender === "__EMPTY__") {
-          if (p.gender) return false;
-        } else if (p.gender !== filterGender) {
-          return false;
-        }
-      }
-      if (filterPrice !== "" && (Number(p.price) || 0) !== Number(filterPrice)) {
-        return false;
-      }
-      const models = attributeValues(p.attributes?.model_name);
-      if (filterModel === "__EMPTY__" ? models.length > 0 : filterModel && !models.includes(filterModel)) return false;
-      const colors = attributeValues(p.attributes?.colors ?? p.attributes?.color);
-      if (filterColor === "__EMPTY__" ? colors.length > 0 : filterColor && !colors.includes(filterColor)) return false;
-      const hasVariants = variantGroups.has(approvedVariantGroupKey(p));
-      if (filterVariants === "with" && !hasVariants) return false;
-      if (filterVariants === "without" && hasVariants) return false;
-      const hasVideo = Boolean(productVideoForDisplay(p).url);
-      if (filterVideo === "with" && !hasVideo) return false;
-      if (filterVideo === "without" && hasVideo) return false;
-      const aiReady = p.ai_processed === true || p.ai_processed === "true";
-      if (filterAiStatus === "raw" && aiReady) return false;
-      if (filterAiStatus === "ready" && !aiReady) return false;
-      if (filterAiStatus === "error" && (aiReady || !p.ai_error)) return false;
-      return true;
-    });
-  }, [products, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterModel, filterColor, filterVariants, filterVideo, filterAiStatus, attributeValues, variantGroups]);
+  // Filtered products for display. Facet options above are calculated with all
+  // other active filters, so each select narrows the available values.
+  const filteredProducts = facetProducts.all;
 
   const sampleProducts = useMemo(
     () => filteredProducts.filter((product) => product.ai_sampled === true),
@@ -2408,13 +2403,23 @@ export default function CsvImportApp({
                 </span>
               </div>
 
+              <div className="relative min-w-[240px] flex-1 basis-full lg:basis-auto">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input
+                  value={filterSearch}
+                  onChange={(event) => setFilterSearch(event.target.value)}
+                  placeholder="Поиск по названию или external ID"
+                  className="w-full rounded-lg border border-slate-600 bg-slate-800 py-1.5 pl-9 pr-3 text-sm text-white outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500"
+                />
+              </div>
+
               {uniqueBrands.length > 0 && (
                 <select
                   value={filterBrand}
                   onChange={(e) => setFilterBrand(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
                 >
-                  <option value="">Все бренды ({products.length})</option>
+                  <option value="">Все бренды ({facetProducts.brand.length})</option>
                   {uniqueBrands.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
@@ -2431,7 +2436,7 @@ export default function CsvImportApp({
                   onChange={(e) => setFilterCategory(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[160px]"
                 >
-                  <option value="">Все категории ({products.length})</option>
+                  <option value="">Все категории ({facetProducts.category.length})</option>
                   {uniqueCategories.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
@@ -2448,7 +2453,7 @@ export default function CsvImportApp({
                   onChange={(e) => setFilterSubcategory(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[180px]"
                 >
-                  <option value="">Все подкатегории ({products.length})</option>
+                  <option value="">Все подкатегории ({facetProducts.subcategory.length})</option>
                   {uniqueSubcategories.map((id) => (
                     <option key={id} value={id}>
                       {id === "__EMPTY__"
@@ -2465,10 +2470,10 @@ export default function CsvImportApp({
                   onChange={(e) => setFilterGender(e.target.value)}
                   className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white outline-none focus:border-indigo-500 transition-colors min-w-[140px]"
                 >
-                  <option value="">Все гендеры ({products.length})</option>
+                  <option value="">Все гендеры ({facetProducts.gender.length})</option>
                   {uniqueGenders.map((g) => (
                     <option key={g} value={g}>
-                      {g === "__EMPTY__" ? `Без гендера (${genderCounts.get("__EMPTY__") || 0})` : `${g} (${genderCounts.get(String(g)) || 0})`}
+                      {g === "__EMPTY__" ? `Без гендера (${genderCounts.get("__EMPTY__") || 0})` : `${genderLabel(g)} (${genderCounts.get(String(g)) || 0})`}
                     </option>
                   ))}
                 </select>
@@ -2479,10 +2484,10 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterAiStatus(e.target.value as "" | "raw" | "ready" | "error")}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все по ИИ ({products.length})</option>
-                <option value="raw">Сырой ({aiRemainingCount})</option>
-                <option value="ready">ИИ готово ({aiReadyCount})</option>
-                <option value="error">Ошибка ИИ ({aiErrorProducts.length})</option>
+                <option value="">Все по ИИ ({facetProducts.ai.length})</option>
+                <option value="raw">Сырой ({facetProducts.ai.filter((product) => !(product.ai_processed === true || product.ai_processed === "true")).length})</option>
+                <option value="ready">ИИ готово ({facetProducts.ai.filter((product) => product.ai_processed === true || product.ai_processed === "true").length})</option>
+                <option value="error">Ошибка ИИ ({facetProducts.ai.filter((product) => product.ai_error && !(product.ai_processed === true || product.ai_processed === "true")).length})</option>
               </select>
 
               <select
@@ -2490,7 +2495,7 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterPrice(e.target.value)}
                 className="min-w-[140px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все цены ({products.length})</option>
+                <option value="">Все цены ({facetProducts.price.length})</option>
                 {uniquePrices.map((price) => (
                   <option key={price} value={String(price)}>
                     {price.toLocaleString("ru-RU")} ₽ ({priceCounts.get(String(price)) || 0})
@@ -2499,22 +2504,11 @@ export default function CsvImportApp({
               </select>
 
               <select
-                value={filterModel}
-                onChange={(e) => setFilterModel(e.target.value)}
-                className="min-w-[160px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
-              >
-                <option value="">Все модели ({products.length})</option>
-                {uniqueModels.map((model) => (
-                  <option key={model} value={model}>{model === "__EMPTY__" ? `Без модели (${modelCounts.get("__EMPTY__") || 0})` : `${model} (${modelCounts.get(model) || 0})`}</option>
-                ))}
-              </select>
-
-              <select
                 value={filterColor}
                 onChange={(e) => setFilterColor(e.target.value)}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все цвета ({products.length})</option>
+                <option value="">Все цвета ({facetProducts.color.length})</option>
                 {uniqueColors.map((color) => (
                   <option key={color} value={color}>{color === "__EMPTY__" ? `Без цвета (${colorCounts.get("__EMPTY__") || 0})` : `${color} (${colorCounts.get(color) || 0})`}</option>
                 ))}
@@ -2525,9 +2519,9 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterVariants(e.target.value as "" | "with" | "without")}
                 className="min-w-[170px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все варианты ({products.length})</option>
+                <option value="">Все варианты ({facetProducts.variants.length})</option>
                 <option value="with">Есть варианты ({productsWithVariantsCount})</option>
-                <option value="without">Без вариантов ({products.length - productsWithVariantsCount})</option>
+                <option value="without">Без вариантов ({facetProducts.variants.length - productsWithVariantsCount})</option>
               </select>
 
               <select
@@ -2535,30 +2529,30 @@ export default function CsvImportApp({
                 onChange={(e) => setFilterVideo(e.target.value as "" | "with" | "without")}
                 className="min-w-[150px] rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm text-white outline-none transition-colors focus:border-indigo-500"
               >
-                <option value="">Все видео ({products.length})</option>
+                <option value="">Все видео ({facetProducts.video.length})</option>
                 <option value="with">С видео ({productsWithVideoCount})</option>
-                <option value="without">Без видео ({products.length - productsWithVideoCount})</option>
+                <option value="without">Без видео ({facetProducts.video.length - productsWithVideoCount})</option>
               </select>
 
-              {(filterBrand ||
+              {(filterSearch ||
+                filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
                 filterGender ||
                 filterAiStatus ||
-                filterModel ||
                 filterColor ||
                 filterVariants ||
                 filterVideo ||
                 filterPrice !== "") && (
                   <button
                     onClick={() => {
+                      setFilterSearch("");
                       setFilterBrand("");
                       setFilterCategory("");
                       setFilterSubcategory("");
                       setFilterGender("");
                       setFilterAiStatus("");
                       setFilterPrice("");
-                      setFilterModel("");
                       setFilterColor("");
                       setFilterVariants("");
                       setFilterVideo("");
@@ -2569,12 +2563,12 @@ export default function CsvImportApp({
                   </button>
                 )}
 
-              {(filterBrand ||
+              {(filterSearch ||
+                filterBrand ||
                 filterCategory ||
                 filterSubcategory ||
                 filterGender ||
                 filterAiStatus ||
-                filterModel ||
                 filterColor ||
                 filterVariants ||
                 filterVideo ||
@@ -2713,6 +2707,8 @@ export default function CsvImportApp({
                   subcategory: product.subcategory,
                   gender: product.gender || '',
                   photos: product.photos || [],
+                  video_url: productVideoForDisplay(product).url || null,
+                  video_poster_url: productVideoForDisplay(product).posterUrl || null,
                   attributes: product.attributes || {},
                   metadata: {},
                   created: '', updated: '', collectionId: '', collectionName: 'products',
@@ -3427,6 +3423,21 @@ function CsvProductDrawer({
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = previousOverflow; };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (event.target instanceof Element && event.target.closest('[role="dialog"][aria-modal="true"]')) return;
+
+      event.preventDefault();
+      onClose();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen || !local) return null;
 
