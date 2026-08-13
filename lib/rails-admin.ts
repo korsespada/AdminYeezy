@@ -22,7 +22,6 @@ let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 let pendingRailsAdminLogin: Promise<string> | null = null
 let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
-const CATALOG_PRODUCTS_PAGE_CHUNK_SIZE = 40
 
 export interface RailsCrmCustomer {
   id?: number | string
@@ -190,6 +189,7 @@ export interface RailsChromoffCategory {
 export interface RailsChromoffListing {
   id: string
   source_product_id: string
+  product_id?: string
   legacy_slug: string
   name: string
   image_url?: string | null
@@ -210,6 +210,20 @@ export interface RailsChromoffListing {
   chromoff_category_confidence?: number | null
   chromoff_category_reason?: string | null
   metadata?: Record<string, unknown>
+  description?: string
+  external_id?: string
+  sku?: string
+  seo_article?: string
+  slug?: string
+  gender?: string | null
+  catalog_attributes?: Record<string, unknown>
+  category?: { id: string; name: string; slug: string; parent_id?: string | null } | null
+  brand?: { id: string; name: string; slug?: string } | null
+  supplier?: { id: string; name: string; avatar_url?: string | null } | null
+  price_on_request?: boolean
+  video_url?: string | null
+  video_poster_url?: string | null
+  color_variants?: Array<{ id: string; name?: string; color?: string | null; slug?: string; image_url?: string | null; price_cents?: number; current?: boolean }>
 }
 
 export interface RailsChromoffImportCategory {
@@ -803,6 +817,13 @@ export async function listRailsChromoffListings(options: {
   categoryId?: string
   minPrice?: string | number
   maxPrice?: string | number
+  description?: string
+  supplier?: string
+  productCategoryId?: string
+  productSubcategoryId?: string
+  gender?: string
+  source?: 'auto' | 'manual'
+  aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
 } = {}): Promise<RailsCrmListResult<RailsChromoffListing>> {
   const params = new URLSearchParams()
   params.set('page', String(options.page || 1))
@@ -812,6 +833,13 @@ export async function listRailsChromoffListings(options: {
   if (options.categoryId) params.set('category_id', options.categoryId)
   if (options.minPrice !== undefined && String(options.minPrice).trim()) params.set('min_price', String(options.minPrice))
   if (options.maxPrice !== undefined && String(options.maxPrice).trim()) params.set('max_price', String(options.maxPrice))
+  if (options.description?.trim()) params.set('description', options.description.trim())
+  if (options.supplier) params.set('supplier', options.supplier)
+  if (options.productCategoryId) params.set('category', options.productCategoryId)
+  if (options.productSubcategoryId) params.set('subcategory', options.productSubcategoryId)
+  if (options.gender) params.set('gender', options.gender)
+  if (options.source) params.set('source', options.source)
+  if (options.aiStatus) params.set('ai_status', options.aiStatus)
 
   const result = await railsFetch<{ listings: RailsChromoffListing[]; meta?: { total?: number; pages?: number } }>(
     `/admin/chromoff/listings?${params}`
@@ -942,19 +970,6 @@ export async function listRailsAdminProducts(options: {
     category: await resolveCategoryFilterSlug(options.category),
     subcategory: await resolveCategoryFilterSlug(options.subcategory),
   }
-  if (
-    (options.brand
-      || options.category
-      || options.subcategory
-      || options.gender
-      || options.noGender
-      || options.attributeKey
-      || options.attributeValue)
-    && !options.status
-  ) {
-    return listRailsCatalogProducts(options)
-  }
-
   if (options.perPage > ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) {
     return listRailsAdminProductsInChunks(options)
   }
@@ -967,94 +982,6 @@ export async function listRailsAdminProducts(options: {
     products: options.status ? products : products.filter((product) => product.status !== 'archived'),
     totalItems: Number(payload.meta?.total || 0),
     totalPages: Number(payload.meta?.pages || 0),
-  }
-}
-
-async function listRailsCatalogProducts(options: {
-  page: number
-  perPage: number
-  search?: string
-  name?: string
-  description?: string
-  priceMin?: string | number
-  priceMax?: string | number
-  brand?: string
-  supplier?: string
-  category?: string
-  subcategory?: string
-  gender?: string
-  genderExact?: boolean
-  noGender?: boolean
-  attributeKey?: string
-  attributeValue?: string
-}) {
-  options = {
-    ...options,
-    category: await resolveCategoryFilterSlug(options.category),
-    subcategory: await resolveCategoryFilterSlug(options.subcategory),
-  }
-  if (options.perPage > CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) {
-    return listRailsCatalogProductsInChunks(options)
-  }
-
-  const params = buildRailsAdminProductsParams(options)
-  const payload = await publicRailsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/catalog/products?${params}`)
-  const products = (payload.products || []).map(mapRailsProduct)
-
-  return {
-    products: products.filter((product) => product.status !== 'archived'),
-    totalItems: Number(payload.meta?.total || 0),
-    totalPages: Number(payload.meta?.pages || 0),
-  }
-}
-
-async function listRailsCatalogProductsInChunks(options: {
-  page: number
-  perPage: number
-  search?: string
-  name?: string
-  description?: string
-  priceMin?: string | number
-  priceMax?: string | number
-  brand?: string
-  category?: string
-  subcategory?: string
-  gender?: string
-  genderExact?: boolean
-  noGender?: boolean
-  attributeKey?: string
-  attributeValue?: string
-}) {
-  const requestedOffset = (options.page - 1) * options.perPage
-  const firstSourcePage = Math.floor(requestedOffset / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) + 1
-  const firstPageSkip = requestedOffset % CATALOG_PRODUCTS_PAGE_CHUNK_SIZE
-  const products: Product[] = []
-  let sourcePage = firstSourcePage
-  let sourcePages = firstSourcePage
-  let totalItems = 0
-
-  while (sourcePage <= sourcePages && products.length < options.perPage) {
-    const params = buildRailsAdminProductsParams({
-      ...options,
-      page: sourcePage,
-      perPage: CATALOG_PRODUCTS_PAGE_CHUNK_SIZE,
-    })
-    const payload = await publicRailsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/catalog/products?${params}`)
-
-    if (sourcePage === firstSourcePage) {
-      totalItems = Number(payload.meta?.total || 0)
-      sourcePages = Number(payload.meta?.pages || Math.ceil(totalItems / CATALOG_PRODUCTS_PAGE_CHUNK_SIZE) || firstSourcePage)
-    }
-
-    const pageProducts = (payload.products || []).map(mapRailsProduct).filter((product) => product.status !== 'archived')
-    products.push(...(sourcePage === firstSourcePage ? pageProducts.slice(firstPageSkip) : pageProducts))
-    sourcePage += 1
-  }
-
-  return {
-    products: products.slice(0, options.perPage),
-    totalItems,
-    totalPages: Math.ceil(totalItems / options.perPage),
   }
 }
 

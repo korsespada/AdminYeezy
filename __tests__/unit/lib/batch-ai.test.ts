@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
+  it('extracts a structured response wrapped in markdown and repairs control characters', () => {
+    expect(parseBatchAiJson('Ответ:\n```json\n{"unit":"см","columns":[],"rows":[],"note":"строка\nс допуском",}\n```')).toEqual({
+      unit: 'см',
+      columns: [],
+      rows: [],
+      note: 'строка\nс допуском',
+    })
+  })
+
   it('normalizes provider endpoints and encrypts API keys at rest', () => {
     const previous = process.env.AI_PROVIDER_ENCRYPTION_KEY
     process.env.AI_PROVIDER_ENCRYPTION_KEY = 'unit-test-key'

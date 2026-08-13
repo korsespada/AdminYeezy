@@ -1,5 +1,6 @@
 import ChromoffCatalog from '@/components/chromoff/ChromoffCatalog'
-import { listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
+import { getRailsCatalogLookups, getRailsProductFilterFacets, listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
+import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -14,6 +15,13 @@ type ChromoffSearchParams = {
   minPrice?: string
   maxPrice?: string
   published?: string
+  description?: string
+  supplier?: string
+  gender?: string
+  source?: 'auto' | 'manual'
+  aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
+  chromoffCategory?: string
+  chromoffSubcategory?: string
 }
 
 function positivePage(value?: string) {
@@ -35,32 +43,53 @@ export default async function ChromoffPage({
     subcategory: params.subcategory || '',
     minPrice: params.minPrice || '',
     maxPrice: params.maxPrice || '',
+    description: params.description || '',
+    supplier: params.supplier || '',
+    gender: params.gender || '',
+    source: ['auto', 'manual'].includes(params.source || '') ? params.source as 'auto' | 'manual' : undefined,
+    aiStatus: ['ai_assigned', 'mapped', 'needs_review', 'manual'].includes(params.aiStatus || '') ? params.aiStatus as 'ai_assigned' | 'mapped' | 'needs_review' | 'manual' : undefined,
+    chromoffCategory: params.chromoffCategory || '',
+    chromoffSubcategory: params.chromoffSubcategory || '',
     published: ['published', 'hidden'].includes(params.published || '') ? params.published as 'published' | 'hidden' : 'all' as const,
   }
 
   try {
-    const [categories, listings, candidates] = await Promise.all([
+    const [categories, listings, candidates, lookups, facets, attributeDefinitions] = await Promise.all([
       listRailsChromoffCategories(),
       listRailsChromoffListings({
         page,
         perPage: PAGE_SIZE,
         search: filters.q,
-        categoryId: filters.subcategory || filters.category,
+        categoryId: filters.chromoffSubcategory || filters.chromoffCategory,
         minPrice: filters.minPrice,
         maxPrice: filters.maxPrice,
+        description: filters.description,
+        supplier: filters.supplier,
+        productCategoryId: filters.category,
+        productSubcategoryId: filters.subcategory,
+        gender: filters.gender,
+        source: filters.source,
+        aiStatus: filters.aiStatus,
         published: filters.published === 'all' ? undefined : filters.published === 'published',
       }),
       listRailsChromoffCandidates(),
+      getRailsCatalogLookups(),
+      getRailsProductFilterFacets({}),
+      getCatalogAttributeDefinitions(),
     ])
     return (
       <ChromoffCatalog
         categories={categories}
         listings={listings.items}
         candidates={candidates}
+        catalogCategories={lookups.categories}
+        catalogSubcategories={lookups.subcategories}
+        brands={lookups.brands}
+        attributeDefinitions={attributeDefinitions}
+        suppliers={(facets.supplierFacets || []).map((item) => ({ id: item.slug, name: item.name || item.slug }))}
         totalItems={listings.totalItems}
         totalPages={listings.totalPages}
         page={page}
-        filters={filters}
       />
     )
   } catch (error) {

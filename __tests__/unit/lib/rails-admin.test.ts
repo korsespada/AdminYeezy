@@ -269,7 +269,7 @@ describe('rails admin product adapter', () => {
     expect(fetchMock.mock.calls.every(([, init]) => init.method === 'POST')).toBe(true)
   })
 
-  it('loads gender-filtered products from the catalog endpoint with exact admin semantics', async () => {
+  it('loads gender-filtered products from the admin endpoint with color families', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -282,6 +282,11 @@ describe('rails admin product adapter', () => {
             status: 'active',
             price_cents: 0,
             media: [],
+            variant_group_key: 'family-1',
+            color_variants: [
+              { id: 'product-id', color: 'Белый', current: true },
+              { id: 'product-2', color: 'Чёрный', current: false },
+            ],
           },
         ],
         meta: { total: 1, pages: 1 },
@@ -299,13 +304,14 @@ describe('rails admin product adapter', () => {
 
     expect(result.products).toHaveLength(1)
     expect(result.products[0].gender).toBe('Для женщин')
+    expect(result.products[0].color_variants).toHaveLength(2)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&brand=hermes&gender=female&gender_exact=true')
-    expect(init).toMatchObject({ cache: 'no-store' })
+    expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&brand=hermes&gender=female&gender_exact=true')
+    expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('loads category-filtered products from the catalog endpoint so parent categories include children', async () => {
+  it('loads category-filtered products from the admin endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -333,11 +339,11 @@ describe('rails admin product adapter', () => {
     expect(result.products).toHaveLength(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toBe('https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&category=bags-parent')
-    expect(init).toMatchObject({ cache: 'no-store' })
+    expect(String(url)).toBe('https://rails.example.test/api/v1/admin/products?page=1&per_page=40&category=bags-parent')
+    expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('loads attribute-only filters from the catalog endpoint', async () => {
+  it('loads attribute-only filters from the admin endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -356,7 +362,7 @@ describe('rails admin product adapter', () => {
 
     const [url, init] = fetchMock.mock.calls[0]
     expect(String(url)).toBe(
-      'https://rails.example.test/api/v1/catalog/products?page=1&per_page=40&attribute_key=colors&attribute_value=black'
+      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&attribute_key=colors&attribute_value=black'
     )
     expect(init).toMatchObject({ cache: 'no-store' })
   })
@@ -372,7 +378,7 @@ describe('rails admin product adapter', () => {
     expect(params.get('attribute_value')).toBeNull()
   })
 
-  it('loads products without gender through the Rails gender_missing filter', async () => {
+  it('loads products without gender through the admin gender_missing filter', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => ({
@@ -405,7 +411,7 @@ describe('rails admin product adapter', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]
     const params = new URL(String(url)).searchParams
-    expect(String(url)).toContain('/catalog/products?')
+    expect(String(url)).toContain('/admin/products?')
     expect(params.get('gender_missing')).toBe('true')
     expect(params.get('gender')).toBeNull()
     expect(params.get('brand')).toBe('hermes')
@@ -590,7 +596,7 @@ describe('rails admin product adapter', () => {
     expect(result.totalItems).toBe(620)
     expect(result.totalPages).toBe(2)
     expect(fetchMock).toHaveBeenCalledTimes(13)
-    expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/catalog/products?'))).toBe(true)
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/admin/products?'))).toBe(true)
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(
       Array.from({ length: 13 }, () => '40')
     )

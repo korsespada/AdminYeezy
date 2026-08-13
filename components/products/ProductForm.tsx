@@ -3,7 +3,9 @@
 import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
+import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { createProductAction, updateProductAction } from '@/actions/products'
+import { updateChromoffListingAction } from '@/actions/chromoff'
 import { Download, ExternalLink, Palette, Settings2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
@@ -38,6 +40,8 @@ interface ProductFormProps {
   isOpen: boolean
   onClose: () => void
   onSave?: (updatedProduct: Product) => void
+  chromoffListing?: RailsChromoffListing | null
+  chromoffCategories?: RailsChromoffCategory[]
 }
 
 function formatPublishedAt(value: unknown) {
@@ -59,6 +63,8 @@ export default function ProductForm({
   isOpen,
   onClose,
   onSave,
+  chromoffListing = null,
+  chromoffCategories = [],
 }: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -93,6 +99,12 @@ export default function ProductForm({
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
   const [videoUrl, setVideoUrl] = useState('')
   const [videoPosterUrl, setVideoPosterUrl] = useState('')
+  const [chromoffCategoryId, setChromoffCategoryId] = useState('')
+  const [chromoffPublished, setChromoffPublished] = useState(false)
+  const [chromoffLegacySlug, setChromoffLegacySlug] = useState('')
+  const [chromoffH1, setChromoffH1] = useState('')
+  const [chromoffSeoTitle, setChromoffSeoTitle] = useState('')
+  const [chromoffSeoDescription, setChromoffSeoDescription] = useState('')
 
   const selectedCategoryName = useMemo(
     () => categories.find((item) => item.id === category)?.name || '',
@@ -191,6 +203,12 @@ export default function ProductForm({
         setPhotoUrlsToAdd('')
         setVideoUrl(product.video_url || '')
         setVideoPosterUrl(product.video_poster_url || '')
+        setChromoffCategoryId(chromoffListing?.chromoff_category?.id || '')
+        setChromoffPublished(Boolean(chromoffListing?.published ?? chromoffListing?.chromoff_published))
+        setChromoffLegacySlug(chromoffListing?.legacy_slug || product.slug || '')
+        setChromoffH1(chromoffListing?.h1 || product.h1 || product.name || '')
+        setChromoffSeoTitle(chromoffListing?.seo_title || product.seo_title || product.name || '')
+        setChromoffSeoDescription(chromoffListing?.seo_description || product.seo_description || productDescription)
 
         // Set existing photos (they are external URLs, not PocketBase files)
         const media = product.media && product.media.length > 0
@@ -252,12 +270,18 @@ export default function ProductForm({
         setPhotoUrlsToAdd('')
         setVideoUrl('')
         setVideoPosterUrl('')
+        setChromoffCategoryId('')
+        setChromoffPublished(false)
+        setChromoffLegacySlug('')
+        setChromoffH1('')
+        setChromoffSeoTitle('')
+        setChromoffSeoDescription('')
         setExistingPhotos([])
         setExistingMedia([])
       }
       setError('')
     }
-  }, [isOpen, product, brands, categories])
+  }, [isOpen, product, brands, categories, chromoffListing])
 
   const handleAddUrls = () => {
     const urls = photoUrlsToAdd
@@ -369,6 +393,16 @@ export default function ProductForm({
     formData.append('media', JSON.stringify(mediaPayload))
 
     if (product) {
+      const chromoffFormData = chromoffListing ? new FormData() : null
+      if (chromoffFormData && chromoffListing) {
+        chromoffFormData.append('id', chromoffListing.id)
+        chromoffFormData.append('published', String(chromoffPublished))
+        chromoffFormData.append('chromoff_category_id', chromoffCategoryId)
+        chromoffFormData.append('legacy_slug', chromoffLegacySlug.trim())
+        chromoffFormData.append('chromoff_h1', chromoffH1.trim())
+        chromoffFormData.append('chromoff_seo_title', chromoffSeoTitle.trim())
+        chromoffFormData.append('chromoff_seo_description', chromoffSeoDescription.trim())
+      }
       if (onSave) {
         // Optimistically update the list and release the editor immediately.
         onSave({
@@ -409,15 +443,20 @@ export default function ProductForm({
       }
       onClose()
 
-      updateProductAction(product.id, formData)
-        .then((result) => {
-          if (!result.success) {
-            window.alert(result.error || 'Не удалось сохранить товар')
+      const productPromise = updateProductAction(product.id, formData)
+      const chromoffPromise = chromoffFormData
+        ? updateChromoffListingAction(chromoffFormData)
+        : Promise.resolve({ success: true, message: '' })
+      Promise.all([productPromise, chromoffPromise])
+        .then(([productResult, chromoffResult]) => {
+          if (!productResult.success) {
+            window.alert(productResult.error || 'Не удалось сохранить товар')
+          } else if (!chromoffResult.success) {
+            window.alert(chromoffResult.message || 'Не удалось сохранить настройки Chromoff')
           }
+          router.refresh()
         })
-        .catch(() => {
-          window.alert('Не удалось сохранить товар')
-        })
+        .catch(() => window.alert('Не удалось сохранить товар'))
       return
     }
 
@@ -881,6 +920,61 @@ export default function ProductForm({
                 </div>
               </div>
             </details>
+
+            {chromoffListing && (
+              <section className="space-y-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-violet-100">Chromoff</h3>
+                  <p className="mt-1 text-xs text-slate-400">Поля этой секции относятся только к витрине chromoff.store.</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-300">Категория Chromoff</label>
+                    <select
+                      value={chromoffCategoryId}
+                      onChange={(event) => setChromoffCategoryId(event.target.value)}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500"
+                      disabled={isPending}
+                    >
+                      <option value="">Без категории</option>
+                      {chromoffCategories.map((item) => (
+                        <option key={item.id} value={item.id}>{item.parent_id ? '↳ ' : ''}{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-300">Публикация</label>
+                    <select
+                      value={chromoffPublished ? 'published' : 'hidden'}
+                      onChange={(event) => setChromoffPublished(event.target.value === 'published')}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500"
+                      disabled={isPending}
+                    >
+                      <option value="published">Опубликован на Chromoff</option>
+                      <option value="hidden">Скрыт с Chromoff</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-300">Chromoff slug</label>
+                  <input value={chromoffLegacySlug} onChange={(event) => setChromoffLegacySlug(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-300">Chromoff H1</label>
+                    <input value={chromoffH1} onChange={(event) => setChromoffH1(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-300">Chromoff SEO title</label>
+                    <input value={chromoffSeoTitle} onChange={(event) => setChromoffSeoTitle(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-slate-300">Chromoff SEO description</label>
+                  <textarea value={chromoffSeoDescription} onChange={(event) => setChromoffSeoDescription(event.target.value)} rows={3} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                </div>
+              </section>
+            )}
 
             <div className="space-y-4 pt-2 border-t border-gray-200 dark:border-gray-700">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

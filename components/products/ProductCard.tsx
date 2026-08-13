@@ -44,9 +44,11 @@ interface ProductCardProps {
     variantCount?: number;
     variantColors?: string[];
     showAttributeSummary?: boolean;
+    extraBadges?: React.ReactNode;
+    extraFooter?: React.ReactNode;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, extraBadges, extraFooter }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -308,6 +310,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
                 </div>
+                {extraBadges && <div className="mb-2 flex flex-wrap gap-1.5">{extraBadges}</div>}
                 {/* Editable Name */}
                 {editingField === 'name' ? (
                     <Input
@@ -357,6 +360,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     </Button>
                 )}
 
+                {extraFooter && <div className="mb-2">{extraFooter}</div>}
                 <div className="mt-auto flex items-center justify-between border-t border-slate-700 pt-2">
                     {/* Editable Price */}
                     {editingField === 'price' ? (

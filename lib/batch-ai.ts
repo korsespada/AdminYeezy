@@ -584,9 +584,9 @@ export async function runBatchAiOpenRouter(input: {
       }), 'AI batch')
   const text = protocol === 'anthropic'
     ? anthropicResponseText(payload)
-    : payload?.choices?.[0]?.message?.content
+    : aiMessageContentText(payload?.choices?.[0]?.message?.content)
   if (!text) throw new Error('ИИ вернул пустой ответ')
-  return parseBatchAiJson(String(text))
+  return parseBatchAiJson(text)
 }
 
 function allowedOriginalPhotoUrls(photoUrls: unknown[], indexes: unknown[]) {
@@ -652,9 +652,9 @@ export async function runBatchAiOpenRouterRefinement(input: {
       }), 'AI refinement')
   const text = protocol === 'anthropic'
     ? anthropicResponseText(payload)
-    : payload?.choices?.[0]?.message?.content
+    : aiMessageContentText(payload?.choices?.[0]?.message?.content)
   if (!text) throw new Error('ИИ вернул пустой ответ при уточнении оригинала')
-  return parseBatchAiJson(String(text))
+  return parseBatchAiJson(text)
 }
 
 async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
@@ -675,27 +675,113 @@ async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
   throw lastError
 }
 
+function aiMessageContentText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map((part) => {
+      if (typeof part === 'string') return part
+      if (!part || typeof part !== 'object') return ''
+      const item = part as Record<string, unknown>
+      return typeof item.text === 'string'
+        ? item.text
+        : typeof item.content === 'string'
+          ? item.content
+          : ''
+    }).join('')
+  }
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>
+    if (typeof item.text === 'string') return item.text
+    if (typeof item.content === 'string') return item.content
+  }
+  return ''
+}
+
+function balancedJsonFragment(text: string, start: number): string | null {
+  const opening = text[start]
+  const closing = opening === '{' ? '}' : opening === '[' ? ']' : ''
+  if (!closing) return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      continue
+    }
+    if (character === '"') {
+      inString = true
+      continue
+    }
+    if (character === opening) depth += 1
+    else if (character === closing) {
+      depth -= 1
+      if (depth === 0) return text.slice(start, index + 1)
+    }
+  }
+  return null
+}
+
+function repairJsonText(value: string): string {
+  const normalized = value.replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+  let result = ''
+  let inString = false
+  let escaped = false
+  for (const character of normalized) {
+    if (inString) {
+      if (escaped) escaped = false
+      else if (character === '\\') escaped = true
+      else if (character === '"') inString = false
+      else if (character === '\n') {
+        result += '\\n'
+        continue
+      } else if (character === '\r') {
+        result += '\\r'
+        continue
+      } else if (character === '\t') {
+        result += '\\t'
+        continue
+      }
+    } else if (character === '"') {
+      inString = true
+    }
+    result += character
+  }
+  return result.replace(/,\s*([}\]])/g, '$1')
+}
+
 export function parseBatchAiJson(text: string) {
-  const clean = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
-  try {
-    return JSON.parse(clean)
-  } catch {
-    const object = clean.match(/\{[\s\S]*\}/)?.[0]
-    if (!object) throw new Error('ИИ вернул невалидный JSON')
+  const clean = String(text || '').trim()
+  const fenced = [...clean.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map((match) => match[1].trim())
+  const sources = [...fenced, clean]
+  const candidates = new Set<string>()
+
+  for (const source of sources) {
+    if (source) candidates.add(source)
+    for (let index = 0; index < source.length; index += 1) {
+      if (source[index] !== '{' && source[index] !== '[') continue
+      const fragment = balancedJsonFragment(source, index)
+      if (fragment) candidates.add(fragment)
+    }
+  }
+
+  for (const candidate of candidates) {
     try {
-      return JSON.parse(object)
+      return JSON.parse(candidate)
     } catch {
-      const repaired = object
-        .replace(/[“”]/g, '"')
-        .replace(/[‘’]/g, "'")
-        .replace(/,\s*([}\]])/g, '$1')
       try {
-        return JSON.parse(repaired)
+        return JSON.parse(repairJsonText(candidate))
       } catch {
-        throw new Error('ИИ вернул невалидный JSON')
+        // Provider/model wrappers may prepend or append explanatory text.
       }
     }
   }
+
+  throw new Error('ИИ вернул невалидный JSON')
 }
 
 export function normalizeBatchAiOutput(raw: any, input: {

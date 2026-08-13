@@ -49,6 +49,26 @@ export async function updateChromoffListingCategoryAction(formData: FormData) {
   }
 }
 
+export async function updateChromoffListingAction(formData: FormData) {
+  const id = String(formData.get('id') || '').trim()
+  if (!id) return { success: false, message: 'Не указан товар Chromoff.' }
+
+  try {
+    const listing = await updateRailsChromoffListing(id, {
+      published: String(formData.get('published') || '') === 'true',
+      chromoffCategoryId: String(formData.get('chromoff_category_id') || '').trim() || undefined,
+      legacySlug: String(formData.get('legacy_slug') || '').trim(),
+      h1: String(formData.get('chromoff_h1') || '').trim(),
+      seoTitle: String(formData.get('chromoff_seo_title') || '').trim(),
+      seoDescription: String(formData.get('chromoff_seo_description') || '').trim(),
+    })
+    revalidatePath('/admin/chromoff')
+    return { success: true, listing, message: 'Настройки Chromoff сохранены.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить настройки Chromoff.' }
+  }
+}
+
 export async function createChromoffListingAction(formData: FormData) {
   const productId = String(formData.get('product_id') || '').trim()
   const chromoffCategoryId = String(formData.get('chromoff_category_id') || '').trim()

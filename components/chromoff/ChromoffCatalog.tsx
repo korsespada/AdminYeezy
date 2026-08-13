@@ -1,273 +1,327 @@
 'use client'
 
-import Image from 'next/image'
 import { useMemo, useState, useTransition } from 'react'
+import { CheckSquare, Filter, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import type { Brand, Category, Product, Subcategory } from '@/lib/types'
+import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
+import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
+import { getProductAction } from '@/actions/products'
+import { bulkDeleteProductsAction, bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
+import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction } from '@/actions/chromoff'
+import ProductCard from '@/components/products/ProductCard'
+import ProductForm from '@/components/products/ProductForm'
+import MeasurementTemplateBulkPicker from '@/components/products/MeasurementTemplateBulkPicker'
+import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chromoff/ChromoffSidebar'
+import { applyMeasurementTableAttributes, type MeasurementTemplate } from '@/lib/measurement-templates'
+import { isPriceOnRequest } from '@/lib/product-pricing'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, updateChromoffListingCategoryAction, updateChromoffListingSeoAction } from '@/actions/chromoff'
-import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
-type ChromoffFilters = {
-  q: string
-  category: string
-  subcategory: string
-  minPrice: string
-  maxPrice: string
-  published: 'all' | 'published' | 'hidden'
-}
-
-function formatPrice(priceCents: number) {
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(priceCents / 100)
-}
-
-function seoStatus(listing: RailsChromoffListing) {
-  return listing.h1?.trim() && listing.seo_title?.trim() && listing.seo_description?.trim()
-    ? 'SEO готово'
-    : 'SEO нужно проверить'
-}
-
-function chromoffCategoryStatus(listing: RailsChromoffListing) {
-  if (listing.chromoff_category?.name) return listing.chromoff_category.name
-  const name = String(listing.metadata?.chromoff_category_name || '').trim()
-  return name || 'Категория не назначена'
-}
-
-function chromoffCategoryNeedsReview(listing: RailsChromoffListing) {
-  return !listing.chromoff_category || listing.chromoff_category_status === 'needs_review'
-}
-
-export default function ChromoffCatalog({
-  listings,
-  categories,
-  candidates,
-  totalItems,
-  totalPages,
-  page,
-  filters,
-}: {
-  listings: RailsChromoffListing[]
+interface ChromoffCatalogProps {
   categories: RailsChromoffCategory[]
+  listings: RailsChromoffListing[]
   candidates: RailsChromoffCandidate[]
+  catalogCategories: Category[]
+  catalogSubcategories: Subcategory[]
+  brands: Brand[]
+  attributeDefinitions?: CatalogAttributeDefinition[]
+  suppliers: ChromoffSupplierOption[]
   totalItems: number
   totalPages: number
   page: number
-  filters: ChromoffFilters
-}) {
+}
+
+function listingProductId(listing: RailsChromoffListing) {
+  return String(listing.product_id || '').trim()
+}
+
+function listingToProduct(listing: RailsChromoffListing): Product {
+  const productId = listingProductId(listing) || listing.id
+  const photos = (listing.images || (listing.image_url ? [listing.image_url] : [])).filter(Boolean).map(String)
+  const rawGender = String(listing.gender || '')
+  const gender = rawGender === 'male' ? 'Для мужчин' : rawGender === 'female' ? 'Для женщин' : rawGender === 'unisex' ? 'Унисекс' : rawGender
+  const product: Product = {
+    id: productId,
+    productId: listing.external_id || productId,
+    external_id: listing.external_id || '',
+    sku: listing.sku || '',
+    seo_article: listing.seo_article || '',
+    slug: listing.slug || listing.legacy_slug || '',
+    name: listing.name || '',
+    description: listing.description || '',
+    price: Number(listing.price_cents || 0) / 100,
+    price_cents: Number(listing.price_cents || 0),
+    price_on_request: Boolean(listing.price_on_request) || Number(listing.price_cents || 0) <= 0,
+    status: ['draft', 'active', 'hidden', 'archived'].includes(String(listing.status)) ? listing.status as Product['status'] : 'hidden',
+    brand: listing.brand?.id || '',
+    category: listing.category?.parent_id ? String(listing.category.parent_id) : String(listing.category?.id || ''),
+    subcategory: listing.category?.parent_id ? String(listing.category.id) : '',
+    photos,
+    media: photos.map((url, index) => ({ original_url: url, preview_url: url, thumb_url: url, og_image_url: url, alt_text: listing.name || '', sort_order: index, processing_status: 'processed' as const })),
+    video_url: listing.video_url || null,
+    video_poster_url: listing.video_poster_url || null,
+    supplier: listing.supplier || null,
+    photos_processed: true,
+    gender,
+    thumb: listing.image_url || photos[0] || '',
+    fulfillment_mode: 'made_to_order',
+    availability_confidence: 'unknown',
+    indexing_status: 'indexable',
+    currency: 'RUB',
+    seo_title: listing.seo_title || '',
+    seo_description: listing.seo_description || '',
+    h1: listing.h1 || '',
+    metadata: listing.metadata || {},
+    catalog_attributes: listing.catalog_attributes || {},
+    attributes: listing.catalog_attributes || {},
+    color_variants: listing.color_variants || [],
+    created: '',
+    updated: '',
+    collectionId: '',
+    collectionName: 'products',
+  }
+  return {
+    ...product,
+    id: listingProductId(listing) || product.id,
+    metadata: {
+      ...(product.metadata || {}),
+      chromoff_listing_id: listing.id,
+      chromoff_category_status: listing.chromoff_category_status || '',
+    },
+  }
+}
+
+function categoryStatus(listing: RailsChromoffListing) {
+  return listing.chromoff_category?.name || String(listing.metadata?.chromoff_category_name || '').trim() || 'Не назначен'
+}
+
+function aiStatusLabel(listing: RailsChromoffListing) {
+  switch (listing.chromoff_category_status) {
+    case 'ai_assigned': return 'AI назначил'
+    case 'mapped': return 'Сопоставлено'
+    case 'manual': return 'Вручную'
+    default: return 'Нужна проверка'
+  }
+}
+
+function seoLabel(listing: RailsChromoffListing) {
+  return listing.h1 && listing.seo_title && listing.seo_description ? 'SEO заполнено' : 'SEO требует внимания'
+}
+
+function formatPrice(priceCents: number) {
+  if (priceCents <= 0) return 'Цена по запросу'
+  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(priceCents / 100)
+}
+
+function buildPageUrl(searchParams: URLSearchParams, page: number) {
+  const next = new URLSearchParams(searchParams)
+  if (page > 1) next.set('page', String(page))
+  else next.delete('page')
+  return next.toString() ? `/admin/chromoff?${next}` : '/admin/chromoff'
+}
+
+export default function ChromoffCatalog({
+  categories,
+  listings: initialListings,
+  candidates,
+  catalogCategories,
+  catalogSubcategories,
+  brands,
+  attributeDefinitions,
+  suppliers,
+  totalItems,
+  totalPages,
+  page,
+}: ChromoffCatalogProps) {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [listings, setListings] = useState(initialListings)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isImportOpen, setIsImportOpen] = useState(false)
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editingListing, setEditingListing] = useState<RailsChromoffListing | null>(null)
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
   const [importMessage, setImportMessage] = useState('')
-  const [canImport, setCanImport] = useState(false)
-  const [listingMessage, setListingMessage] = useState('')
-  const [categoryId, setCategoryId] = useState(filters.category)
-  const mappedCategories = categories.filter((category) => category.catalog_category)
-  const rootCategories = categories.filter((category) => !category.parent_id)
-  const subcategories = categories.filter((category) => category.parent_id && (!categoryId || category.parent_id === categoryId))
-  const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
+  const [addMessage, setAddMessage] = useState('')
+  const [selectedCategory, setSelectedCategory] = useState('')
+  const [selectedSubcategory, setSelectedSubcategory] = useState('')
+  const [selectedGender, setSelectedGender] = useState('')
+  const [selectedPrice, setSelectedPrice] = useState('')
+  const [selectedMeasurementTemplate, setSelectedMeasurementTemplate] = useState<MeasurementTemplate | null>(null)
+  const [isBulkUpdating, setIsBulkUpdating] = useState(false)
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
 
-  const buildUrl = (nextPage = 1) => {
-    const params = new URLSearchParams()
-    if (nextPage > 1) params.set('page', String(nextPage))
-    if (filters.q) params.set('q', filters.q)
-    if (filters.category) params.set('category', filters.category)
-    if (filters.subcategory) params.set('subcategory', filters.subcategory)
-    if (filters.minPrice) params.set('minPrice', filters.minPrice)
-    if (filters.maxPrice) params.set('maxPrice', filters.maxPrice)
-    if (filters.published !== 'all') params.set('published', filters.published)
-    const query = params.toString()
-    return query ? `/admin/chromoff?${query}` : '/admin/chromoff'
+  const products = useMemo(() => listings.map(listingToProduct), [listings])
+  const hasBulkUpdates = Boolean(selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate)
+
+  const updateListingFromProduct = (updatedProduct: Product) => {
+    setListings((current) => current.map((listing) => listingProductId(listing) === updatedProduct.id
+      ? { ...listing, name: updatedProduct.name, description: updatedProduct.description, price_cents: Math.round(updatedProduct.price * 100), status: updatedProduct.status, gender: updatedProduct.gender, category: listing.category }
+      : listing))
   }
 
-  const previewImport = () => {
-    setImportMessage('Проверяем источник и сопоставление категорий…')
+  const openEditor = async (listing: RailsChromoffListing) => {
+    const product = listingToProduct(listing)
+    setEditingListing(listing)
+    setEditingProduct(product)
+    const result = await getProductAction(product.id)
+    if (result.success && result.data) {
+      setEditingProduct({ ...(result.data as Product), id: product.id })
+    }
+  }
+
+  const toggleSelected = (id: string) => setSelectedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+
+  const togglePublished = (listing: RailsChromoffListing) => {
+    const nextPublished = !Boolean(listing.published)
+    const formData = new FormData()
+    formData.append('id', listing.id)
+    formData.append('published', String(nextPublished))
     startTransition(async () => {
-      const response = await previewChromoffImportAction()
-      if (!response.success) {
-        setCanImport(false)
-        setImportMessage(response.message || 'Dry-run завершился с ошибкой.')
-        return
-      }
-      const result = response.result
-      if (!result) {
-        setCanImport(false)
-        setImportMessage('Dry-run не вернул результат.')
-        return
-      }
-      const ready = result.categories_missing_catalog_mapping === 0 && result.missing_category_sources.length === 0
-      setCanImport(ready)
-      setImportMessage(`Проверено: ${result.products_received.toLocaleString('ru-RU')} товаров, ${result.categories_received} категорий. ${ready ? 'Ошибок сопоставления нет — импорт можно запускать.' : `Непривязанных категорий: ${result.categories_missing_catalog_mapping}.`}`)
+      const result = await setChromoffListingPublishedAction(formData)
+      if (result.success) setListings((current) => current.map((item) => item.id === listing.id ? { ...item, published: nextPublished, chromoff_published: nextPublished } : item))
+      else window.alert(result.message)
     })
   }
 
-  const importCatalog = () => {
-    setImportMessage('Импорт запущен: переносим товары и фотографии в общий каталог. Это может занять несколько минут — не закрывай страницу.')
-    startTransition(async () => {
-      const response = await importChromoffCatalogAction()
-      setImportMessage(response.success
-        ? `Импортировано: ${Number(response.imported || 0).toLocaleString('ru-RU')} товаров. Текущие активные карточки сохранены опубликованными.`
-        : response.message || 'Импорт не выполнен.')
-    })
+  const handleDelete = async (id: string) => {
+    if (!confirm('Переместить этот товар в корзину?')) return
+    const result = await (await import('@/actions/products')).deleteProductAction(id)
+    if (result.success) setListings((current) => current.filter((listing) => listingProductId(listing) !== id))
+    else window.alert(result.error || 'Не удалось переместить товар в корзину')
   }
+
+  const handleBulkUpdate = async () => {
+    if (!hasBulkUpdates) return
+    const price = Number(selectedPrice)
+    if (selectedPrice.trim() && (!Number.isFinite(price) || price < 0)) return window.alert('Введите корректную цену')
+    if (!confirm(`Обновить ${selectedIds.length} товаров?`)) return
+    setIsBulkUpdating(true)
+    const updates: BulkProductUpdates = {}
+    if (selectedCategory) updates.category = selectedCategory
+    if (selectedSubcategory) updates.subcategory = selectedSubcategory
+    if (selectedGender) updates.gender = selectedGender
+    if (selectedPrice.trim()) updates.price = price
+    if (selectedMeasurementTemplate) updates.measurementTemplate = selectedMeasurementTemplate.measurements
+    const result = await bulkUpdateProductsAction(selectedIds, updates)
+    if (!result.success) window.alert(result.error || 'Не удалось обновить товары')
+    else {
+      setListings((current) => current.map((listing) => {
+        if (!selectedIds.includes(listingProductId(listing))) return listing
+        const product = listingToProduct(listing)
+        const attributes = selectedMeasurementTemplate ? applyMeasurementTableAttributes(product.catalog_attributes || {}, selectedMeasurementTemplate.measurements) : product.catalog_attributes
+        return {
+          ...listing,
+          ...(selectedCategory ? { category: { ...(listing.category || { id: selectedCategory, name: '', slug: '' }), id: selectedCategory } } : {}),
+          ...(selectedPrice.trim() ? { price_cents: Math.round(price * 100), price_on_request: isPriceOnRequest(price) } : {}),
+          ...(selectedGender ? { gender: selectedGender } : {}),
+          ...(attributes ? { catalog_attributes: attributes } : {}),
+        }
+      }))
+      setSelectedIds([])
+      setSelectedCategory('')
+      setSelectedSubcategory('')
+      setSelectedGender('')
+      setSelectedPrice('')
+      setSelectedMeasurementTemplate(null)
+      router.refresh()
+    }
+    setIsBulkUpdating(false)
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Переместить ${selectedIds.length} товаров в корзину?`)) return
+    setIsBulkDeleting(true)
+    const result = await bulkDeleteProductsAction(selectedIds)
+    if (result.success) {
+      setListings((current) => current.filter((listing) => !selectedIds.includes(listingProductId(listing))))
+      setSelectedIds([])
+    } else window.alert(result.error || 'Не удалось переместить товары в корзину')
+    setIsBulkDeleting(false)
+  }
+
+  const previewImport = () => startTransition(async () => {
+    const result = await previewChromoffImportAction()
+    setImportMessage(result.success ? `Проверено: ${Number(result.result?.products_received || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
+  })
+
+  const importCatalog = () => startTransition(async () => {
+    const result = await importChromoffCatalogAction()
+    setImportMessage(result.success ? `Импортировано: ${Number(result.imported || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
+    if (result.success) router.refresh()
+  })
 
   return (
-    <main className="min-h-full min-w-0 bg-slate-950 p-4 text-slate-100 sm:p-6 lg:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <Badge className="bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">Отдельная витрина</Badge>
-              <h1 className="mt-3 text-3xl font-bold text-white">Chromoff</h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
-                Выбранные поставщики: свои разделы, публикация и SEO; общий товар, цена и фотографии из YeezyUnique.
-              </p>
+    <div className="min-h-screen bg-slate-900 font-sans text-slate-200 lg:flex">
+      <ChromoffSidebar categories={catalogCategories} subcategories={catalogSubcategories} chromoffCategories={categories} suppliers={suppliers} count={totalItems} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} isNavigationPending={isPending} />
+      <main className={`min-w-0 flex-1 px-4 py-5 sm:p-6 ${selectedIds.length ? 'pb-48 lg:pb-28' : ''}`}>
+        <div className="mx-auto max-w-[1600px]">
+          <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div><div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-100">Chromoff</h1><Badge className="bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">chromoff.store</Badge></div><p className="mt-1 text-sm text-slate-400">Каталог общего товара с отдельной публикацией, категорией и SEO Chromoff</p></div>
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+              <Button type="button" variant="outline" onClick={() => setIsSidebarOpen(true)} className="h-11 flex-1 border-slate-700 bg-slate-800 text-slate-200 lg:hidden"><Filter className="h-4 w-4" />Фильтры</Button>
+              <Button type="button" variant="outline" onClick={() => setIsImportOpen(true)} className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Upload className="h-4 w-4" />Импорт</Button>
+              <Button type="button" onClick={() => setIsAddOpen(true)} className="h-11"><Plus className="h-4 w-4" />Добавить</Button>
             </div>
-            <div className="rounded-lg border border-slate-800 bg-slate-950 px-4 py-3 text-sm sm:min-w-40">
-              <div className="text-slate-500">По текущему фильтру</div>
-              <div className="mt-1 text-2xl font-semibold text-white">{totalItems.toLocaleString('ru-RU')}</div>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-2 text-xs text-slate-400 sm:grid-cols-3">
-            <span>Подкатегорий Chromoff: {categories.filter((category) => category.parent_id).length}</span>
-            <span>Сопоставлено с Rails: {mappedCategories.length}</span>
-            <span>Непривязанных: {categories.length - mappedCategories.length}</span>
-          </div>
-          <div className="mt-5 flex flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-            <Button type="button" variant="outline" className="h-11 sm:h-10" disabled={isPending} onClick={previewImport}>
-              {isPending ? 'Проверяем…' : 'Проверить импорт'}
+          </header>
+
+          <div className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5">
+            <Button type="button" variant="ghost" onClick={() => setSelectedIds(selectedIds.length === products.length ? [] : products.map((product) => product.id))} className="h-auto px-1 text-sm text-slate-400 hover:bg-transparent hover:text-violet-300">
+              {selectedIds.length === products.length && products.length > 0 ? <CheckSquare className="h-5 w-5 text-violet-400" /> : <Square className="h-5 w-5" />}
+              {selectedIds.length === products.length && products.length > 0 ? 'Снять всё' : 'Выбрать все на странице'}
             </Button>
-            <Button type="button" className="h-11 sm:h-10" disabled={!canImport || isPending} onClick={importCatalog}>
-              {isPending ? 'Импортируем…' : 'Импортировать каталог'}
-            </Button>
-            {importMessage && <span className="text-sm text-slate-300" role="status" aria-live="polite">{importMessage}</span>}
+            <div className="flex items-center gap-2 text-sm text-slate-400"><LayoutGrid className="h-4 w-4 text-violet-300" />{totalItems.toLocaleString('ru-RU')} товаров · страница {page} из {Math.max(totalPages, 1)}</div>
           </div>
-        </section>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <form action="/admin/chromoff" className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <input name="q" defaultValue={filters.q} placeholder="Поиск по названию" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500 xl:col-span-2" />
-            <select name="category" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
-              <option value="">Все разделы</option>
-              {rootCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <select name="subcategory" defaultValue={filters.subcategory} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
-              <option value="">Все подкатегории</option>
-              {subcategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <input type="number" name="minPrice" min="0" step="1" defaultValue={filters.minPrice} placeholder="Цена от, ₽" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500" />
-            <input type="number" name="maxPrice" min="0" step="1" defaultValue={filters.maxPrice} placeholder="Цена до, ₽" className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-500" />
-            <select name="published" defaultValue={filters.published} className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
-              <option value="all">Все статусы</option>
-              <option value="published">Опубликованные</option>
-              <option value="hidden">Скрытые</option>
-            </select>
-            <div className="flex flex-col gap-2 sm:flex-row xl:col-span-2">
-              <Button type="submit" className="h-11 sm:h-10">Применить</Button>
-              <Button asChild type="button" variant="outline" className="h-11 sm:h-10"><a href="/admin/chromoff">Сбросить</a></Button>
-            </div>
-          </form>
-        </section>
+          {products.length > 0 ? <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {products.map((product, index) => {
+              const listing = listings[index]
+              return <ProductCard
+                key={listing.id}
+                product={product}
+                brands={brands}
+                categories={catalogCategories}
+                subcategories={catalogSubcategories}
+                onEdit={() => openEditor(listing)}
+                onDelete={handleDelete}
+                onUpdate={updateListingFromProduct}
+                selected={selectedIds.includes(product.id)}
+                onToggleSelect={toggleSelected}
+                variantCount={product.color_variants?.length || 0}
+                variantColors={Array.from(new Set((product.color_variants || []).map((variant) => variant.color).filter((value): value is string => Boolean(value))))}
+                showAttributeSummary
+                extraBadges={<><Badge className={listing.published ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/15' : 'bg-slate-700 text-slate-300 hover:bg-slate-700'}>{listing.published ? 'Опубликован' : 'Скрыт'}</Badge><Badge variant="outline" className="border-violet-500/30 text-violet-300">{listing.sync_mode === 'auto' ? 'Автосинхронизация' : 'Ручной товар'}</Badge><Badge variant="outline" className={listing.chromoff_category_status === 'needs_review' || !listing.chromoff_category ? 'border-amber-500/40 text-amber-300' : 'border-slate-700 text-slate-400'}>{aiStatusLabel(listing)}</Badge></>}
+                extraFooter={<div className="space-y-2"><div className="flex items-center justify-between gap-2 text-[11px] text-slate-500"><span className="truncate">{categoryStatus(listing)}</span><span className={seoLabel(listing) === 'SEO заполнено' ? 'text-emerald-400' : 'text-amber-400'}>{seoLabel(listing)}</span></div><Button type="button" size="sm" variant={listing.published ? 'outline' : 'default'} onClick={(event) => { event.stopPropagation(); togglePublished(listing) }} disabled={isPending} className="h-8 w-full">{listing.published ? 'Скрыть с Chromoff' : 'Опубликовать на Chromoff'}</Button></div>}
+              />
+            })}
+          </div> : <div className="rounded-xl border border-dashed border-slate-700 py-20 text-center"><RotateCcw className="mx-auto h-8 w-8 text-slate-600" /><h2 className="mt-3 text-lg font-medium text-slate-200">Ничего не найдено</h2><p className="mt-1 text-sm text-slate-500">Измените фильтры в боковой панели.</p></div>}
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <h2 className="text-lg font-semibold text-white">Добавить новый товар</h2>
-          <p className="mt-1 text-sm text-slate-400">Товары, которых ещё нет в Chromoff; источник и бренд могут быть любыми.</p>
-          <form className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" action={(formData) => startTransition(async () => {
-            const response = await createChromoffListingAction(formData)
-            setListingMessage(response.message)
-          })}>
-            <select name="product_id" required className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
-              <option value="">Выбери товар</option>
-              {candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
-            </select>
-            <select name="chromoff_category_id" required className="h-11 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white">
-              <option value="">Выбери подкатегорию</option>
-              {categories.filter((category) => category.parent_id).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <div className="flex items-center gap-3"><input type="hidden" name="published" value="true" /><Button type="submit" className="h-11 w-full sm:h-10 md:w-auto">Добавить и опубликовать</Button></div>
-          </form>
-          {listingMessage && <p className="mt-3 text-sm text-slate-300">{listingMessage}</p>}
-        </section>
+          {totalPages > 1 && <nav className="mt-6 flex flex-wrap justify-center gap-2" aria-label="Страницы Chromoff"><Button asChild variant="outline" size="sm" className={page === 1 ? 'pointer-events-none opacity-50' : ''}><a href={buildPageUrl(searchParams, Math.max(1, page - 1))}>Назад</a></Button>{Array.from({ length: totalPages }, (_, index) => index + 1).filter((itemPage) => itemPage >= page - 2 && itemPage <= page + 2).map((itemPage) => <Button key={itemPage} asChild size="sm" variant={itemPage === page ? 'default' : 'outline'}><a href={buildPageUrl(searchParams, itemPage)}>{itemPage}</a></Button>)}<Button asChild variant="outline" size="sm" className={page === totalPages ? 'pointer-events-none opacity-50' : ''}><a href={buildPageUrl(searchParams, Math.min(totalPages, page + 1))}>Вперёд</a></Button></nav>}
+        </div>
+      </main>
 
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
-          <div className="mb-5 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-white">Товары Chromoff</h2>
-              <p className="text-sm text-slate-400">Карточки используют те же фотографии и цену общего товара YeezyUnique.</p>
-            </div>
-            <span className="text-sm text-slate-400">Страница {page} из {Math.max(totalPages, 1)}</span>
-          </div>
-          {listings.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {listings.map((listing) => {
-                const category = listing.chromoff_category
-                const parent = category?.parent_id ? categoryById.get(category.parent_id) : null
-                const image = listing.images?.[0] || listing.image_url
-                return (
-                  <Card key={listing.id} className="overflow-hidden border-slate-800 bg-slate-950 shadow-sm">
-                    <div className="relative aspect-square bg-slate-800">
-                      {image ? <Image src={image} alt={listing.name} fill sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 30vw, (min-width: 640px) 45vw, 100vw" className="object-cover" unoptimized /> : <div className="flex h-full items-center justify-center text-sm text-slate-500">Нет фото</div>}
-                      <Badge className={`absolute left-3 top-3 ${listing.published ? 'bg-emerald-500/90 text-white' : 'bg-slate-700/90 text-slate-200'}`}>{listing.published ? 'Опубликован' : 'Скрыт'}</Badge>
-                    </div>
-                    <CardContent className="space-y-3 p-4">
-                      <div>
-                        <p className="line-clamp-2 min-h-10 font-medium leading-5 text-white">{listing.name}</p>
-                        <p className="mt-1 truncate text-xs text-slate-500">{parent ? `${parent.name} · ` : ''}{category?.name || 'Категория не назначена'}</p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <Badge variant="outline" className={listing.sync_mode === 'auto' ? 'border-emerald-500/40 text-emerald-300' : 'border-slate-700 text-slate-400'}>
-                            {listing.sync_mode === 'auto' ? 'Автосинхронизация' : 'Ручной товар'}
-                          </Badge>
-                          <Badge variant="outline" className={chromoffCategoryNeedsReview(listing) ? 'border-amber-500/40 text-amber-300' : 'border-violet-500/40 text-violet-300'}>
-                            {chromoffCategoryNeedsReview(listing) ? `Chromoff: ${chromoffCategoryStatus(listing)} · проверить` : `Chromoff: ${chromoffCategoryStatus(listing)}`}
-                          </Badge>
-                          <Badge variant="outline" className={listing.h1 && listing.seo_title && listing.seo_description ? 'border-sky-500/40 text-sky-300' : 'border-amber-500/40 text-amber-300'}>
-                            {seoStatus(listing)}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 truncate text-[11px] text-slate-600">
-                          {listing.source_supplier_name || listing.source_supplier_id || 'Источник не указан'}
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-between gap-2"><span className="text-lg font-semibold text-white">{formatPrice(listing.price_cents)}</span><Badge variant="outline" className="border-slate-700 text-slate-300">{listing.status}</Badge></div>
-                      <form action={(formData) => startTransition(async () => { await setChromoffListingPublishedAction(formData) })}>
-                        <input type="hidden" name="id" value={listing.id} />
-                        <input type="hidden" name="published" value={String(!listing.published)} />
-                        <Button type="submit" size="sm" variant={listing.published ? 'outline' : 'default'} className="w-full">{listing.published ? 'Скрыть с Chromoff' : 'Опубликовать на Chromoff'}</Button>
-                      </form>
-                      <details className="rounded-md border border-slate-800 bg-slate-900/70 p-3">
-                        <summary className="cursor-pointer text-xs font-medium text-slate-300">Категория и SEO Chromoff</summary>
-                        <form className="mt-3 space-y-2" action={(formData) => startTransition(async () => { await updateChromoffListingCategoryAction(formData) })}>
-                          <input type="hidden" name="id" value={listing.id} />
-                          <select name="chromoff_category_id" defaultValue={listing.chromoff_category?.id || ''} required className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white">
-                            <option value="">Выбери категорию Chromoff</option>
-                            {categories.map((categoryOption) => <option key={categoryOption.id} value={categoryOption.id}>{categoryOption.parent_id ? '↳ ' : ''}{categoryOption.name}</option>)}
-                          </select>
-                          <Button type="submit" size="sm" variant="outline" className="w-full">Сохранить категорию</Button>
-                        </form>
-                        <form className="mt-3 space-y-2" action={(formData) => startTransition(async () => { await updateChromoffListingSeoAction(formData) })}>
-                          <input type="hidden" name="id" value={listing.id} />
-                          <input name="h1" defaultValue={listing.h1 || ''} placeholder="H1 Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
-                          <input name="seo_title" defaultValue={listing.seo_title || ''} placeholder="SEO title Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
-                          <textarea name="seo_description" defaultValue={listing.seo_description || ''} rows={3} placeholder="SEO description Chromoff" className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white placeholder:text-slate-500" />
-                          <Button type="submit" size="sm" variant="outline" className="w-full">Сохранить SEO</Button>
-                        </form>
-                      </details>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
-          ) : <div className="py-14 text-center text-sm text-slate-500">По этим фильтрам товаров нет.</div>}
-          {totalPages > 1 && (
-            <nav className="mt-6 flex flex-wrap items-center justify-center gap-2" aria-label="Страницы товаров Chromoff">
-              <Button asChild variant="outline" size="sm" className={page === 1 ? 'pointer-events-none opacity-50' : ''}><a href={buildUrl(Math.max(1, page - 1))}>Назад</a></Button>
-              {[...Array(totalPages)].map((_, index) => {
-                const itemPage = index + 1
-                if (itemPage < page - 2 || itemPage > page + 2) return null
-                return <Button key={itemPage} asChild size="sm" variant={itemPage === page ? 'default' : 'outline'}><a href={buildUrl(itemPage)}>{itemPage}</a></Button>
-              })}
-              <Button asChild variant="outline" size="sm" className={page === totalPages ? 'pointer-events-none opacity-50' : ''}><a href={buildUrl(Math.min(totalPages, page + 1))}>Вперёд</a></Button>
-            </nav>
-          )}
-        </section>
+      <ProductForm product={editingProduct} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} isOpen={Boolean(editingProduct && editingListing)} chromoffListing={editingListing} chromoffCategories={categories} onClose={() => { setEditingListing(null); setEditingProduct(null) }} onSave={updateListingFromProduct} />
+
+      <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
+          <Select value={selectedGender || '__unchanged__'} onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Пол" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Пол: без изменений</SelectItem><SelectItem value="Для мужчин">Для мужчин</SelectItem><SelectItem value="Для женщин">Для женщин</SelectItem><SelectItem value="Унисекс">Унисекс</SelectItem></SelectContent></Select>
+          <Select value={selectedCategory || '__unchanged__'} onValueChange={(value) => { setSelectedCategory(value === '__unchanged__' ? '' : value); setSelectedSubcategory('') }}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Категория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Категория: без изменений</SelectItem>{catalogCategories.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
+          <Select value={selectedSubcategory || '__unchanged__'} onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)} disabled={!selectedCategory}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Подкатегория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Подкатегория: без изменений</SelectItem><SelectItem value="__none__">Сбросить подкатегорию</SelectItem>{catalogSubcategories.filter((item) => item.category === selectedCategory).map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
+          <Input type="number" min="0" value={selectedPrice} onChange={(event) => setSelectedPrice(event.target.value)} placeholder="Цена, ₽" className="h-10 bg-slate-700 text-slate-200" />
+          <MeasurementTemplateBulkPicker value={selectedMeasurementTemplate} onChange={setSelectedMeasurementTemplate} disabled={isBulkUpdating || isBulkDeleting} />
+          <Button type="button" onClick={handleBulkUpdate} disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting} className="h-10">{isBulkUpdating ? 'Обновление…' : 'Применить'}</Button><Button type="button" variant="destructive" size="icon" onClick={handleBulkDelete} disabled={isBulkUpdating || isBulkDeleting} className="h-10 w-10" title="В корзину"><Trash2 className="h-4 w-4" /></Button>
+        </div></div>
       </div>
-    </main>
+
+      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}><DialogContent className="border-slate-700 bg-slate-800 text-slate-100"><DialogHeader><DialogTitle>Импорт каталога Chromoff</DialogTitle><DialogDescription className="text-slate-400">Сначала выполните проверку, затем запустите импорт из старого источника.</DialogDescription></DialogHeader><div className="flex flex-col gap-3 sm:flex-row"><Button type="button" variant="outline" onClick={previewImport} disabled={isPending} className="border-slate-600 bg-slate-700 text-slate-200">{isPending ? 'Проверяем…' : 'Проверить импорт'}</Button><Button type="button" onClick={importCatalog} disabled={isPending}>{isPending ? 'Импортируем…' : 'Импортировать каталог'}</Button></div>{importMessage && <p className="text-sm text-slate-300" role="status">{importMessage}</p>}<DialogFooter><Button type="button" variant="ghost" onClick={() => setIsImportOpen(false)}>Закрыть</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}><DialogContent className="border-slate-700 bg-slate-800 text-slate-100"><DialogHeader><DialogTitle>Добавить товар в Chromoff</DialogTitle><DialogDescription className="text-slate-400">Выберите существующий общий товар и подраздел Chromoff.</DialogDescription></DialogHeader><form action={(formData) => startTransition(async () => { const result = await createChromoffListingAction(formData); setAddMessage(result.message); if (result.success) router.refresh() })} className="space-y-3"><select name="product_id" required className="h-11 w-full rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-200"><option value="">Выберите товар</option>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {formatPrice(candidate.price_cents)}</option>)}</select><select name="chromoff_category_id" required className="h-11 w-full rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-200"><option value="">Выберите категорию Chromoff</option>{categories.filter((item) => item.parent_id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input type="hidden" name="published" value="true" /><Button type="submit" disabled={isPending} className="w-full">{isPending ? 'Добавляем…' : 'Добавить и опубликовать'}</Button>{addMessage && <p className="text-sm text-slate-300" role="status">{addMessage}</p>}</form></DialogContent></Dialog>
+    </div>
   )
 }
