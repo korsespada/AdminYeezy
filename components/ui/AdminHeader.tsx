@@ -42,7 +42,10 @@ export default function AdminHeader() {
     if (!menuOpen) return
 
     const previousOverflow = document.body.style.overflow
+    const shell = document.querySelector<HTMLElement>('.admin-shell')
+    const previousShellOverflowY = shell?.style.overflowY
     document.body.style.overflow = 'hidden'
+    if (shell) shell.style.overflowY = 'hidden'
     const firstFocusable = menuRef.current?.querySelector<HTMLElement>('a, button')
     firstFocusable?.focus()
 
@@ -70,6 +73,7 @@ export default function AdminHeader() {
     document.addEventListener('keydown', onKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
+      if (shell) shell.style.overflowY = previousShellOverflowY ?? ''
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [menuOpen])
@@ -94,7 +98,7 @@ export default function AdminHeader() {
           <Menu className="h-5 w-5" />
         </Button>
 
-        <Link href="/admin/home" aria-label="Yeezy Unique, Home" className="flex min-h-11 min-w-0 shrink-0 items-center rounded-md px-1 py-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+        <Link href="/admin/home" aria-label="Yeezy Unique, Home" aria-current={isActive(pathname || '', '/admin/home') ? 'page' : undefined} className="flex min-h-11 min-w-0 shrink-0 items-center rounded-md px-1 py-1 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
           <h1 className="flex items-center gap-1 text-base font-bold text-slate-100 sm:text-xl">
             <span className="text-indigo-500">Yeezy</span>
             <span>Unique</span>
@@ -123,10 +127,9 @@ export default function AdminHeader() {
         </form>
       </header>
       {menuOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden" role="presentation">
+        <div id="admin-mobile-navigation" className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Основная навигация">
           <div aria-hidden="true" className="absolute inset-0 bg-slate-950/75" onClick={closeMenu} />
           <nav
-            id="admin-mobile-navigation"
             ref={menuRef}
             aria-label="Основная навигация"
             className="relative flex h-full w-[min(22rem,calc(100vw-2rem))] min-w-0 flex-col overflow-y-auto border-r border-slate-700 bg-slate-900 p-4 pt-[calc(1rem+env(safe-area-inset-top))] shadow-2xl"

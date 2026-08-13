@@ -38,6 +38,12 @@ describe('LoginPage', () => {
       expect(subheading).toBeInTheDocument()
     })
 
+    it('should expose a named login region', () => {
+      render(<LoginPage />)
+
+      expect(screen.getByRole('main', { name: /welcome back/i })).toBeInTheDocument()
+    })
+
     it('should have email input with correct type', () => {
       render(<LoginPage />)
 

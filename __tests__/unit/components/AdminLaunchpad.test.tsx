@@ -32,6 +32,23 @@ describe('AdminLaunchpad', () => {
     expect(screen.getAllByText('—')).toHaveLength(3)
   })
 
+  it('keeps status content and metrics width-safe at phone sizes', () => {
+    render(
+      <AdminLaunchpad
+        railsConfigured
+        scrapingConfigured
+        railsStatus="unavailable"
+        scrapingStatus="not_configured"
+      />,
+    )
+
+    expect(screen.getByText('Недоступен, данные не загружены')).toHaveClass('min-w-0')
+    expect(screen.getByText('Не настроена: нужен SCRAPING_DATABASE_URL')).toHaveClass('min-w-0')
+    expect(screen.getByText('Товаров').parentElement).toHaveClass('min-w-0')
+    expect(screen.getByText('Брендов').parentElement).toHaveClass('min-w-0')
+    expect(screen.getByText('Категорий').parentElement).toHaveClass('min-w-0')
+  })
+
   it('renders core admin sections and environment status', () => {
     render(
       <AdminLaunchpad

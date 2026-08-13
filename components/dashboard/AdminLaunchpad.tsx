@@ -259,9 +259,9 @@ function StatusRow({
   const isConnected = status === 'connected'
   const text = isConnected ? okText : status === 'unavailable' ? unavailableText : notConfiguredText
   return (
-    <div className="flex items-center justify-between gap-4 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
-      <span className="text-sm font-medium text-slate-300">{label}</span>
-      <Badge role="status" className={isConnected ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/15' : 'bg-amber-500/15 text-amber-200 hover:bg-amber-500/15'}>
+    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-slate-800 bg-slate-950 px-3 py-2">
+      <span className="min-w-0 text-sm font-medium text-slate-300">{label}</span>
+      <Badge role="status" className={`min-w-0 max-w-full whitespace-normal break-words text-right ${isConnected ? 'bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/15' : 'bg-amber-500/15 text-amber-200 hover:bg-amber-500/15'}`}>
         {text}
       </Badge>
     </div>
@@ -270,8 +270,8 @@ function StatusRow({
 
 function Metric({ label, value }: { label: string; value?: number | null }) {
   return (
-    <div className="rounded-md border border-slate-800 bg-slate-950 p-3">
-      <div className="text-lg font-bold text-white">{typeof value === 'number' ? value.toLocaleString('ru-RU') : '—'}</div>
+    <div className="min-w-0 rounded-md border border-slate-800 bg-slate-950 p-3">
+      <div className="min-w-0 break-words text-lg font-bold text-white">{typeof value === 'number' ? value.toLocaleString('ru-RU') : '—'}</div>
       <div className="mt-1 text-xs text-slate-500">{label}</div>
     </div>
   )

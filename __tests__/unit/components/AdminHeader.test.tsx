@@ -42,11 +42,36 @@ describe('AdminHeader', () => {
     expect(document.body.style.overflow).toBe('')
   })
 
+  it('locks the shell scroll owner while the modal navigation is open', () => {
+    const shell = document.createElement('div')
+    shell.className = 'admin-shell'
+    document.body.appendChild(shell)
+    const { unmount } = render(<AdminHeader />, { container: shell })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть навигацию' }))
+
+    const modal = screen.getByRole('dialog', { name: 'Основная навигация' })
+    expect(modal).toHaveAttribute('aria-modal', 'true')
+    expect(shell.style.overflowY).toBe('hidden')
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Закрыть навигацию' }))
+
+    expect(shell.style.overflowY).toBe('')
+    unmount()
+    shell.remove()
+  })
+
   it('marks the CRM ancestor active and keeps logout separate', () => {
     usePathname.mockReturnValue('/admin/crm/orders')
     render(<AdminHeader />)
 
     expect(screen.getByRole('link', { name: 'CRM', hidden: true })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: 'Выйти' })).toBeInTheDocument()
+  })
+
+  it('marks the home identity as current on the home route', () => {
+    render(<AdminHeader />)
+
+    expect(screen.getByRole('link', { name: 'Yeezy Unique, Home' })).toHaveAttribute('aria-current', 'page')
   })
 })
