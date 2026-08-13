@@ -66,7 +66,6 @@ import {
   getBatchAiRunAction,
   getBatchAiRunLogsAction,
   getBatchAiSuggestionsAction,
-  getBatchMediaSeoStatusAction,
   getLatestBatchAiRunAction,
   getBatchSnapshotsAction,
   rollbackBatchAction,
@@ -627,7 +626,6 @@ export default function CsvImportApp({
   const [showAiLogs, setShowAiLogs] = useState(false);
   const [showAiErrors, setShowAiErrors] = useState(false);
   const [isLoadingAiLogs, setIsLoadingAiLogs] = useState(false);
-  const [canGenerateMediaSeo, setCanGenerateMediaSeo] = useState(false);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
 
@@ -714,21 +712,6 @@ export default function CsvImportApp({
       window.clearInterval(timer);
     };
   }, [isPushing, batchId, initialBatchId, products.length]);
-
-  useEffect(() => {
-    if (!batchId || isSnapshotSource) {
-      setCanGenerateMediaSeo(false);
-      return;
-    }
-    let cancelled = false;
-    getBatchMediaSeoStatusAction(batchId).then((result) => {
-      if (!cancelled) setCanGenerateMediaSeo(Boolean(result.success && result.data?.allowed));
-    }).catch(() => {
-      if (!cancelled) setCanGenerateMediaSeo(false);
-    });
-    return () => { cancelled = true; };
-  }, [batchId, isSnapshotSource]);
-
 
   // Unique values for filters (derived from all products)
   const uniqueBrands = useMemo(() => {
@@ -845,12 +828,6 @@ export default function CsvImportApp({
     }
     return [...groups.entries()].sort((left, right) => right[1] - left[1]);
   }, [aiErrorProducts]);
-  const mediaSeoProducts = useMemo(
-    () => products.filter((product) => Boolean(product.slug)
-      && Array.isArray(product.photo_alts) && product.photo_alts.length === product.photos.length
-      && Array.isArray(product.photo_slugs) && product.photo_slugs.length === product.photos.length),
-    [products],
-  );
   const canPublish = isBatchSource && ["SCRIPT_PROCESSED", "AI_PROCESSED"].includes(batchStage) && products.length > 0 && aiRemainingCount === 0;
   const pendingAiSuggestions = useMemo(
     () => aiSuggestions.filter((item) => item.status === "pending"),
@@ -1884,16 +1861,6 @@ export default function CsvImportApp({
 
               {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
                 <div className="flex flex-wrap items-center gap-2">
-                  {canGenerateMediaSeo && (
-                    <button
-                      onClick={() => handleAiProcess("media_seo")}
-                      disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
-                      className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-sm font-bold text-violet-200 transition-all hover:bg-violet-500/20 disabled:opacity-50"
-                      title="Перезаписать alt-тексты, slug товара и имена файлов фото для последней выгрузки"
-                    >
-                      <Sparkles className="h-4 w-4" /> Сгенерировать alt + slug
-                    </button>
-                  )}
                   <button
                     onClick={() => handlePush("upsert")}
                     disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
@@ -1901,7 +1868,7 @@ export default function CsvImportApp({
                     title="Отправить в каталог только товары, изменённые после предыдущей публикации; после генерации alt и slug фото будут перевыложены в WebP с новыми именами"
                   >
                     {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    {mediaSeoProducts.length > 0 ? "Обновить каталог" : "Обновить изменённые"}
+                    Обновить изменённые
                   </button>
                   <button
                     onClick={handleReprocessAll}
@@ -1994,6 +1961,7 @@ export default function CsvImportApp({
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
+                      {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Удалить товары, которых нет в партии</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Пересобрать цветовые семьи</button>}
                     </div>
