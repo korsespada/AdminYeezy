@@ -41,16 +41,16 @@ export default function ChromoffSidebar({
   const params = new URLSearchParams(searchParamsKey)
   const [name, setName] = useState(params.get('q') || '')
   const [description, setDescription] = useState(params.get('description') || '')
-  const [priceMin, setPriceMin] = useState(params.get('priceMin') || '')
-  const [priceMax, setPriceMax] = useState(params.get('priceMax') || '')
+  const [priceMin, setPriceMin] = useState(params.get('minPrice') || '')
+  const [priceMax, setPriceMax] = useState(params.get('maxPrice') || '')
   const current = params
 
   useEffect(() => {
     const next = new URLSearchParams(searchParamsKey)
     setName(next.get('q') || '')
     setDescription(next.get('description') || '')
-    setPriceMin(next.get('priceMin') || '')
-    setPriceMax(next.get('priceMax') || '')
+    setPriceMin(next.get('minPrice') || '')
+    setPriceMax(next.get('maxPrice') || '')
   }, [searchParamsKey])
   const rootChromoffCategories = chromoffCategories.filter((item) => !item.parent_id)
   const selectedChromoffRoot = current.get('chromoffCategory') || ''
@@ -73,7 +73,7 @@ export default function ChromoffSidebar({
   const submitTextAndPrice = (event: React.FormEvent) => {
     event.preventDefault()
     const next = new URLSearchParams(current)
-    const values: Record<string, string> = { q: name.trim(), description: description.trim(), priceMin: priceMin.trim(), priceMax: priceMax.trim() }
+    const values: Record<string, string> = { q: name.trim(), description: description.trim(), minPrice: priceMin.trim(), maxPrice: priceMax.trim() }
     Object.entries(values).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key))
     navigate(next)
   }
@@ -116,15 +116,15 @@ export default function ChromoffSidebar({
             </div>
             <Button type="submit" className="h-9 w-full" disabled={isNavigationPending}><Search className="h-4 w-4" />Найти</Button>
 
-            <FilterSelect label="Поставщик" value={current.get('supplier') || ''} onChange={(value) => setFilter('supplier', value)} options={suppliers.map((item) => ({ value: item.id, label: item.name }))} />
+            <FilterSelect label="Раздел Chromoff" value={selectedChromoffRoot} onChange={(value) => setFilter('chromoffCategory', value, 'chromoffSubcategory')} options={rootChromoffCategories.map((item) => ({ value: item.id, label: item.name }))} />
+            <FilterSelect label="Подраздел Chromoff" value={current.get('chromoffSubcategory') || ''} onChange={(value) => setFilter('chromoffSubcategory', value)} options={chromoffSubcategories.map((item) => ({ value: item.id, label: item.name }))} />
+            <FilterSelect label="Поставщик Chromoff" value={current.get('sourceSupplier') || ''} onChange={(value) => setFilter('sourceSupplier', value)} options={suppliers.map((item) => ({ value: item.id, label: item.name }))} />
+            <FilterSelect label="Публикация Chromoff" value={current.get('published') || ''} onChange={(value) => setFilter('published', value)} options={[{ value: 'published', label: 'Опубликованные' }, { value: 'hidden', label: 'Скрытые' }]} />
             <FilterSelect label="Категория товара" value={current.get('category') || ''} onChange={(value) => setFilter('category', value, 'subcategory')} options={categories.map((item) => ({ value: item.id, label: item.name }))} />
             <FilterSelect label="Подкатегория товара" value={current.get('subcategory') || ''} onChange={(value) => setFilter('subcategory', value)} options={subcategories.filter((item) => !current.get('category') || item.category === current.get('category')).map((item) => ({ value: item.id, label: item.name }))} />
             <FilterSelect label="Пол" value={current.get('gender') || ''} onChange={(value) => setFilter('gender', value)} options={[{ value: 'male', label: 'Для мужчин' }, { value: 'female', label: 'Для женщин' }, { value: 'unisex', label: 'Унисекс' }]} />
             <FilterSelect label="Источник" value={current.get('source') || ''} onChange={(value) => setFilter('source', value)} options={[{ value: 'auto', label: 'Автосинхронизация' }, { value: 'manual', label: 'Ручной товар' }]} />
             <FilterSelect label="AI статус" value={current.get('aiStatus') || ''} onChange={(value) => setFilter('aiStatus', value)} options={[{ value: 'ai_assigned', label: 'AI назначил' }, { value: 'mapped', label: 'Сопоставлено' }, { value: 'needs_review', label: 'Нужна проверка' }, { value: 'manual', label: 'Назначено вручную' }]} />
-            <FilterSelect label="Публикация Chromoff" value={current.get('published') || ''} onChange={(value) => setFilter('published', value)} options={[{ value: 'published', label: 'Опубликованные' }, { value: 'hidden', label: 'Скрытые' }]} />
-            <FilterSelect label="Раздел Chromoff" value={selectedChromoffRoot} onChange={(value) => setFilter('chromoffCategory', value, 'chromoffSubcategory')} options={rootChromoffCategories.map((item) => ({ value: item.id, label: item.name }))} />
-            <FilterSelect label="Подраздел Chromoff" value={current.get('chromoffSubcategory') || ''} onChange={(value) => setFilter('chromoffSubcategory', value)} options={chromoffSubcategories.map((item) => ({ value: item.id, label: item.name }))} />
           </form>
         </div>
       </aside>

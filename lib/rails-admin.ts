@@ -823,6 +823,7 @@ export async function listRailsChromoffListings(options: {
   productSubcategoryId?: string
   gender?: string
   source?: 'auto' | 'manual'
+  sourceSupplierId?: string
   aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
 } = {}): Promise<RailsCrmListResult<RailsChromoffListing>> {
   const params = new URLSearchParams()
@@ -839,6 +840,7 @@ export async function listRailsChromoffListings(options: {
   if (options.productSubcategoryId) params.set('subcategory', options.productSubcategoryId)
   if (options.gender) params.set('gender', options.gender)
   if (options.source) params.set('source', options.source)
+  if (options.sourceSupplierId) params.set('source_supplier_id', options.sourceSupplierId)
   if (options.aiStatus) params.set('ai_status', options.aiStatus)
 
   const result = await railsFetch<{ listings: RailsChromoffListing[]; meta?: { total?: number; pages?: number } }>(
@@ -872,6 +874,14 @@ export async function updateRailsChromoffListing(id: string, input: {
     body: JSON.stringify({ listing }),
   })
   return result.listing
+}
+
+export async function bulkUpdateRailsChromoffListingsPublished(listingIds: string[], published: boolean) {
+  const result = await railsFetch<{ updated: number; published: boolean }>('/admin/chromoff/listings/bulk_update', {
+    method: 'PATCH',
+    body: JSON.stringify({ listing_ids: listingIds, published }),
+  })
+  return result
 }
 
 export async function listRailsChromoffCandidates() {

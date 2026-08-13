@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { buildChromoffImportPayload } from '@/lib/chromoff-source'
-import { createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { bulkUpdateRailsChromoffListingsPublished, createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffListing } from '@/lib/rails-admin'
 
 export async function setChromoffListingPublishedAction(formData: FormData) {
   const id = String(formData.get('id') || '').trim()
@@ -13,6 +13,19 @@ export async function setChromoffListingPublishedAction(formData: FormData) {
     await updateRailsChromoffListing(id, { published })
     revalidatePath('/admin/chromoff')
     return { success: true, message: published ? 'Товар опубликован в Chromoff.' : 'Товар скрыт с Chromoff.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить публикацию.' }
+  }
+}
+
+export async function setChromoffListingsPublishedAction(listingIds: string[], published: boolean) {
+  const ids = [...new Set(listingIds.map(String).map((value) => value.trim()).filter(Boolean))]
+  if (!ids.length) return { success: false, message: 'Не выбраны карточки Chromoff.' }
+
+  try {
+    const result = await bulkUpdateRailsChromoffListingsPublished(ids, published)
+    revalidatePath('/admin/chromoff')
+    return { success: true, updated: result.updated, message: published ? 'Товары опубликованы в Chromoff.' : 'Товары скрыты с Chromoff.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить публикацию.' }
   }

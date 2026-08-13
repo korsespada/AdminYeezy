@@ -44,11 +44,12 @@ interface ProductCardProps {
     variantCount?: number;
     variantColors?: string[];
     showAttributeSummary?: boolean;
+    showDescription?: boolean;
     extraBadges?: React.ReactNode;
     extraFooter?: React.ReactNode;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, extraBadges, extraFooter }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, extraBadges, extraFooter }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -340,7 +341,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                             <span className="min-w-0 flex-1"><span className="block text-xs font-semibold text-violet-200">{variantCount} {variantCountLabel(variantCount)}</span><span className="block truncate text-[10px] text-slate-400">{variantColors.join(', ')}</span></span>
                         </button>
                     )}
-                    {product.description && (
+                    {showDescription && product.description && (
                         <p className="mb-2 mt-1 line-clamp-2 text-xs leading-snug text-slate-400">
                             <ProductDescription text={product.description} />
                         </p>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { CheckSquare, Filter, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Brand, Category, Product, Subcategory } from '@/lib/types'
@@ -8,7 +8,7 @@ import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { getProductAction } from '@/actions/products'
 import { bulkDeleteProductsAction, bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
-import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction } from '@/actions/chromoff'
+import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction } from '@/actions/chromoff'
 import ProductCard from '@/components/products/ProductCard'
 import ProductForm from '@/components/products/ProductForm'
 import MeasurementTemplateBulkPicker from '@/components/products/MeasurementTemplateBulkPicker'
@@ -156,9 +156,24 @@ export default function ChromoffCatalog({
   const [selectedMeasurementTemplate, setSelectedMeasurementTemplate] = useState<MeasurementTemplate | null>(null)
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  const [isBulkPublishing, setIsBulkPublishing] = useState(false)
+  const [selectedPublication, setSelectedPublication] = useState<'published' | 'hidden' | ''>('')
+  const [gridColumns, setGridColumns] = useState(4)
 
   const products = useMemo(() => listings.map(listingToProduct), [listings])
   const hasBulkUpdates = Boolean(selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate)
+  const isCompactGrid = gridColumns >= 5
+  const gridClassName = gridColumns === 4 ? 'lg:grid-cols-4' : gridColumns === 5 ? 'lg:grid-cols-5' : gridColumns === 6 ? 'lg:grid-cols-6' : gridColumns === 7 ? 'lg:grid-cols-7' : gridColumns === 8 ? 'lg:grid-cols-8' : gridColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'
+
+  useEffect(() => {
+    const saved = Number(window.localStorage.getItem('chromoffGridColumns'))
+    if (Number.isInteger(saved) && saved >= 4 && saved <= 10) setGridColumns(saved)
+  }, [])
+
+  const changeGridColumns = (value: number) => {
+    setGridColumns(value)
+    window.localStorage.setItem('chromoffGridColumns', String(value))
+  }
 
   const updateListingFromProduct = (updatedProduct: Product) => {
     setListings((current) => current.map((listing) => listingProductId(listing) === updatedProduct.id
@@ -246,6 +261,24 @@ export default function ChromoffCatalog({
     setIsBulkDeleting(false)
   }
 
+  const handleBulkPublication = () => {
+    if (!selectedPublication) return
+    const selectedListingIds = listings.filter((listing) => selectedIds.includes(listingProductId(listing))).map((listing) => listing.id)
+    if (!selectedListingIds.length) return
+    const published = selectedPublication === 'published'
+    if (!confirm(`${published ? 'Опубликовать' : 'Скрыть'} ${selectedListingIds.length} товаров на Chromoff?`)) return
+    setIsBulkPublishing(true)
+    startTransition(async () => {
+      const result = await setChromoffListingsPublishedAction(selectedListingIds, published)
+      if (result.success) {
+        setListings((current) => current.map((listing) => selectedListingIds.includes(listing.id) ? { ...listing, published, chromoff_published: published } : listing))
+        setSelectedIds([])
+        setSelectedPublication('')
+      } else window.alert(result.message)
+      setIsBulkPublishing(false)
+    })
+  }
+
   const previewImport = () => startTransition(async () => {
     const result = await previewChromoffImportAction()
     setImportMessage(result.success ? `Проверено: ${Number(result.result?.products_received || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
@@ -271,15 +304,15 @@ export default function ChromoffCatalog({
             </div>
           </header>
 
-          <div className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800/70 px-3 py-2.5">
             <Button type="button" variant="ghost" onClick={() => setSelectedIds(selectedIds.length === products.length ? [] : products.map((product) => product.id))} className="h-auto px-1 text-sm text-slate-400 hover:bg-transparent hover:text-violet-300">
               {selectedIds.length === products.length && products.length > 0 ? <CheckSquare className="h-5 w-5 text-violet-400" /> : <Square className="h-5 w-5" />}
               {selectedIds.length === products.length && products.length > 0 ? 'Снять всё' : 'Выбрать все на странице'}
             </Button>
-            <div className="flex items-center gap-2 text-sm text-slate-400"><LayoutGrid className="h-4 w-4 text-violet-300" />{totalItems.toLocaleString('ru-RU')} товаров · страница {page} из {Math.max(totalPages, 1)}</div>
+            <div className="flex items-center gap-2"><label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1.5 text-xs text-slate-400 xl:flex"><span className="whitespace-nowrap">В ряд: {gridColumns}</span><input type="range" min="4" max="10" step="1" value={gridColumns} onChange={(event) => changeGridColumns(Number(event.target.value))} className="h-1.5 w-24 cursor-pointer accent-violet-500" aria-label="Количество карточек в ряду" /></label><div className="flex items-center gap-2 text-sm text-slate-400"><LayoutGrid className="h-4 w-4 text-violet-300" />{totalItems.toLocaleString('ru-RU')} товаров · страница {page} из {Math.max(totalPages, 1)}</div></div>
           </div>
 
-          {products.length > 0 ? <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          {products.length > 0 ? <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${gridClassName}`}>
             {products.map((product, index) => {
               const listing = listings[index]
               return <ProductCard
@@ -295,9 +328,10 @@ export default function ChromoffCatalog({
                 onToggleSelect={toggleSelected}
                 variantCount={product.color_variants?.length || 0}
                 variantColors={Array.from(new Set((product.color_variants || []).map((variant) => variant.color).filter((value): value is string => Boolean(value))))}
-                showAttributeSummary
+                showAttributeSummary={!isCompactGrid}
+                showDescription={!isCompactGrid}
                 extraBadges={<><Badge className={listing.published ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/15' : 'bg-slate-700 text-slate-300 hover:bg-slate-700'}>{listing.published ? 'Опубликован' : 'Скрыт'}</Badge><Badge variant="outline" className="border-violet-500/30 text-violet-300">{listing.sync_mode === 'auto' ? 'Автосинхронизация' : 'Ручной товар'}</Badge><Badge variant="outline" className={listing.chromoff_category_status === 'needs_review' || !listing.chromoff_category ? 'border-amber-500/40 text-amber-300' : 'border-slate-700 text-slate-400'}>{aiStatusLabel(listing)}</Badge></>}
-                extraFooter={<div className="space-y-2"><div className="flex items-center justify-between gap-2 text-[11px] text-slate-500"><span className="truncate">{categoryStatus(listing)}</span><span className={seoLabel(listing) === 'SEO заполнено' ? 'text-emerald-400' : 'text-amber-400'}>{seoLabel(listing)}</span></div><Button type="button" size="sm" variant={listing.published ? 'outline' : 'default'} onClick={(event) => { event.stopPropagation(); togglePublished(listing) }} disabled={isPending} className="h-8 w-full">{listing.published ? 'Скрыть с Chromoff' : 'Опубликовать на Chromoff'}</Button></div>}
+                extraFooter={isCompactGrid ? undefined : <div className="space-y-2"><div className="flex items-center justify-between gap-2 text-[11px] text-slate-500"><span className="truncate">{categoryStatus(listing)}</span><span className={seoLabel(listing) === 'SEO заполнено' ? 'text-emerald-400' : 'text-amber-400'}>{seoLabel(listing)}</span></div><Button type="button" size="sm" variant={listing.published ? 'outline' : 'default'} onClick={(event) => { event.stopPropagation(); togglePublished(listing) }} disabled={isPending} className="h-8 w-full">{listing.published ? 'Скрыть с Chromoff' : 'Опубликовать на Chromoff'}</Button></div>}
               />
             })}
           </div> : <div className="rounded-xl border border-dashed border-slate-700 py-20 text-center"><RotateCcw className="mx-auto h-8 w-8 text-slate-600" /><h2 className="mt-3 text-lg font-medium text-slate-200">Ничего не найдено</h2><p className="mt-1 text-sm text-slate-500">Измените фильтры в боковой панели.</p></div>}
@@ -310,6 +344,8 @@ export default function ChromoffCatalog({
 
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
+          <Select value={selectedPublication || '__unchanged__'} onValueChange={(value) => setSelectedPublication(value === '__unchanged__' ? '' : value as 'published' | 'hidden')}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Публикация Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Chromoff: без изменений</SelectItem><SelectItem value="published">Опубликовать</SelectItem><SelectItem value="hidden">Скрыть</SelectItem></SelectContent></Select>
+          <Button type="button" variant="secondary" onClick={handleBulkPublication} disabled={!selectedPublication || isBulkPublishing || isPending} className="h-10">{isBulkPublishing ? 'Публикация…' : 'Применить Chromoff'}</Button>
           <Select value={selectedGender || '__unchanged__'} onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Пол" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Пол: без изменений</SelectItem><SelectItem value="Для мужчин">Для мужчин</SelectItem><SelectItem value="Для женщин">Для женщин</SelectItem><SelectItem value="Унисекс">Унисекс</SelectItem></SelectContent></Select>
           <Select value={selectedCategory || '__unchanged__'} onValueChange={(value) => { setSelectedCategory(value === '__unchanged__' ? '' : value); setSelectedSubcategory('') }}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Категория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Категория: без изменений</SelectItem>{catalogCategories.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
           <Select value={selectedSubcategory || '__unchanged__'} onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)} disabled={!selectedCategory}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Подкатегория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Подкатегория: без изменений</SelectItem><SelectItem value="__none__">Сбросить подкатегорию</SelectItem>{catalogSubcategories.filter((item) => item.category === selectedCategory).map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>

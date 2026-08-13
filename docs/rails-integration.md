@@ -137,6 +137,7 @@ PATCH  /api/v1/admin/chromoff/categories/:id
 GET    /api/v1/admin/chromoff/listings
 PATCH  /api/v1/admin/chromoff/listings/:id
 DELETE /api/v1/admin/chromoff/listings/:id
+PATCH  /api/v1/admin/chromoff/listings/bulk_update
 ```
 
 Публичная витрина Chromoff получает только опубликованные listings через

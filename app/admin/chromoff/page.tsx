@@ -1,11 +1,17 @@
 import ChromoffCatalog from '@/components/chromoff/ChromoffCatalog'
-import { getRailsCatalogLookups, getRailsProductFilterFacets, listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
+import { getRailsCatalogLookups, listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
 const PAGE_SIZE = 48
+const CHROMOFF_SUPPLIERS = [
+  { id: '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', name: 'CH Одежда' },
+  { id: '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', name: 'CH Одежда, обувь, ремни' },
+  { id: '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ', name: 'CH Ювелирка, сумки, ремни' },
+  { id: '__none__', name: 'Без поставщика' },
+]
 
 type ChromoffSearchParams = {
   page?: string
@@ -16,9 +22,9 @@ type ChromoffSearchParams = {
   maxPrice?: string
   published?: string
   description?: string
-  supplier?: string
   gender?: string
   source?: 'auto' | 'manual'
+  sourceSupplier?: string
   aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
   chromoffCategory?: string
   chromoffSubcategory?: string
@@ -44,9 +50,9 @@ export default async function ChromoffPage({
     minPrice: params.minPrice || '',
     maxPrice: params.maxPrice || '',
     description: params.description || '',
-    supplier: params.supplier || '',
     gender: params.gender || '',
     source: ['auto', 'manual'].includes(params.source || '') ? params.source as 'auto' | 'manual' : undefined,
+    sourceSupplier: CHROMOFF_SUPPLIERS.some((item) => item.id === params.sourceSupplier) ? params.sourceSupplier : '',
     aiStatus: ['ai_assigned', 'mapped', 'needs_review', 'manual'].includes(params.aiStatus || '') ? params.aiStatus as 'ai_assigned' | 'mapped' | 'needs_review' | 'manual' : undefined,
     chromoffCategory: params.chromoffCategory || '',
     chromoffSubcategory: params.chromoffSubcategory || '',
@@ -54,7 +60,7 @@ export default async function ChromoffPage({
   }
 
   try {
-    const [categories, listings, candidates, lookups, facets, attributeDefinitions] = await Promise.all([
+    const [categories, listings, candidates, lookups, attributeDefinitions] = await Promise.all([
       listRailsChromoffCategories(),
       listRailsChromoffListings({
         page,
@@ -64,17 +70,16 @@ export default async function ChromoffPage({
         minPrice: filters.minPrice,
         maxPrice: filters.maxPrice,
         description: filters.description,
-        supplier: filters.supplier,
         productCategoryId: filters.category,
         productSubcategoryId: filters.subcategory,
         gender: filters.gender,
         source: filters.source,
+        sourceSupplierId: filters.sourceSupplier || undefined,
         aiStatus: filters.aiStatus,
         published: filters.published === 'all' ? undefined : filters.published === 'published',
       }),
       listRailsChromoffCandidates(),
       getRailsCatalogLookups(),
-      getRailsProductFilterFacets({}),
       getCatalogAttributeDefinitions(),
     ])
     return (
@@ -86,7 +91,7 @@ export default async function ChromoffPage({
         catalogSubcategories={lookups.subcategories}
         brands={lookups.brands}
         attributeDefinitions={attributeDefinitions}
-        suppliers={(facets.supplierFacets || []).map((item) => ({ id: item.slug, name: item.name || item.slug }))}
+        suppliers={CHROMOFF_SUPPLIERS}
         totalItems={listings.totalItems}
         totalPages={listings.totalPages}
         page={page}
