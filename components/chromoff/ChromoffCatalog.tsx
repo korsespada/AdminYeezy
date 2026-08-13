@@ -160,6 +160,11 @@ export default function ChromoffCatalog({
   const [selectedPublication, setSelectedPublication] = useState<'published' | 'hidden' | ''>('')
   const [gridColumns, setGridColumns] = useState(4)
 
+  useEffect(() => {
+    setListings(initialListings)
+    setSelectedIds([])
+  }, [initialListings])
+
   const products = useMemo(() => listings.map(listingToProduct), [listings])
   const hasBulkUpdates = Boolean(selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate)
   const isCompactGrid = gridColumns >= 5
