@@ -364,6 +364,7 @@ export default function ProductList({
                               .map((variant) => variant.color)
                               .filter((color): color is string => Boolean(color)),
                           ))}
+                          showAttributeSummary={false}
                         />
                       ))}
                     </div>

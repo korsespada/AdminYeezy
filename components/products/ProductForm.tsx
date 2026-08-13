@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import { createProductAction, updateProductAction } from '@/actions/products'
-import { Download, ExternalLink, Settings2, Upload } from 'lucide-react'
+import { Download, ExternalLink, Palette, Settings2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -723,6 +723,40 @@ export default function ProductForm({
                 registryDefinitions={attributeDefinitions}
               />
             </div>
+
+            {product?.color_variants && product.color_variants.length > 1 && (
+              <section className="space-y-3 rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">
+                <div className="flex items-center gap-2">
+                  <Palette className="h-4 w-4 text-violet-300" />
+                  <h3 className="text-sm font-semibold text-violet-100">
+                    Цветовые варианты ({product.color_variants.length})
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {product.color_variants.map((variant) => (
+                    <a
+                      key={variant.id}
+                      href={`${process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://yeezyunique.ru'}/product/${variant.slug || product.slug || ''}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`overflow-hidden rounded-lg border text-left transition hover:border-violet-400 ${variant.current ? 'border-violet-400 bg-violet-500/15' : 'border-slate-700 bg-slate-900/60'}`}
+                    >
+                      <div className="relative aspect-[4/3] bg-slate-950">
+                        {variant.image_url ? (
+                          <Image src={variant.image_url} alt={variant.color || variant.name || ''} fill unoptimized className="object-cover" />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-xs text-slate-600">Нет фото</div>
+                        )}
+                      </div>
+                      <div className="space-y-0.5 p-2">
+                        <div className="truncate text-xs font-semibold text-slate-200">{variant.color || 'Цвет не указан'}</div>
+                        <div className="line-clamp-2 text-[10px] text-slate-500">{variant.name || 'Открыть товар'}</div>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {product?.supplier && (
               <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/50 p-3">

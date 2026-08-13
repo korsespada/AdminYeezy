@@ -17,16 +17,6 @@ import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
 
-function formatPublishedAt(value: unknown) {
-    const date = new Date(String(value || ''));
-    return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' }).format(date);
-}
-
-function formatSupplierPublishedOn(value: unknown) {
-    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
-    return match ? `${match[3]}.${match[2]}.${match[1]}` : '';
-}
-
 interface ProductCardProps {
     product: Product;
     onEdit: (product: Product) => void;
@@ -301,24 +291,6 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     <div className="truncate text-[10px] font-semibold text-indigo-400">
                         {brandLabel}
                     </div>
-                    {product.supplier && (
-                        <div className="flex shrink-0 items-center gap-1.5" title={`Поставщик: ${product.supplier.name}`}>
-                            {product.supplier.avatar_url ? (
-                                <Image
-                                    src={product.supplier.avatar_url}
-                                    alt=""
-                                    width={20}
-                                    height={20}
-                                    unoptimized
-                                    className="h-5 w-5 rounded-full border border-slate-600 object-cover"
-                                />
-                            ) : (
-                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
-                                    {product.supplier.name.slice(0, 1).toUpperCase()}
-                                </span>
-                            )}
-                        </div>
-                    )}
                 </div>
 
                 <div className="mb-1.5">
@@ -328,10 +300,6 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
                 </div>
-                {product.supplier?.name && <div className="mb-1 text-[10px] text-slate-600">Поставщик: {product.supplier.name}</div>}
-                {product.metadata?.supplier_published_on && <div className="mb-1 text-[10px] text-slate-600">Выложен: {formatSupplierPublishedOn(product.metadata.supplier_published_on)}</div>}
-                {(product.published_at || product.metadata?.source_published_at) && <div className="mb-1 text-[10px] text-slate-600">Запушен: {formatPublishedAt(product.published_at || product.metadata?.source_published_at)}</div>}
-
                 {/* Editable Name */}
                 {editingField === 'name' ? (
                     <Input
