@@ -88,6 +88,16 @@ describe('batch workflow CSV compatibility adapter', () => {
         video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
         video_poster_url: 'https://static.yeezyunique.ru/batches/old/item-poster.webp',
       })).toBe(false)
+      const alreadyHostedSource = {
+        external_id: 'item-static',
+        name: 'Товар со статическим видео',
+        attributes: {
+          szwego_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+        },
+      }
+      expect(workflow.needsVideoTransfer(alreadyHostedSource)).toBe(false)
+      expect(workflow.railsUpdatePayload(alreadyHostedSource).product.video_url)
+        .toBe('https://static.yeezyunique.ru/batches/old/item.mp4')
     } finally {
       if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
       else process.env.S3_PUBLIC_DOMAIN = previousDomain

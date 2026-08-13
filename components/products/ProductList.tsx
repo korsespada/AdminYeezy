@@ -11,12 +11,14 @@ import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
 import CategoryBrowser from '@/components/products/CategoryBrowser'
+import MeasurementTemplateBulkPicker from '@/components/products/MeasurementTemplateBulkPicker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import { isPriceOnRequest } from '@/lib/product-pricing'
+import { applyMeasurementTableAttributes, type MeasurementTemplate } from '@/lib/measurement-templates'
 
 interface ProductListProps {
   initialData: Product[]
@@ -64,6 +66,7 @@ export default function ProductList({
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
   const [selectedPrice, setSelectedPrice] = useState('')
+  const [selectedMeasurementTemplate, setSelectedMeasurementTemplate] = useState<MeasurementTemplate | null>(null)
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isNavigationPending, startNavigationTransition] = useTransition()
@@ -147,7 +150,7 @@ export default function ProductList({
   }, [handleNavigation, routeKey])
 
   const hasBulkUpdates = Boolean(
-    selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim(),
+    selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate,
   )
 
   const handleBulkUpdate = async () => {
@@ -167,6 +170,7 @@ export default function ProductList({
     if (selectedSubcategory) updates.subcategory = selectedSubcategory
     if (selectedGender) updates.gender = selectedGender
     if (hasPriceUpdate) updates.price = price
+    if (selectedMeasurementTemplate) updates.measurementTemplate = selectedMeasurementTemplate.measurements
 
     const result = await bulkUpdateProductsAction(selectedProductIds, updates)
     if (!result.success) {
@@ -179,6 +183,9 @@ export default function ProductList({
       if (!selectedProductIds.includes(product.id)) return product
 
       const priceOnRequest = hasPriceUpdate ? isPriceOnRequest(price) : product.price_on_request
+      const catalogAttributes = selectedMeasurementTemplate
+        ? applyMeasurementTableAttributes(product.catalog_attributes || product.attributes || {}, selectedMeasurementTemplate.measurements)
+        : product.catalog_attributes
       return {
         ...product,
         ...(selectedCategory ? { category: selectedCategory } : {}),
@@ -193,6 +200,10 @@ export default function ProductList({
             price_on_request: priceOnRequest,
           },
         } : {}),
+        ...(selectedMeasurementTemplate ? {
+          catalog_attributes: catalogAttributes,
+          attributes: catalogAttributes,
+        } : {}),
         expand: {
           ...product.expand,
           ...(selectedCategory ? { category: undefined } : {}),
@@ -206,6 +217,7 @@ export default function ProductList({
     setSelectedCategory('')
     setSelectedGender('')
     setSelectedPrice('')
+    setSelectedMeasurementTemplate(null)
     router.refresh()
   }
 
@@ -490,6 +502,12 @@ export default function ProductList({
               aria-label="Цена для выбранных товаров"
               placeholder="Цена, ₽"
               className="h-9 w-28 shrink-0 border-slate-600 bg-slate-700 px-2 text-sm text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              disabled={isBulkUpdating || isBulkDeleting}
+            />
+
+            <MeasurementTemplateBulkPicker
+              value={selectedMeasurementTemplate}
+              onChange={setSelectedMeasurementTemplate}
               disabled={isBulkUpdating || isBulkDeleting}
             />
 

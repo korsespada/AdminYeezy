@@ -1,14 +1,17 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { deleteRailsAdminProduct, moveRailsAdminProductToTrash, patchRailsAdminProduct } from '@/lib/rails-admin'
+import { deleteRailsAdminProduct, getRailsAdminProduct, moveRailsAdminProductToTrash, patchRailsAdminProduct } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
+import { applyMeasurementTableAttributes, normalizeMeasurementTable } from '@/lib/measurement-templates'
 
 export interface BulkProductUpdates {
   category?: string
   subcategory?: string
   gender?: string
   price?: number
+  measurementTemplate?: unknown
+  catalog_attributes?: Record<string, any>
 }
 
 export async function bulkUpdateProductsAction(ids: string[], updates: BulkProductUpdates) {
@@ -21,12 +24,29 @@ export async function bulkUpdateProductsAction(ids: string[], updates: BulkProdu
     if (updates.price !== undefined && (!Number.isFinite(updates.price) || updates.price < 0)) {
       return { success: false, error: 'Цена должна быть неотрицательным числом' }
     }
+    const measurementTemplate = updates.measurementTemplate === undefined
+      ? null
+      : normalizeMeasurementTable(updates.measurementTemplate)
+    if (updates.measurementTemplate !== undefined && !measurementTemplate) {
+      return { success: false, error: 'Шаблон размеров пуст или повреждён' }
+    }
 
     // A small concurrency window keeps large selections responsive without
     // flooding the Rails admin API with hundreds of simultaneous requests.
     for (let index = 0; index < uniqueIds.length; index += 5) {
       await Promise.all(
-        uniqueIds.slice(index, index + 5).map((id) => patchRailsAdminProduct(id, updates)),
+        uniqueIds.slice(index, index + 5).map(async (id) => {
+          const productUpdates: BulkProductUpdates = { ...updates }
+          delete productUpdates.measurementTemplate
+
+          if (measurementTemplate) {
+            const current = await getRailsAdminProduct(id)
+            const currentAttributes = current.catalog_attributes || current.attributes || {}
+            productUpdates.catalog_attributes = applyMeasurementTableAttributes(currentAttributes, measurementTemplate)
+          }
+
+          return patchRailsAdminProduct(id, productUpdates)
+        }),
       )
     }
     revalidatePath('/admin')

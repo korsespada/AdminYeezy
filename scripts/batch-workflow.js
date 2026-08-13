@@ -170,7 +170,8 @@ function hostedVideo(product, existingRailsProduct = null) {
     };
   }
   const localVideoUrl = String(attributes.hosted_video_url || '').trim()
-    || (isAlreadyHosted(attributes.video_url) ? String(attributes.video_url).trim() : '');
+    || (isAlreadyHosted(attributes.video_url) ? String(attributes.video_url).trim() : '')
+    || (isAlreadyHosted(attributes.szwego_video_url) ? String(attributes.szwego_video_url).trim() : '');
   const localPosterUrl = String(attributes.hosted_video_poster_url || '').trim()
     || (isAlreadyHosted(attributes.video_poster_url) ? String(attributes.video_poster_url).trim() : '');
   return {
@@ -184,7 +185,7 @@ function sourceVideo(product) {
   const manualUrl = String(attributes.manual_video_url || '').trim();
   if (manualUrl && !isAlreadyHosted(manualUrl)) return manualUrl;
   const sourceUrl = String(attributes.szwego_video_url || '').trim();
-  if (sourceUrl) return sourceUrl;
+  if (sourceUrl && !isAlreadyHosted(sourceUrl)) return sourceUrl;
   const genericUrl = String(attributes.video_url || '').trim();
   return genericUrl && !isAlreadyHosted(genericUrl) ? genericUrl : null;
 }

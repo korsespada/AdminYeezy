@@ -46,14 +46,21 @@ export async function getMeasurementTemplatesAction(supplierId?: number | null) 
   await requireAdmin()
   try {
     const normalizedSupplierId = Number(supplierId)
-    if (!Number.isInteger(normalizedSupplierId) || normalizedSupplierId <= 0) return { success: true, data: [] as MeasurementTemplate[] }
-    const result = await scrapingQuery(`
+    const query = Number.isInteger(normalizedSupplierId) && normalizedSupplierId > 0
+      ? `
       SELECT mt.id,mt.supplier_id,s.name AS supplier_name,mt.name,mt.garment_type,mt.measurements,mt.source_image_url,mt.notes,mt.created_at,mt.updated_at
       FROM measurement_templates mt
       JOIN suppliers s ON s.id=mt.supplier_id
       WHERE mt.supplier_id=$1
       ORDER BY mt.garment_type ASC, mt.name ASC, mt.id ASC
-    `, [normalizedSupplierId])
+    `
+      : `
+      SELECT mt.id,mt.supplier_id,s.name AS supplier_name,mt.name,mt.garment_type,mt.measurements,mt.source_image_url,mt.notes,mt.created_at,mt.updated_at
+      FROM measurement_templates mt
+      JOIN suppliers s ON s.id=mt.supplier_id
+      ORDER BY s.name ASC,mt.garment_type ASC,mt.name ASC,mt.id ASC
+    `
+    const result = await scrapingQuery(query, Number.isInteger(normalizedSupplierId) && normalizedSupplierId > 0 ? [normalizedSupplierId] : [])
     return { success: true, data: result.rows.map(rowToTemplate).filter(Boolean) as MeasurementTemplate[] }
   } catch (error: any) {
     return { success: false, error: error.message, data: [] as MeasurementTemplate[] }

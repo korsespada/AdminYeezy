@@ -620,6 +620,7 @@ export default function CsvImportApp({
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
   const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkMeasurements, setBulkMeasurements] = useState<unknown>(null);
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
   const actionBarRef = useRef<HTMLDivElement | null>(null);
@@ -1565,13 +1566,21 @@ export default function CsvImportApp({
       updates.price = price;
       updates.price_source = "manual";
     }
+    if (bulkMeasurements && selectedForMerge.length > 0) {
+      updates.attributes = applyMeasurementTableAttributes(products[selectedForMerge[0]]?.attributes || {}, bulkMeasurements);
+    }
     if (Object.keys(updates).length === 0 || selectedForMerge.length === 0) return;
 
     setPreviousProducts([...products]);
     setProducts((prev) =>
       {
-        const next = prev.map((product, index) =>
-          selectedForMerge.includes(index) ? { ...product, ...updates } : product,
+        const next = prev.map((product, index) => selectedForMerge.includes(index)
+          ? {
+            ...product,
+            ...updates,
+            ...(bulkMeasurements ? { attributes: applyMeasurementTableAttributes(product.attributes || {}, bulkMeasurements) } : {}),
+          }
+          : product,
         );
         if (batchId) persistBatchProducts(next);
         return next;
@@ -1582,6 +1591,7 @@ export default function CsvImportApp({
     setBulkCategory("");
     setBulkSubcategory("");
     setBulkPrice("");
+    setBulkMeasurements(null);
     setIsDirty(true);
   };
 
@@ -2837,9 +2847,12 @@ export default function CsvImportApp({
                       .map((subcategory) => ({
                         id: subcategory.id,
                         name: subcategory.name,
-                      }))}
+                    }))}
                     placeholder="Подкатегория для выбранных"
                   />
+                  <div className="flex min-h-10 items-center rounded-lg border border-slate-600 bg-slate-900 px-2">
+                    <MeasurementTemplatePicker key={bulkMeasurements ? "selected" : "empty"} supplierId={supplierId} onApply={setBulkMeasurements} />
+                  </div>
                 </div>
               </div>
 
@@ -2869,7 +2882,7 @@ export default function CsvImportApp({
                 </button>
                 <button
                   onClick={handleBulkApply}
-                  disabled={bulkPrice === "" && !bulkBrand && !bulkCategory && !bulkSubcategory}
+                  disabled={bulkPrice === "" && !bulkBrand && !bulkCategory && !bulkSubcategory && !bulkMeasurements}
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:grayscale"
                 >
                   Применить цену и поля
