@@ -2,7 +2,35 @@
 
 import { revalidatePath } from 'next/cache'
 import { buildChromoffImportPayload } from '@/lib/chromoff-source'
-import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
+
+export async function deleteChromoffListingAction(id: string) {
+  const listingId = String(id || '').trim()
+  if (!listingId) return { success: false, message: 'Не указан товар Chromoff.' }
+
+  try {
+    await deleteRailsChromoffListing(listingId)
+    revalidatePath('/admin/chromoff')
+    return { success: true, message: 'Товар удалён из Chromoff.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось удалить товар из Chromoff.' }
+  }
+}
+
+export async function deleteChromoffListingsAction(ids: string[]) {
+  const listingIds = [...new Set(ids.map(String).map((value) => value.trim()).filter(Boolean))]
+  if (!listingIds.length) return { success: false, message: 'Не выбраны карточки Chromoff.' }
+
+  try {
+    for (const listingId of listingIds) {
+      await deleteRailsChromoffListing(listingId)
+    }
+    revalidatePath('/admin/chromoff')
+    return { success: true, deleted: listingIds.length, message: 'Товары удалены из Chromoff.' }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось удалить товары из Chromoff.' }
+  }
+}
 
 export async function setChromoffListingPublishedAction(formData: FormData) {
   const id = String(formData.get('id') || '').trim()

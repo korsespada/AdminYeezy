@@ -8,8 +8,8 @@ import type { Brand, Category, Product, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { getProductAction } from '@/actions/products'
-import { bulkDeleteProductsAction, bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
-import { createChromoffListingAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
+import { bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
+import { createChromoffListingAction, deleteChromoffListingAction, deleteChromoffListingsAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
 import ProductCard from '@/components/products/ProductCard'
 import ProductForm from '@/components/products/ProductForm'
 import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chromoff/ChromoffSidebar'
@@ -36,7 +36,7 @@ interface ChromoffCatalogProps {
 }
 
 function listingProductId(listing: RailsChromoffListing) {
-  return String(listing.product_id || '').trim()
+  return String(listing.product_id || listing.id || '').trim()
 }
 
 function listingToProduct(listing: RailsChromoffListing): Product {
@@ -220,10 +220,11 @@ export default function ChromoffCatalog({
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Переместить этот товар в корзину?')) return
-    const result = await (await import('@/actions/products')).deleteProductAction(id)
-    if (result.success) setListings((current) => current.filter((listing) => listingProductId(listing) !== id))
-    else window.alert(result.error || 'Не удалось переместить товар в корзину')
+    const listing = listings.find((item) => listingProductId(item) === id)
+    if (!listing || !confirm('Удалить этот товар из Chromoff?')) return
+    const result = await deleteChromoffListingAction(listing.id)
+    if (result.success) setListings((current) => current.filter((item) => item.id !== listing.id))
+    else window.alert(result.message || 'Не удалось удалить товар из Chromoff')
   }
 
   const handleBulkUpdate = async () => {
@@ -260,13 +261,16 @@ export default function ChromoffCatalog({
   }
 
   const handleBulkDelete = async () => {
-    if (!confirm(`Переместить ${selectedIds.length} товаров в корзину?`)) return
+    const selectedListingIds = listings
+      .filter((listing) => selectedIds.includes(listingProductId(listing)))
+      .map((listing) => listing.id)
+    if (!selectedListingIds.length || !confirm(`Удалить ${selectedListingIds.length} товаров из Chromoff?`)) return
     setIsBulkDeleting(true)
-    const result = await bulkDeleteProductsAction(selectedIds)
+    const result = await deleteChromoffListingsAction(selectedListingIds)
     if (result.success) {
-      setListings((current) => current.filter((listing) => !selectedIds.includes(listingProductId(listing))))
+      setListings((current) => current.filter((listing) => !selectedListingIds.includes(listing.id)))
       setSelectedIds([])
-    } else window.alert(result.error || 'Не удалось переместить товары в корзину')
+    } else window.alert(result.message || 'Не удалось удалить товары из Chromoff')
     setIsBulkDeleting(false)
   }
 
@@ -388,7 +392,7 @@ export default function ChromoffCatalog({
           <Select value={selectedCategory || '__unchanged__'} onValueChange={(value) => { setSelectedCategory(value === '__unchanged__' ? '' : value); setSelectedSubcategory('') }}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Категория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Категория: без изменений</SelectItem>{catalogCategories.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
           <Select value={selectedSubcategory || '__unchanged__'} onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)} disabled={!selectedCategory}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Подкатегория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Подкатегория: без изменений</SelectItem><SelectItem value="__none__">Сбросить подкатегорию</SelectItem>{catalogSubcategories.filter((item) => item.category === selectedCategory).map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>
           <Input type="number" min="0" value={selectedPrice} onChange={(event) => setSelectedPrice(event.target.value)} placeholder="Цена, ₽" className="h-10 bg-slate-700 text-slate-200" />
-          <Button type="button" onClick={handleBulkUpdate} disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting} className="h-10">{isBulkUpdating ? 'Обновление…' : 'Применить'}</Button><Button type="button" variant="destructive" size="icon" onClick={handleBulkDelete} disabled={isBulkUpdating || isBulkDeleting} className="h-10 w-10" title="В корзину"><Trash2 className="h-4 w-4" /></Button>
+          <Button type="button" onClick={handleBulkUpdate} disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting} className="h-10">{isBulkUpdating ? 'Обновление…' : 'Применить'}</Button><Button type="button" variant="destructive" size="icon" onClick={handleBulkDelete} disabled={isBulkUpdating || isBulkDeleting} className="h-10 w-10" title="Удалить из Chromoff"><Trash2 className="h-4 w-4" /></Button>
         </div></div>
       </div>
 

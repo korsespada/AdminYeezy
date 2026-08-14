@@ -4,6 +4,7 @@ import {
   approveRailsCrmRefund,
   approveRailsCrmWalletWithdrawal,
   buildRailsAdminProductsParams,
+  deleteRailsChromoffListing,
   getRailsCatalogLookupFacets,
   getRailsProductFilterFacets,
   listRailsCrmCustomers,
@@ -71,6 +72,22 @@ describe('rails admin product adapter', () => {
     })
 
     expect(params.get('q')).toBe('ext-1')
+  })
+
+  it('deletes only the Chromoff listing through the listing endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteRailsChromoffListing('listing-1')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(String(url)).toBe('https://rails.example.test/api/v1/admin/chromoff/listings/listing-1')
+    expect(init.method).toBe('DELETE')
+    expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
   it('maps the product name filter to the Rails text search parameter', () => {

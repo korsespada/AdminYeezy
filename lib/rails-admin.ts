@@ -907,6 +907,12 @@ export async function updateRailsChromoffListing(id: string, input: {
   return result.listing
 }
 
+export async function deleteRailsChromoffListing(id: string) {
+  await railsFetch(`/admin/chromoff/listings/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function bulkUpdateRailsChromoffListingsPublished(listingIds: string[], published: boolean) {
   const result = await railsFetch<{ updated: number; published: boolean }>('/admin/chromoff/listings/bulk_update', {
     method: 'PATCH',
