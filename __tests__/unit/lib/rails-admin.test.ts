@@ -37,6 +37,7 @@ describe('rails admin product adapter', () => {
       brand: 'brand-id',
       category: 'category-id',
       subcategory: 'subcategory-id',
+      subcategoryMissing: true,
       gender: 'Унисекс',
       genderExact: true,
       status: 'archived',
@@ -52,7 +53,9 @@ describe('rails admin product adapter', () => {
     expect(params.get('price_min')).toBe('0')
     expect(params.get('price_max')).toBe('125099')
     expect(params.get('brand')).toBe('brand-id')
-    expect(params.get('category')).toBe('subcategory-id')
+    expect(params.get('category')).toBe('category-id')
+    expect(params.get('subcategory')).toBe('subcategory-id')
+    expect(params.get('subcategory_missing')).toBe('true')
     expect(params.get('gender')).toBe('Унисекс')
     expect(params.get('gender_exact')).toBe('true')
     expect(params.get('status')).toBe('archived')
@@ -421,16 +424,16 @@ describe('rails admin product adapter', () => {
   it('loads filter facets while excluding the current facet dimension', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)
-      const hasBrand = requestUrl.searchParams.has('brand')
-      const hasCategory = requestUrl.searchParams.has('category')
+      const excluded = requestUrl.searchParams.get('exclude')
       const gender = requestUrl.searchParams.get('gender')
 
       return {
         ok: true,
         json: async () => ({
           facets: {
-            brands: [{ slug: hasBrand ? 'unexpected' : 'gucci', name: 'Gucci', count: 2 }],
-            categories: [{ slug: hasCategory ? 'bags-child' : 'bags-parent', name: 'Сумки', count: 3 }],
+            brands: [{ slug: excluded === 'brand' ? 'gucci' : 'unexpected', name: 'Gucci', count: 2 }],
+            suppliers: [{ slug: excluded === 'supplier' ? 'supplier-a' : 'unexpected', name: 'Supplier A', count: 5 }],
+            categories: [{ slug: excluded === 'category' ? 'bags-parent' : 'bags-child', name: 'Сумки', count: 3 }],
             genders: gender === 'unisex' ? [] : [{ value: 'female', count: 4 }],
             sizes: [{ value: 'M', count: 3 }],
           },
@@ -447,6 +450,7 @@ describe('rails admin product adapter', () => {
       category: 'bags-parent',
       subcategory: 'bags-child',
       gender: 'female',
+      status: 'active',
     })
 
     expect(result.brandFacets).toEqual([{ slug: 'gucci', name: 'Gucci', count: 2 }])
@@ -454,37 +458,53 @@ describe('rails admin product adapter', () => {
     expect(result.subcategoryFacets).toEqual([{ slug: 'bags-child', name: 'Сумки', count: 3 }])
     expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }, { value: 'unisex', count: 2 }])
     expect(result.attributeFacets?.sizes).toEqual([{ value: 'M', count: 3 }])
-    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(fetchMock).toHaveBeenCalledTimes(7)
 
     const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
-    expect(calls[0].get('brand')).toBeNull()
-    expect(calls[0].get('category')).toBe('bags-child')
+    expect(calls[0].get('exclude')).toBe('brand')
+    expect(calls[0].get('category')).toBe('bags-parent')
+    expect(calls[0].get('subcategory')).toBe('bags-child')
     expect(calls[0].get('gender')).toBe('female')
+    expect(calls[0].get('status')).toBe('active')
+    expect(calls[1].get('exclude')).toBe('category')
     expect(calls[1].get('brand')).toBe('gucci')
     expect(calls[1].get('category')).toBeNull()
     expect(calls[1].get('gender')).toBe('female')
+    expect(calls[2].get('exclude')).toBe('subcategory')
     expect(calls[2].get('brand')).toBe('gucci')
     expect(calls[2].get('category')).toBe('bags-parent')
+    expect(calls[2].get('subcategory')).toBeNull()
     expect(calls[2].get('gender')).toBe('female')
+    expect(calls[3].get('exclude')).toBe('supplier')
     expect(calls[3].get('brand')).toBe('gucci')
-    expect(calls[3].get('category')).toBe('bags-child')
-    expect(calls[3].get('gender')).toBeNull()
+    expect(calls[3].get('category')).toBe('bags-parent')
+    expect(calls[3].get('subcategory')).toBe('bags-child')
+    expect(calls[3].get('supplier')).toBeNull()
+    expect(calls[4].get('exclude')).toBe('gender')
     expect(calls[4].get('brand')).toBe('gucci')
-    expect(calls[4].get('category')).toBe('bags-child')
-    expect(calls[4].get('gender')).toBe('unisex')
-    expect(calls[5].get('attribute_key')).toBeNull()
-    expect(calls[5].get('attribute_value')).toBeNull()
+    expect(calls[4].get('category')).toBe('bags-parent')
+    expect(calls[4].get('subcategory')).toBe('bags-child')
+    expect(calls[4].get('gender')).toBeNull()
+    expect(calls[5].get('exclude')).toBe('gender')
+    expect(calls[5].get('brand')).toBe('gucci')
+    expect(calls[5].get('category')).toBe('bags-parent')
+    expect(calls[5].get('subcategory')).toBe('bags-child')
+    expect(calls[5].get('gender')).toBe('unisex')
+    expect(calls[6].get('exclude')).toBe('attribute')
+    expect(calls[6].get('attribute_key')).toBeNull()
+    expect(calls[6].get('attribute_value')).toBeNull()
   })
 
   it('loads only catalog lookup facets for the attribute review filters', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const params = new URL(url).searchParams
+      const excluded = params.get('exclude')
       return {
         ok: true,
         json: async () => ({
           facets: {
-            brands: [{ slug: params.has('brand') ? 'selected' : 'gucci', count: 2 }],
-            categories: [{ slug: params.has('category') ? 'child' : 'bags', count: 3 }],
+            brands: [{ slug: excluded === 'brand' ? 'gucci' : 'unexpected', count: 2 }],
+            categories: [{ slug: excluded === 'category' ? 'bags' : 'child', count: 3 }],
           },
           products: [],
           meta: { total: 3, pages: 1 },
@@ -507,9 +527,13 @@ describe('rails admin product adapter', () => {
 
     const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
     expect(calls[0].get('brand')).toBeNull()
-    expect(calls[0].get('category')).toBe('child')
+    expect(calls[0].get('exclude')).toBe('brand')
+    expect(calls[0].get('category')).toBe('bags')
+    expect(calls[0].get('subcategory')).toBe('child')
+    expect(calls[1].get('exclude')).toBe('category')
     expect(calls[1].get('brand')).toBe('gucci')
     expect(calls[1].get('category')).toBeNull()
+    expect(calls[2].get('exclude')).toBe('subcategory')
     expect(calls[2].get('brand')).toBe('gucci')
     expect(calls[2].get('category')).toBe('bags')
   })

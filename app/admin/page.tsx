@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 
 const PRODUCT_PAGE_SIZES = [40, 100, 500]
+const PRODUCT_STATUSES = ['active', 'hidden', 'draft', 'archived'] as const
 type AdminSearchParams = {
   page?: string
   search?: string
@@ -19,6 +20,7 @@ type AdminSearchParams = {
   category?: string
   subcategory?: string
   gender?: string
+  status?: string
   attributeKey?: string
   attributeValue?: string
   perPage?: string
@@ -45,6 +47,10 @@ export default async function AdminPage({
   const categoryFilter = params.category || ''
   const subcategoryFilter = params.subcategory || ''
   const genderFilter = params.gender || ''
+  const statusFilter = PRODUCT_STATUSES.includes(params.status as typeof PRODUCT_STATUSES[number])
+    ? params.status as typeof PRODUCT_STATUSES[number]
+    : ''
+  const categoryMissing = categoryFilter === '__none__'
   const attributeKeyFilter = params.attributeKey || ''
   const attributeValueFilter = attributeKeyFilter ? params.attributeValue || '' : ''
   const hasActiveFilters = Boolean(
@@ -57,6 +63,7 @@ export default async function AdminPage({
     || categoryFilter
     || subcategoryFilter
     || genderFilter
+    || statusFilter
     || attributeKeyFilter
     || attributeValueFilter
   )
@@ -73,6 +80,7 @@ export default async function AdminPage({
     if (categoryFilter) params.set('category', categoryFilter)
     if (subcategoryFilter) params.set('subcategory', subcategoryFilter)
     if (genderFilter) params.set('gender', genderFilter)
+    if (statusFilter) params.set('status', statusFilter)
     if (attributeKeyFilter) params.set('attributeKey', attributeKeyFilter)
     if (attributeValueFilter) params.set('attributeValue', attributeValueFilter)
     if (perPage !== 40) params.set('perPage', perPage.toString())
@@ -82,7 +90,7 @@ export default async function AdminPage({
   try {
     const { brands, categories, subcategories } = await getRailsCatalogLookups()
     const brandSlug = brands.find((brand) => brand.id === brandFilter)?.slug || brandFilter
-    const categorySlug = categories.find((category) => category.id === categoryFilter)?.slug || categoryFilter
+    const categorySlug = categories.find((category) => category.id === categoryFilter)?.slug || (categoryMissing ? '' : categoryFilter)
     const subcategorySlug = subcategories.find((subcategory) => subcategory.id === subcategoryFilter)?.slug || subcategoryFilter
     const genderParam = genderFilter === 'Для мужчин'
       ? 'male'
@@ -101,11 +109,14 @@ export default async function AdminPage({
       priceMax,
       brand: brandSlug,
       supplier: supplierFilter,
-      category: categorySlug,
-      subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
+      category: categoryMissing ? '' : categorySlug,
+      categoryMissing,
+      subcategory: categoryMissing || subcategoryFilter === '__none__' ? '' : subcategorySlug,
+      subcategoryMissing: subcategoryFilter === '__none__',
       gender: genderFilter === '__none__' ? '' : genderParam,
       genderExact: Boolean(genderParam && genderFilter !== '__none__'),
       noGender: genderFilter === '__none__',
+      status: statusFilter || undefined,
       attributeKey: attributeKeyFilter,
       attributeValue: attributeValueFilter,
     }
@@ -121,11 +132,14 @@ export default async function AdminPage({
         priceMax,
         brand: brandSlug,
         supplier: supplierFilter,
-        category: categorySlug,
-        subcategory: subcategoryFilter === '__none__' ? '' : subcategorySlug,
+        category: categoryMissing ? '' : categorySlug,
+        categoryMissing,
+        subcategory: categoryMissing || subcategoryFilter === '__none__' ? '' : subcategorySlug,
+        subcategoryMissing: subcategoryFilter === '__none__',
         gender: genderFilter === '__none__' ? '' : genderParam,
         genderExact: Boolean(genderParam && genderFilter !== '__none__'),
         noGender: genderFilter === '__none__',
+        status: statusFilter || undefined,
         attributeKey: attributeKeyFilter,
         attributeValue: attributeValueFilter,
       }),
@@ -150,6 +164,7 @@ export default async function AdminPage({
       categoryFilter,
       subcategoryFilter,
       genderFilter,
+      statusFilter,
       attributeKeyFilter,
       attributeValueFilter,
     ].join('\u001f')

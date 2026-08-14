@@ -16,6 +16,13 @@ import {
     type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
 
+const PRODUCT_STATUS_OPTIONS = [
+    { value: 'active', label: 'Активные' },
+    { value: 'hidden', label: 'Скрытые' },
+    { value: 'draft', label: 'Черновики' },
+    { value: 'archived', label: 'Архивные' },
+] as const
+
 interface SidebarProps {
     brands: Brand[]
     categories: Category[]
@@ -61,6 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
     const currentGender = searchParams.get('gender') || ''
+    const currentStatus = searchParams.get('status') || ''
     const currentName = searchParams.get('name') || searchParams.get('search') || ''
     const currentDescription = searchParams.get('description') || ''
     const currentPriceMin = searchParams.get('priceMin') || ''
@@ -68,7 +76,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     const currentAttributeKey = searchParams.get('attributeKey') || ''
     const currentAttributeValue = searchParams.get('attributeValue') || ''
     const hasActiveFilters = Boolean(
-        currentBrand || currentSupplier || currentCategory || currentSubcategory || currentGender || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
+        currentBrand || currentSupplier || currentCategory || currentSubcategory || currentGender || currentStatus || currentName || currentDescription || currentPriceMin || currentPriceMax || currentAttributeKey || currentAttributeValue
     )
 
     useEffect(() => {
@@ -269,7 +277,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         isFacetAvailable(facetState.categoryCounts, category.id, currentCategory)
     )
 
-    const availableSubcategories = currentCategory
+    const availableSubcategories = currentCategory && currentCategory !== '__none__'
         ? subcategories
             .filter(sub => sub.category === currentCategory)
             .filter(sub => isFacetAvailable(facetState.subcategoryCounts, sub.id, currentSubcategory))
@@ -279,7 +287,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         const registryByCode = new Map(attributeDefinitions.map((item) => [item.code, item]))
         const categoryName = categories.find((item) => item.id === currentCategory)?.name || ''
         const subcategoryName = subcategories.find((item) => item.id === currentSubcategory)?.name || ''
-        const categoryDefinitions = currentCategory
+        const categoryDefinitions = currentCategory && currentCategory !== '__none__'
             ? getCatalogAttributeDefinitionsForCategory(categoryName, subcategoryName)
                 .map((definition) => ({ ...definition, ...registryByCode.get(definition.code) }))
             : attributeDefinitions
@@ -318,6 +326,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     const noGenderCount = useMemo(() => {
         if (!filterFacets) return undefined
+        if (filterFacets.missingGenderCount !== undefined) return Number(filterFacets.missingGenderCount || 0)
         const missingFacet = filterFacets.genderFacets.find(facet => {
             const value = String(facet.value ?? '').toLowerCase()
             return value === '' || value === '__none__' || value === 'missing' || value === 'none' || value === 'null'
@@ -421,6 +430,25 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </Button>
                         </form>
 
+                        {/* Product status filter */}
+                        <div>
+                            <Label className="mb-2 block text-slate-300">Статус товара</Label>
+                            <Select
+                                value={currentStatus || '__all__'}
+                                onValueChange={(value) => applyFilter('status', value === '__all__' ? null : value)}
+                            >
+                                <SelectTrigger aria-label="Статус товара" className="bg-slate-700 text-slate-200">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="__all__">Все, кроме архивных</SelectItem>
+                                    {PRODUCT_STATUS_OPTIONS.map((option) => (
+                                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
                         {/* Price Filter */}
                         <div>
                             <Label className="mb-2 block text-slate-300">Цена</Label>
@@ -520,6 +548,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 </SelectTrigger>
                                 <SelectContent>
                                 <SelectItem value="__all__">Все категории</SelectItem>
+                                {(filterFacets?.missingCategoryCount || 0) > 0 || currentCategory === '__none__' ? (
+                                    <SelectItem value="__none__">Без категории</SelectItem>
+                                ) : null}
                                 {availableCategories.map(cat => (
                                     <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                                 ))}
@@ -530,17 +561,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                         {/* Subcategory Filter (Conditional) */}
                         <div>
                             <Label className="mb-2 block text-slate-300">Подкатегория</Label>
-                            <Select
-                                value={currentSubcategory || '__all__'}
-                                onValueChange={(value) => applyFilter('subcategory', value === '__all__' ? null : value)}
-                                disabled={!currentCategory}
+                                <Select
+                                    value={currentSubcategory || '__all__'}
+                                    onValueChange={(value) => applyFilter('subcategory', value === '__all__' ? null : value)}
+                                disabled={!currentCategory || currentCategory === '__none__'}
                             >
                                 <SelectTrigger aria-label="Подкатегория" className="bg-slate-700 text-slate-200">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                 <SelectItem value="__all__">Все подкатегории</SelectItem>
-                                <SelectItem value="__none__">Без подкатегории</SelectItem>
+                                {(filterFacets?.missingSubcategoryCount || 0) > 0 || currentSubcategory === '__none__' ? (
+                                    <SelectItem value="__none__">Без подкатегории</SelectItem>
+                                ) : null}
                                 {availableSubcategories.map(sub => (
                                     <SelectItem key={sub.id} value={sub.id}>
                                         {sub.name}
@@ -568,7 +601,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     { value: 'Для женщин', label: 'Женщинам' },
                                     { value: 'Унисекс', label: 'Унисекс' },
                                     { value: '__none__', label: 'Без гендера' },
-                                ].map(option => (
+                                ].filter((option) => option.value !== '__none__' || (noGenderCount || 0) > 0 || currentGender === '__none__').map(option => (
                                     <Button
                                         key={option.value}
                                         type="button"

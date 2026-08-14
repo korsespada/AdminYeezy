@@ -58,6 +58,9 @@ export interface ProductFilterFacets {
   categoryFacets: CatalogSlugFacet[]
   subcategoryFacets: CatalogSlugFacet[]
   genderFacets: CatalogValueFacet[]
+  missingCategoryCount?: number
+  missingSubcategoryCount?: number
+  missingGenderCount?: number
   attributeFacets?: Record<string, CatalogValueFacet[]>
 }
 

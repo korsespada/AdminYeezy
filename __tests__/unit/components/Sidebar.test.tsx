@@ -83,7 +83,10 @@ const filterFacets: ProductFilterFacets = {
     { slug: 'totes', name: 'Шопперы', count: 3 },
     { slug: 'crossbody', name: 'Кросс-боди', count: 2 },
   ],
+  missingCategoryCount: 1,
+  missingSubcategoryCount: 1,
   genderFacets: [{ value: null, count: 3 }],
+  missingGenderCount: 3,
   attributeFacets: {
     colors: [{ value: 'gray', count: 3 }],
   },
@@ -172,6 +175,33 @@ describe('Sidebar faceted filters', () => {
     })
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?priceMin=0')
+  })
+
+  it('filters products by status', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    renderSidebar({ onNavigate })
+
+    await user.click(screen.getByRole('combobox', { name: 'Статус товара' }))
+    await user.click(screen.getByRole('option', { name: 'Архивные' }))
+
+    expect(onNavigate).toHaveBeenCalledWith('/admin?status=archived')
+  })
+
+  it('filters products without category or subcategory', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+
+    renderSidebar({ onNavigate })
+    await user.click(screen.getByRole('combobox', { name: 'Категория' }))
+    await user.click(screen.getByRole('option', { name: 'Без категории' }))
+    expect(onNavigate).toHaveBeenCalledWith('/admin?category=__none__')
+
+    navigationMock.searchParams = new URLSearchParams('category=bags-id')
+    renderSidebar({ onNavigate })
+    await user.click(screen.getAllByRole('combobox', { name: 'Подкатегория' }).at(-1)!)
+    await user.click(screen.getByRole('option', { name: 'Без подкатегории' }))
+    expect(onNavigate).toHaveBeenCalledWith('/admin?category=bags-id&subcategory=__none__')
   })
 
   it('runs text search only after clicking the search button', async () => {

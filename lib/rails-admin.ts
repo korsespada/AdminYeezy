@@ -1007,6 +1007,8 @@ export async function listRailsAdminProducts(options: {
   supplier?: string
   category?: string
   subcategory?: string
+  categoryMissing?: boolean
+  subcategoryMissing?: boolean
   gender?: string
   genderExact?: boolean
   status?: Product['status']
@@ -1043,13 +1045,17 @@ async function listRailsAdminProductsInChunks(options: {
   priceMin?: string | number
   priceMax?: string | number
   brand?: string
+  supplier?: string
   category?: string
   subcategory?: string
+  categoryMissing?: boolean
+  subcategoryMissing?: boolean
   gender?: string
   genderExact?: boolean
   status?: Product['status']
   attributeKey?: string
   attributeValue?: string
+  noGender?: boolean
 }) {
   const requestedOffset = (options.page - 1) * options.perPage
   const firstSourcePage = Math.floor(requestedOffset / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) + 1
@@ -1527,6 +1533,7 @@ export async function createRailsSeoAiBatch(input: {
   brand?: string
   category?: string
   subcategory?: string
+  subcategoryMissing?: boolean
   gender?: string
   status?: string
   missingSeoOnly?: boolean
@@ -1853,6 +1860,8 @@ export function buildRailsAdminProductsParams(options: {
   supplier?: string
   category?: string
   subcategory?: string
+  categoryMissing?: boolean
+  subcategoryMissing?: boolean
   gender?: string
   status?: Product['status']
   noGender?: boolean
@@ -1876,7 +1885,10 @@ export function buildRailsAdminProductsParams(options: {
   if (priceMax) params.set('price_max', priceMax)
   if (options.brand) params.set('brand', options.brand)
   if (options.supplier) params.set('supplier', options.supplier)
-  if (options.category || options.subcategory) params.set('category', options.subcategory || options.category || '')
+  if (options.category) params.set('category', options.category)
+  if (options.categoryMissing) params.set('category_missing', 'true')
+  if (options.subcategory) params.set('subcategory', options.subcategory)
+  if (options.subcategoryMissing) params.set('subcategory_missing', 'true')
   if (options.genderMissing || options.noGender) {
     params.set('gender_missing', 'true')
   } else if (options.gender) {
@@ -1943,9 +1955,12 @@ type ProductFacetFilters = {
   supplier?: string
   category?: string
   subcategory?: string
+  categoryMissing?: boolean
+  subcategoryMissing?: boolean
   gender?: string
   genderExact?: boolean
   noGender?: boolean
+  status?: Product['status']
   attributeKey?: string
   attributeValue?: string
 }
@@ -1960,10 +1975,13 @@ type RailsProductFacetPayload = {
   }
   meta?: {
     total?: number
+    missing_category_count?: number
+    missing_subcategory_count?: number
+    missing_gender_count?: number
   }
 }
 
-async function fetchRailsProductFacets(options: ProductFacetFilters) {
+async function fetchRailsProductFacets(options: ProductFacetFilters, exclude?: string) {
   options = {
     ...options,
     category: await resolveCategoryFilterSlug(options.category),
@@ -1979,7 +1997,8 @@ async function fetchRailsProductFacets(options: ProductFacetFilters) {
     attributeKey: options.attributeKey,
     attributeValue: options.attributeValue,
   })
-  return publicRailsFetch<RailsProductFacetPayload>(`/catalog/products?${params}`)
+  if (exclude) params.set('exclude', exclude)
+  return railsFetch<RailsProductFacetPayload>(`/admin/products/facets?${params}`)
 }
 
 export async function getRailsCatalogLookupFacets(filters: Pick<
@@ -1991,16 +2010,16 @@ export async function getRailsCatalogLookupFacets(filters: Pick<
       search: filters.search,
       category: filters.category,
       subcategory: filters.subcategory,
-    }),
+    }, 'brand'),
     fetchRailsProductFacets({
       search: filters.search,
       brand: filters.brand,
-    }),
+    }, 'category'),
     fetchRailsProductFacets({
       search: filters.search,
       brand: filters.brand,
       category: filters.category,
-    }),
+    }, 'subcategory'),
   ])
 
   return {
@@ -2022,56 +2041,80 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
     attributeKey: filters.attributeKey,
     attributeValue: filters.attributeValue,
     supplier: filters.supplier,
+    categoryMissing: filters.categoryMissing,
+    status: filters.status,
   }
 
-  const [brandPayload, categoryPayload, subcategoryPayload, genderPayload, unisexPayload, attributePayload] = await Promise.all([
+  const [brandPayload, categoryPayload, subcategoryPayload, supplierPayload, genderPayload, unisexPayload, attributePayload] = await Promise.all([
     fetchRailsProductFacets({
       ...sharedFilters,
       category: filters.category,
+      categoryMissing: filters.categoryMissing,
       subcategory: filters.subcategory,
+      subcategoryMissing: filters.subcategoryMissing,
       gender: filters.gender,
       genderExact: filters.genderExact,
       noGender: filters.noGender,
-    }),
+    }, 'brand'),
     fetchRailsProductFacets({
       ...sharedFilters,
       brand: filters.brand,
       gender: filters.gender,
       genderExact: filters.genderExact,
       noGender: filters.noGender,
-    }),
+    }, 'category'),
     fetchRailsProductFacets({
       ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
+      categoryMissing: filters.categoryMissing,
+      subcategoryMissing: false,
       gender: filters.gender,
       genderExact: filters.genderExact,
       noGender: filters.noGender,
-    }),
+    }, 'subcategory'),
+    fetchRailsProductFacets({
+      ...sharedFilters,
+      supplier: undefined,
+      brand: filters.brand,
+      category: filters.category,
+      categoryMissing: filters.categoryMissing,
+      subcategory: filters.subcategory,
+      subcategoryMissing: filters.subcategoryMissing,
+      gender: filters.gender,
+      genderExact: filters.genderExact,
+      noGender: filters.noGender,
+    }, 'supplier'),
     fetchRailsProductFacets({
       ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
+      categoryMissing: filters.categoryMissing,
       subcategory: filters.subcategory,
-    }),
+      subcategoryMissing: filters.subcategoryMissing,
+    }, 'gender'),
     fetchRailsProductFacets({
       ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
+      categoryMissing: filters.categoryMissing,
       subcategory: filters.subcategory,
+      subcategoryMissing: filters.subcategoryMissing,
       gender: 'unisex',
-    }),
+    }, 'gender'),
     fetchRailsProductFacets({
       ...sharedFilters,
       brand: filters.brand,
       category: filters.category,
+      categoryMissing: filters.categoryMissing,
       subcategory: filters.subcategory,
+      subcategoryMissing: filters.subcategoryMissing,
       gender: filters.gender,
       genderExact: filters.genderExact,
       noGender: filters.noGender,
       attributeKey: '',
       attributeValue: '',
-    }),
+    }, 'attribute'),
   ])
 
   const genderFacets = [...(genderPayload.facets?.genders || [])]
@@ -2082,10 +2125,13 @@ export async function getRailsProductFilterFacets(filters: ProductFacetFilters):
 
   return {
     brandFacets: brandPayload.facets?.brands || [],
-    supplierFacets: brandPayload.facets?.suppliers || [],
+    supplierFacets: supplierPayload.facets?.suppliers || [],
     categoryFacets: categoryPayload.facets?.categories || [],
     subcategoryFacets: subcategoryPayload.facets?.categories || [],
     genderFacets,
+    missingCategoryCount: Number(categoryPayload.meta?.missing_category_count || 0),
+    missingSubcategoryCount: Number(subcategoryPayload.meta?.missing_subcategory_count || 0),
+    missingGenderCount: Number(genderPayload.meta?.missing_gender_count || 0),
     attributeFacets: Object.fromEntries(
       CATALOG_ATTRIBUTE_DEFINITIONS.map((definition) => [
         definition.code,

@@ -39,6 +39,7 @@ HttpOnly cookie `admin_token`. При отсутствии или истечен
 
 ```text
 GET    /api/v1/admin/products
+GET    /api/v1/admin/products/facets
 GET    /api/v1/admin/products/:id
 POST   /api/v1/admin/products
 PATCH  /api/v1/admin/products/:id
@@ -46,6 +47,19 @@ DELETE /api/v1/admin/products/:id
 DELETE /api/v1/admin/products/:id/force_destroy
 POST   /api/v1/admin/products/:id/reindex
 ```
+
+Список и фасеты админского каталога используют один scope: архивные товары
+исключаются по умолчанию, а явный `status=archived` используется для просмотра
+архивных товаров (в том числе в корзине).
+Админский список также принимает `status=active|hidden|draft|archived` для
+переключения между статусами; без параметра показываются все товары, кроме
+архивных.
+`category` включает дочерние категории, `subcategory` выбирает одну точную
+категорию, а `subcategory_missing=true` оставляет только товары, назначенные
+непосредственно родительской категории. `category_missing=true` выбирает товары
+без категории. Для фильтров пола `gender_exact=true`
+исключает `unisex`; без этого флага мужской и женский фильтры могут включать
+унисекс-товары, а `gender_missing=true` выбирает товары без гендера.
 
 Scraping-товары внутри партий продолжают жить в `yeezy_scraping.products` до публикации.
 
