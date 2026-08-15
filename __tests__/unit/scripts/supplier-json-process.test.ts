@@ -290,6 +290,38 @@ describe('supplier JSON post-process contract', () => {
     ])
   })
 
+  it('puts the richer following product album before its preceding close-up detail album', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'closeups', description: '26a 口盖小波点 款号：AS6513 尺寸：15x25.5x6.5cm',
+        photos: Array.from({ length: 9 }, (_, index) => `closeup-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: ['26a 口盖小波点'] },
+      },
+      {
+        external_id: 'main', description: '26a 口盖小波点 托斯卡纳羊皮搭配黑色波点，毛绒手感柔软，复古氛围浓郁。',
+        photos: ['main-1.jpg', 'main-2.jpg', 'main-3.jpg', 'main-4.jpg'], source_position: 1,
+        attributes: { szwego_tags: ['26a 口盖小波点'] },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].photos).toEqual([
+      'main-1.jpg', 'main-2.jpg', 'main-3.jpg', 'main-4.jpg',
+      ...Array.from({ length: 9 }, (_, index) => `closeup-${index}.jpg`),
+    ])
+    expect(result[0].description.startsWith('26a 口盖小波点 托斯卡纳羊皮')).toBe(true)
+  })
+
+  it('drops Chanel first-version and material-progress posts instead of listing them as products', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      { external_id: 'first-version', description: '26a 链条法棍鹿棕已出首版 与zp高度相似，下一版继续调整', photos: ['a.jpg'], source_position: 0, attributes: {} },
+      { external_id: 'progress', description: '26b 双c小鹿棕【对皮进度】原厂麂皮，避免阳光直晒', photos: ['b.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'main', description: '26a 黑色链条包 日常通勤可单肩斜挎', photos: ['main.jpg'], source_position: 2, attributes: {} },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main'])
+  })
+
   it('builds five Szwego timeline products, excludes mosaic tiles, and copies the size chart into each', async () => {
     const timeline = [
       {

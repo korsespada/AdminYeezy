@@ -137,7 +137,9 @@ The legacy `shop` database is not the source of truth for the new storefront.
 лента` source. It keeps only a substantive main product card and safely joins
 its nearby service cards in this output order:
 
-1. main gallery and its description;
+1. main gallery and its description. When a technical close-up album appears
+   first but the matching following album has the substantive product copy, the
+   latter becomes the main gallery and is placed first;
 2. only the first following short detail gallery, when both cards have the
    same parsed Szwego tag, or (for an old snapshot without tags) the same
    concrete model code. Generic Chinese phrases never prove that two cards are
@@ -148,8 +150,8 @@ its nearby service cards in this output order:
 4. a preceding video URL (the video card itself is not a catalogue product).
 
 Packaging text is not copied into the product description. Collages, `合集`,
-factory/quality posts, `ZP` comparisons and development announcements are not
-merged or emitted. If the first detail image is the same as the first main
+factory/quality posts, `ZP` comparisons, first/final-version notes and material
+development announcements are not merged or emitted. If the first detail image is the same as the first main
 image, it is removed when the URL is identical. The script never downloads or
 decodes source photos; URL-distinct visual duplicates are left for the
 photo-enabled AI pass, which already evaluates the complete gallery.

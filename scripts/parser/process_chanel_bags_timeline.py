@@ -19,7 +19,8 @@ PACKAGING_RE = re.compile(r"包装(?:展示|图|清单)?|配套|标配|礼盒|�
 VIDEO_RE = re.compile(r"(?:实拍)?视频", re.IGNORECASE)
 JUNK_RE = re.compile(
     r"合集|图集|拼图|上新(?:预告)?|新品推荐|准备(?:开发|中)?|开发准备|品控|"
-    r"我们\s*(?:🆚|vs)?\s*zp|\bzp\b|工厂(?:展示|对比)?|档口(?:展示|对比)?",
+    r"我们\s*(?:🆚|vs)?\s*zp|(?<![a-z])zp(?![a-z])|工厂(?:展示|对比)?|档口(?:展示|对比)?|"
+    r"首版(?:已出|完工|落地|正式)?|最终版|大货版|对皮进度|开发进度|打版|待优化|同台.*对比",
     re.IGNORECASE,
 )
 SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
@@ -126,6 +127,23 @@ def _merge_description(main: str, detail: str) -> str:
     return main if not detail or detail == main else f"{main}\n\n{detail}"
 
 
+def _description_score(product: dict[str, Any]) -> int:
+    """Prefer the supplier's actual product copy over a technical detail label."""
+    text = _description(product)
+    for tag in _tags(product):
+        text = re.sub(re.escape(tag), "", text, flags=re.IGNORECASE)
+    text = MODEL_CODE_RE.sub("", text)
+    text = re.sub(r"(?:款号|款式|款名|尺寸)\s*[:：]?\s*[\w.×xX\-]+", "", text)
+    return len(re.sub(r"[\s\d\W_]", "", text))
+
+
+def _prefer_following_album_as_main(current: dict[str, Any], following: dict[str, Any]) -> bool:
+    """The feed sometimes puts close-ups before the actual product gallery."""
+    current_score = _description_score(current)
+    following_score = _description_score(following)
+    return following_score >= 18 and following_score >= current_score + 12 and following_score * 2 >= current_score * 3
+
+
 def _attach_video(product: dict[str, Any], video: tuple[str | None, str | None] | None) -> None:
     if not video or not video[0]:
         return
@@ -186,8 +204,12 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
             # not another detail set and must not turn into a duplicate card.
             if main_key in detail_attached_to:
                 continue
-            main["photos"] = _unique(_photos(main) + photos)
-            main["description"] = _merge_description(_description(main), description)
+            if _prefer_following_album_as_main(main, product):
+                main["photos"] = _unique(photos + _photos(main))
+                main["description"] = _merge_description(description, _description(main))
+            else:
+                main["photos"] = _unique(_photos(main) + photos)
+                main["description"] = _merge_description(_description(main), description)
             detail_attached_to.add(main_key)
             _append_packaging(main, packaging_by_primary_id)
             continue
