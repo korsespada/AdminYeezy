@@ -340,6 +340,41 @@ describe('batch AI normalization', () => {
     expect(result.suggestions).toEqual([])
   })
 
+  it('normalizes bag dimensions and hardware before deterministic pricing', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Classic Flap',
+        category: 'bags',
+        subcategory: 'shoulder-bags',
+        description: 'Сумка с золотистой фурнитурой. Размер: 25,5 × 15 × 6,5 см.',
+        catalog_attributes: { model_name: 'Classic Flap' },
+      },
+    }, {
+      product: { category: 'bags', subcategory: 'shoulder-bags', photos: [], attributes: { sizes: ['25'] } },
+      brandIds: new Set(),
+      categoryIds: new Set(['bags']),
+      categoryNames: new Map([['bags', 'Сумки']]),
+      subcategoryIds: new Set(['shoulder-bags']),
+      subcategoryNames: new Map([['shoulder-bags', 'Сумки на плечо']]),
+      subcategoryParents: new Map([['shoulder-bags', 'bags']]),
+      attributeCodes: new Set(['sizes', 'model_name', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
+    })
+
+    expect(result.product.name).toBe('Classic Flap 25')
+    expect(result.product.attributes).toEqual({
+      model_name: 'Classic Flap',
+      dimensions: '25,5 × 15 × 6,5 см',
+      bag_width_cm: 25.5,
+      bag_height_cm: 15,
+      hardware_color: 'Золотистая',
+    })
+    expect(matchingPriceRule(result.product, [{
+      id: 'classic-flap-25', enabled: true, priority: 100,
+      conditions: { category: 'bags', 'attributes.model_name': 'Classic Flap', 'attributes.bag_width_cm': { min: 25, max: 26 } },
+      price: 90_000,
+    }])?.price).toBe(90_000)
+  })
+
   it('drops registered attributes that are not allowed for the product category', () => {
     const result = normalizeBatchAiOutput({
       product: {

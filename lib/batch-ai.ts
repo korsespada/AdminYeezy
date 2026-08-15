@@ -219,6 +219,8 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Используй только существующие бренды, категории, подкатегории и коды атрибутов. Не возвращай attribute_suggestions или subcategory_suggestion и не предлагай новые сущности.
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
+- Для сумок с подтверждёнными габаритами обязательно заполни dimensions в формате «Ш × В × Г см», bag_width_cm и bag_height_cm. Не записывай размер сумки в sizes: это не размерный ряд. Если подтверждён номинальный размер модели, например Classic Flap 25, включи его в name без бренда.
+- Для сумок при подтверждённом тексте или фото обязательно заполни hardware_color допустимым значением из схемы атрибутов. Не угадывай цвет фурнитуры.
 
 Глобальные правила сверки текста с фотографиями:
 - Исходный текст ненадёжен и может относиться к другой карточке. Не переноси из него модель или характеристики автоматически.
@@ -819,6 +821,66 @@ function nameWithoutLeadingBrand(value: string, brand?: string) {
   return name.replace(new RegExp(`^${escapedBrand}[\\s\\-–—_:,]*`, 'iu'), '').trim() || name
 }
 
+type BagDimensions = { width: number; height: number; depth: number; value: string }
+
+function dimensionNumber(value: string) {
+  const number = Number(value.replace(',', '.'))
+  return Number.isFinite(number) && number > 0 && number <= 300 ? number : null
+}
+
+function displayDimension(value: number) {
+  return Number.isInteger(value) ? String(value) : String(value).replace('.', ',')
+}
+
+function explicitBagDimensions(values: unknown[]): BagDimensions | null {
+  for (const value of values) {
+    const text = String(value || '')
+    // Без слова «размер»/«尺寸» сохраняем только тройку с единицей измерения:
+    // это не позволяет принять номер модели вроде CF25 за габарит.
+    const match = text.match(/(?:(?:размер(?:ы)?|габариты|dimensions?|尺寸)\s*[:：]?\s*)?(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)(?:\s*(?:см|cm))?/iu)
+    if (!match) continue
+    const labelled = /(размер(?:ы)?|габариты|dimensions?|尺寸)/iu.test(text.slice(0, match.index! + match[0].length))
+    const hasUnit = /(?:см|cm)\b/iu.test(match[0])
+    if (!labelled && !hasUnit) continue
+    const [width, height, depth] = match.slice(1).map(dimensionNumber)
+    if (width === null || height === null || depth === null) continue
+    return {
+      width,
+      height,
+      depth,
+      value: `${displayDimension(width)} × ${displayDimension(height)} × ${displayDimension(depth)} см`,
+    }
+  }
+  return null
+}
+
+function hardwareColorFromConfirmedText(values: unknown[]) {
+  const text = values.map((value) => String(value || '')).join('\n').toLowerCase()
+  const hasHardwareContext = /(фурнитур|замок|цепочк|металл|五金|金扣|银扣|链条)/iu.test(text)
+  if (!hasHardwareContext) return ''
+  if (/(паллади|palladium)/iu.test(text)) return 'Палладиевая'
+  if (/(розов(?:ое|ая) золот|rose gold)/iu.test(text)) return 'Розовое золото'
+  if (/(графит|gunmetal)/iu.test(text)) return 'Графитовая'
+  if (/(бронз|bronze)/iu.test(text)) return 'Бронзовая'
+  if (/(золотист|золот(?:ая|ое)|浅金|金色五金|金扣|gold(?:-tone)? hardware)/iu.test(text)) return 'Золотистая'
+  if (/(серебрист|серебр(?:яная|ое)|银扣|银色五金|silver(?:-tone)? hardware)/iu.test(text)) return 'Серебристая'
+  if (/(чёрн(?:ая|ое) фурнитур|черн(?:ая|ое) фурнитур|black hardware)/iu.test(text)) return 'Чёрная'
+  return ''
+}
+
+function nominalBagSize(value: unknown) {
+  const values = Array.isArray(value) ? value : [value]
+  const size = values
+    .map((item) => String(item || '').trim())
+    .find((item) => /^(?:1[7-9]|2[0-9]|3[0-2])$/u.test(item))
+  return size || ''
+}
+
+function appendNominalBagSize(name: string, size: string) {
+  if (!name || !size || new RegExp(`(?:^|\\D)${size}(?:\\D|$)`, 'u').test(name)) return name
+  return `${name} ${size}`.trim()
+}
+
 export function normalizeBatchAiOutput(raw: any, input: {
   product: any
   brandIds: Set<string>
@@ -1111,6 +1173,27 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (!subcategory || normalizedName(input.subcategoryNames?.get(subcategory)) === 'сумки') {
       throw new Error('Для категории «Сумки» требуется конкретная подкатегория вместо «Сумки»')
     }
+
+    const dimensions = explicitBagDimensions([
+      attributes.dimensions,
+      proposed.catalog_attributes?.dimensions,
+      original.description,
+      proposed.description,
+    ])
+    if (dimensions) {
+      if (input.attributeCodes.has('dimensions')) attributes.dimensions = dimensions.value
+      if (input.attributeCodes.has('bag_width_cm') && !attributes.bag_width_cm) attributes.bag_width_cm = dimensions.width
+      if (input.attributeCodes.has('bag_height_cm') && !attributes.bag_height_cm) attributes.bag_height_cm = dimensions.height
+    }
+
+    if (input.attributeCodes.has('hardware_color') && !attributes.hardware_color) {
+      const hardwareColor = hardwareColorFromConfirmedText([
+        original.description,
+        proposed.description,
+        ...Object.values(proposed.catalog_attributes || {}),
+      ])
+      if (hardwareColor) attributes.hardware_color = hardwareColor
+    }
   }
 
   let subcategorySuggestion = typeof raw?.subcategory_suggestion === 'string'
@@ -1220,10 +1303,17 @@ export function normalizeBatchAiOutput(raw: any, input: {
   if (processingOptions.colorFamilyByArticle && rawColorFamily && articleKey) {
     rawColorFamily.group_signature = articleKey
   }
-  const productName = nameWithoutLeadingBrand(
+  let productName = nameWithoutLeadingBrand(
     String(proposed.name || original.name || ''),
     input.brandNames?.get(resolvedBrand),
   )
+  if (normalizedName(input.categoryNames?.get(category)) === 'сумки') {
+    const size = nominalBagSize(attributes.sizes)
+    if (size) {
+      productName = appendNominalBagSize(productName, size)
+      delete attributes.sizes
+    }
+  }
   return {
     product: {
       ...original,
