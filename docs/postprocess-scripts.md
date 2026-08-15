@@ -149,8 +149,8 @@ its nearby service cards in this output order:
    one product. Later short cards with the same generic label are
    lookbook/model shots on a different background and are excluded. The
    accepted detail description is appended after the main description. A
-   following 7-10 photo album is also accepted only when it has an explicit
-   size/style marker, so it is a detail set rather than another colour;
+   7+ photo album is never joined merely because of a shared tag: such tags
+   may name a family rather than one exact colour or item;
 3. a preceding packaging gallery;
 4. a preceding video URL (the video card itself is not a catalogue product).
 
@@ -161,9 +161,12 @@ image, it is removed when the URL is identical. The script never downloads or
 decodes source photos; URL-distinct visual duplicates are left for the
 photo-enabled AI pass, which already evaluates the complete gallery.
 
-After all merges and packaging attachments, only galleries with at least ten
-photos remain. Watches, jewellery, hair accessories, bag charms and scarf
-clips are also excluded, even if they meet the photo threshold.
+After all merges and packaging attachments, only galleries with 10–14 photos
+remain. A gallery without video must also contain at least 12 meaningful
+description characters after tags, article codes and dimensions are removed;
+this excludes bare factory captions such as `原版实拍`. Watches, jewellery,
+hair accessories, bag charms and scarf clips are also excluded, even if they
+meet the photo threshold.
 
 When supplier setting `Парсинг тегов` is enabled, `SzwegoParser.py` keeps the
 source labels both at the end of the description for AI context and in

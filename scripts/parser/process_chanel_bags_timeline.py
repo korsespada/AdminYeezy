@@ -20,11 +20,11 @@ VIDEO_RE = re.compile(r"(?:实拍)?视频", re.IGNORECASE)
 JUNK_RE = re.compile(
     r"合集|图集|拼图|上新(?:预告)?|新品推荐|准备(?:开发|中)?|开发准备|品控|"
     r"我们\s*(?:🆚|vs)?\s*zp|(?<![a-z])zp(?![a-z])|工厂(?:展示|对比)?|档口(?:展示|对比)?|"
-    r"首版(?:已出|完工|落地|正式)?|最终版|大货版|对皮进度|开发进度|打版|待优化|同台.*对比",
+    r"(?:产前)?第?一版(?:已出|完工|落地|正式)?|最终版|大货版|初次对皮|对皮(?:中|完成|进度)?|"
+    r"开发进度|生产素材碎片|开发素材碎片|打版|开版|待优化|同台.*对比",
     re.IGNORECASE,
 )
 SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
-DETAIL_MARKER_RE = re.compile(r"(?:款号|款式|款名|尺寸)\s*[:：]?", re.IGNORECASE)
 NON_BAG_ACCESSORY_RE = re.compile(
     r"丝巾(?:扣|环)|包挂|包饰|钥匙扣|腕表|手表|表带|PREMIÈRE|"
     r"耳环|耳饰|项链|手链|手镯|戒指|发夹|发箍|头箍|头饰|蝴蝶结",
@@ -33,6 +33,8 @@ NON_BAG_ACCESSORY_RE = re.compile(
 MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,5}\s*[-.]?\s*\d{3,}\b", re.IGNORECASE)
 MAX_PENDING_DISTANCE = 3
 MIN_PRODUCT_PHOTOS = 10
+MAX_PRODUCT_PHOTOS = 14
+MIN_NO_VIDEO_DESCRIPTION_SCORE = 12
 
 
 def _description(product: dict[str, Any]) -> str:
@@ -120,9 +122,9 @@ def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def _is_matching_detail(main: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    """A following detail album belongs to the main card only with product proof."""
+    """Only a short following detail album belongs to the main card."""
     candidate_photos = _photos(candidate)
-    if not candidate_photos or len(candidate_photos) > MIN_PRODUCT_PHOTOS:
+    if not candidate_photos or len(candidate_photos) > 6:
         return False
     description = _description(candidate)
     if (
@@ -131,10 +133,6 @@ def _is_matching_detail(main: dict[str, Any], candidate: dict[str, Any]) -> bool
         or PACKAGING_RE.search(description)
         or NON_BAG_ACCESSORY_RE.search(description)
     ):
-        return False
-    # Large detail albums contain the product's concrete size or style data;
-    # without it, an equally large following gallery can be another colour.
-    if len(candidate_photos) > 6 and not DETAIL_MARKER_RE.search(description):
         return False
     return _same_product(main, candidate)
 
@@ -168,6 +166,15 @@ def _prefer_following_album_as_main(current: dict[str, Any], following: dict[str
 def _is_placeholder_primary(product: dict[str, Any]) -> bool:
     """Recognise a tag-only cover that precedes the actual product gallery."""
     return len(_photos(product)) <= 2 and _description_score(product) < 18
+
+
+def _is_usable_product(product: dict[str, Any]) -> bool:
+    """Keep the supplier's complete bag sets, not incomplete source albums."""
+    photo_count = len(_photos(product))
+    if not MIN_PRODUCT_PHOTOS <= photo_count <= MAX_PRODUCT_PHOTOS:
+        return False
+    video_url, _ = _video(product)
+    return bool(video_url or _description_score(product) >= MIN_NO_VIDEO_DESCRIPTION_SCORE)
 
 
 def _attach_video(product: dict[str, Any], video: tuple[str | None, str | None] | None) -> None:
@@ -281,6 +288,7 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     if result:
         _append_packaging(result[-1], packaging_by_primary_id)
-    # This supplier's usable product sets contain at least ten photographs
-    # after the main, detail and packaging albums have been assembled.
-    return [product for product in result if len(_photos(product)) >= MIN_PRODUCT_PHOTOS]
+    # Validate the completed gallery only after main, detail and packaging
+    # albums have been assembled. Video cards carry enough visual proof; a
+    # no-video card also needs meaningful supplier copy, not just a tag/code.
+    return [product for product in result if _is_usable_product(product)]

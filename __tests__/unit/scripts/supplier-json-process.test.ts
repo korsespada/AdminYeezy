@@ -246,7 +246,7 @@ describe('supplier JSON post-process contract', () => {
     })])
   })
 
-  it('joins a ten-photo marked detail album to its short matching main gallery before applying the minimum', async () => {
+  it('does not join a full following album based on a generic shared tag alone', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
         external_id: 'main', description: '金球20黑 复古链条包，日常可单肩或斜挎。',
@@ -254,22 +254,19 @@ describe('supplier JSON post-process contract', () => {
         attributes: { szwego_tags: ['金球20cm'] },
       },
       {
-        external_id: 'details', description: '金球20黑（硬底） 尺寸：13x18x7cm 金球20cm',
+        external_id: 'details', description: '金球20黑 复古链条包轮廓利落，日常通勤搭配轻松自然。',
         photos: Array.from({ length: 10 }, (_, index) => `detail-${index}.jpg`), source_position: 1,
         attributes: { szwego_tags: ['金球20cm'] },
       },
     ])
 
     expect(result).toEqual([expect.objectContaining({
-      external_id: 'main',
-      photos: [
-        ...Array.from({ length: 5 }, (_, index) => `main-${index}.jpg`),
-        ...Array.from({ length: 10 }, (_, index) => `detail-${index}.jpg`),
-      ],
+      external_id: 'details',
+      photos: Array.from({ length: 10 }, (_, index) => `detail-${index}.jpg`),
     })])
   })
 
-  it('keeps only Chanel bag galleries with at least ten photos and drops watches or scarf clips', async () => {
+  it('keeps complete Chanel bag galleries, rejects thin no-video copy and drops watches or scarf clips', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
         external_id: 'nine-photos', description: 'cf23 黑金 日常通勤链条包',
@@ -287,9 +284,19 @@ describe('supplier JSON post-process contract', () => {
         attributes: { szwego_tags: ['丝巾扣'] },
       },
       {
-        external_id: 'bag', description: 'cf25 黑金 菱格链条包，适合日常通勤。',
+        external_id: 'bag', description: 'cf25 黑金 菱格链条包，柔软皮质搭配金色五金，适合日常通勤。',
         photos: Array.from({ length: 10 }, (_, index) => `bag-${index}.jpg`), source_position: 3,
         attributes: { szwego_tags: ['cf25 黑金'] },
+      },
+      {
+        external_id: 'thin-no-video', description: '26s 托特鳄鱼小酒红 原版实拍',
+        photos: Array.from({ length: 12 }, (_, index) => `thin-${index}.jpg`), source_position: 4,
+        attributes: { szwego_tags: ['26s 托特鳄鱼'] },
+      },
+      {
+        external_id: 'too-many-photos', description: '白色链条包，菱格工艺和金色五金适合日常通勤。',
+        photos: Array.from({ length: 18 }, (_, index) => `many-${index}.jpg`), source_position: 5,
+        attributes: { szwego_tags: ['white-chain'] },
       },
     ])
 
@@ -299,11 +306,11 @@ describe('supplier JSON post-process contract', () => {
   it('never merges unrelated cards from a shared generic Chinese phrase when tags are unavailable', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
-        external_id: 'main', description: '26a 黑色口盖包 整体包型和五金细节清晰',
+        external_id: 'main', description: '26a 黑色口盖包 整体包型和五金细节清晰，日常通勤搭配轻松。',
         photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 0, attributes: {},
       },
       {
-        external_id: 'other', description: '26b 白色链条包 整体包型和五金细节需要调整',
+        external_id: 'other', description: '26b 白色链条包 整体包型和五金细节清晰，适合日常出行。',
         photos: Array.from({ length: 10 }, (_, index) => `other-${index}.jpg`), source_position: 1, attributes: {},
       },
     ])
@@ -315,12 +322,12 @@ describe('supplier JSON post-process contract', () => {
   it('does not treat a missing structured tag as the shared string none', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
-        external_id: 'main', description: '26a 黑色口盖包',
+        external_id: 'main', description: '26a 黑色口盖包 菱格皮质和链条肩带适合日常通勤。',
         photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 0,
         attributes: { szwego_tags: null },
       },
       {
-        external_id: 'other', description: '26b 白色链条包',
+        external_id: 'other', description: '26b 白色链条包 小巧包身搭配金色五金，日常轻便。',
         photos: Array.from({ length: 10 }, (_, index) => `other-${index}.jpg`), source_position: 1,
         attributes: {},
       },
@@ -332,7 +339,7 @@ describe('supplier JSON post-process contract', () => {
   it('keeps only the first matching detail album and drops later lookbook shots on another background', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
-        external_id: 'main', description: 'cf23 球纹 黑金',
+        external_id: 'main', description: 'cf23 球纹 黑金 菱格纹路立体，链条肩带适合日常通勤。',
         photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0,
         attributes: { szwego_tags: ['cf23 球纹'] },
       },
@@ -347,7 +354,7 @@ describe('supplier JSON post-process contract', () => {
         attributes: { szwego_tags: ['cf23 球纹'] },
       },
       {
-        external_id: 'next-main', description: 'cf25 黑金 主图',
+        external_id: 'next-main', description: 'cf25 黑金 主图 皮质细腻，搭配金色五金，日常百搭。',
         photos: Array.from({ length: 10 }, (_, index) => `next-${index}.jpg`), source_position: 3,
         attributes: { szwego_tags: ['cf25'] },
       },
