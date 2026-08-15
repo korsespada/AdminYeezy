@@ -226,6 +226,25 @@ describe('supplier JSON post-process contract', () => {
     })
   })
 
+  it('replaces a tag-only one/two-photo cover with the following substantive Chanel gallery', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'cover', description: '26c hobo球迷你', photos: ['other-background-1.jpg', 'other-background-2.jpg'], source_position: 0,
+        attributes: { szwego_tags: ['26c hobo球迷你'] },
+      },
+      {
+        external_id: 'main', description: '26c hobo球迷你奶茶 低饱和奶茶色，容量适合日常出行。',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 1,
+        attributes: { szwego_tags: ['26c hobo球迷你'] },
+      },
+    ])
+
+    expect(result).toEqual([expect.objectContaining({
+      external_id: 'main',
+      photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+    })])
+  })
+
   it('never merges unrelated cards from a shared generic Chinese phrase when tags are unavailable', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {

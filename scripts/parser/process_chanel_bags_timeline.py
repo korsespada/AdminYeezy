@@ -144,6 +144,11 @@ def _prefer_following_album_as_main(current: dict[str, Any], following: dict[str
     return following_score >= 18 and following_score >= current_score + 12 and following_score * 2 >= current_score * 3
 
 
+def _is_placeholder_primary(product: dict[str, Any]) -> bool:
+    """Recognise a tag-only cover that precedes the actual product gallery."""
+    return len(_photos(product)) <= 2 and _description_score(product) < 18
+
+
 def _attach_video(product: dict[str, Any], video: tuple[str | None, str | None] | None) -> None:
     if not video or not video[0]:
         return
@@ -194,6 +199,14 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if video[0]:
                 pending_videos.append((position, product))
             continue
+
+        # A bare one/two-photo tag card often precedes the actual gallery for
+        # the same colour. It is not a detail set: discard it and retain the
+        # substantive following album only. This keeps a different-background
+        # cover/model shot out of the final gallery and avoids a duplicate row.
+        if result and _is_primary(product, description) and _is_placeholder_primary(result[-1]) and _same_product(result[-1], product):
+            discarded = result.pop()
+            packaging_by_primary_id.pop(str(discarded.get("external_id") or ""), None)
 
         if result and _is_matching_detail(result[-1], product):
             main = result[-1]

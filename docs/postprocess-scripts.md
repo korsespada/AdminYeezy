@@ -139,7 +139,10 @@ its nearby service cards in this output order:
 
 1. main gallery and its description. When a technical close-up album appears
    first but the matching following album has the substantive product copy, the
-   latter becomes the main gallery and is placed first;
+   latter becomes the main gallery and is placed first. A preceding tag-only
+   one/two-photo cover is discarded altogether when the following tagged album
+   is substantive, so a different-background shot cannot become a duplicate
+   product or enter the gallery;
 2. only the first following short detail gallery, when both cards have the
    same parsed Szwego tag, or (for an old snapshot without tags) the same
    concrete model code. Generic Chinese phrases never prove that two cards are
