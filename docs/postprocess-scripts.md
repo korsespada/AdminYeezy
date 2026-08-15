@@ -142,7 +142,9 @@ its nearby service cards in this output order:
    latter becomes the main gallery and is placed first. A preceding tag-only
    one/two-photo cover is discarded altogether when the following tagged album
    is substantive, so a different-background shot cannot become a duplicate
-   product or enter the gallery;
+   product or enter the gallery. The same ordering is mandatory for a 7-10
+   photo technical album with an article/size followed by a 3-6 photo studio
+   gallery of the proven same product;
 2. only the first following short detail gallery, when both cards have the
    same parsed Szwego tag, or (for an old snapshot without tags) the same
    concrete model code. Generic Chinese phrases never prove that two cards are

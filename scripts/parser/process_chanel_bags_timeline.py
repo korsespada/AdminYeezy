@@ -25,6 +25,7 @@ JUNK_RE = re.compile(
     re.IGNORECASE,
 )
 SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
+DETAIL_MARKER_RE = re.compile(r"(?:款号|款式|款名|尺寸)\s*[:：]?", re.IGNORECASE)
 NON_BAG_ACCESSORY_RE = re.compile(
     r"丝巾(?:扣|环)|包挂|包饰|钥匙扣|腕表|手表|表带|PREMIÈRE|"
     r"耳环|耳饰|项链|手链|手镯|戒指|发夹|发箍|头箍|头饰|蝴蝶结",
@@ -160,6 +161,17 @@ def _prefer_following_album_as_main(current: dict[str, Any], following: dict[str
     """The feed sometimes puts close-ups before the actual product gallery."""
     current_score = _description_score(current)
     following_score = _description_score(following)
+    # Szwego often posts a 9/10-photo technical set (article/size close-ups)
+    # before a short 3-6-photo studio gallery. Once the shared product identity
+    # is proven by the caller, the studio gallery must be first even when its
+    # marketing copy is shorter than the generic score threshold.
+    if (
+        7 <= len(_photos(current)) <= 10
+        and 3 <= len(_photos(following)) <= 6
+        and DETAIL_MARKER_RE.search(_description(current))
+        and following_score >= MIN_NO_VIDEO_DESCRIPTION_SCORE
+    ):
+        return True
     return following_score >= 18 and following_score >= current_score + 12 and following_score * 2 >= current_score * 3
 
 

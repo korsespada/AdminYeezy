@@ -389,6 +389,29 @@ describe('supplier JSON post-process contract', () => {
     expect(result[0].description.startsWith('26a 口盖小波点 托斯卡纳羊皮')).toBe(true)
   })
 
+  it('puts a short studio gallery before its preceding 9-photo size-detail album', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'details', description: '金球20黑（硬底） 尺寸：13x18x7cm 金球20cm',
+        photos: Array.from({ length: 9 }, (_, index) => `detail-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: ['金球20cm'] },
+      },
+      {
+        external_id: 'studio', description: '金球20cm 复古链条包轮廓利落，日常通勤搭配轻松自然。',
+        photos: Array.from({ length: 5 }, (_, index) => `studio-${index}.jpg`), source_position: 1,
+        attributes: { szwego_tags: ['金球20cm'] },
+      },
+    ])
+
+    expect(result).toEqual([expect.objectContaining({
+      external_id: 'details',
+      photos: [
+        ...Array.from({ length: 5 }, (_, index) => `studio-${index}.jpg`),
+        ...Array.from({ length: 9 }, (_, index) => `detail-${index}.jpg`),
+      ],
+    })])
+  })
+
   it('drops Chanel first-version and material-progress posts instead of listing them as products', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       { external_id: 'first-version', description: '26a 链条法棍鹿棕已出首版 与zp高度相似，下一版继续调整', photos: ['a.jpg'], source_position: 0, attributes: {} },
