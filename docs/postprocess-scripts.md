@@ -138,10 +138,11 @@ The legacy `shop` database is not the source of truth for the new storefront.
 its nearby service cards in this output order:
 
 1. main gallery and its description;
-2. a following short detail gallery only when it shares a model code or a
-   specific Chinese product-name fragment; for new batches an exact matching
-   Szwego tag has priority. Its description is appended after the main
-   description;
+2. only the first following short detail gallery, when it shares a model code
+   or a specific Chinese product-name fragment; for new batches an exact
+   matching Szwego tag has priority. Later short cards with the same generic
+   label are lookbook/model shots on a different background and are excluded.
+   The accepted detail description is appended after the main description;
 3. a preceding packaging gallery;
 4. a preceding video URL (the video card itself is not a catalogue product).
 

@@ -152,6 +152,11 @@ def _append_packaging(product: dict[str, Any], pending_by_id: dict[str, list[str
         product["photos"] = _unique(_photos(product) + packaging)
 
 
+def _primary_key(product: dict[str, Any], fallback: int) -> str:
+    """Keep transient merge state outside the product JSON passed downstream."""
+    return str(product.get("external_id") or f"source-position-{_position(product, fallback)}")
+
+
 def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build only Chanel products from their neighbouring service albums."""
     ordered = sorted(
@@ -162,6 +167,7 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     pending_packaging: list[tuple[int, dict[str, Any]]] = []
     pending_videos: list[tuple[int, dict[str, Any]]] = []
     packaging_by_primary_id: dict[str, list[str]] = {}
+    detail_attached_to: set[str] = set()
 
     for fallback, product in enumerate(ordered):
         position = _position(product, fallback)
@@ -181,8 +187,16 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         if result and _is_matching_detail(result[-1], product):
             main = result[-1]
+            main_key = _primary_key(main, fallback)
+            # One product block has exactly one secondary detail album. Later
+            # short cards can share the same generic Szwego label, but are
+            # usually lookbook/model shots on a different background. They are
+            # not another detail set and must not turn into a duplicate card.
+            if main_key in detail_attached_to:
+                continue
             main["photos"] = _unique(_photos(main) + photos)
             main["description"] = _merge_description(_description(main), description)
+            detail_attached_to.add(main_key)
             _append_packaging(main, packaging_by_primary_id)
             continue
 

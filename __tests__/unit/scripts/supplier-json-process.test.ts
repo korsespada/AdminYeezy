@@ -225,6 +225,37 @@ describe('supplier JSON post-process contract', () => {
     })
   })
 
+  it('keeps only the first matching detail album and drops later lookbook shots on another background', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'main', description: 'cf23 球纹 黑金',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: ['cf23 球纹'] },
+      },
+      {
+        external_id: 'details', description: 'cf23 球纹 五金细节',
+        photos: ['detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg', 'detail-4.jpg'], source_position: 1,
+        attributes: { szwego_tags: ['cf23 球纹'] },
+      },
+      {
+        external_id: 'lookbook', description: 'cf23 球纹',
+        photos: ['model-background-1.jpg', 'model-background-2.jpg', 'model-background-3.jpg'], source_position: 2,
+        attributes: { szwego_tags: ['cf23 球纹'] },
+      },
+      {
+        external_id: 'next-main', description: 'cf25 黑金 主图',
+        photos: Array.from({ length: 9 }, (_, index) => `next-${index}.jpg`), source_position: 3,
+        attributes: { szwego_tags: ['cf25'] },
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main', 'next-main'])
+    expect(result[0].photos).toEqual([
+      ...Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+      'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg', 'detail-4.jpg',
+    ])
+  })
+
   it('builds five Szwego timeline products, excludes mosaic tiles, and copies the size chart into each', async () => {
     const timeline = [
       {
