@@ -138,11 +138,12 @@ The legacy `shop` database is not the source of truth for the new storefront.
 its nearby service cards in this output order:
 
 1. main gallery and its description;
-2. only the first following short detail gallery, when it shares a model code
-   or a specific Chinese product-name fragment; for new batches an exact
-   matching Szwego tag has priority. Later short cards with the same generic
-   label are lookbook/model shots on a different background and are excluded.
-   The accepted detail description is appended after the main description;
+2. only the first following short detail gallery, when both cards have the
+   same parsed Szwego tag, or (for an old snapshot without tags) the same
+   concrete model code. Generic Chinese phrases never prove that two cards are
+   one product. Later short cards with the same generic label are
+   lookbook/model shots on a different background and are excluded. The
+   accepted detail description is appended after the main description;
 3. a preceding packaging gallery;
 4. a preceding video URL (the video card itself is not a catalogue product).
 
@@ -156,4 +157,5 @@ photo-enabled AI pass, which already evaluates the complete gallery.
 When supplier setting `Парсинг тегов` is enabled, `SzwegoParser.py` keeps the
 source labels both at the end of the description for AI context and in
 `attributes.szwego_tags` for deterministic post-processing. Existing raw
-snapshots without this attribute remain compatible through the text fallback.
+snapshots without this attribute merge only cards with the same concrete
+article; recurring Chinese marketing text never proves one product.

@@ -138,7 +138,7 @@ describe('supplier JSON post-process contract', () => {
         description: '包装展示',
         photos: ['bundle-1.jpg'],
         source_position: 0,
-        attributes: {},
+        attributes: { szwego_tags: ['26a 口盖小波点'] },
       },
       {
         external_id: 'video',
@@ -146,6 +146,7 @@ describe('supplier JSON post-process contract', () => {
         photos: ['video-poster.jpg'],
         source_position: 1,
         attributes: {
+          szwego_tags: ['26a 口盖小波点'],
           szwego_video_url: 'https://video/chanel.mp4',
           szwego_video_poster_url: 'https://video/chanel.webp',
         },
@@ -155,14 +156,14 @@ describe('supplier JSON post-process contract', () => {
         description: '26a 口盖小波点 托斯卡纳羊皮 黑色波点很有复古氛围',
         photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
         source_position: 2,
-        attributes: {},
+        attributes: { szwego_tags: ['26a 口盖小波点'] },
       },
       {
         external_id: 'details',
         description: '26a 口盖小波点 款号 AS6513 尺寸：15x25.5x6.5cm',
         photos: ['main-0.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg'],
         source_position: 3,
-        attributes: {},
+        attributes: { szwego_tags: ['26a 口盖小波点'] },
       },
       {
         external_id: 'junk',
@@ -223,6 +224,39 @@ describe('supplier JSON post-process contract', () => {
         szwego_video_url: 'https://video/cardholder.mp4',
       },
     })
+  })
+
+  it('never merges unrelated cards from a shared generic Chinese phrase when tags are unavailable', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'main', description: '26a 黑色口盖包 整体包型和五金细节清晰',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0, attributes: {},
+      },
+      {
+        external_id: 'other', description: '26b 白色链条包 整体包型和五金细节需要调整',
+        photos: ['other-1.jpg', 'other-2.jpg', 'other-3.jpg'], source_position: 1, attributes: {},
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main', 'other'])
+    expect(result[0].photos).toHaveLength(9)
+  })
+
+  it('does not treat a missing structured tag as the shared string none', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'main', description: '26a 黑色口盖包',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: null },
+      },
+      {
+        external_id: 'other', description: '26b 白色链条包',
+        photos: ['other-1.jpg', 'other-2.jpg'], source_position: 1,
+        attributes: {},
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main', 'other'])
   })
 
   it('keeps only the first matching detail album and drops later lookbook shots on another background', async () => {

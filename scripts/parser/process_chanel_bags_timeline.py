@@ -24,7 +24,6 @@ JUNK_RE = re.compile(
 )
 SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
 MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,5}\s*[-.]?\s*\d{3,}\b", re.IGNORECASE)
-CHINESE_PHRASE_RE = re.compile(r"[\u4e00-\u9fff]{4,}")
 MAX_PENDING_DISTANCE = 3
 
 
@@ -55,12 +54,14 @@ def _tags(product: dict[str, Any]) -> set[str]:
     """Read the parser's structured Szwego labels, when this batch has them."""
     attributes = product.get("attributes") or {}
     values = attributes.get("szwego_tags") if isinstance(attributes, dict) else []
+    if values is None:
+        values = []
     if not isinstance(values, list):
         values = [values]
     return {
         " ".join(str(value).split()).casefold()
         for value in values
-        if str(value).strip()
+        if value is not None and str(value).strip()
     }
 
 
@@ -83,17 +84,6 @@ def _is_primary(product: dict[str, Any], description: str) -> bool:
     return not (video_url or VIDEO_RE.search(description))
 
 
-def _common_product_phrase(left: str, right: str) -> str:
-    """Find a sufficiently specific shared Chinese fragment between albums."""
-    best = ""
-    for phrase in CHINESE_PHRASE_RE.findall(left):
-        for start in range(0, len(phrase) - 3):
-            candidate = phrase[start:]
-            if len(candidate) >= 4 and candidate in right and len(candidate) > len(best):
-                best = candidate
-    return best
-
-
 def _same_model(left: str, right: str) -> bool:
     left_codes = {re.sub(r"\s+", "", code).upper() for code in MODEL_CODE_RE.findall(left)}
     right_codes = {re.sub(r"\s+", "", code).upper() for code in MODEL_CODE_RE.findall(right)}
@@ -101,17 +91,19 @@ def _same_model(left: str, right: str) -> bool:
 
 
 def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    """Prefer exact supplier tags; old snapshots fall back to their text."""
+    """Merge only on an explicit supplier identity, never generic copy text."""
     left_tags = _tags(left)
     right_tags = _tags(right)
-    if left_tags and right_tags:
-        return bool(left_tags & right_tags)
+    # A structured tag comes from Szwego itself. Do not fall back to prose when
+    # just one old/service card lacks it: phrases about shape, hardware or
+    # factory quality recur between unrelated products in this supplier feed.
+    if left_tags or right_tags:
+        return bool(left_tags and right_tags and left_tags & right_tags)
     left_description = _description(left)
     right_description = _description(right)
-    return (
-        _same_model(left_description, right_description)
-        or len(_common_product_phrase(left_description, right_description)) >= 4
-    )
+    # Old snapshots without parsed tags remain compatible only when a concrete
+    # article is present on both cards. Missing proof means no merge.
+    return _same_model(left_description, right_description)
 
 
 def _is_matching_detail(main: dict[str, Any], candidate: dict[str, Any]) -> bool:
