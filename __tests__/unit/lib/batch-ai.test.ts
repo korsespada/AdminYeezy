@@ -357,7 +357,11 @@ describe('batch AI normalization', () => {
       subcategoryIds: new Set(['shoulder-bags']),
       subcategoryNames: new Map([['shoulder-bags', 'Сумки на плечо']]),
       subcategoryParents: new Map([['shoulder-bags', 'bags']]),
-      attributeCodes: new Set(['sizes', 'model_name', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
+      // Raw suppliers may not assign a category before AI. Their prompt then
+      // receives only common fields, while the resolved «Сумки» category must
+      // still recover its registered attributes after processing.
+      attributeCodes: new Set(['sizes', 'model_name']),
+      knownAttributeCodes: new Set(['sizes', 'model_name', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
     })
 
     expect(result.product.name).toBe('Classic Flap 25')

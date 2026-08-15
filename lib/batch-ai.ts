@@ -1154,6 +1154,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (normalizedName(input.categoryNames?.get(category)) === 'сумки') {
+    // Сырые товары нередко поступают без категории, поэтому их initial schema
+    // содержит только общие поля. После того как AI выбрал «Сумки», разрешаем
+    // зарегистрированные bag-поля из ответа — иначе они безвозвратно теряются
+    // до детерминированного разбора габаритов и подбора цены.
+    const bagAttributeCodes = ['dimensions', 'bag_width_cm', 'bag_height_cm', 'size_class', 'strap_length', 'capacity', 'hardware_color']
+    const canWriteBagAttribute = (code: string) => (
+      input.attributeCodes.has(code) || input.knownAttributeCodes?.has(code) === true
+    )
+    for (const code of bagAttributeCodes) {
+      if (!canWriteBagAttribute(code) || attributes[code] !== undefined) continue
+      const value = proposed.catalog_attributes?.[code]
+      if (value !== undefined && value !== null) attributes[code] = resolveDictionaryValue(code, value)
+    }
+
     const selectedName = normalizedName(input.subcategoryNames?.get(subcategory))
     const shoulderBags = [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
       normalizedName(name) === 'сумки на плечо'
@@ -1181,12 +1195,12 @@ export function normalizeBatchAiOutput(raw: any, input: {
       proposed.description,
     ])
     if (dimensions) {
-      if (input.attributeCodes.has('dimensions')) attributes.dimensions = dimensions.value
-      if (input.attributeCodes.has('bag_width_cm') && !attributes.bag_width_cm) attributes.bag_width_cm = dimensions.width
-      if (input.attributeCodes.has('bag_height_cm') && !attributes.bag_height_cm) attributes.bag_height_cm = dimensions.height
+      if (canWriteBagAttribute('dimensions')) attributes.dimensions = dimensions.value
+      if (canWriteBagAttribute('bag_width_cm') && !attributes.bag_width_cm) attributes.bag_width_cm = dimensions.width
+      if (canWriteBagAttribute('bag_height_cm') && !attributes.bag_height_cm) attributes.bag_height_cm = dimensions.height
     }
 
-    if (input.attributeCodes.has('hardware_color') && !attributes.hardware_color) {
+    if (canWriteBagAttribute('hardware_color') && !attributes.hardware_color) {
       const hardwareColor = hardwareColorFromConfirmedText([
         original.description,
         proposed.description,
