@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 
 describe('batch AI normalization', () => {
@@ -81,7 +81,13 @@ describe('batch AI normalization', () => {
     expect(normalizeBatchAiProcessingOptions({ colorFamilyBySequence: true }).colorFamilyBySequence).toBe(true)
   })
 
-  it('does not create new taxonomy proposals unless the supplier enables them', () => {
+  it('enforces the current product-title contract over saved legacy prompts', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('name — видимый заголовок товара без бренда и артикула, но с точным цветом')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Сервер записывает h1 равным name')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Не возвращай attribute_suggestions или subcategory_suggestion')
+  })
+
+  it('never creates new taxonomy proposals', () => {
     const output = {
       product: { category: 'accessories', subcategory: '', catalog_attributes: {} },
       attribute_suggestions: [{ code: 'strap_type', label: 'Тип ремешка', value: 'Плетёный' }],
@@ -102,12 +108,35 @@ describe('batch AI normalization', () => {
     expect(disabled.suggestions).toEqual([])
     expect(disabled.subcategorySuggestion).toBeNull()
 
-    const enabled = normalizeBatchAiOutput(output, {
+    const stillDisabled = normalizeBatchAiOutput(output, {
       ...baseInput,
       processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, suggestSubcategories: true, suggestAttributes: true },
     })
-    expect(enabled.suggestions).toHaveLength(1)
-    expect(enabled.subcategorySuggestion?.name).toBe('Новая категория аксессуара')
+    expect(stillDisabled.suggestions).toEqual([])
+    expect(stillDisabled.subcategorySuggestion).toBeNull()
+  })
+
+  it('keeps the brand in its own field and mirrors the visible name into H1', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Chanel — Сумка 22 Mini, чёрная',
+        brand: 'chanel',
+        h1: 'Устаревший H1',
+        seo_title: 'Устаревший title',
+        seo_description: 'Устаревшее описание',
+      },
+    }, {
+      product: { name: '', photos: [], attributes: {} },
+      brandIds: new Set(['chanel']),
+      brandNames: new Map([['chanel', 'Chanel']]),
+      categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.name).toBe('Сумка 22 Mini, чёрная')
+    expect(result.product.brand).toBe('chanel')
+    expect(result.product.h1).toBe('Сумка 22 Mini, чёрная')
+    expect(result.product.seo_title).toBe('')
+    expect(result.product.seo_description).toBe('')
   })
 
   it('moves only the selected cover photo to the first position', () => {
@@ -235,7 +264,7 @@ describe('batch AI normalization', () => {
     expect(result.product.photos).toEqual(['1.jpg', '4.jpg'])
     expect(result.product.attributes).toEqual({ colors: ['black'] })
     expect(result.product.price_rule_key).toBe('known-rule')
-    expect(result.suggestions[0].code).toBe('exotic_detail')
+    expect(result.suggestions).toEqual([])
   })
 
   it('chooses the most specific price rule and normalizes common attribute aliases', () => {

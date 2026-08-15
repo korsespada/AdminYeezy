@@ -1465,6 +1465,7 @@ function batchAiNormalizationOptions(input: any, context: any) {
   return {
     product: input.product,
     brandIds: new Set<string>(context.brands.map((row: any) => String(row.id))),
+    brandNames: new Map<string, string>(context.brands.map((row: any) => [String(row.id), String(row.name || '')])),
     categoryIds: new Set<string>(context.categories.map((row: any) => String(row.id))),
     subcategoryIds: new Set<string>(context.subcategories.map((row: any) => String(row.id))),
     subcategoryParents: new Map<string, string>(context.subcategories.map((row: any) => [String(row.id), String(row.parent_id || '')])),
@@ -1532,8 +1533,10 @@ function normalizeColorSplitOutput(raw: any, input: any, context: any) {
     return { color, normalized, firstPhotoIndex: indexes[0] }
   }).sort((left: any, right: any) => left.firstPhotoIndex - right.firstPhotoIndex)
 
+  const familyName = String(raw?.family_name || normalizedVariants[0]?.normalized?.product?.name || 'Цветовые варианты').trim().slice(0, 250)
+
   return {
-    familyName: String(raw?.family_name || normalizedVariants[0]?.normalized?.product?.name || 'Цветовые варианты').trim().slice(0, 250),
+    familyName,
     videoColorKey: String(raw?.video_color_key || '').trim().slice(0, 100),
     skipProduct: false,
     variants: normalizedVariants,

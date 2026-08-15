@@ -49,8 +49,9 @@ export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProces
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
-    suggestSubcategories: source.suggestSubcategories === true,
-    suggestAttributes: source.suggestAttributes === true,
+    // Таксономия каталога закрыта: AI выбирает только значения из справочников.
+    suggestSubcategories: false,
+    suggestAttributes: false,
   }
 }
 
@@ -180,12 +181,13 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 
 Требования:
 - Пиши по-русски, без китайских иероглифов, эмодзи, рекламных обещаний и упоминаний реплики.
-- name: кратко «Бренд + тип/модель товара», без артикула.
+- brand выбирай только из справочника и возвращай отдельным полем.
+- name: видимый заголовок товара без бренда и артикула, но с точным цветом. Например: «Чёрная сумка 22 Mini из стёганой кожи».
 - photo_alts: если переданы фотографии, верни ровно один короткий alt на каждую исходную фотографию в исходном порядке, включая кадры, которые предлагаешь исключить. Целевая длина 60–120 символов, жёсткий максимум 160 символов. Пиши по-русски: товар, ракурс и 1–2 видимые детали, без рекламных обещаний и неподтверждённых свойств.
 - description: содержательное описание обычно 350–700 знаков. Сохраняй подтверждённые детали дизайна, формы, цвета, отделки, застёжек, материалов и размеров; разделяй смысловые части не более чем двумя одиночными переносами.
 - Точно переноси из исходника конкретные факты о материале и фурнитуре: например, 羊皮 означает овечью/натуральную кожу, а 925制银 — серебряную фурнитуру 925 пробы. Не заменяй явно указанный материал на «хлопковый трикотаж» и не добавляй конструкцию, которой нет в тексте или на фото (карманы, пуллеры, нашивки, застёжки и т. п.).
 - Не выбрасывай подтверждённые технические детали исходника при сокращении описания. Рекламные обещания, себестоимость, наличие и заявления о «полном соответствии оригиналу» можно не переносить, но материал, фурнитуру, способ отделки, упаковку и размерный ряд сохраняй, если они явно указаны или видны.
-- h1, seo_title и seo_description должны быть естественными, полезными для поиска и без keyword stuffing.
+- Не возвращай h1, seo_title или seo_description: сервер запишет h1 равным name, а Rails сформирует SEO-поля из бренда, name и цены после сохранения товара.
 - Не сообщай покупателю, что факт неизвестен или не удалось определить: просто не упоминай его.
 - Не начинай текст словами «на фото видно», «на фотографиях представлено», «исходный текст» и подобными служебными фразами.
 - Не используй слова «оригинал», «официальный», «лучший», «премиальный» или «трендовый» и не делай заявлений о подлинности.
@@ -194,10 +196,7 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
 - model_name — свободное каноничное название конкретной линейки/модели. При низкой уверенности оставь пустым.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
-- Используй существующие коды атрибутов. Новый атрибут выноси в attribute_suggestions только если это явно разрешено в пользовательском запросе.
-- Новую подкатегорию выноси в subcategory_suggestion только если это явно разрешено в пользовательском запросе; не подменяй ею исходную подкатегорию.
-- Если предложения разрешены, перед предложением новой подкатегории сверь её со всем переданным справочником. Учитывай регистр, дефисы, число слов и близкие формулировки.
-- Не создавай узкий синоним существующей подкатегории: например, «Сумки с верхней ручкой» и «Сумки с ручкой» считаются одной подкатегорией. Выбирай существующую более общую формулировку.
+- Используй только существующие коды атрибутов, бренды, категории и подкатегории. Не предлагай и не создавай новые значения.
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
 - Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
@@ -212,6 +211,11 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Верни строго JSON без markdown.`
 
 export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные правила каталога для всех категорий:
+- Эти правила имеют приоритет над любыми противоречащими инструкциями из сохранённого системного промпта или настроек поставщика.
+- Бренд выбирай только из справочника и возвращай отдельным полем brand.
+- name — видимый заголовок товара без бренда и артикула, но с точным цветом. Пример: «Чёрный лонгслив с разноцветными крестами».
+- Не возвращай h1, seo_title или seo_description. Сервер записывает h1 равным name; Rails формирует title и meta description из бренда, name и текущей цены.
+- Используй только существующие бренды, категории, подкатегории и коды атрибутов. Не возвращай attribute_suggestions или subcategory_suggestion и не предлагай новые сущности.
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
 
@@ -275,7 +279,7 @@ export function buildBatchAiUserPrompt(input: {
     'Верни объект следующей формы:',
     JSON.stringify({
       product: {
-        name: '', description: '', h1: '', seo_title: '', seo_description: '',
+        name: '', description: '',
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
         gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '' }, price_rule_key: '', confidence: 0,
       },
@@ -283,8 +287,6 @@ export function buildBatchAiUserPrompt(input: {
       photo_alts: [],
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
-      subcategory_suggestion: null,
-      attribute_suggestions: [],
       color_family: null,
       ai_processing: {
         skip_product: false,
@@ -314,12 +316,7 @@ export function buildBatchAiUserPrompt(input: {
     `Визуальный справочник моделей Chanel: ${JSON.stringify(modelReferencePrompt)}`,
     'После contact sheet товара приложен отдельный лист «Эталоны моделей Chanel». Сопоставляй текущий товар с этими эталонами прежде всего по силуэту, конструкции, клапану, ручкам, цепи, застёжке и пропорциям. Китайские aliases и visual_hint — только подсказка, не доказательство. Если уверенно совпал эталон, верни его model_key в catalog_attributes.model_reference_key; затем используй каноническое model_name этого эталона. Если совпадения нет, оставь model_reference_key пустым и выбери точный тип товара по фотографиям. Не переноси модель только из текста.',
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
-    processingOptions.suggestAttributes
-      ? 'Если нужен новый код атрибута, вынеси его в attribute_suggestions: [{code,label,value_type,unit,allowed_values,aliases,value,reason,confidence}].'
-      : 'attribute_suggestions всегда возвращай пустым массивом: новые предложения атрибутов для этого поставщика выключены.',
-    processingOptions.suggestSubcategories
-      ? 'Если подходящей существующей подкатегории нет, вынеси новую в subcategory_suggestion: {name,parent_category_id,reason,confidence}; иначе верни null.'
-      : 'subcategory_suggestion всегда возвращай null: новые предложения подкатегорий для этого поставщика выключены.',
+    'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
       `Определи цветовое семейство по артикулу/коду модели. Пример пользователя: «${processingOptions.articleExample || 'SP001 blue'}». Если в таких артикулах цвет идёт после общей основы (например, SP001 blue и SP001 green), в color_family.group_signature и ai_processing.article_key оставь только общую основу SP001, а цвет запиши отдельно в color. Не объединяй разные модели только из-за похожего артикула.`,
@@ -420,7 +417,7 @@ export function buildBatchAiColorSplitPrompt(input: {
     ...(videoPreviewAvailable ? [
       'После contact sheet приложен отдельный кадр-превью исходного видео. Он не является фотографией товара, не включай его в photo_indexes. Верни video_color_key: точный color_key одного варианта, если по этому кадру цвет виден однозначно; иначе пустую строку. Если на видео несколько цветов, тоже верни пустую строку.',
     ] : []),
-    'Каждый product должен быть полностью готов как после обычной AI-обработки: название, описание, SEO, классификация, пол, атрибуты, ценовое правило и confidence.',
+    'У каждого варианта должно быть собственное name без бренда, но с его точным цветом; например, «Чёрная сумка 22 Mini» и «Белая сумка 22 Mini». color_key и attributes.colors дублируют цвет как структурированные данные. family_name содержит общую основу без бренда и цвета. Каждый product должен содержать название, описание, классификацию, пол, атрибуты, ценовое правило и confidence. H1 и SEO не возвращай: сервер и Rails формируют их после сохранения.',
     'Верни строго JSON без markdown следующей формы:',
     JSON.stringify({
       family_name: '',
@@ -430,7 +427,7 @@ export function buildBatchAiColorSplitPrompt(input: {
         color_key: '',
         photo_indexes: [],
         product: {
-          name: '', description: '', h1: '', seo_title: '', seo_description: '',
+          name: '', description: '',
           brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
           gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
         },
@@ -438,8 +435,6 @@ export function buildBatchAiColorSplitPrompt(input: {
         photo_alts: [],
         cover_photo_index: null,
         media: { discard_indexes: [], size_chart_indexes: [] },
-        subcategory_suggestion: null,
-        attribute_suggestions: [],
       }],
     }),
     'photo_indexes и номера фотографий начинаются с 1 и подписаны на contact sheet. photo_alts верни в том же порядке и количестве, что photo_indexes.',
@@ -813,9 +808,19 @@ export function parseBatchAiJson(text: string) {
   throw new Error('ИИ вернул невалидный JSON')
 }
 
+function nameWithoutLeadingBrand(value: string, brand?: string) {
+  const name = String(value || '').trim()
+  const brandName = String(brand || '').trim()
+  if (!name || !brandName) return name
+
+  const escapedBrand = brandName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return name.replace(new RegExp(`^${escapedBrand}[\\s\\-–—_:,]*`, 'iu'), '').trim() || name
+}
+
 export function normalizeBatchAiOutput(raw: any, input: {
   product: any
   brandIds: Set<string>
+  brandNames?: Map<string, string>
   categoryIds: Set<string>
   subcategoryIds: Set<string>
   subcategoryParents?: Map<string, string>
@@ -861,6 +866,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       || canonicalCode === 'source_parent_external_id'
     ) attributes[canonicalCode] = value
   }
+  const resolvedBrand = choose(proposed.brand, input.brandIds, original.brand)
   const suggestions: any[] = []
   const dictionaryByCode = new Map<string, Map<string, string>>()
   for (const item of input.attributeDictionaryValues || []) {
@@ -1212,16 +1218,21 @@ export function normalizeBatchAiOutput(raw: any, input: {
   if (processingOptions.colorFamilyByArticle && rawColorFamily && articleKey) {
     rawColorFamily.group_signature = articleKey
   }
+  const productName = nameWithoutLeadingBrand(
+    String(proposed.name || original.name || ''),
+    input.brandNames?.get(resolvedBrand),
+  )
   return {
     product: {
       ...original,
       supplier_published_on: supplierPublishedOn,
-      name: String(proposed.name || original.name || '').trim().slice(0, 250),
+      name: productName.slice(0, 250),
       description: String(proposed.description || original.description || '').trim().slice(0, 8000),
-      h1: String(proposed.h1 || proposed.name || original.h1 || original.name || '').trim().slice(0, 250),
-      seo_title: String(proposed.seo_title || '').trim().slice(0, 250),
-      seo_description: String(proposed.seo_description || '').trim().slice(0, 500),
-      brand: choose(proposed.brand, input.brandIds, original.brand),
+      // H1 всегда повторяет видимое имя; SEO-поля создаёт Rails из фактов товара.
+      h1: productName.slice(0, 250),
+      seo_title: '',
+      seo_description: '',
+      brand: resolvedBrand,
       category,
       subcategory,
       gender: resolvedGender,
@@ -1240,7 +1251,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       variant_group_name: original.variant_group_name || null,
     },
     suggestions,
-    subcategorySuggestion: processingOptions.suggestSubcategories ? subcategorySuggestion : null,
+    subcategorySuggestion: null,
     colorFamily: rawColorFamily,
     chromoffCategory,
     mediaDecision: { discard: [...discard], sizeCharts: [...sizeCharts] },
