@@ -175,6 +175,25 @@ async function migrate() {
     await client.query('CREATE INDEX IF NOT EXISTS supplier_price_rules_supplier_idx ON supplier_price_rules(supplier_id, enabled, priority DESC)')
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS supplier_model_references (
+        id BIGSERIAL PRIMARY KEY,
+        supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+        model_key TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        aliases JSONB NOT NULL DEFAULT '[]'::jsonb,
+        visual_hint TEXT,
+        reference_images JSONB NOT NULL DEFAULT '[]'::jsonb,
+        source_batch_id TEXT REFERENCES scraping_batches(id) ON DELETE SET NULL,
+        source_product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(supplier_id, model_key)
+      )
+    `)
+    await client.query('CREATE INDEX IF NOT EXISTS supplier_model_references_supplier_idx ON supplier_model_references(supplier_id, enabled, model_name)')
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS batch_ai_worker_state (
         worker_id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,

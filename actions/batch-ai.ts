@@ -70,6 +70,7 @@ import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
+import { deriveChanelModelReferences, type ChanelModelReference } from '@/lib/chanel-model-references'
 import {
   decryptProviderApiKey,
   encryptProviderApiKey,
@@ -363,6 +364,108 @@ async function loadSettings(): Promise<BatchAiSettings> {
     ...settings,
     systemPrompt: `${settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT}\n\n${GLOBAL_BATCH_AI_CATALOG_RULES}`,
   })
+}
+
+function normalizeModelReferenceRow(row: any): ChanelModelReference {
+  return {
+    model_key: String(row.model_key || '').trim(),
+    model_name: String(row.model_name || '').trim(),
+    aliases: Array.isArray(row.aliases) ? row.aliases.map(String).filter(Boolean).slice(0, 12) : [],
+    visual_hint: String(row.visual_hint || '').trim(),
+    reference_images: Array.isArray(row.reference_images)
+      ? Array.from(new Set<string>(row.reference_images.map((value: unknown) => String(value)).filter((url: string) => /^https:\/\//i.test(url)))).slice(0, 3)
+      : [],
+    source_batch_id: row.source_batch_id ? String(row.source_batch_id) : null,
+    source_product_id: Number.isFinite(Number(row.source_product_id)) ? Number(row.source_product_id) : null,
+    enabled: row.enabled !== false,
+  }
+}
+
+export async function getSupplierModelReferencesAction(supplierId: number) {
+  await requireAdmin()
+  const result = await scrapingQuery(
+    'SELECT * FROM supplier_model_references WHERE supplier_id=$1 ORDER BY model_name,id',
+    [supplierId],
+  )
+  return { success: true, data: result.rows.map(normalizeModelReferenceRow) }
+}
+
+export async function buildSupplierModelReferencesAction(supplierId: number, batchId: string) {
+  await requireAdmin()
+  const batch = await scrapingQuery('SELECT id,supplier_id FROM scraping_batches WHERE id=$1', [batchId])
+  if (!batch.rows[0] || Number(batch.rows[0].supplier_id) !== Number(supplierId)) {
+    return { success: false, error: 'Выгрузка не принадлежит этому поставщику' }
+  }
+  const products = await scrapingQuery('SELECT id,photos,description,name,attributes FROM products WHERE batch_id=$1 ORDER BY source_position ASC NULLS LAST,id', [batchId])
+  const references = deriveChanelModelReferences(products.rows, batchId)
+  if (references.length === 0) return { success: false, error: 'В выгрузке не удалось найти модели Chanel с фотографиями' }
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM supplier_model_references WHERE supplier_id=$1', [supplierId])
+    for (const reference of references) {
+      await client.query(`
+        INSERT INTO supplier_model_references(supplier_id,model_key,model_name,aliases,visual_hint,reference_images,source_batch_id,source_product_id,enabled)
+        VALUES($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9)
+      `, [
+        supplierId,
+        reference.model_key,
+        reference.model_name,
+        JSON.stringify(reference.aliases),
+        reference.visual_hint,
+        JSON.stringify(reference.reference_images),
+        reference.source_batch_id,
+        reference.source_product_id,
+        reference.enabled !== false,
+      ])
+    }
+    await client.query('COMMIT')
+    return { success: true, data: references }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
+}
+
+export async function saveSupplierModelReferencesAction(supplierId: number, references: any[]) {
+  await requireAdmin()
+  const normalized = references.flatMap((row) => {
+    const modelKey = String(row?.model_key || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_|_$/g, '').slice(0, 80)
+    const modelName = String(row?.model_name || '').trim().slice(0, 120)
+    const images = Array.isArray(row?.reference_images)
+      ? [...new Set(row.reference_images.map(String).filter((url: string) => /^https:\/\//i.test(url)))].slice(0, 3)
+      : []
+    return modelKey && modelName && images.length ? [{
+      model_key: modelKey,
+      model_name: modelName,
+      aliases: Array.isArray(row?.aliases) ? row.aliases.map(String).map((value: string) => value.trim()).filter(Boolean).slice(0, 12) : [],
+      visual_hint: String(row?.visual_hint || '').trim().slice(0, 1000),
+      reference_images: images,
+      source_batch_id: row?.source_batch_id ? String(row.source_batch_id) : null,
+      source_product_id: Number.isFinite(Number(row?.source_product_id)) ? Number(row.source_product_id) : null,
+      enabled: row?.enabled !== false,
+    }] : []
+  })
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM supplier_model_references WHERE supplier_id=$1', [supplierId])
+    for (const reference of normalized) {
+      await client.query(`
+        INSERT INTO supplier_model_references(supplier_id,model_key,model_name,aliases,visual_hint,reference_images,source_batch_id,source_product_id,enabled)
+        VALUES($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9)
+      `, [supplierId, reference.model_key, reference.model_name, JSON.stringify(reference.aliases), reference.visual_hint, JSON.stringify(reference.reference_images), reference.source_batch_id, reference.source_product_id, reference.enabled])
+    }
+    await client.query('COMMIT')
+    return { success: true }
+  } catch (error: any) {
+    await client.query('ROLLBACK')
+    return { success: false, error: error.message }
+  } finally {
+    client.release()
+  }
 }
 
 async function hydrateBatchAiSettings(settings: BatchAiSettings): Promise<BatchAiSettings> {
@@ -671,6 +774,13 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     'SELECT * FROM supplier_price_rules WHERE supplier_id=$1 AND enabled=true ORDER BY priority DESC,id',
     [batch.rows[0].supplier_id],
   )
+  const modelReferencesResult = await scrapingQuery(
+    'SELECT * FROM supplier_model_references WHERE supplier_id=$1 AND enabled=true ORDER BY model_name,id',
+    [batch.rows[0].supplier_id],
+  ).catch((error: any) => {
+    if (String(error?.message || '').includes('supplier_model_references')) return { rows: [] as any[] }
+    throw error
+  })
   const measurementTemplatesResult = await scrapingQuery(`
     SELECT id,supplier_id,name,garment_type,measurements,source_image_url,notes
     FROM measurement_templates
@@ -724,6 +834,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
       ? subcategories.filter((row) => allowedSubcategories.has(String(row.id)))
       : subcategories,
     priceRules: normalizePriceRulesCatalogReferences(priceRules.rows, mappings.rows),
+    modelReferences: modelReferencesResult.rows.map(normalizeModelReferenceRow),
     measurementTemplates,
     chromoffMode,
     chromoffCategories: resolvedChromoffCategories,
@@ -1167,6 +1278,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           subcategories: promptSubcategories,
           attributes: attributeDefinitions,
           priceRules,
+          modelReferences: context.modelReferences,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
           processingOptions: normalizedProcessingOptions,
@@ -1196,8 +1308,10 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           knownAttributeCodes: context.definitions.map((item: any) => item.code),
           attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
           priceRules,
+          modelReferences: context.modelReferences,
           measurementTemplates: context.measurementTemplates,
           priceReferenceUrls,
+          modelReferenceUrls: context.modelReferences.flatMap((reference: ChanelModelReference) => reference.reference_images || []),
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
         })])
@@ -1360,6 +1474,7 @@ function batchAiNormalizationOptions(input: any, context: any) {
     knownAttributeCodes: new Set<string>((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
     priceRuleKeys: new Set<string>((input.priceRules || []).map((row: any) => String(row.rule_key))),
+    modelReferences: Array.isArray(input.modelReferences) ? input.modelReferences : [],
     chromoffMode: input.chromoffMode === true,
     chromoffCategories: Array.isArray(input.chromoffCategories) ? input.chromoffCategories : [],
     processingOptions: normalizeBatchAiProcessingOptions(input.processingOptions),
@@ -1444,13 +1559,16 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
     context.priceReferenceSheetsPromise ||= buildBatchAiContactSheets(input.priceReferenceUrls || [])
+    context.modelReferenceSheetsPromise ||= buildBatchAiContactSheets(input.modelReferenceUrls || [])
     const referenceSheets = await context.priceReferenceSheetsPromise
+    const modelReferenceSheets = await context.modelReferenceSheetsPromise
     let raw = await runBatchAiOpenRouter({
       settings,
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,
       contactSheets: sheets,
       referenceSheets,
+      modelReferenceSheets,
       extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
     })
     rawOutput = raw

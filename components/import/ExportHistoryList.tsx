@@ -17,6 +17,7 @@ import {
   FolderPlus,
   RotateCcw,
   BadgeRussianRuble,
+  BookOpen,
   Sparkles,
   Square,
 } from 'lucide-react'
@@ -41,6 +42,7 @@ import {
   stopBatchAiRunAction,
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
+import SupplierModelReferencesDialog from './SupplierModelReferencesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
 import { shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
@@ -105,6 +107,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [modalState, setModalState] = useState<ModalState | null>(null)
   const [priceSupplier, setPriceSupplier] = useState<{ id: number; name: string } | null>(null)
+  const [modelSupplier, setModelSupplier] = useState<{ id: number; name: string; batchId: string } | null>(null)
   const [reviewBatch, setReviewBatch] = useState<ExportHistoryBatch | null>(null)
 
   const refresh = async () => {
@@ -530,6 +533,9 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           {!batch.isSynthetic && batch.supplier_id && (
                             <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика" aria-label="Правила цен"><BadgeRussianRuble className="h-4 w-4" /></button>
                           )}
+                          {!batch.isSynthetic && batch.supplier_id && (
+                            <button onClick={(event) => { event.stopPropagation(); setModelSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик', batchId: batch.id }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-cyan-300 hover:bg-cyan-500/10" title="Справочник моделей по этой выгрузке" aria-label="Справочник моделей"><BookOpen className="h-4 w-4" /></button>
+                          )}
                           {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
                             <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ" aria-label="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
                           )}
@@ -704,6 +710,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         forceFileMode={modalState?.forceFileMode}
       />
       {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
+      {modelSupplier && <SupplierModelReferencesDialog supplierId={modelSupplier.id} supplierName={modelSupplier.name} batchId={modelSupplier.batchId} onClose={() => setModelSupplier(null)} />}
       {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={() => setReviewBatch(null)} />}
     </div>
   )
