@@ -24,8 +24,15 @@ JUNK_RE = re.compile(
     re.IGNORECASE,
 )
 SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
+DETAIL_MARKER_RE = re.compile(r"(?:款号|款式|款名|尺寸)\s*[:：]?", re.IGNORECASE)
+NON_BAG_ACCESSORY_RE = re.compile(
+    r"丝巾(?:扣|环)|包挂|包饰|钥匙扣|腕表|手表|表带|PREMIÈRE|"
+    r"耳环|耳饰|项链|手链|手镯|戒指|发夹|发箍|头箍|头饰|蝴蝶结",
+    re.IGNORECASE,
+)
 MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,5}\s*[-.]?\s*\d{3,}\b", re.IGNORECASE)
 MAX_PENDING_DISTANCE = 3
+MIN_PRODUCT_PHOTOS = 10
 
 
 def _description(product: dict[str, Any]) -> str:
@@ -79,7 +86,12 @@ def _is_primary(product: dict[str, Any], description: str) -> bool:
     # Accessories can have one usable main image and no detail album.
     if not _photos(product) or len(description) < 8:
         return False
-    if JUNK_RE.search(description) or PACKAGING_RE.search(description) or SERVICE_RE.search(description):
+    if (
+        JUNK_RE.search(description)
+        or PACKAGING_RE.search(description)
+        or SERVICE_RE.search(description)
+        or NON_BAG_ACCESSORY_RE.search(description)
+    ):
         return False
     video_url, _ = _video(product)
     return not (video_url or VIDEO_RE.search(description))
@@ -108,12 +120,21 @@ def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def _is_matching_detail(main: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    """A following short album belongs to the main card only with product proof."""
+    """A following detail album belongs to the main card only with product proof."""
     candidate_photos = _photos(candidate)
-    if not candidate_photos or len(candidate_photos) > 6:
+    if not candidate_photos or len(candidate_photos) > MIN_PRODUCT_PHOTOS:
         return False
     description = _description(candidate)
-    if not description or JUNK_RE.search(description) or PACKAGING_RE.search(description):
+    if (
+        not description
+        or JUNK_RE.search(description)
+        or PACKAGING_RE.search(description)
+        or NON_BAG_ACCESSORY_RE.search(description)
+    ):
+        return False
+    # Large detail albums contain the product's concrete size or style data;
+    # without it, an equally large following gallery can be another colour.
+    if len(candidate_photos) > 6 and not DETAIL_MARKER_RE.search(description):
         return False
     return _same_product(main, candidate)
 
@@ -190,7 +211,7 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
         photos = _photos(product)
         video = _video(product)
 
-        if JUNK_RE.search(description):
+        if JUNK_RE.search(description) or NON_BAG_ACCESSORY_RE.search(description):
             continue
         if PACKAGING_RE.search(description):
             pending_packaging.append((position, product))
@@ -260,4 +281,6 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     if result:
         _append_packaging(result[-1], packaging_by_primary_id)
-    return result
+    # This supplier's usable product sets contain at least ten photographs
+    # after the main, detail and packaging albums have been assembled.
+    return [product for product in result if len(_photos(product)) >= MIN_PRODUCT_PHOTOS]

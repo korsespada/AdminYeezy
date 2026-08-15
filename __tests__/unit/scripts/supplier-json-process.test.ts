@@ -195,7 +195,7 @@ describe('supplier JSON post-process contract', () => {
     ])
   })
 
-  it('uses exact Szwego tags for a one-photo Chanel accessory without requiring a detail album', async () => {
+  it('uses exact Szwego tags for a Chanel group when it reaches the photo threshold', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
         external_id: 'other-packaging', description: '包装展示', photos: ['other-bundle.jpg'], source_position: 0,
@@ -210,7 +210,8 @@ describe('supplier JSON post-process contract', () => {
         attributes: { szwego_tags: ['翻盖卡包'], szwego_video_url: 'https://video/cardholder.mp4' },
       },
       {
-        external_id: 'cardholder', description: '翻盖卡包 黑金色，尺寸：7.5x11.3x2.1cm', photos: ['cardholder-main.jpg'], source_position: 3,
+        external_id: 'cardholder', description: '翻盖卡包 黑金色，尺寸：7.5x11.3x2.1cm',
+        photos: Array.from({ length: 9 }, (_, index) => `cardholder-${index}.jpg`), source_position: 3,
         attributes: { szwego_tags: ['翻盖卡包'] },
       },
     ])
@@ -218,7 +219,7 @@ describe('supplier JSON post-process contract', () => {
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
       external_id: 'cardholder',
-      photos: ['cardholder-main.jpg', 'cardholder-bundle.jpg'],
+      photos: [...Array.from({ length: 9 }, (_, index) => `cardholder-${index}.jpg`), 'cardholder-bundle.jpg'],
       attributes: {
         szwego_tags: ['翻盖卡包'],
         szwego_video_url: 'https://video/cardholder.mp4',
@@ -234,43 +235,93 @@ describe('supplier JSON post-process contract', () => {
       },
       {
         external_id: 'main', description: '26c hobo球迷你奶茶 低饱和奶茶色，容量适合日常出行。',
-        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 1,
+        photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 1,
         attributes: { szwego_tags: ['26c hobo球迷你'] },
       },
     ])
 
     expect(result).toEqual([expect.objectContaining({
       external_id: 'main',
-      photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+      photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`),
     })])
+  })
+
+  it('joins a ten-photo marked detail album to its short matching main gallery before applying the minimum', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'main', description: '金球20黑 复古链条包，日常可单肩或斜挎。',
+        photos: Array.from({ length: 5 }, (_, index) => `main-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: ['金球20cm'] },
+      },
+      {
+        external_id: 'details', description: '金球20黑（硬底） 尺寸：13x18x7cm 金球20cm',
+        photos: Array.from({ length: 10 }, (_, index) => `detail-${index}.jpg`), source_position: 1,
+        attributes: { szwego_tags: ['金球20cm'] },
+      },
+    ])
+
+    expect(result).toEqual([expect.objectContaining({
+      external_id: 'main',
+      photos: [
+        ...Array.from({ length: 5 }, (_, index) => `main-${index}.jpg`),
+        ...Array.from({ length: 10 }, (_, index) => `detail-${index}.jpg`),
+      ],
+    })])
+  })
+
+  it('keeps only Chanel bag galleries with at least ten photos and drops watches or scarf clips', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'nine-photos', description: 'cf23 黑金 日常通勤链条包',
+        photos: Array.from({ length: 9 }, (_, index) => `nine-${index}.jpg`), source_position: 0,
+        attributes: { szwego_tags: ['cf23 黑金'] },
+      },
+      {
+        external_id: 'watch', description: 'PREMIÈRE 麻花辫手镯表 尺寸：S码',
+        photos: Array.from({ length: 13 }, (_, index) => `watch-${index}.jpg`), source_position: 1,
+        attributes: { szwego_tags: ['premiere'] },
+      },
+      {
+        external_id: 'scarf-clip', description: '喜欢低调配饰的姐妹选丝巾扣银，日常上班戴完全不夸张。',
+        photos: Array.from({ length: 11 }, (_, index) => `clip-${index}.jpg`), source_position: 2,
+        attributes: { szwego_tags: ['丝巾扣'] },
+      },
+      {
+        external_id: 'bag', description: 'cf25 黑金 菱格链条包，适合日常通勤。',
+        photos: Array.from({ length: 10 }, (_, index) => `bag-${index}.jpg`), source_position: 3,
+        attributes: { szwego_tags: ['cf25 黑金'] },
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['bag'])
   })
 
   it('never merges unrelated cards from a shared generic Chinese phrase when tags are unavailable', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
         external_id: 'main', description: '26a 黑色口盖包 整体包型和五金细节清晰',
-        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0, attributes: {},
+        photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 0, attributes: {},
       },
       {
         external_id: 'other', description: '26b 白色链条包 整体包型和五金细节需要调整',
-        photos: ['other-1.jpg', 'other-2.jpg', 'other-3.jpg'], source_position: 1, attributes: {},
+        photos: Array.from({ length: 10 }, (_, index) => `other-${index}.jpg`), source_position: 1, attributes: {},
       },
     ])
 
     expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main', 'other'])
-    expect(result[0].photos).toHaveLength(9)
+    expect(result[0].photos).toHaveLength(10)
   })
 
   it('does not treat a missing structured tag as the shared string none', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
         external_id: 'main', description: '26a 黑色口盖包',
-        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 0,
+        photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 0,
         attributes: { szwego_tags: null },
       },
       {
         external_id: 'other', description: '26b 白色链条包',
-        photos: ['other-1.jpg', 'other-2.jpg'], source_position: 1,
+        photos: Array.from({ length: 10 }, (_, index) => `other-${index}.jpg`), source_position: 1,
         attributes: {},
       },
     ])
@@ -297,7 +348,7 @@ describe('supplier JSON post-process contract', () => {
       },
       {
         external_id: 'next-main', description: 'cf25 黑金 主图',
-        photos: Array.from({ length: 9 }, (_, index) => `next-${index}.jpg`), source_position: 3,
+        photos: Array.from({ length: 10 }, (_, index) => `next-${index}.jpg`), source_position: 3,
         attributes: { szwego_tags: ['cf25'] },
       },
     ])
@@ -335,7 +386,10 @@ describe('supplier JSON post-process contract', () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       { external_id: 'first-version', description: '26a 链条法棍鹿棕已出首版 与zp高度相似，下一版继续调整', photos: ['a.jpg'], source_position: 0, attributes: {} },
       { external_id: 'progress', description: '26b 双c小鹿棕【对皮进度】原厂麂皮，避免阳光直晒', photos: ['b.jpg'], source_position: 1, attributes: {} },
-      { external_id: 'main', description: '26a 黑色链条包 日常通勤可单肩斜挎', photos: ['main.jpg'], source_position: 2, attributes: {} },
+      {
+        external_id: 'main', description: '26a 黑色链条包 日常通勤可单肩斜挎',
+        photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 2, attributes: {},
+      },
     ])
 
     expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['main'])

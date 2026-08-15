@@ -148,7 +148,9 @@ its nearby service cards in this output order:
    concrete model code. Generic Chinese phrases never prove that two cards are
    one product. Later short cards with the same generic label are
    lookbook/model shots on a different background and are excluded. The
-   accepted detail description is appended after the main description;
+   accepted detail description is appended after the main description. A
+   following 7-10 photo album is also accepted only when it has an explicit
+   size/style marker, so it is a detail set rather than another colour;
 3. a preceding packaging gallery;
 4. a preceding video URL (the video card itself is not a catalogue product).
 
@@ -158,6 +160,10 @@ development announcements are not merged or emitted. If the first detail image i
 image, it is removed when the URL is identical. The script never downloads or
 decodes source photos; URL-distinct visual duplicates are left for the
 photo-enabled AI pass, which already evaluates the complete gallery.
+
+After all merges and packaging attachments, only galleries with at least ten
+photos remain. Watches, jewellery, hair accessories, bag charms and scarf
+clips are also excluded, even if they meet the photo threshold.
 
 When supplier setting `Парсинг тегов` is enabled, `SzwegoParser.py` keeps the
 source labels both at the end of the description for AI context and in
