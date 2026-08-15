@@ -13,7 +13,7 @@ import {
   canonicalClothingSubcategoryName,
   inferClothingSubcategoryName,
 } from '@/lib/clothing-taxonomy'
-import { batchAiCategoryRuleFor } from '@/lib/batch-ai-category-rules'
+import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
@@ -68,6 +68,7 @@ export type BatchAiSettings = {
   maxTokens: number
   concurrency: number
   systemPrompt: string
+  categoryRules: BatchAiCategoryRule[]
   processingOptions?: BatchAiProcessingOptions
 }
 
@@ -244,12 +245,13 @@ export function buildBatchAiUserPrompt(input: {
   modelReferences?: BatchAiModelReference[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
+  categoryRules?: BatchAiCategoryRule[]
   processingOptions?: BatchAiProcessingOptions
 }) {
   const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
     || (categories.length === 1 ? categories[0] : null)
-  const categoryRule = batchAiCategoryRuleFor(selectedCategory?.name)
+  const categoryRule = batchAiCategoryRuleForRules(selectedCategory?.name, normalizeBatchAiCategoryRules(input.categoryRules))
   let referenceOffset = 0
   const priceRulePrompt = priceRules.map((rule) => {
     const references = (rule.reference_images || []).map((_, index) => referenceOffset + index + 1)

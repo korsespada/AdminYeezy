@@ -3,11 +3,12 @@
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, Server, ShieldAlert, Trash2, X } from 'lucide-react'
-import { createAiProviderAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { createAiProviderAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
-import { BATCH_AI_CATEGORY_RULES } from '@/lib/batch-ai-category-rules'
+import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import type { ByesuModelOption } from '@/lib/byesu'
 import type { AiProviderRecord } from '@/lib/ai-providers'
+import type { Category, Subcategory } from '@/lib/types'
 
 type WorkerState = {
   available?: boolean
@@ -27,6 +28,8 @@ type Props = {
     byesuModels?: ByesuModelOption[]
     providers?: AiProviderRecord[]
   }
+  initialCategories: Category[]
+  initialSubcategories: Subcategory[]
 }
 
 const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
@@ -34,7 +37,7 @@ const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
   { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' },
 ]
 
-export default function AIRulesEditor({ initialSettings }: Props) {
+export default function AIRulesEditor({ initialSettings, initialCategories, initialSubcategories }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
     provider: initialSettings.provider,
     activeProviderId: initialSettings.activeProviderId || null,
@@ -45,6 +48,7 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     maxTokens: initialSettings.maxTokens,
     concurrency: initialSettings.concurrency,
     systemPrompt: initialSettings.systemPrompt,
+    categoryRules: initialSettings.categoryRules,
   })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
@@ -55,6 +59,11 @@ export default function AIRulesEditor({ initialSettings }: Props) {
   const [providerForm, setProviderForm] = useState({
     name: '', baseUrl: '', apiKey: '', model: '',
   })
+  const [categories, setCategories] = useState(initialCategories)
+  const [subcategories, setSubcategories] = useState(initialSubcategories)
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newSubcategoryName, setNewSubcategoryName] = useState('')
+  const [newSubcategoryParentId, setNewSubcategoryParentId] = useState(initialCategories[0]?.id || '')
   const worker = initialSettings.cockpitWorker
   const credentials = initialSettings.credentials
   const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
@@ -148,6 +157,50 @@ export default function AIRulesEditor({ initialSettings }: Props) {
     }
     setProviders((current) => current.map((item) => item.id === provider.id ? { ...item, models: result.data?.models || [] } : item))
     setMessage({ type: 'success', text: `Список моделей обновлён: ${result.data?.models?.length || 0}.` })
+  })
+
+  const updateCategoryRule = (id: string, patch: Partial<BatchAiCategoryRule>) => {
+    update('categoryRules', settings.categoryRules.map((rule) => rule.id === id ? { ...rule, ...patch } : rule))
+  }
+
+  const addCategoryRule = () => {
+    const category = categories[0]
+    if (!category) {
+      setMessage({ type: 'error', text: 'Сначала добавьте категорию.' })
+      return
+    }
+    update('categoryRules', [...settings.categoryRules, {
+      id: crypto.randomUUID(),
+      categoryName: category.name,
+      title: `Правила: ${category.name}`,
+      description: '',
+      rules: '',
+    }])
+  }
+
+  const createCategory = () => startTransition(async () => {
+    const result = await createBatchAiCatalogCategoryAction(newCategoryName)
+    if (!result.success || !result.data) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось создать категорию' })
+      return
+    }
+    const category = { ...result.data, description: '', created: '', updated: '', collectionId: '', collectionName: 'categories' } as Category
+    setCategories((current) => [...current, category].sort((left, right) => left.name.localeCompare(right.name, 'ru')))
+    setNewCategoryName('')
+    setNewSubcategoryParentId(category.id)
+    setMessage({ type: 'success', text: `Категория «${category.name}» создана в Rails. Добавьте правило и сохраните настройки.` })
+  })
+
+  const createSubcategory = () => startTransition(async () => {
+    const result = await createBatchAiCatalogSubcategoryAction(newSubcategoryName, newSubcategoryParentId)
+    if (!result.success || !result.data) {
+      setMessage({ type: 'error', text: result.error || 'Не удалось создать подкатегорию' })
+      return
+    }
+    const subcategory = { ...result.data, category: result.data.parent_id, description: '', created: '', updated: '', collectionId: '', collectionName: 'subcategories' } as Subcategory
+    setSubcategories((current) => [...current, subcategory].sort((left, right) => left.name.localeCompare(right.name, 'ru')))
+    setNewSubcategoryName('')
+    setMessage({ type: 'success', text: `Подкатегория «${subcategory.name}» создана в Rails и доступна AI.` })
   })
 
   const save = () => startTransition(async () => {
@@ -440,41 +493,41 @@ export default function AIRulesEditor({ initialSettings }: Props) {
           <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 p-2 text-violet-400">
             <BookOpen size={24} />
           </div>
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-bold text-white">Автоматические правила категорий</h2>
               <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-xs font-bold text-violet-200">
-                {BATCH_AI_CATEGORY_RULES.length} набора
+                {settings.categoryRules.length} наборов
               </span>
             </div>
             <p className="mt-1 text-sm text-slate-400">
-              Подключаются только к товару соответствующей категории и имеют приоритет над инструкцией поставщика.
+              Подключаются только к товару соответствующей категории и имеют приоритет над инструкцией поставщика. Изменения вступают в силу после «Сохранить настройки».
             </p>
           </div>
+          <button type="button" onClick={addCategoryRule} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500"><Plus className="h-4 w-4" />Добавить правило</button>
         </header>
-        <div className="grid gap-4 p-6 lg:grid-cols-2">
-          {BATCH_AI_CATEGORY_RULES.map((rule) => (
-            <details key={rule.categoryName} className="group rounded-xl border border-slate-700 bg-slate-950/60 open:border-violet-500/30">
-              <summary className="cursor-pointer list-none p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-md bg-violet-500/10 px-2 py-1 text-xs font-bold text-violet-300">{rule.categoryName}</span>
-                      <span className="font-semibold text-white">{rule.title}</span>
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-400">{rule.description}</p>
-                  </div>
-                  <span className="text-lg text-slate-500 transition group-open:rotate-45">+</span>
-                </div>
-              </summary>
-              <pre className="whitespace-pre-wrap border-t border-slate-800 px-4 py-4 font-sans text-sm leading-relaxed text-slate-300">
-                {rule.rules}
-              </pre>
-            </details>
-          ))}
+        <div className="grid gap-4 border-b border-slate-700 p-6 lg:grid-cols-2">
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+            <h3 className="font-semibold text-white">Новая категория</h3>
+            <p className="mt-1 text-xs text-slate-500">Создаётся в каталоге Rails со статусом проверки.</p>
+            <div className="mt-3 flex gap-2"><input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="Например, Текстиль" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /><button type="button" onClick={createCategory} disabled={pending || !newCategoryName.trim()} className="rounded-lg border border-violet-500/40 px-3 text-sm font-semibold text-violet-200 disabled:opacity-50">Создать</button></div>
+          </div>
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+            <h3 className="font-semibold text-white">Новая подкатегория</h3>
+            <p className="mt-1 text-xs text-slate-500">Сейчас в справочнике: {categories.length} категорий и {subcategories.length} подкатегорий.</p>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"><select value={newSubcategoryParentId} onChange={(event) => setNewSubcategoryParentId(event.target.value)} className="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white">{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><input value={newSubcategoryName} onChange={(event) => setNewSubcategoryName(event.target.value)} placeholder="Например, Пледы" className="min-w-0 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /><button type="button" onClick={createSubcategory} disabled={pending || !newSubcategoryName.trim() || !newSubcategoryParentId} className="rounded-lg border border-violet-500/40 px-3 text-sm font-semibold text-violet-200 disabled:opacity-50">Создать</button></div>
+          </div>
         </div>
-        <div className="border-t border-slate-700 px-6 py-4 text-sm text-slate-500">
-          Для остальных категорий пока действует только общий системный промпт. Новые наборы добавляются сюда по мере появления реальных сценариев.
+        <div className="grid gap-4 p-6 lg:grid-cols-2">
+          {settings.categoryRules.map((rule) => (
+            <article key={rule.id} className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/60 p-4">
+              <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold text-white">Правило категории</span><button type="button" onClick={() => update('categoryRules', settings.categoryRules.filter((item) => item.id !== rule.id))} className="rounded-md p-1.5 text-slate-400 hover:bg-red-500/10 hover:text-red-300" aria-label={`Удалить правило ${rule.title}`}><Trash2 className="h-4 w-4" /></button></div>
+              <label className="block text-xs text-slate-400">Категория<select value={rule.categoryName} onChange={(event) => updateCategoryRule(rule.id, { categoryName: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white">{categories.map((category) => <option key={category.id} value={category.name}>{category.name}</option>)}</select></label>
+              <label className="block text-xs text-slate-400">Название<input value={rule.title} onChange={(event) => updateCategoryRule(rule.id, { title: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /></label>
+              <label className="block text-xs text-slate-400">Краткое описание<input value={rule.description} onChange={(event) => updateCategoryRule(rule.id, { description: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white" /></label>
+              <label className="block text-xs text-slate-400">Инструкции для AI<textarea value={rule.rules} onChange={(event) => updateCategoryRule(rule.id, { rules: event.target.value })} className="mt-1 min-h-40 w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm leading-6 text-white" /></label>
+            </article>
+          ))}
         </div>
       </section>
 

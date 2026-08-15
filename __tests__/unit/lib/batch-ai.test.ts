@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
+import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
 describe('batch AI normalization', () => {
   it('extracts a structured response wrapped in markdown and repairs control characters', () => {
@@ -731,6 +732,30 @@ describe('batch AI normalization', () => {
     expect(accessoryPrompt).toContain('Кепки и бейсболки')
     expect(accessoryPrompt).not.toContain('Правила классификации категории «Обувь»')
     expect(clothingPrompt).toContain('Никогда не заполняй subcategory_suggestion для одежды')
+  })
+
+  it('uses an operator-edited category rule from settings', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { category: 'textile' },
+      brands: [],
+      categories: [{ id: 'textile', name: 'Текстиль' }],
+      subcategories: [],
+      attributes: [],
+      categoryRules: [{
+        id: 'textile-rule',
+        categoryName: 'Текстиль',
+        title: 'Текстиль: ручное правило',
+        description: 'Настроено оператором',
+        rules: 'Для текстиля выбирай только подтверждённые материалы.',
+      }],
+    })
+
+    expect(prompt).toContain('Автоматические правила категории «Текстиль»')
+    expect(prompt).toContain('Для текстиля выбирай только подтверждённые материалы.')
+  })
+
+  it('allows the operator to remove every category rule', () => {
+    expect(normalizeBatchAiCategoryRules([])).toEqual([])
   })
 
   it('passes the actual price together with each supplier price rule', () => {

@@ -167,6 +167,7 @@ async function measurementRecognitionSettings(): Promise<BatchAiSettings> {
     maxTokens: 3000,
     concurrency: 1,
     systemPrompt: '',
+    categoryRules: [],
     providerBaseUrl,
     providerApiKey,
   }

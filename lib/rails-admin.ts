@@ -801,7 +801,7 @@ export function mapRailsProduct(product: any): Product {
 export async function getRailsCatalogLookups() {
   const [brandsPayload, categoriesPayload] = await Promise.all([
     publicRailsFetch<{ brands: any[] }>('/catalog/brands'),
-    publicRailsFetch<{ categories: any[] }>('/catalog/categories'),
+    railsFetch<{ categories: any[] }>('/admin/catalog_taxonomy/categories'),
   ])
   const { categories, subcategories } = flattenCategories(categoriesPayload.categories || [])
 
@@ -1751,6 +1751,14 @@ export async function createRailsCatalogSubcategory(input: { name: string; paren
   const result = await railsFetch<{ category: any }>('/admin/catalog_taxonomy/subcategories', {
     method: 'POST',
     body: JSON.stringify({ subcategory: input }),
+  })
+  return result.category
+}
+
+export async function createRailsCatalogCategory(input: { name: string }) {
+  const result = await railsFetch<{ category: any }>('/admin/catalog_taxonomy/categories', {
+    method: 'POST',
+    body: JSON.stringify({ category: input }),
   })
   return result.category
 }

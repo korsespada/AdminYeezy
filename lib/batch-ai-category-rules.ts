@@ -2,6 +2,7 @@ import { SHOE_TAXONOMY_AI_RULES } from '@/lib/shoe-taxonomy'
 import { CLOTHING_TAXONOMY_AI_RULES } from '@/lib/clothing-taxonomy'
 
 export type BatchAiCategoryRule = {
+  id: string
   categoryName: string
   title: string
   description: string
@@ -25,24 +26,28 @@ const ACCESSORY_RULES = `Правила классификации катего�
 
 export const BATCH_AI_CATEGORY_RULES: BatchAiCategoryRule[] = [
   {
+    id: 'clothing',
     categoryName: 'Одежда',
     title: 'Одежда: единая классификация',
     description: 'Глобальное распределение типов одежды, включая китайские названия.',
     rules: CLOTHING_TAXONOMY_AI_RULES,
   },
   {
+    id: 'bags',
     categoryName: 'Сумки',
     title: 'Сумки: подкатегории и материалы',
     description: 'Запрещённые узкие подкатегории, обязательная конкретная классификация и нормализация кожи.',
     rules: BAG_RULES,
   },
   {
+    id: 'shoes',
     categoryName: 'Обувь',
     title: 'Обувь: единая классификация',
     description: 'Закрытый список подкатегорий, различение конструкций, размеров и model_name.',
     rules: SHOE_TAXONOMY_AI_RULES,
   },
   {
+    id: 'accessories',
     categoryName: 'Аксессуары',
     title: 'Аксессуары: головные уборы',
     description: 'Разделение шапок и моделей с козырьком.',
@@ -55,6 +60,30 @@ function normalizedCategoryName(value: unknown) {
 }
 
 export function batchAiCategoryRuleFor(value: unknown) {
+  return batchAiCategoryRuleForRules(value, BATCH_AI_CATEGORY_RULES)
+}
+
+export function batchAiCategoryRuleForRules(value: unknown, rules: BatchAiCategoryRule[]) {
   const categoryName = normalizedCategoryName(value)
-  return BATCH_AI_CATEGORY_RULES.find((rule) => normalizedCategoryName(rule.categoryName) === categoryName) || null
+  return rules.find((rule) => normalizedCategoryName(rule.categoryName) === categoryName) || null
+}
+
+export function normalizeBatchAiCategoryRules(value: unknown): BatchAiCategoryRule[] {
+  if (!Array.isArray(value)) return BATCH_AI_CATEGORY_RULES
+  const rules = value.flatMap((item, index) => {
+    if (!item || typeof item !== 'object') return []
+    const source = item as Record<string, unknown>
+    const categoryName = String(source.categoryName || '').trim().slice(0, 120)
+    const title = String(source.title || '').trim().slice(0, 180)
+    const content = String(source.rules || '').trim().slice(0, 12_000)
+    if (!categoryName || !title || !content) return []
+    return [{
+      id: String(source.id || `category-rule-${index + 1}`).trim().slice(0, 120),
+      categoryName,
+      title,
+      description: String(source.description || '').trim().slice(0, 500),
+      rules: content,
+    }]
+  })
+  return rules
 }

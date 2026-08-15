@@ -34,6 +34,7 @@ import {
   type BatchAiSettings,
 } from '@/lib/batch-ai'
 import {
+  createRailsCatalogCategory,
   createRailsCatalogSubcategory,
   getRailsCatalogAttributeRegistry,
   getRailsCatalogLookups,
@@ -80,6 +81,7 @@ import {
   type AiProviderKind,
   type AiProviderRecord,
 } from '@/lib/ai-providers'
+import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -90,6 +92,7 @@ const SETTINGS_KEYS = [
   'batch_ai_max_tokens',
   'batch_ai_concurrency',
   'batch_ai_system_prompt',
+  'batch_ai_category_rules',
 ]
 
 const FALLBACK_BYESU_MODELS = [
@@ -100,6 +103,14 @@ const FALLBACK_BYESU_MODELS = [
 function finiteNumber(value: unknown, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function safeJsonParse(value: unknown) {
+  try {
+    return JSON.parse(String(value || ''))
+  } catch {
+    return null
+  }
 }
 
 export async function getBatchAiSettingsAction() {
@@ -150,6 +161,7 @@ export async function getBatchAiSettingsAction() {
       maxTokens: Math.max(1000, finiteNumber(values.batch_ai_max_tokens, 5000)),
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
       systemPrompt: values.batch_ai_system_prompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
+      categoryRules: normalizeBatchAiCategoryRules(safeJsonParse(values.batch_ai_category_rules)),
       cockpitWorker: worker.rows[0] || null,
       credentials: {
         openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
@@ -183,6 +195,7 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
     batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
     batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
     batch_ai_system_prompt: String(settings.systemPrompt || '').trim() || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
+    batch_ai_category_rules: JSON.stringify(normalizeBatchAiCategoryRules(settings.categoryRules)),
   }
   const client = await getScrapingClient()
   try {
@@ -270,6 +283,35 @@ export async function getSupplierPriceRulesAction(supplierId: number) {
     WHERE entity_type IN ('brand','category','subcategory')
   `)
   return { success: true, data: normalizePriceRulesCatalogReferences(result.rows, mappings.rows) }
+}
+
+export async function createBatchAiCatalogCategoryAction(name: string) {
+  await requireAdmin()
+  const value = String(name || '').trim().slice(0, 120)
+  if (!value) return { success: false, error: 'Введите название категории' }
+  try {
+    const category = await createRailsCatalogCategory({ name: value })
+    revalidatePath('/admin/ai-rules')
+    revalidatePath('/admin/categories')
+    return { success: true, data: category }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Не удалось создать категорию' }
+  }
+}
+
+export async function createBatchAiCatalogSubcategoryAction(name: string, parentCategoryId: string) {
+  await requireAdmin()
+  const value = String(name || '').trim().slice(0, 120)
+  const parentId = String(parentCategoryId || '').trim()
+  if (!value || !parentId) return { success: false, error: 'Укажите название и родительскую категорию' }
+  try {
+    const category = await createRailsCatalogSubcategory({ name: value, parent_category_id: parentId })
+    revalidatePath('/admin/ai-rules')
+    revalidatePath('/admin/categories')
+    return { success: true, data: category }
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Не удалось создать подкатегорию' }
+  }
 }
 
 export async function saveSupplierPriceRulesAction(supplierId: number, rules: any[]) {
@@ -1281,6 +1323,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           modelReferences: context.modelReferences,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
+          categoryRules: settings.categoryRules,
           processingOptions: normalizedProcessingOptions,
         })
         await scrapingQuery(`

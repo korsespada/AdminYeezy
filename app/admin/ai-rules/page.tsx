@@ -1,11 +1,15 @@
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import AIRulesEditor from '@/components/ai/AIRulesEditor'
 import ImportTabs from '@/components/ui/ImportTabs'
+import { getRailsCatalogLookups } from '@/lib/rails-admin'
 
 export const dynamic = 'force-dynamic'
 
 export default async function AIRulesPage() {
-  const settingsResult = await getBatchAiSettingsAction()
+  const [settingsResult, lookups] = await Promise.all([
+    getBatchAiSettingsAction(),
+    getRailsCatalogLookups(),
+  ])
 
   return (
     <div className="p-8">
@@ -15,7 +19,7 @@ export default async function AIRulesPage() {
           <p className="text-slate-400">Глобальные настройки обработки китайских товаров в «Выгрузках»</p>
         </div>
         <ImportTabs />
-        <AIRulesEditor initialSettings={settingsResult.data} />
+        <AIRulesEditor initialSettings={settingsResult.data} initialCategories={lookups.categories} initialSubcategories={lookups.subcategories} />
       </div>
     </div>
   )
