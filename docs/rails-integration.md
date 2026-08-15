@@ -128,6 +128,12 @@ POST /api/v1/admin/telegram_notification_recipients
 `@YeezyUniqueBot`). Тестовый запрос передаёт `channel=site` или
 `channel=telegram_mini_app`, чтобы проверить нужного бота.
 
+Источник клиента фиксируется при первой регистрации: Telegram-вход на обычном
+сайте относится к `site`, а `telegram_mini_app` используется только для
+проверенного `init_data` Telegram Mini App. Наличие `telegram_id` само по себе
+не является признаком Mini App; последующий вход через другой канал источник не
+переключает.
+
 В CRM остаются четыре вкладки: «Заказы», «Клиенты», «Telegram-сообщения» и
 «Настройки CRM». В заказах используются только статусы `payment_pending`,
 `paid`, `shipped`, `delivered`, `refund_pending`, `cancelled`; подтверждение
