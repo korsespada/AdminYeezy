@@ -441,6 +441,28 @@ describe('rails admin product adapter', () => {
   it('loads filter facets while excluding the current facet dimension', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const requestUrl = new URL(url)
+      if (requestUrl.pathname.endsWith('/admin/products/facets_batch')) {
+        return {
+          ok: true,
+          json: async () => ({
+            facets: {
+              brands: [{ slug: 'gucci', name: 'Gucci', count: 2 }],
+              suppliers: [{ slug: 'supplier-a', name: 'Supplier A', count: 5 }],
+              categories: [{ slug: 'bags-parent', name: 'Сумки', count: 3 }],
+              subcategories: [{ slug: 'bags-child', name: 'Сумки', count: 3 }],
+              genders: [{ value: 'female', count: 4 }],
+              sizes: [{ value: 'M', count: 3 }],
+            },
+            meta: {
+              total: 4,
+              unisex_total: 2,
+              missing_category_count: 1,
+              missing_subcategory_count: 2,
+              missing_gender_count: 3,
+            },
+          }),
+        }
+      }
       const excluded = requestUrl.searchParams.get('exclude')
       const gender = requestUrl.searchParams.get('gender')
 
@@ -475,41 +497,19 @@ describe('rails admin product adapter', () => {
     expect(result.subcategoryFacets).toEqual([{ slug: 'bags-child', name: 'Сумки', count: 3 }])
     expect(result.genderFacets).toEqual([{ value: 'female', count: 4 }, { value: 'unisex', count: 2 }])
     expect(result.attributeFacets?.sizes).toEqual([{ value: 'M', count: 3 }])
-    expect(fetchMock).toHaveBeenCalledTimes(7)
+    expect(result.missingCategoryCount).toBe(1)
+    expect(result.missingSubcategoryCount).toBe(2)
+    expect(result.missingGenderCount).toBe(3)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    const calls = fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams)
-    expect(calls[0].get('exclude')).toBe('brand')
-    expect(calls[0].get('category')).toBe('bags-parent')
-    expect(calls[0].get('subcategory')).toBe('bags-child')
-    expect(calls[0].get('gender')).toBe('female')
-    expect(calls[0].get('status')).toBe('active')
-    expect(calls[1].get('exclude')).toBe('category')
-    expect(calls[1].get('brand')).toBe('gucci')
-    expect(calls[1].get('category')).toBeNull()
-    expect(calls[1].get('gender')).toBe('female')
-    expect(calls[2].get('exclude')).toBe('subcategory')
-    expect(calls[2].get('brand')).toBe('gucci')
-    expect(calls[2].get('category')).toBe('bags-parent')
-    expect(calls[2].get('subcategory')).toBeNull()
-    expect(calls[2].get('gender')).toBe('female')
-    expect(calls[3].get('exclude')).toBe('supplier')
-    expect(calls[3].get('brand')).toBe('gucci')
-    expect(calls[3].get('category')).toBe('bags-parent')
-    expect(calls[3].get('subcategory')).toBe('bags-child')
-    expect(calls[3].get('supplier')).toBeNull()
-    expect(calls[4].get('exclude')).toBe('gender')
-    expect(calls[4].get('brand')).toBe('gucci')
-    expect(calls[4].get('category')).toBe('bags-parent')
-    expect(calls[4].get('subcategory')).toBe('bags-child')
-    expect(calls[4].get('gender')).toBeNull()
-    expect(calls[5].get('exclude')).toBe('gender')
-    expect(calls[5].get('brand')).toBe('gucci')
-    expect(calls[5].get('category')).toBe('bags-parent')
-    expect(calls[5].get('subcategory')).toBe('bags-child')
-    expect(calls[5].get('gender')).toBe('unisex')
-    expect(calls[6].get('exclude')).toBe('attribute')
-    expect(calls[6].get('attribute_key')).toBeNull()
-    expect(calls[6].get('attribute_value')).toBeNull()
+    const [url] = fetchMock.mock.calls[0]
+    const params = new URL(String(url)).searchParams
+    expect(String(url)).toContain('/admin/products/facets_batch?')
+    expect(params.get('brand')).toBe('gucci')
+    expect(params.get('category')).toBe('bags-parent')
+    expect(params.get('subcategory')).toBe('bags-child')
+    expect(params.get('gender')).toBe('female')
+    expect(params.get('status')).toBe('active')
   })
 
   it('loads only catalog lookup facets for the attribute review filters', async () => {
@@ -590,12 +590,12 @@ describe('rails admin product adapter', () => {
     expect(result.products[499].id).toBe('product-500')
     expect(result.totalItems).toBe(1200)
     expect(result.totalPages).toBe(3)
-    expect(fetchMock).toHaveBeenCalledTimes(13)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(
-      Array.from({ length: 13 }, () => '40')
+      Array.from({ length: 5 }, () => '100')
     )
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('page'))).toEqual(
-      Array.from({ length: 13 }, (_, index) => String(index + 1))
+      Array.from({ length: 5 }, (_, index) => String(index + 1))
     )
   })
 
@@ -636,16 +636,16 @@ describe('rails admin product adapter', () => {
     expect(result.products[499].id).toBe('filtered-product-500')
     expect(result.totalItems).toBe(620)
     expect(result.totalPages).toBe(2)
-    expect(fetchMock).toHaveBeenCalledTimes(13)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
     expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/admin/products?'))).toBe(true)
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('per_page'))).toEqual(
-      Array.from({ length: 13 }, () => '40')
+      Array.from({ length: 5 }, () => '100')
     )
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('gender'))).toEqual(
-      Array.from({ length: 13 }, () => 'unisex')
+      Array.from({ length: 5 }, () => 'unisex')
     )
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).searchParams.get('brand'))).toEqual(
-      Array.from({ length: 13 }, () => 'hermes')
+      Array.from({ length: 5 }, () => 'hermes')
     )
   })
 

@@ -21,7 +21,9 @@ import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 let pendingRailsAdminLogin: Promise<string> | null = null
 let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
-const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 40
+// Rails accepts up to 100 products per request. Keep the chunk aligned with
+// that limit so the 500-row view does not make thirteen sequential requests.
+const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 100
 
 export interface RailsCrmCustomer {
   id?: number | string
@@ -2038,6 +2040,96 @@ export async function getRailsCatalogLookupFacets(filters: Pick<
 }
 
 export async function getRailsProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
+  const batchPayload = await fetchRailsProductFacetBatch(filters)
+  if (batchPayload) {
+    return mapRailsProductFilterFacets(batchPayload)
+  }
+
+  return getRailsProductFilterFacetsLegacy(filters)
+}
+
+async function fetchRailsProductFacetBatch(options: ProductFacetFilters) {
+  options = {
+    ...options,
+    category: await resolveCategoryFilterSlug(options.category),
+    subcategory: await resolveCategoryFilterSlug(options.subcategory),
+  }
+  const params = buildRailsAdminProductsParams({
+    ...options,
+    page: 1,
+    perPage: 1,
+    genderMissing: options.noGender,
+    gender: options.noGender ? '' : options.gender,
+    genderExact: options.genderExact,
+  })
+
+  try {
+    return await railsFetch<{
+      facets?: {
+        brands?: CatalogSlugFacet[]
+        suppliers?: CatalogSlugFacet[]
+        categories?: CatalogSlugFacet[]
+        subcategories?: CatalogSlugFacet[]
+        genders?: CatalogValueFacet[]
+        [key: string]: CatalogSlugFacet[] | CatalogValueFacet[] | undefined
+      }
+      meta?: {
+        total?: number
+        unisex_total?: number
+        missing_category_count?: number
+        missing_subcategory_count?: number
+        missing_gender_count?: number
+      }
+    }>(`/admin/products/facets_batch?${params}`)
+  } catch (error) {
+    // Keep AdminYeezy compatible while Rails is being rolled out first.
+    if (String(error).includes('404')) return null
+    throw error
+  }
+}
+
+function mapRailsProductFilterFacets(payload: {
+  facets?: {
+    brands?: CatalogSlugFacet[]
+    suppliers?: CatalogSlugFacet[]
+    categories?: CatalogSlugFacet[]
+    subcategories?: CatalogSlugFacet[]
+    genders?: CatalogValueFacet[]
+    [key: string]: CatalogSlugFacet[] | CatalogValueFacet[] | undefined
+  }
+  meta?: {
+    total?: number
+    unisex_total?: number
+    missing_category_count?: number
+    missing_subcategory_count?: number
+    missing_gender_count?: number
+  }
+}): ProductFilterFacets {
+  const genderFacets = [...(payload.facets?.genders || [])]
+  const unisexCount = Number(payload.meta?.unisex_total || 0)
+  if (unisexCount > 0 && !genderFacets.some(facet => facet.value === 'unisex')) {
+    genderFacets.push({ value: 'unisex', count: unisexCount })
+  }
+
+  return {
+    brandFacets: payload.facets?.brands || [],
+    supplierFacets: payload.facets?.suppliers || [],
+    categoryFacets: payload.facets?.categories || [],
+    subcategoryFacets: payload.facets?.subcategories || [],
+    genderFacets,
+    missingCategoryCount: Number(payload.meta?.missing_category_count || 0),
+    missingSubcategoryCount: Number(payload.meta?.missing_subcategory_count || 0),
+    missingGenderCount: Number(payload.meta?.missing_gender_count || 0),
+    attributeFacets: Object.fromEntries(
+      CATALOG_ATTRIBUTE_DEFINITIONS.map((definition) => [
+        definition.code,
+        (payload.facets?.[definition.code] || []) as CatalogValueFacet[],
+      ]),
+    ),
+  }
+}
+
+async function getRailsProductFilterFacetsLegacy(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
   const sharedFilters = {
     search: filters.search,
     name: filters.name,

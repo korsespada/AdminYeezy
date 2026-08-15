@@ -40,6 +40,7 @@ HttpOnly cookie `admin_token`. При отсутствии или истечен
 ```text
 GET    /api/v1/admin/products
 GET    /api/v1/admin/products/facets
+GET    /api/v1/admin/products/facets_batch
 GET    /api/v1/admin/products/:id
 POST   /api/v1/admin/products
 PATCH  /api/v1/admin/products/:id
@@ -60,6 +61,12 @@ POST   /api/v1/admin/products/:id/reindex
 без категории. Для фильтров пола `gender_exact=true`
 исключает `unisex`; без этого флага мужской и женский фильтры могут включать
 унисекс-товары, а `gender_missing=true` выбирает товары без гендера.
+
+`facets_batch` возвращает фасеты для всех фильтров одним HTTP-запросом. Rails
+рассчитывает только нужное измерение для каждого фильтра, поэтому экран
+каталога не запускает семь повторных полных JSONB-агрегаций. AdminYeezy
+временно откатывается к отдельным запросам `/facets`, если endpoint ещё не
+развёрнут в Rails.
 
 Scraping-товары внутри партий продолжают жить в `yeezy_scraping.products` до публикации.
 
