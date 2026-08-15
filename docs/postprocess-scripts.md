@@ -130,3 +130,29 @@ yeezy_scraping.products -> AdminYeezy publication adapter -> Rails API -> Rails 
 ```
 
 The legacy `shop` database is not the source of truth for the new storefront.
+
+## Chanel Bags
+
+`Chanel Сумки` uses `process_chanel_bags_timeline.py` against the `全部 / единая
+лента` source. It keeps only a substantive main product card and safely joins
+its nearby service cards in this output order:
+
+1. main gallery and its description;
+2. a following short detail gallery only when it shares a model code or a
+   specific Chinese product-name fragment; for new batches an exact matching
+   Szwego tag has priority. Its description is appended after the main
+   description;
+3. a preceding packaging gallery;
+4. a preceding video URL (the video card itself is not a catalogue product).
+
+Packaging text is not copied into the product description. Collages, `合集`,
+factory/quality posts, `ZP` comparisons and development announcements are not
+merged or emitted. If the first detail image is the same as the first main
+image, it is removed when the URL is identical. The script never downloads or
+decodes source photos; URL-distinct visual duplicates are left for the
+photo-enabled AI pass, which already evaluates the complete gallery.
+
+When supplier setting `Парсинг тегов` is enabled, `SzwegoParser.py` keeps the
+source labels both at the end of the description for AI context and in
+`attributes.szwego_tags` for deterministic post-processing. Existing raw
+snapshots without this attribute remain compatible through the text fallback.

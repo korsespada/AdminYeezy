@@ -131,33 +131,98 @@ describe('supplier JSON post-process contract', () => {
     expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['real'])
   })
 
-  it('preserves UTF-8 and merges neighbouring Chanel albums without CSV artifacts', async () => {
+  it('builds a Chanel gallery as main, matching details, then packaging, and attaches the nearby video', async () => {
     const products = [
       {
-        external_id: 'details',
-        description: '经典款 尺寸：25',
-        photos: Array.from({ length: 9 }, (_, index) => `detail-${index}`),
+        external_id: 'packaging',
+        description: '包装展示',
+        photos: ['bundle-1.jpg'],
         source_position: 0,
         attributes: {},
       },
       {
-        external_id: 'cover',
-        description: '钱包展示',
-        photos: Array.from({ length: 4 }, (_, index) => `cover-${index}`),
+        external_id: 'video',
+        description: '实拍视频',
+        photos: ['video-poster.jpg'],
         source_position: 1,
+        attributes: {
+          szwego_video_url: 'https://video/chanel.mp4',
+          szwego_video_poster_url: 'https://video/chanel.webp',
+        },
+      },
+      {
+        external_id: 'main',
+        description: '26a 口盖小波点 托斯卡纳羊皮 黑色波点很有复古氛围',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+        source_position: 2,
+        attributes: {},
+      },
+      {
+        external_id: 'details',
+        description: '26a 口盖小波点 款号 AS6513 尺寸：15x25.5x6.5cm',
+        photos: ['main-0.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg'],
+        source_position: 3,
+        attributes: {},
+      },
+      {
+        external_id: 'junk',
+        description: '合集 26a 多个不相干款式',
+        photos: ['junk.jpg'],
+        source_position: 4,
         attributes: {},
       },
     ]
 
-    const result = await runSupplierJsonProcess('merge_photos_8_9_11.py', products)
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', products)
 
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
-      external_id: 'details',
-      description: '钱包展示 经典款 尺寸：25',
-      source_position: 0,
+      external_id: 'main',
+      description: '26a 口盖小波点 托斯卡纳羊皮 黑色波点很有复古氛围\n\n26a 口盖小波点 款号 AS6513 尺寸：15x25.5x6.5cm',
+      source_position: 2,
+      attributes: {
+        szwego_video_url: 'https://video/chanel.mp4',
+        szwego_video_poster_url: 'https://video/chanel.webp',
+      },
     })
-    expect(result[0].photos).toHaveLength(13)
+    expect(result[0].photos).toEqual([
+      ...Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+      'detail-1.jpg',
+      'detail-2.jpg',
+      'detail-3.jpg',
+      'bundle-1.jpg',
+    ])
+  })
+
+  it('uses exact Szwego tags for a one-photo Chanel accessory without requiring a detail album', async () => {
+    const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
+      {
+        external_id: 'other-packaging', description: '包装展示', photos: ['other-bundle.jpg'], source_position: 0,
+        attributes: { szwego_tags: ['другая модель'] },
+      },
+      {
+        external_id: 'accessory-packaging', description: '包装展示 翻盖卡包', photos: ['cardholder-bundle.jpg'], source_position: 1,
+        attributes: { szwego_tags: ['翻盖卡包'] },
+      },
+      {
+        external_id: 'accessory-video', description: '翻盖卡包 视频', photos: [], source_position: 2,
+        attributes: { szwego_tags: ['翻盖卡包'], szwego_video_url: 'https://video/cardholder.mp4' },
+      },
+      {
+        external_id: 'cardholder', description: '翻盖卡包 黑金色，尺寸：7.5x11.3x2.1cm', photos: ['cardholder-main.jpg'], source_position: 3,
+        attributes: { szwego_tags: ['翻盖卡包'] },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'cardholder',
+      photos: ['cardholder-main.jpg', 'cardholder-bundle.jpg'],
+      attributes: {
+        szwego_tags: ['翻盖卡包'],
+        szwego_video_url: 'https://video/cardholder.mp4',
+      },
+    })
   })
 
   it('builds five Szwego timeline products, excludes mosaic tiles, and copies the size chart into each', async () => {

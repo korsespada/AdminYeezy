@@ -1,0 +1,222 @@
+"""Post-process the Chanel Bags all-timeline feed.
+
+The supplier normally publishes a product in reverse order: packaging and a
+video card, then the main gallery, then a short detail gallery. The output
+must be main gallery -> detail gallery -> packaging photos. A generic
+``8/9/11 photos + 4 photos`` rule is unsafe here: unrelated collages and
+different bags are often adjacent in the timeline.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+from typing import Any
+
+
+PACKAGING_RE = re.compile(r"包装(?:展示|图|清单)?|配套|标配|礼盒|防尘袋|手提袋", re.IGNORECASE)
+VIDEO_RE = re.compile(r"(?:实拍)?视频", re.IGNORECASE)
+JUNK_RE = re.compile(
+    r"合集|图集|拼图|上新(?:预告)?|新品推荐|准备(?:开发|中)?|开发准备|品控|"
+    r"我们\s*(?:🆚|vs)?\s*zp|\bzp\b|工厂(?:展示|对比)?|档口(?:展示|对比)?",
+    re.IGNORECASE,
+)
+SERVICE_RE = re.compile(r"尺码表|尺寸表|上身图|模特|真人|穿搭|参考", re.IGNORECASE)
+MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,5}\s*[-.]?\s*\d{3,}\b", re.IGNORECASE)
+CHINESE_PHRASE_RE = re.compile(r"[\u4e00-\u9fff]{4,}")
+MAX_PENDING_DISTANCE = 3
+
+
+def _description(product: dict[str, Any]) -> str:
+    return " ".join(str(product.get("description") or "").split())
+
+
+def _photos(product: dict[str, Any]) -> list[str]:
+    photos = product.get("photos") or []
+    if not isinstance(photos, list):
+        try:
+            photos = json.loads(photos)
+        except (TypeError, json.JSONDecodeError):
+            photos = []
+    return [str(photo) for photo in photos if photo] if isinstance(photos, list) else []
+
+
+def _video(product: dict[str, Any]) -> tuple[str | None, str | None]:
+    attributes = product.get("attributes") or {}
+    if not isinstance(attributes, dict):
+        return None, None
+    url = attributes.get("szwego_video_url") or attributes.get("video_url")
+    poster = attributes.get("szwego_video_poster_url") or attributes.get("video_poster_url")
+    return (str(url).strip() if url else None, str(poster).strip() if poster else None)
+
+
+def _tags(product: dict[str, Any]) -> set[str]:
+    """Read the parser's structured Szwego labels, when this batch has them."""
+    attributes = product.get("attributes") or {}
+    values = attributes.get("szwego_tags") if isinstance(attributes, dict) else []
+    if not isinstance(values, list):
+        values = [values]
+    return {
+        " ".join(str(value).split()).casefold()
+        for value in values
+        if str(value).strip()
+    }
+
+
+def _position(product: dict[str, Any], fallback: int) -> int:
+    value = product.get("source_position", fallback)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _is_primary(product: dict[str, Any], description: str) -> bool:
+    """Keep actual bag cards, not service cards or publication collages."""
+    # Accessories can have one usable main image and no detail album.
+    if not _photos(product) or len(description) < 8:
+        return False
+    if JUNK_RE.search(description) or PACKAGING_RE.search(description) or SERVICE_RE.search(description):
+        return False
+    video_url, _ = _video(product)
+    return not (video_url or VIDEO_RE.search(description))
+
+
+def _common_product_phrase(left: str, right: str) -> str:
+    """Find a sufficiently specific shared Chinese fragment between albums."""
+    best = ""
+    for phrase in CHINESE_PHRASE_RE.findall(left):
+        for start in range(0, len(phrase) - 3):
+            candidate = phrase[start:]
+            if len(candidate) >= 4 and candidate in right and len(candidate) > len(best):
+                best = candidate
+    return best
+
+
+def _same_model(left: str, right: str) -> bool:
+    left_codes = {re.sub(r"\s+", "", code).upper() for code in MODEL_CODE_RE.findall(left)}
+    right_codes = {re.sub(r"\s+", "", code).upper() for code in MODEL_CODE_RE.findall(right)}
+    return bool(left_codes & right_codes)
+
+
+def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Prefer exact supplier tags; old snapshots fall back to their text."""
+    left_tags = _tags(left)
+    right_tags = _tags(right)
+    if left_tags and right_tags:
+        return bool(left_tags & right_tags)
+    left_description = _description(left)
+    right_description = _description(right)
+    return (
+        _same_model(left_description, right_description)
+        or len(_common_product_phrase(left_description, right_description)) >= 4
+    )
+
+
+def _is_matching_detail(main: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    """A following short album belongs to the main card only with product proof."""
+    candidate_photos = _photos(candidate)
+    if not candidate_photos or len(candidate_photos) > 6:
+        return False
+    description = _description(candidate)
+    if not description or JUNK_RE.search(description) or PACKAGING_RE.search(description):
+        return False
+    return _same_product(main, candidate)
+
+
+def _unique(photos: list[str]) -> list[str]:
+    seen: set[str] = set()
+    return [photo for photo in photos if not (photo in seen or seen.add(photo))]
+
+
+def _merge_description(main: str, detail: str) -> str:
+    return main if not detail or detail == main else f"{main}\n\n{detail}"
+
+
+def _attach_video(product: dict[str, Any], video: tuple[str | None, str | None] | None) -> None:
+    if not video or not video[0]:
+        return
+    attributes = dict(product.get("attributes") or {})
+    attributes.setdefault("szwego_video_url", video[0])
+    if video[1]:
+        attributes.setdefault("szwego_video_poster_url", video[1])
+    product["attributes"] = attributes
+
+
+def _append_packaging(product: dict[str, Any], pending_by_id: dict[str, list[str]]) -> None:
+    """Append deferred packaging only after the detail album, if there is one."""
+    external_id = str(product.get("external_id") or "")
+    packaging = pending_by_id.pop(external_id, [])
+    if packaging:
+        product["photos"] = _unique(_photos(product) + packaging)
+
+
+def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build only Chanel products from their neighbouring service albums."""
+    ordered = sorted(
+        (copy.deepcopy(product) for product in products),
+        key=lambda item: _position(item, 0),
+    )
+    result: list[dict[str, Any]] = []
+    pending_packaging: list[tuple[int, dict[str, Any]]] = []
+    pending_videos: list[tuple[int, dict[str, Any]]] = []
+    packaging_by_primary_id: dict[str, list[str]] = {}
+
+    for fallback, product in enumerate(ordered):
+        position = _position(product, fallback)
+        description = _description(product)
+        photos = _photos(product)
+        video = _video(product)
+
+        if JUNK_RE.search(description):
+            continue
+        if PACKAGING_RE.search(description):
+            pending_packaging.append((position, product))
+            continue
+        if video[0] or VIDEO_RE.search(description):
+            if video[0]:
+                pending_videos.append((position, product))
+            continue
+
+        if result and _is_matching_detail(result[-1], product):
+            main = result[-1]
+            main["photos"] = _unique(_photos(main) + photos)
+            main["description"] = _merge_description(_description(main), description)
+            _append_packaging(main, packaging_by_primary_id)
+            continue
+
+        if not _is_primary(product, description):
+            continue
+
+        if result:
+            _append_packaging(result[-1], packaging_by_primary_id)
+        primary = copy.deepcopy(product)
+        # A service card belongs only to a nearby following main card. This
+        # distance guard keeps workshop/collage albums from the next product
+        # out of the gallery.
+        nearby_packaging = [
+            _photos(service_product)
+            for service_position, service_product in pending_packaging
+            if 0 < position - service_position <= MAX_PENDING_DISTANCE
+            and _same_product(primary, service_product)
+        ]
+        nearby_videos = [
+            _video(service_product)
+            for service_position, service_product in pending_videos
+            if 0 < position - service_position <= MAX_PENDING_DISTANCE
+            and _same_product(primary, service_product)
+        ]
+        primary["photos"] = _unique(photos)
+        _attach_video(primary, nearby_videos[0] if nearby_videos else None)
+        result.append(primary)
+        if nearby_packaging:
+            packaging_by_primary_id[str(primary.get("external_id") or "")] = _unique(
+                [photo for group in nearby_packaging for photo in group]
+            )
+        pending_packaging = []
+        pending_videos = []
+
+    if result:
+        _append_packaging(result[-1], packaging_by_primary_id)
+    return result

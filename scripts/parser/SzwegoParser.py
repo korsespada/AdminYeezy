@@ -442,9 +442,9 @@ def main():
 
                 description = " ".join(raw_text.replace("\r", " ").replace("\n", " ").split())
                 
+                tags_list = []
                 if args.parse_tags:
                     tags_raw = item.get("tags", [])
-                    tags_list = []
                     if isinstance(tags_raw, list):
                         for tag in tags_raw:
                             if isinstance(tag, dict) and "tagName" in tag:
@@ -508,6 +508,11 @@ def main():
                     attributes["szwego_video_url"] = video_url
                 if video_poster_url:
                     attributes["szwego_video_poster_url"] = video_poster_url
+                if tags_list:
+                    # Keep the identity signal separately from the human/AI
+                    # source text. Supplier post-processors can compare these
+                    # labels without guessing where the appended text begins.
+                    attributes["szwego_tags"] = list(dict.fromkeys(tags_list))
                 attributes = {key: value for key, value in attributes.items() if value not in (None, "")}
 
                 row = [goods_id, "", description, int(args.default_price), args.brand, args.category, args.subcategory, args.gender, json.dumps(photos, ensure_ascii=False), attributes, item_date.isoformat() if item_date else None]
