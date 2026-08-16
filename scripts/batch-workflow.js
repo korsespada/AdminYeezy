@@ -431,14 +431,31 @@ async function railsCatalogLookups() {
     fetchJsonWithRetry(railsApiUrl('/catalog/brands'), {}, 'Rails brands lookup'),
     fetchJsonWithRetry(railsApiUrl('/catalog/categories'), {}, 'Rails categories lookup'),
   ]);
-  const lookups = { brands: new Map(), categories: new Map(), subcategories: new Map() };
+  const lookups = {
+    brands: new Map(),
+    categories: new Map(),
+    subcategories: new Map(),
+    railsCategoryIdsByName: new Map(),
+    railsSubcategoryIdsByParentAndName: new Map(),
+  };
   for (const brand of brandsPayload.brands || []) {
     if (brand?.id && brand?.name) lookups.brands.set(String(brand.id), String(brand.name));
   }
   const walk = (items, parentId = null) => {
     for (const item of items || []) {
       if (item?.id && item?.name) {
-        (parentId ? lookups.subcategories : lookups.categories).set(String(item.id), String(item.name));
+        const itemId = String(item.id);
+        const itemName = String(item.name);
+        if (parentId) {
+          lookups.subcategories.set(itemId, itemName);
+          lookups.railsSubcategoryIdsByParentAndName.set(
+            `${parentId}:${catalogLookupKey(itemName)}`,
+            itemId,
+          );
+        } else {
+          lookups.categories.set(itemId, itemName);
+          lookups.railsCategoryIdsByName.set(catalogLookupKey(itemName), itemId);
+        }
       }
       walk(item?.children || [], item?.id ? String(item.id) : parentId);
     }
@@ -455,7 +472,13 @@ async function loadLegacyLookupMaps() {
     mappedCatalogLookups(),
     railsCatalogLookups().catch((error) => {
       console.warn(`Rails catalog lookups unavailable: ${error.message}`);
-      return { brands: new Map(), categories: new Map(), subcategories: new Map() };
+      return {
+        brands: new Map(),
+        categories: new Map(),
+        subcategories: new Map(),
+        railsCategoryIdsByName: new Map(),
+        railsSubcategoryIdsByParentAndName: new Map(),
+      };
     }),
   ]);
   for (const [key, value] of mappings.brands) brands.set(key, value);
@@ -464,7 +487,13 @@ async function loadLegacyLookupMaps() {
   for (const [key, value] of rails.brands) brands.set(key, value);
   for (const [key, value] of rails.categories) categories.set(key, value);
   for (const [key, value] of rails.subcategories) subcategories.set(key, value);
-  return { brands, categories, subcategories };
+  return {
+    brands,
+    categories,
+    subcategories,
+    railsCategoryIdsByName: rails.railsCategoryIdsByName,
+    railsSubcategoryIdsByParentAndName: rails.railsSubcategoryIdsByParentAndName,
+  };
 }
 
 function looksLikeCatalogId(value) {
@@ -483,6 +512,16 @@ function lookupName(map, value, label = 'справочника') {
     throw new Error(`Публикация остановлена: не найдено название ${label} для ID ${key}`);
   }
   return key;
+}
+
+function railsUpdateCategoryId(product, lookups, railsProduct = null) {
+  const categoryName = lookupName(lookups.categories, product.category, 'категории');
+  const categoryId = lookups.railsCategoryIdsByName.get(catalogLookupKey(categoryName));
+  const subcategoryName = lookupName(lookups.subcategories, product.subcategory, 'подкатегории');
+  const subcategoryId = categoryId && subcategoryName
+    ? lookups.railsSubcategoryIdsByParentAndName.get(`${categoryId}:${catalogLookupKey(subcategoryName)}`)
+    : null;
+  return subcategoryId || categoryId || railsProduct?.category?.id || null;
 }
 
 function productToRailsCsvRow(product, lookups) {
@@ -1756,7 +1795,9 @@ function railsUpdatePayload(product) {
   };
   if (product.supplier_published_on) metadata.supplier_published_on = product.supplier_published_on;
   Object.assign(metadata, chromoffClassificationMetadata(product));
-  const categoryId = product.subcategory || product.category || null;
+  const categoryId = Object.hasOwn(product, '_railsCategoryId')
+    ? product._railsCategoryId
+    : product.subcategory || product.category || null;
   return {
     product: {
       external_id: product.external_id || '',
@@ -1932,6 +1973,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
       ? railsProduct.metadata
       : undefined,
+    ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(product, lookups, railsProduct) } : {}),
     attributes: {
       ...normalizeAttributes(product.attributes),
       ...(hostedVideo(product, railsProduct).url ? { hosted_video_url: hostedVideo(product, railsProduct).url } : {}),
@@ -2131,10 +2173,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
 
-  const payloadHashes = new Map(updatedProducts.map((product) => [
-    String(product.external_id || '').trim(),
-    publicationPayloadHash(withPublicationContext(product)),
-  ]));
+  const payloadHashes = new Map(updatedProducts.map((product) => {
+    const externalId = String(product.external_id || '').trim();
+    return [externalId, publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId)))];
+  }));
 
   if (mode === 'upsert') {
     const existingEntries = [...existingProducts.entries()]
