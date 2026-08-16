@@ -15,6 +15,7 @@ import {
 } from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
+import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -908,7 +909,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
   const processingOptions = normalizeBatchAiProcessingOptions(input.processingOptions)
   const proposed = raw?.product || {}
   const original = input.product
-  const supplierPublishedOn = original.supplier_published_on || original.attributes?.supplier_published_on || null
+  const supplierPublishedOn = normalizeSupplierPublishedOn(original.supplier_published_on)
+    || supplierPublishedOnFromAttributes(original.attributes)
+    || null
   const choose = (value: unknown, allowed: Set<string>, fallback: unknown) => {
     const candidate = String(value || '')
     if (allowed.has(candidate)) return candidate

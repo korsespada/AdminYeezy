@@ -86,14 +86,12 @@ import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttrib
 import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
 import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
+import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from "@/lib/supplier-publication";
 
 const DEFAULT_PRODUCT_COLUMNS = [
   { name: "external_id", key: "external_id" },
   { name: "name", key: "name" },
   { name: "description", key: "description" },
-  { name: "h1", key: "h1" },
-  { name: "seo_title", key: "seo_title" },
-  { name: "seo_description", key: "seo_description" },
   { name: "price", key: "price" },
   { name: "status", key: "status" },
   { name: "brand", key: "brand" },
@@ -105,7 +103,12 @@ const DEFAULT_PRODUCT_COLUMNS = [
   { name: "variant_group_key", key: "variant_group_key" },
 ];
 
-const CSV_CORE_KEYS = new Set(DEFAULT_PRODUCT_COLUMNS.map((column) => column.key));
+const CSV_CORE_KEYS = new Set([
+  ...DEFAULT_PRODUCT_COLUMNS.map((column) => column.key),
+  "h1",
+  "seo_title",
+  "seo_description",
+]);
 
 function attributeValuesForDisplay(value: unknown) {
   const values = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
@@ -3541,6 +3544,10 @@ function CsvProductDrawer({
   };
 
   const attributes = local.attributes || {};
+  const publicAttributes = Object.entries(attributes).filter(([key]) => key !== "measurements" && !isTechnicalAttribute(key));
+  const technicalAttributes = Object.entries(attributes).filter(([key]) => isTechnicalAttribute(key));
+  const supplierPublishedOn = normalizeSupplierPublishedOn(local.supplier_published_on)
+    || supplierPublishedOnFromAttributes(attributes);
   const video = productVideoForDisplay(local);
   const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
   const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
@@ -3841,18 +3848,6 @@ function CsvProductDrawer({
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm"
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">H1</label>
-                <input value={local.h1 || ""} onChange={(e) => change("h1", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">SEO title</label>
-                <input value={local.seo_title || ""} onChange={(e) => change("seo_title", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">SEO description</label>
-                <textarea rows={3} value={local.seo_description || ""} onChange={(e) => change("seo_description", e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm" />
-              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-800">
                 <div className="space-y-1">
                   <label className="text-xs text-slate-500">
@@ -3941,8 +3936,8 @@ function CsvProductDrawer({
                 </div>}
                 <div className="flex items-center justify-between">
                   <div>
-                    <label className="text-xs text-slate-500">Дополнительные атрибуты</label>
-                    <p className="mt-1 text-[11px] text-slate-600">Ключи сохраняются в JSON и не меняют старый CSV-контракт.</p>
+                    <label className="text-xs text-slate-500">Характеристики товара</label>
+                    <p className="mt-1 text-[11px] text-slate-600">Публичные характеристики карточки. Ключи сохраняются в JSON.</p>
                   </div>
                   <button
                     type="button"
@@ -3952,13 +3947,13 @@ function CsvProductDrawer({
                     Добавить
                   </button>
                 </div>
-                {Object.entries(attributes).filter(([key]) => key !== "measurements").length === 0 ? (
+                {publicAttributes.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-slate-700 p-3 text-xs text-slate-600">
-                    Других атрибутов пока нет
+                    Характеристик товара пока нет
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {Object.entries(attributes).filter(([key]) => key !== "measurements").map(([key, value]) => (
+                    {publicAttributes.map(([key, value]) => (
                       <div key={key} className="flex items-center gap-2">
                         <input
                           value={key}
@@ -3985,12 +3980,24 @@ function CsvProductDrawer({
                   </div>
                 )}
               </div>
+
+              {(supplierPublishedOn || technicalAttributes.length > 0) && <div className="space-y-3 border-t border-slate-800 pt-4">
+                <div>
+                  <label className="text-xs text-slate-500">Техническая информация</label>
+                  <p className="mt-1 text-[11px] text-slate-600">Данные источника и импорта. В карточку товара не публикуются.</p>
+                </div>
+                <div className="space-y-2">
+                  {supplierPublishedOn && <TechnicalAttributeRow label="Выложен у поставщика" value={formatSupplierPublishedOn(supplierPublishedOn)} />}
+                  {technicalAttributes.map(([key, value]) => (
+                    <TechnicalAttributeRow key={key} label={technicalAttributeLabel(key)} value={formatTechnicalAttributeValue(key, value)} />
+                  ))}
+                </div>
+              </div>}
             </section>
 
             <section className="border-t border-slate-800 pt-4 text-xs text-slate-500">
               <div className="flex flex-wrap gap-x-5 gap-y-2">
                 {supplierName && <span>Поставщик: <span className="text-slate-300">{supplierName}</span></span>}
-                <span>Выложен у поставщика: <span className="text-slate-300">{formatSupplierPublishedOn(local.supplier_published_on)}</span></span>
               </div>
             </section>
           </div>
@@ -4003,6 +4010,63 @@ function CsvProductDrawer({
 function formatSupplierPublishedOn(value?: string | null) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
   return match ? `${match[3]}.${match[2]}.${match[1]}` : "Не указано";
+}
+
+function isTechnicalAttribute(key: string) {
+  return key.startsWith("szwego_")
+    || key.startsWith("insert_")
+    || key.startsWith("hosted_video_")
+    || key.startsWith("manual_video_")
+    || [
+      "bag_width_cm",
+      "bag_height_cm",
+      "size_class",
+      "video_transfer_error",
+      "video_url",
+      "video_poster_url",
+      "source_parent_external_id",
+    ].includes(key);
+}
+
+function technicalAttributeLabel(key: string) {
+  const labels: Record<string, string> = {
+    bag_width_cm: "Ширина для правил цены, см",
+    bag_height_cm: "Высота для правил цены, см",
+    insert_material: "Материал в источнике",
+    size_class: "Размерный класс для правил цены",
+    source_parent_external_id: "Исходный ID альбома",
+    szwego_parse_mode: "Режим парсинга Szwego",
+    szwego_tags: "Теги Szwego",
+    szwego_timestamp: "Время в Szwego",
+    szwego_video_url: "Видео Szwego",
+    szwego_video_poster_url: "Превью видео Szwego",
+  };
+  return labels[key] || key;
+}
+
+function formatTechnicalAttributeValue(key: string, value: unknown) {
+  if (key === "szwego_timestamp") {
+    const text = String(value ?? "").trim();
+    if (/^\d{10,13}$/.test(text)) {
+      const milliseconds = text.length === 13 ? Number(text) : Number(text) * 1_000;
+      const date = new Date(milliseconds);
+      if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat("ru-RU", {
+          timeZone: "Europe/Moscow",
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(date);
+      }
+    }
+  }
+  return Array.isArray(value) ? value.join(", ") : String(value ?? "");
+}
+
+function TechnicalAttributeRow({ label, value }: { label: string; value: string }) {
+  return <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,0.36fr)_minmax(0,0.64fr)]">
+    <div className="rounded-lg border border-slate-800 bg-slate-950/35 px-3 py-2 text-sm text-slate-500">{label}</div>
+    <div className="break-all rounded-lg border border-slate-800 bg-slate-950/35 px-3 py-2 text-sm text-slate-300">{value}</div>
+  </div>;
 }
 
 function VariantFamiliesDialog({

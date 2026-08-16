@@ -13,6 +13,7 @@ import {
   normalizeProductAttributes,
   type ProductAttributes,
 } from '@/lib/product-attributes'
+import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 import { activeBatchOperation, claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
@@ -58,9 +59,6 @@ const BATCH_PRODUCT_COLUMNS = [
   { name: 'external_id', key: 'external_id' },
   { name: 'name', key: 'name' },
   { name: 'description', key: 'description' },
-  { name: 'h1', key: 'h1' },
-  { name: 'seo_title', key: 'seo_title' },
-  { name: 'seo_description', key: 'seo_description' },
   { name: 'price', key: 'price' },
   { name: 'status', key: 'status' },
   { name: 'brand', key: 'brand' },
@@ -142,7 +140,9 @@ function normalizeBatchProduct(row: any): CsvProduct {
     ai_error: row.ai_error || null,
     ai_confidence: row.ai_confidence === null || row.ai_confidence === undefined ? null : Number(row.ai_confidence),
     source_position: row.source_position === null || row.source_position === undefined ? null : Number(row.source_position),
-    supplier_published_on: row.supplier_published_on || null,
+    supplier_published_on: normalizeSupplierPublishedOn(row.supplier_published_on)
+      || supplierPublishedOnFromAttributes(row.attributes)
+      || null,
   }
 }
 

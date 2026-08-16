@@ -7,6 +7,7 @@ import type { ActionResponse } from '@/lib/types'
 import { requireAdmin } from '@/lib/admin-session'
 import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
 import { extractProductAttributes } from '@/lib/product-attributes'
+import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
@@ -867,6 +868,10 @@ async function importScrapedProductsTransaction(taskId: number, supplier: any, p
       const photos = Array.isArray(item.photos)
         ? item.photos.map(String).filter(Boolean)
         : (() => { try { return item.photos ? JSON.parse(item.photos) : [] } catch { return [] } })()
+      const attributes = extractProductAttributes(item)
+      const supplierPublishedOn = normalizeSupplierPublishedOn(item.supplier_published_on)
+        || supplierPublishedOnFromAttributes(attributes)
+        || null
       await client.query(`
         INSERT INTO products(external_id,name,description,price,price_source,status,brand,category,subcategory,gender,photos,attributes,batch_id,source_position,supplier_published_on,created_at,updated_at)
         VALUES($1,$2,$3,$4,'default','inactive',$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,NOW(),NOW())
@@ -880,9 +885,9 @@ async function importScrapedProductsTransaction(taskId: number, supplier: any, p
         parseFloat(item.price) || supplier.default_price || 0,
         item.brand || parserDefaults.brand || '', item.category || parserDefaults.category || '',
         item.subcategory || parserDefaults.subcategory || null, item.gender || supplier.default_gender || '',
-        JSON.stringify(Array.isArray(photos) ? photos : []), JSON.stringify(extractProductAttributes(item)),
+        JSON.stringify(Array.isArray(photos) ? photos : []), JSON.stringify(attributes),
         batchId, Number.isFinite(Number(item.source_position)) ? Number(item.source_position) : index,
-        item.supplier_published_on || null,
+        supplierPublishedOn,
       ])
     }
     const actual = await client.query('SELECT COUNT(*)::int AS count FROM products WHERE batch_id=$1', [batchId])
