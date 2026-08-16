@@ -3,6 +3,73 @@ import { describe, expect, it } from 'vitest'
 const { runSupplierJsonProcess } = require('../../../scripts/lib/supplier-json-process')
 
 describe('supplier JSON post-process contract', () => {
+  it('attaches a Dior video only to the nearby bracketed product, not a later unrelated bag', async () => {
+    const result = await runSupplierJsonProcess('process_dior_bags_timeline.py', [
+      {
+        external_id: 'lady-video', description: '', photos: ['lady-poster.jpg'], source_position: 0,
+        attributes: { szwego_video_url: 'https://video/lady.mp4', szwego_video_poster_url: 'https://video/lady.webp' },
+      },
+      { external_id: 'lady-preview-1', description: '', photos: ['lady-preview-1.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'lady-preview-2', description: '', photos: ['lady-preview-2.jpg'], source_position: 2, attributes: {} },
+      {
+        external_id: 'lady-main', description: '【CD-Lady20鳄鱼皮紫色银扣】💜 尺寸：20cm',
+        photos: Array.from({ length: 11 }, (_, index) => `lady-${index}.jpg`), source_position: 3, attributes: {},
+      },
+      {
+        external_id: 'joy-main', description: '【16D-Joy蝴蝶结超迷羊白】现货',
+        photos: Array.from({ length: 10 }, (_, index) => `joy-${index}.jpg`), source_position: 8, attributes: {},
+      },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual(['lady-main', 'joy-main'])
+    expect(result[0]).toMatchObject({
+      attributes: {
+        szwego_video_url: 'https://video/lady.mp4',
+        szwego_video_poster_url: 'https://video/lady.webp',
+      },
+    })
+    expect(result[1].attributes).not.toHaveProperty('szwego_video_url')
+  })
+
+  it('does not attach a Dior video to the first bracketed bag when it is four source positions away', async () => {
+    const result = await runSupplierJsonProcess('process_dior_bags_timeline.py', [
+      {
+        external_id: 'other-video', description: '', photos: ['other-poster.jpg'], source_position: 0,
+        attributes: { szwego_video_url: 'https://video/other.mp4' },
+      },
+      { external_id: 'unrelated-1', description: '', photos: ['unrelated-1.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'unrelated-2', description: '', photos: ['unrelated-2.jpg'], source_position: 2, attributes: {} },
+      { external_id: 'unrelated-3', description: '', photos: ['unrelated-3.jpg'], source_position: 3, attributes: {} },
+      {
+        external_id: 'joy-main', description: '【16D-Joy蝴蝶结超迷羊白】现货',
+        photos: Array.from({ length: 10 }, (_, index) => `joy-${index}.jpg`), source_position: 4, attributes: {},
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0].attributes).not.toHaveProperty('szwego_video_url')
+  })
+
+  it('copies a Dior colour-overview video to every proven variant and keeps an unnamed variant inside the block', async () => {
+    const result = await runSupplierJsonProcess('process_dior_bags_timeline.py', [
+      {
+        external_id: 'woc-video', description: '', photos: ['woc-poster.jpg'], source_position: 0,
+        attributes: { szwego_video_url: 'https://video/woc-colours.mp4' },
+      },
+      { external_id: 'woc-overview', description: '', photos: ['overview-1.jpg', 'overview-2.jpg'], source_position: 1, attributes: {} },
+      { external_id: 'woc-beige-red', description: '【蝴蝶结WOC羊米拼酒红】现货', photos: Array.from({ length: 11 }, (_, index) => `beige-${index}.jpg`), source_position: 2, attributes: {} },
+      { external_id: 'woc-grey', description: '', photos: ['grey.jpg'], source_position: 3, attributes: {} },
+      { external_id: 'woc-blue', description: '【蝴蝶结WOC羊淡蓝色】现货', photos: Array.from({ length: 11 }, (_, index) => `blue-${index}.jpg`), source_position: 4, attributes: {} },
+      { external_id: 'woc-white-black', description: '【蝴蝶结WOC羊白拼酒黑】现货', photos: Array.from({ length: 11 }, (_, index) => `white-${index}.jpg`), source_position: 5, attributes: {} },
+      { external_id: 'woc-red', description: '【蝴蝶结WOC羊酒红】现货', photos: Array.from({ length: 11 }, (_, index) => `red-${index}.jpg`), source_position: 6, attributes: {} },
+    ])
+
+    expect(result.map((product: { external_id: string }) => product.external_id)).toEqual([
+      'woc-beige-red', 'woc-grey', 'woc-blue', 'woc-white-black', 'woc-red',
+    ])
+    expect(result.every((product: { attributes: { szwego_video_url?: string } }) => product.attributes.szwego_video_url === 'https://video/woc-colours.mp4')).toBe(true)
+  })
+
   it('builds CH clothing products from preceding detail albums and video cards', async () => {
     const products = [
       { external_id: 'separator-1', description: '➨', photos: [], source_position: 0, attributes: { szwego_parse_mode: 'all' } },

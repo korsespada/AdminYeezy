@@ -198,3 +198,21 @@ discarded at the end; they do not become separate products.
 Service cards are assigned to the nearest matching product block, so packaging
 photos are appended after all product/detail photos. The original
 `external_id` and `source_position` of the main card are preserved.
+
+## Dior Сумки
+
+`process_dior_bags_timeline.py` processes the `全部 / единая лента` source for
+the Dior Bags supplier. It does not use `szwego_tags`: video posts do not have
+them. A catalogue product is a photo album whose source description starts
+with `【…】`; decorative Unicode letters in that label are normalised before
+comparison.
+
+A video immediately before one such product is attached only when the main
+album begins within three source positions. This keeps a video from a
+neighbouring product block off a later bag. When two or more nearby bracketed
+albums share a meaningful leading model label and differ after it by colour,
+they form one colour family. The same video is copied to every variant in that
+family. An unlabelled photo album is emitted only when it lies between proven
+variants in that family; an overview collage before the first variant is not a
+product. The script never merges their galleries: every colour keeps its own
+`external_id`, photos and `source_position`.
