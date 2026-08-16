@@ -759,7 +759,7 @@ export default function CsvImportApp({
   const facetProducts = useMemo(() => {
     const matches = (product: CsvProduct, excluded: string) => {
       const search = filterSearch.trim().toLocaleLowerCase("ru-RU");
-      if (search && excluded !== "search" && ![product.name, product.external_id]
+      if (search && excluded !== "search" && ![product.name, product.description, product.external_id]
         .some((value) => String(value || "").toLocaleLowerCase("ru-RU").includes(search))) return false;
       if (excluded !== "brand" && filterBrand && (filterBrand === "__EMPTY__" ? product.brand : product.brand !== filterBrand)) return false;
       if (excluded !== "category" && filterCategory && (filterCategory === "__EMPTY__" ? product.category : product.category !== filterCategory)) return false;
@@ -1191,7 +1191,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -2422,7 +2422,7 @@ export default function CsvImportApp({
                 <input
                   value={filterSearch}
                   onChange={(event) => setFilterSearch(event.target.value)}
-                  placeholder="Поиск по названию или external ID"
+                  placeholder="Поиск по названию, описанию или external ID"
                   className="h-9 w-full rounded-md border border-slate-600 bg-slate-800 py-1 pl-8 pr-2.5 text-xs text-white outline-none transition-colors placeholder:text-slate-500 focus:border-indigo-500"
                 />
               </div>
@@ -2914,7 +2914,10 @@ export default function CsvImportApp({
                       .filter(Number.isInteger);
                     if (!ids.length) return;
                     setSelectedForMerge([]);
-                    await handleAiProcess("selection", ids);
+                    const retryFromSource = selectedForMerge.every((index) => (
+                      products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
+                    ));
+                    await handleAiProcess(retryFromSource ? "retry_selection" : "selection", ids);
                   }}
                   disabled={isProcessing || !batchId}
                   className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
@@ -2922,7 +2925,7 @@ export default function CsvImportApp({
                   <Sparkles className="h-4 w-4" />
                   {selectedForMerge.every((index) => (
                     products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
-                  )) ? "Переобработать выбранные" : "Обработать с ИИ"}
+                  )) ? "Повторить ИИ из исходника" : "Обработать с ИИ"}
                 </button>
                 <button
                   onClick={handleBulkApply}
@@ -3336,7 +3339,7 @@ function CsvProductCard({
         )}
         {onRetryAi && (
           <button onClick={(event) => { event.stopPropagation(); onRetryAi(); }} className="mb-3 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20">
-            {product.ai_processed || product.ai_error ? "Повторить ИИ" : "Обработать ИИ"}
+            {product.ai_processed || product.ai_error ? "Повторить ИИ из исходника" : "Обработать ИИ"}
           </button>
         )}
         <div className="flex items-center justify-between mb-2">
@@ -3665,7 +3668,7 @@ function CsvProductDrawer({
               )}
               {onRetryAi && (
                 <button onClick={onRetryAi} disabled={aiBusy} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50">
-                  {local.ai_processed || local.ai_error ? "Повторить ИИ" : "Обработать ИИ"}
+                  {local.ai_processed || local.ai_error ? "Повторить ИИ из исходника" : "Обработать ИИ"}
                 </button>
               )}
               <button

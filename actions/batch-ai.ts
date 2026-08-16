@@ -23,6 +23,7 @@ import {
   calculatePriceRulePrice,
   matchingPriceRule,
   normalizePriceRulesCatalogReferences,
+  restoreRetryProductsFromSnapshots,
   shouldPreserveExistingPrice,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
@@ -633,7 +634,7 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'retry_selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors'
 
 const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: подтверждённый бренд, товар, видимый ракурс и 1–2 различимые детали. Бренд товара обязателен в каждом alt. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
@@ -713,7 +714,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     }
   }
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true ORDER BY source_position ASC NULLS LAST, id'
-  if (mode === 'selection') {
+  if (mode === 'selection' || mode === 'retry_selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
     params.push(productIds)
     predicate = `AND id=ANY($${params.length}::int[]) ORDER BY source_position ASC NULLS LAST, id`
@@ -730,6 +731,22 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   }
   const products = await scrapingQuery(`SELECT * FROM products WHERE batch_id=$1 ${predicate}`, params)
   let selectedProducts = products.rows
+  if ((mode === 'retry' || mode === 'retry_selection') && selectedProducts.length > 0) {
+    const productIds = selectedProducts.map((product: any) => Number(product.id)).filter(Number.isInteger)
+    const sourceItems = await scrapingQuery(`
+      SELECT DISTINCT ON (i.product_id)
+        i.product_id,
+        i.input_snapshot->'product' AS source_product
+      FROM batch_ai_items i
+      JOIN batch_ai_runs r ON r.id=i.run_id
+      WHERE r.batch_id=$1
+        AND i.product_id=ANY($2::int[])
+        AND i.status='completed'
+        AND COALESCE(i.input_snapshot->>'variantScanOnly','false') <> 'true'
+      ORDER BY i.product_id,i.created_at ASC
+    `, [batchId, productIds])
+    selectedProducts = restoreRetryProductsFromSnapshots(selectedProducts, sourceItems.rows)
+  }
   if (mode === 'recover_measurements') {
     const sourceSnapshots = await scrapingQuery(`
       SELECT products
@@ -1361,7 +1378,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       }
     }
 
-    if (['reprocess', 'selection', 'retry'].includes(mode)) {
+    if (['reprocess', 'selection', 'retry', 'retry_selection'].includes(mode)) {
       const targetIds = context.products.map((product: any) => Number(product.id)).filter(Number.isInteger)
       if (targetIds.length > 0) {
         await scrapingQuery(`

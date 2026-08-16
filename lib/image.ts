@@ -58,6 +58,17 @@ export function productImageUrl(product: Product | null | undefined, options: Re
   return resizeImageUrl(productImageSource(product), options)
 }
 
+export function productImageAlt(product: Product | null | undefined) {
+  if (!product) return ''
+
+  const source = productImageSource(product)
+  const media = [...(product.media || [])].sort((left, right) => left.sort_order - right.sort_order)
+  const matchingMedia = media.find((item) => [item.original_url, item.preview_url, item.thumb_url, item.og_image_url]
+    .some((url) => url && (url === source || url === product.thumb)))
+
+  return matchingMedia?.alt_text?.trim() || media[0]?.alt_text?.trim() || product.name || ''
+}
+
 export function productImageSource(product: Product | null | undefined) {
   if (!product) return ''
 

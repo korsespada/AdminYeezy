@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
-import { imagePresets, productImageUrl } from '@/lib/image'
+import { imagePresets, productImageAlt, productImageUrl } from '@/lib/image'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import ProductGenderBadge from '@/components/products/ProductGenderBadge'
 
@@ -28,6 +28,7 @@ interface ProductTableViewProps {
 }
 
 const getPhotoUrl = (product: Product) => productImageUrl(product, imagePresets.productTable)
+const getPhotoAlt = (product: Product) => productImageAlt(product)
 
 type FieldName = 'productId' | 'name' | 'description' | 'price'
 
@@ -319,7 +320,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                     <TableCell className="p-3 align-top">
                                         <div className="w-12 h-12 rounded bg-slate-900 border border-slate-700 overflow-hidden relative shrink-0">
                                             {thumb ? (
-                                                <Image src={thumb} alt={product.name} fill sizes="48px" className="object-cover" unoptimized />
+                                                <Image src={thumb} alt={getPhotoAlt(product)} title={getPhotoAlt(product)} fill sizes="48px" className="object-cover" unoptimized />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-600 uppercase">No</div>
                                             )}

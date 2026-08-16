@@ -73,6 +73,23 @@ export type BatchAiSettings = {
   processingOptions?: BatchAiProcessingOptions
 }
 
+export function restoreRetryProductsFromSnapshots(products: any[], sourceRows: Array<{ product_id?: number; source_product?: unknown }>) {
+  const sources = new Map(
+    sourceRows
+      .map((row) => [Number(row.product_id), row.source_product] as const)
+      .filter(([productId, source]) => Number.isInteger(productId) && source && typeof source === 'object'),
+  )
+  return products.map((product) => {
+    const source = sources.get(Number(product?.id))
+    if (!source || typeof source !== 'object') return product
+    return {
+      ...(source as Record<string, unknown>),
+      id: product.id,
+      batch_id: product.batch_id,
+    }
+  })
+}
+
 function anthropicImageContent(url: string) {
   const match = url.match(/^data:([^;,]+);base64,(.+)$/i)
   if (match) {

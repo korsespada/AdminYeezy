@@ -12,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import ProductDescription, { normalizeDescription } from '@/components/products/ProductDescription';
-import { imagePresets, productImageUrl } from '@/lib/image';
+import { imagePresets, productImageAlt, productImageUrl } from '@/lib/image';
 import { isPriceOnRequest } from '@/lib/product-pricing';
 import ProductGenderBadge from '@/components/products/ProductGenderBadge';
 import ProductAttributeSummary from '@/components/products/ProductAttributeSummary';
@@ -57,6 +57,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     const router = useRouter();
 
     const thumb = useMemo(() => productImageUrl(product, imagePresets.productGrid), [product])
+    const thumbAlt = useMemo(() => productImageAlt(product), [product])
     const brandLabel = useMemo(() => {
         const brand = product.expand?.brand
         if (Array.isArray(brand)) return brand.map((item) => item.name).join(', ')
@@ -238,7 +239,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 {thumb ? (
                     <Image
                         src={thumb}
-                        alt={product.name}
+                        alt={thumbAlt}
+                        title={thumbAlt}
                         fill
                         sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
                         className="object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"

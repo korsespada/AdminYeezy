@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -416,6 +416,25 @@ describe('batch AI normalization', () => {
     })
 
     expect(result.product.attributes).toEqual({ dimensions: '14 × 10 см' })
+  })
+
+  it('retries selected products from their first pre-AI snapshots', () => {
+    const [wallet, bag] = restoreRetryProductsFromSnapshots([
+      { id: 42, batch_id: 'batch-1', name: 'Бежевый кошелёк Victorine', description: 'Русское описание без размеров', attributes: { model_name: 'Victorine' } },
+      { id: 43, batch_id: 'batch-1', name: 'Сумка Alma', description: 'Русское описание без размеров', attributes: { model_name: 'Alma' } },
+    ], [
+      { product_id: 42, source_product: { id: 42, batch_id: 'batch-1', name: '', description: 'Victorine 尺寸：11 × 8 cm', attributes: { szwego_tags: ['Victorine'] } } },
+      { product_id: 43, source_product: { id: 43, batch_id: 'batch-1', name: '', description: 'Alma 尺寸：25 × 18 × 11 cm', attributes: { szwego_tags: ['Alma'] } } },
+    ])
+
+    expect(wallet).toEqual({
+      id: 42,
+      batch_id: 'batch-1',
+      name: '',
+      description: 'Victorine 尺寸：11 × 8 cm',
+      attributes: { szwego_tags: ['Victorine'] },
+    })
+    expect(bag.description).toBe('Alma 尺寸：25 × 18 × 11 cm')
   })
 
   it('moves top-handle bags into shoulder bags', () => {

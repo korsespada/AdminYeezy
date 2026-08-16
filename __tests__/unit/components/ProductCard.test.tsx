@@ -71,6 +71,30 @@ describe('ProductCard grid presentation', () => {
     expect(screen.queryByTitle('Дублировать')).not.toBeInTheDocument()
   })
 
+  it('shows the primary photo alt text on hover', () => {
+    render(
+      <ProductCard
+        product={{
+          ...product,
+          thumb: 'https://cdn.example.test/products/product-1/cover.jpg',
+          media: [{
+            original_url: 'https://cdn.example.test/products/product-1/cover.jpg',
+            alt_text: 'Louis Vuitton кошелёк Victorine, вид спереди',
+            sort_order: 0,
+            processing_status: 'processed',
+          }],
+        }}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTitle('Louis Vuitton кошелёк Victorine, вид спереди')).toHaveAttribute('alt', 'Louis Vuitton кошелёк Victorine, вид спереди')
+  })
+
   it('shows a compact, grammatically correct color family badge', () => {
     render(
       <ProductCard
