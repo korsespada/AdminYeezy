@@ -22,6 +22,8 @@ PACKAGING_RE = re.compile(
 VIDEO_RE = re.compile(r"(?:实拍)?视频|video", re.IGNORECASE)
 MODEL_CODE_RE = re.compile(r"\b[A-Z]{1,6}\s*[-.]?\s*\d{3,}[A-Z0-9-]*\b", re.IGNORECASE)
 CHINESE_RUN_RE = re.compile(r"[\u4e00-\u9fff]{5,}")
+LATIN_PHRASE_RE = re.compile(r"[A-Za-z][A-Za-z0-9'’-]*(?:\s+[A-Za-z][A-Za-z0-9'’-]*)+")
+GENERIC_LATIN_PHRASES = {"video", "size chart", "product video"}
 
 MAX_SERVICE_DISTANCE = 3
 MIN_MAIN_PHOTOS = 7
@@ -86,6 +88,18 @@ def _shared_phrase(left: str, right: str) -> bool:
     return False
 
 
+def _shared_latin_phrase(left: str, right: str) -> bool:
+    right_phrases = {
+        " ".join(phrase.split()).casefold()
+        for phrase in LATIN_PHRASE_RE.findall(right)
+    }
+    return any(
+        " ".join(phrase.split()).casefold() in right_phrases
+        and " ".join(phrase.split()).casefold() not in GENERIC_LATIN_PHRASES
+        for phrase in LATIN_PHRASE_RE.findall(left)
+    )
+
+
 def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
     """Require an explicit identity before joining a detail album."""
     left_tags = _tags(left)
@@ -97,10 +111,18 @@ def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
     right_text = _description(right)
     left_codes = _model_codes(left_text)
     right_codes = _model_codes(right_text)
-    return bool(left_codes & right_codes) or _shared_phrase(left_text, right_text)
+    return (
+        bool(left_codes & right_codes)
+        or _shared_phrase(left_text, right_text)
+        or _shared_latin_phrase(left_text, right_text)
+    )
 
 
 def _is_video(product: dict[str, Any]) -> bool:
+    # The main LV album itself can carry a video badge and `video_url`.
+    # A real product gallery must stay a product, not become a service card.
+    if len(_photos(product)) >= MIN_MAIN_PHOTOS:
+        return False
     url, _ = _video(product)
     return bool(url or VIDEO_RE.search(_description(product)))
 
@@ -138,14 +160,10 @@ def _attach_video(product: dict[str, Any], video: tuple[str | None, str | None])
     product["attributes"] = attributes
 
 
-def _can_attach_detail(group: dict[str, Any], candidate: dict[str, Any]) -> bool:
-    main = group["main"]
-    main_photos = _photos(main)
-    detail_photos = _photos(candidate)
-    if len(main_photos) < MIN_MAIN_PHOTOS or not (1 <= len(detail_photos) <= MAX_DETAIL_PHOTOS):
-        return False
-    distance = _position(candidate, 0) - _position(main, 0)
-    return 0 < distance <= 2 and _same_product(main, candidate)
+def _detail_photos(product: dict[str, Any]) -> list[str]:
+    # In the four-album LV block the long album is the detail set. Its first
+    # frame repeats the cover from the following four-photo main album.
+    return _photos(product)[1:]
 
 
 def _service_identity_matches(service: dict[str, Any], group: dict[str, Any]) -> bool:
@@ -191,16 +209,41 @@ def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
             product_cards.append(product)
 
     groups: list[dict[str, Any]] = []
-    for product in product_cards:
-        if groups and _can_attach_detail(groups[-1], product):
-            group = groups[-1]
-            group["details"].append(product)
-            group["main"]["photos"] = _unique(_photos(group["main"]) + _photos(product))
-            group["main"]["description"] = _merge_description(
-                _description(group["main"]), _description(product)
+    index = 0
+    while index < len(product_cards):
+        product = product_cards[index]
+        next_product = product_cards[index + 1] if index + 1 < len(product_cards) else None
+
+        # LV's four-album block is published as long detail album -> short
+        # main album. The short card owns the product identity and becomes the
+        # output card; the long card contributes detail photos and video.
+        if (
+            next_product is not None
+            and len(_photos(product)) >= MIN_MAIN_PHOTOS
+            and 1 <= len(_photos(next_product)) <= MAX_DETAIL_PHOTOS
+            and _position(next_product, 0) - _position(product, 0) <= 2
+            and _same_product(product, next_product)
+        ):
+            main = next_product
+            main["photos"] = _unique(_photos(main) + _detail_photos(product))
+            main["description"] = _merge_description(
+                _description(main), _description(product)
             )
+            groups.append({
+                "main": main,
+                "details": [product],
+                "packaging": [],
+                "video": _video(product) if _video(product)[0] else None,
+            })
+            index += 2
             continue
-        groups.append({"main": product, "details": [], "packaging": [], "video": None})
+
+        # A long album without a following matching short album is the normal
+        # three-album form: main photos -> video -> packaging.
+        if len(_photos(product)) >= MIN_MAIN_PHOTOS:
+            groups.append({"main": product, "details": [], "packaging": [], "video": None})
+        # Short albums that were not joined are discarded at the end.
+        index += 1
 
     for service in service_cards:
         group = _nearest_group(service, groups)

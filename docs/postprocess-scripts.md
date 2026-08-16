@@ -185,9 +185,13 @@ product card with photos in the order `основные → детали → к�
 video URL remains in `attributes.szwego_video_url` and the video card is not
 emitted as a separate product.
 
-The detail album is joined only when the main album has at least seven photos
-and the cards share a parsed Szwego tag, concrete model code, or a meaningful
-Chinese product phrase. Service cards are assigned to the nearest matching
-product block, so packaging photos are appended after all product/detail
-photos. The original `external_id` and `source_position` of the main card are
-preserved.
+The detail album is joined only when the long album has at least seven photos,
+the following main album has up to six photos, and the cards share a parsed
+Szwego tag, concrete model code, or a meaningful Chinese/Latin product name.
+In this four-album pattern the short album is the main product, while the
+preceding long album is the detail set; its first repeated cover photo is
+removed before joining. Short albums that were not joined to a main album are
+discarded at the end; they do not become separate products.
+Service cards are assigned to the nearest matching product block, so packaging
+photos are appended after all product/detail photos. The original
+`external_id` and `source_position` of the main card are preserved.

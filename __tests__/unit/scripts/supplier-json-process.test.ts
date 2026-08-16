@@ -220,7 +220,7 @@ describe('supplier JSON post-process contract', () => {
     })
   })
 
-  it('puts an LV detail album between the main and packaging photos', async () => {
+  it('puts the four-photo LV main album before the long detail album and packaging photos', async () => {
     const result = await runSupplierJsonProcess('process_lv_bags_timeline.py', [
       {
         external_id: 'packaging', description: '包装展示', photos: ['package.jpg'], source_position: 0,
@@ -231,12 +231,12 @@ describe('supplier JSON post-process contract', () => {
         attributes: { szwego_tags: ['M29783'], szwego_video_url: 'https://video/lv.mp4' },
       },
       {
-        external_id: 'main', description: 'M29783 黑色手袋',
+        external_id: 'details', description: 'M29783 黑色手袋细节',
         photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 2,
         attributes: { szwego_tags: ['M29783'] },
       },
       {
-        external_id: 'details', description: 'M29783 尺寸与细节',
+        external_id: 'main', description: 'M29783 黑色手袋',
         photos: Array.from({ length: 4 }, (_, index) => `detail-${index}.jpg`), source_position: 3,
         attributes: { szwego_tags: ['M29783'] },
       },
@@ -246,11 +246,41 @@ describe('supplier JSON post-process contract', () => {
     expect(result[0]).toMatchObject({
       external_id: 'main',
       photos: [
-        ...Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
         ...Array.from({ length: 4 }, (_, index) => `detail-${index}.jpg`),
+        ...Array.from({ length: 8 }, (_, index) => `main-${index + 1}.jpg`),
         'package.jpg',
       ],
       attributes: { szwego_video_url: 'https://video/lv.mp4' },
+    })
+  })
+
+  it('matches LV albums by a shared Latin model name, removes the repeated detail cover and drops an unmerged short album', async () => {
+    const result = await runSupplierJsonProcess('process_lv_bags_timeline.py', [
+      {
+        external_id: 'main', description: 'Nano Frivole手袋-老花棕 款号：M29537 尺寸：...',
+        photos: Array.from({ length: 10 }, (_, index) => `main-${index}.jpg`), source_position: 0,
+        attributes: { szwego_video_url: 'https://video/nano.mp4' },
+      },
+      {
+        external_id: 'details', description: '反复愿意背出门的经典款！ Nano Frivole 老花...',
+        photos: ['duplicate-cover.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg'], source_position: 1,
+        attributes: {},
+      },
+      {
+        external_id: 'unmerged-short', description: '其他款式',
+        photos: ['other-1.jpg', 'other-2.jpg', 'other-3.jpg', 'other-4.jpg'], source_position: 2,
+        attributes: {},
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'details',
+      photos: [
+        'duplicate-cover.jpg', 'detail-1.jpg', 'detail-2.jpg', 'detail-3.jpg',
+        ...Array.from({ length: 9 }, (_, index) => `main-${index + 1}.jpg`),
+      ],
+      attributes: { szwego_video_url: 'https://video/nano.mp4' },
     })
   })
 
