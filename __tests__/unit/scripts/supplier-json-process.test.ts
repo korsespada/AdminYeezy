@@ -284,6 +284,45 @@ describe('supplier JSON post-process contract', () => {
     })
   })
 
+  it('uses one exact parsed LV tag group to keep the four general bag photos, detail photos, video and packaging together', async () => {
+    const result = await runSupplierJsonProcess('process_lv_bags_timeline.py', [
+      {
+        external_id: 'packaging', description: '包装展示 Carryall Nano-老花', photos: ['package.jpg'], source_position: 0,
+        attributes: { szwego_tags: ['Carryall Nano-老花'] },
+      },
+      {
+        external_id: 'video', description: 'Carryall Nano-老花', photos: [], source_position: 1,
+        attributes: { szwego_tags: ['Carryall Nano-老花'], szwego_video_url: 'https://video/carryall.mp4' },
+      },
+      {
+        external_id: 'details', description: 'Carryall Nano-老花 款号：M2A711 尺寸：16x15x9.5cm',
+        photos: Array.from({ length: 9 }, (_, index) => `detail-${index}.jpg`), source_position: 2,
+        attributes: { szwego_tags: ['Carryall Nano-老花'] },
+      },
+      {
+        external_id: 'general', description: 'Carryall Nano-老花 经典 Monogram',
+        photos: Array.from({ length: 4 }, (_, index) => `general-${index}.jpg`), source_position: 3,
+        attributes: { szwego_tags: ['Carryall Nano-老花'] },
+      },
+      {
+        external_id: 'other-packaging', description: '包装展示 Other bag', photos: ['other-package.jpg'], source_position: 4,
+        attributes: { szwego_tags: ['Other bag'] },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'general',
+      photos: [
+        ...Array.from({ length: 4 }, (_, index) => `general-${index}.jpg`),
+        ...Array.from({ length: 8 }, (_, index) => `detail-${index + 1}.jpg`),
+        'package.jpg',
+      ],
+      attributes: { szwego_video_url: 'https://video/carryall.mp4' },
+    })
+    expect(result[0].photos).not.toContain('other-package.jpg')
+  })
+
   it('uses exact Szwego tags for a Chanel group when it reaches the photo threshold', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {

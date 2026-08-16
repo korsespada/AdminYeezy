@@ -101,11 +101,14 @@ def _shared_latin_phrase(left: str, right: str) -> bool:
 
 
 def _same_product(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    """Require an explicit identity before joining a detail album."""
+    """Use the exact Szwego tag group before any text fallback."""
     left_tags = _tags(left)
     right_tags = _tags(right)
     if left_tags or right_tags:
-        return bool(left_tags and right_tags and left_tags & right_tags)
+        # The supplier now publishes one identical tag set on every album of
+        # a product. Intersecting tags is unsafe: a broad tag could otherwise
+        # pull photos from a neighbouring product into this gallery.
+        return bool(left_tags and right_tags and left_tags == right_tags)
 
     left_text = _description(left)
     right_text = _description(right)
@@ -182,6 +185,11 @@ def _nearest_group(service: dict[str, Any], groups: list[dict[str, Any]]) -> dic
         return None
 
     matching = [group for group in nearby if _service_identity_matches(service, group)]
+    # Once parsed tags are available, a service card must never fall back to a
+    # merely nearby product. That would attach packaging/video to a different
+    # bag when the supplier publishes two blocks next to one another.
+    if _tags(service) and not matching:
+        return None
     candidates = matching or nearby
     return min(
         candidates,

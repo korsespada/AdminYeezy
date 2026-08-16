@@ -185,9 +185,12 @@ product card with photos in the order `основные → детали → к�
 video URL remains in `attributes.szwego_video_url` and the video card is not
 emitted as a separate product.
 
-The detail album is joined only when the long album has at least seven photos,
-the following main album has up to six photos, and the cards share a parsed
-Szwego tag, concrete model code, or a meaningful Chinese/Latin product name.
+The detail album is joined only when the long album has at least seven photos
+and the following main album has up to six photos. When `Парсинг тегов` is
+enabled, every album in one LV product block must have the **same complete
+`szwego_tags` set**; this exact tag group is used before any text fallback.
+Without tags, a concrete model code or meaningful Chinese/Latin product name
+is required.
 In this four-album pattern the short album is the main product, while the
 preceding long album is the detail set; its first repeated cover photo is
 removed before joining. Short albums that were not joined to a main album are
