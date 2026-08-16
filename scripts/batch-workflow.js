@@ -358,6 +358,20 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   return results;
 }
 
+function validationDetailsMessage(details) {
+  if (!details || typeof details !== 'object' || Array.isArray(details)) return '';
+  return Object.entries(details)
+    .flatMap(([field, messages]) => {
+      const values = Array.isArray(messages) ? messages : [messages];
+      const text = values
+        .map((message) => String(message || '').trim())
+        .filter(Boolean)
+        .join(', ');
+      return text ? [`${field}: ${text}`] : [];
+    })
+    .join('; ');
+}
+
 async function fetchJsonWithRetry(url, init, label) {
   const { timeoutMs = 45_000, ...requestInit } = init || {};
   let lastError;
@@ -366,7 +380,9 @@ async function fetchJsonWithRetry(url, init, label) {
       const response = await fetch(url, { ...requestInit, signal: AbortSignal.timeout(timeoutMs) });
       const payload = await response.json().catch(() => ({}));
       if (response.ok) return payload;
-      const error = new Error(payload.message || payload.error || `${label} failed with ${response.status}`);
+      const baseMessage = payload.message || payload.error || `${label} failed with ${response.status}`;
+      const details = validationDetailsMessage(payload.details);
+      const error = new Error(details ? `${baseMessage}: ${details}` : baseMessage);
       if (response.status !== 429 && response.status < 500) throw error;
       lastError = error;
     } catch (error) {
