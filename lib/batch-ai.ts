@@ -1184,6 +1184,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
       'мини-сумки', 'мини сумки',
       'сумки-боулинг', 'сумки боулинг',
       'пляжные сумки', 'пляжная сумка',
+      'сумки с верхней ручкой', 'сумка с верхней ручкой',
+      'сумки с ручкой', 'сумка с ручкой',
     ].includes(selectedName) && shoulderBags) {
       subcategory = shoulderBags[0]
     }

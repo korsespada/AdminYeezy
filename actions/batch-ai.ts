@@ -2623,7 +2623,7 @@ async function reviewBatchAiSuggestion(
 
 export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog = true) {
   await requireAdmin()
-  if (syncCatalog) await syncCurrentRailsCatalogMappings()
+  const currentCatalog = syncCatalog ? await syncCurrentRailsCatalogMappings() : null
   const knownAttributeCodes = syncCatalog
     ? new Set((await getCatalogAttributeDefinitions()).map((definition) => definition.code))
     : null
@@ -2636,12 +2636,19 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
       WHERE (entity_type='category' AND lower(name)='сумки')
          OR (entity_type='subcategory' AND lower(name) IN (
            'сумки','сумки-косметички','сумки-кейсы','сумки с клапаном','сумки на плечо'
-           ,'сумки-багет','мини-сумки','сумки-боулинг','пляжные сумки'
+           ,'сумки-багет','мини-сумки','сумки-боулинг','пляжные сумки','сумки с верхней ручкой','сумки с ручкой'
          ))
     `)
-    const bagCategoryId = bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id
+    const currentBagCategoryId = currentCatalog?.categories.find((row: any) => String(row.name || '').toLowerCase() === 'сумки')?.id
+    const bagCategoryId = String(currentBagCategoryId || bagCatalog.rows.find((row) => row.entity_type === 'category')?.canonical_id || '')
     const genericBagId = bagCatalog.rows.find((row) => row.entity_type === 'subcategory' && String(row.name).toLowerCase() === 'сумки')?.canonical_id
-    const shoulderBagId = bagCatalog.rows.find((row) => row.entity_type === 'subcategory' && String(row.name).toLowerCase() === 'сумки на плечо')?.canonical_id
+    const currentShoulderBagId = currentCatalog?.subcategories.find((row: any) => (
+      String(row.name || '').toLowerCase() === 'сумки на плечо'
+      && (!bagCategoryId || String(row.category || row.parent_id || '') === bagCategoryId)
+    ))?.id
+    const shoulderBagId = String(currentShoulderBagId || bagCatalog.rows.find((row) => (
+      row.entity_type === 'subcategory' && String(row.name).toLowerCase() === 'сумки на плечо'
+    ))?.canonical_id || '')
     const redirectedIds = bagCatalog.rows
       .filter((row) => row.entity_type === 'subcategory' && [
         'сумки-косметички',
@@ -2651,13 +2658,26 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
         'мини-сумки',
         'сумки-боулинг',
         'пляжные сумки',
+        'сумки с верхней ручкой',
+        'сумки с ручкой',
       ].includes(String(row.name).toLowerCase()))
       .map((row) => String(row.canonical_id))
-    if (bagCategoryId && shoulderBagId && redirectedIds.length) {
+    const staleShoulderIds = bagCatalog.rows
+      .filter((row) => row.entity_type === 'subcategory'
+        && String(row.name).toLowerCase() === 'сумки на плечо'
+        && String(row.canonical_id) !== shoulderBagId)
+      .map((row) => String(row.canonical_id))
+    const subcategoryIdsToNormalize = [...new Set([
+      ...redirectedIds,
+      ...staleShoulderIds,
+      // Старые выгрузки могли сохранить название вместо ID справочника.
+      'Сумки на плечо',
+    ])]
+    if (bagCategoryId && shoulderBagId && subcategoryIdsToNormalize.length) {
       await client.query(`
         UPDATE products SET subcategory=$3,updated_at=NOW()
         WHERE batch_id=$1 AND category=$2 AND subcategory=ANY($4::text[])
-      `, [batchId, String(bagCategoryId), String(shoulderBagId), redirectedIds])
+      `, [batchId, bagCategoryId, shoulderBagId, subcategoryIdsToNormalize])
     }
     if (bagCategoryId && genericBagId) {
       await client.query(`

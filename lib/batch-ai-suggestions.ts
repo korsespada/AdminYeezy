@@ -59,6 +59,7 @@ function redirectsToShoulderBags(value: unknown) {
     'мини_сумка',
     'боулинг_сумка',
     'пляжная_сумка',
+    'ручка_сумка',
   ].includes(subcategoryFamilyKey(value))
 }
 

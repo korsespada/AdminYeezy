@@ -379,6 +379,29 @@ describe('batch AI normalization', () => {
     }])?.price).toBe(90_000)
   })
 
+  it('moves top-handle bags into shoulder bags', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'bags', subcategory: 'top-handle-bags' },
+    }, {
+      product: { category: 'bags', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['bags']),
+      categoryNames: new Map([['bags', 'Сумки']]),
+      subcategoryIds: new Set(['shoulder-bags', 'top-handle-bags']),
+      subcategoryNames: new Map([
+        ['shoulder-bags', 'Сумки на плечо'],
+        ['top-handle-bags', 'Сумки с верхней ручкой'],
+      ]),
+      subcategoryParents: new Map([
+        ['shoulder-bags', 'bags'],
+        ['top-handle-bags', 'bags'],
+      ]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('shoulder-bags')
+  })
+
   it('drops registered attributes that are not allowed for the product category', () => {
     const result = normalizeBatchAiOutput({
       product: {
