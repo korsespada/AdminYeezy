@@ -2,7 +2,7 @@ const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
-function runSupplierJsonProcess(scriptName, products, options = {}) {
+function runSupplierJsonProcess(script, products, options = {}) {
   const runnerPath = path.join(process.cwd(), 'scripts', 'parser', 'json_postprocess_runner.py');
   const workspacePython = process.platform === 'win32'
     ? path.join(process.cwd(), '.venv', 'Scripts', 'python.exe')
@@ -36,7 +36,20 @@ function runSupplierJsonProcess(scriptName, products, options = {}) {
       }
     });
 
-    child.stdin.end(JSON.stringify({ script: scriptName, products, force_legacy: options.forceLegacy === true }));
+    const stored = script && typeof script === 'object' && !Array.isArray(script) ? script : null;
+    const scriptName = stored ? String(stored.name || 'stored_post_process.py').trim() : String(script || '').trim();
+    const source = stored ? String(stored.source || '') : '';
+    if (source.length > 100_000) {
+      reject(new Error('Код post-process не должен превышать 100 000 символов'));
+      return;
+    }
+    child.stdin.end(JSON.stringify({
+      script: scriptName,
+      source: source || undefined,
+      products,
+      force_legacy: options.forceLegacy === true,
+      validate_only: options.validateOnly === true,
+    }));
   });
 }
 

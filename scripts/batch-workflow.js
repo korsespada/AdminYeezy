@@ -704,6 +704,21 @@ async function getSupplier(supplierId) {
   return res.rows[0] || null;
 }
 
+async function getActiveSupplierPostProcess(supplierId) {
+  const res = await scrapingPool.query(`
+    SELECT id,name,source FROM supplier_post_process_scripts
+    WHERE supplier_id=$1 AND is_active=TRUE
+    LIMIT 1
+  `, [supplierId]);
+  return res.rows[0] || null;
+}
+
+async function hasSupplierPostProcess(supplierId) {
+  const supplier = await getSupplier(supplierId);
+  if (String(supplier?.post_process_script || '').trim()) return true;
+  return Boolean(await getActiveSupplierPostProcess(supplierId));
+}
+
 function parseCsvObjects(text) {
   const normalized = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const firstLine = normalized.split('\n')[0] || '';
@@ -1204,7 +1219,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
 
       if (code === 0 && fs.existsSync(/*turbopackIgnore: true*/ outputPath)) {
         batchId = await importScrapedFileToBatch({ supplier: parserSupplier, taskId, outputPath, itemsCount });
-        if (batchId && supplier.post_process_enabled && supplier.post_process_script) {
+        if (batchId && supplier.post_process_enabled && await hasSupplierPostProcess(supplier.id)) {
           try {
             await runBatchPostProcessScript(batchId);
           } catch (postProcessError) {
@@ -1324,7 +1339,8 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   const batch = await getBatch(batchId);
   if (!batch?.supplier_id) throw new Error('У партии не найден поставщик');
   const supplier = await getSupplier(batch.supplier_id);
-  if (!supplier?.post_process_script) throw new Error('Для поставщика не назначен скрипт постобработки');
+  const storedScript = await getActiveSupplierPostProcess(supplier.id);
+  if (!supplier?.post_process_script && !storedScript) throw new Error('Для поставщика не назначен скрипт постобработки');
   supplier.post_process_script = String(supplier.post_process_script).trim();
 
   const products = await getBatchProducts(batchId);
@@ -1339,7 +1355,10 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   const sourceProducts = Array.isArray(snapshotResult.rows[0]?.products)
     ? snapshotResult.rows[0].products
     : products;
-  const processedProducts = await runSupplierJsonProcess(supplier.post_process_script, sourceProducts);
+  const processedProducts = await runSupplierJsonProcess(
+    storedScript ? { name: `${storedScript.name}.py`, source: storedScript.source } : supplier.post_process_script,
+    sourceProducts,
+  );
   if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
 
   const originalByExternalId = new Map(sourceProducts.map((product, position) => [

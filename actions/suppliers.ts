@@ -10,6 +10,7 @@ import { extractProductAttributes } from '@/lib/product-attributes'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
+import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
 import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
 import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
@@ -1057,7 +1058,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
         itemsCount = Array.isArray(items) ? items.length : 0
         batchId = await importScrapedProductsTransaction(taskId, supplier, parserDefaults, items)
         finalStatus = 'Сырой товар'
-        if (supplier.post_process_enabled && supplier.post_process_script) {
+        const activePostProcess = supplier.post_process_enabled
+          && (supplier.post_process_script || await getActiveSupplierPostProcess(supplier.id))
+        if (activePostProcess) {
           const postProcessResult = await runCustomSupplierScriptAction(null, supplier.id, batchId)
           if (!postProcessResult?.success) console.error(`[Scraper ${taskId}] Auto post-process failed: ${postProcessResult?.error}`)
         }

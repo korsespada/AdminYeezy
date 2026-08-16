@@ -6,12 +6,14 @@ CSV artifact is exposed to the application or stored in history.
 """
 
 import contextlib
+import ast
 import csv
 import importlib.util
 import io
 import json
 import os
 import sys
+import types
 from unittest.mock import patch
 
 
@@ -45,6 +47,20 @@ def load_module(script_name):
     spec = importlib.util.spec_from_file_location(f"supplier_{safe_name[:-3]}", script_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def load_source_module(source, source_name):
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("Код post-process пуст")
+    if len(source) > 100_000:
+        raise ValueError("Код post-process не должен превышать 100 000 символов")
+    safe_name = os.path.basename(str(source_name or "stored_post_process.py").strip())
+    if not safe_name.endswith(".py"):
+        safe_name = "stored_post_process.py"
+    module = types.ModuleType(f"supplier_stored_{safe_name[:-3]}")
+    module.__file__ = f"<stored:{safe_name}>"
+    exec(compile(source, module.__file__, "exec"), module.__dict__)
     return module
 
 
@@ -150,10 +166,19 @@ def run_legacy(module, products):
 def main():
     payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     script_name = str(payload.get("script") or "").strip()
+    source = payload.get("source")
     products = payload.get("products")
     if not isinstance(products, list):
         raise ValueError("products должен быть массивом")
-    module = load_module(script_name)
+    if payload.get("validate_only"):
+        if not isinstance(source, str) or not source.strip():
+            raise ValueError("Код post-process пуст")
+        tree = ast.parse(source, filename=f"<stored:{script_name or 'post_process.py'}>")
+        if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "process_products" for node in tree.body):
+            raise ValueError("Код должен содержать функцию process_products(products)")
+        sys.stdout.buffer.write(b"[]")
+        return
+    module = load_source_module(source, script_name) if source is not None else load_module(script_name)
     if callable(getattr(module, "process_products", None)) and not payload.get("force_legacy"):
         with contextlib.redirect_stdout(sys.stderr):
             result = module.process_products(products)

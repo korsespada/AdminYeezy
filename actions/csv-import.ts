@@ -17,6 +17,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { activeBatchOperation, claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
+import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
 
 export interface CsvProduct {
     id?: string | number
@@ -938,7 +939,17 @@ export async function getSupplierDataAction(supplierId: number) {
     await requireAdmin()
 
     try {
-        const res = await scrapingQuery('SELECT album_id, post_process_script, post_process_enabled, ai_parallel_enabled, ai_parallel_count FROM suppliers WHERE id=$1', [supplierId]);
+        const res = await scrapingQuery(`
+          SELECT s.album_id,
+            COALESCE(active_script.name, s.post_process_script) AS post_process_script,
+            s.post_process_enabled,s.ai_parallel_enabled,s.ai_parallel_count
+          FROM suppliers s
+          LEFT JOIN LATERAL (
+            SELECT name FROM supplier_post_process_scripts
+            WHERE supplier_id=s.id AND is_active=TRUE LIMIT 1
+          ) active_script ON TRUE
+          WHERE s.id=$1
+        `, [supplierId]);
         if (res.rows.length > 0) return res.rows[0];
         return null;
     } catch (err) {
@@ -954,9 +965,10 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
     if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
     const supplierData = supplierRes.rows[0];
+    const storedScript = await getActiveSupplierPostProcess(supplierId)
     supplierData.post_process_script = String(supplierData.post_process_script || '').trim();
 
-    if (!supplierData.post_process_script) {
+    if (!storedScript && !supplierData.post_process_script) {
         throw new Error("Скрипт не назначен для этого поставщика");
     }
     if (!batchId) throw new Error("Для JSON-обработки требуется batchId");
@@ -983,7 +995,9 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
 
     const { runSupplierJsonProcess } = require('../scripts/lib/supplier-json-process');
     const processedProducts = await runSupplierJsonProcess(
-      supplierData.post_process_script,
+      storedScript
+        ? { name: `${storedScript.name}.py`, source: storedScript.source }
+        : supplierData.post_process_script,
       sourceProducts,
     );
     if (!Array.isArray(processedProducts) || processedProducts.length === 0) {

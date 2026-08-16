@@ -9,6 +9,7 @@ import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import {
   getCatalogAttributeDefinitionsForCategory,
 } from '@/lib/catalog-attribute-schema'
+import { SupplierPostProcessEditor } from '@/components/inventory/SupplierPostProcessEditor'
 
 type SupplierAiProcessingOptions = {
   colorFamilyByArticle: boolean
@@ -951,7 +952,7 @@ export default function SupplierList({
                   
                   <div>
                     <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Пост-обработка скриптом</h4>
-                    <p className="text-xs text-slate-400 mb-2">Укажите название скрипта в папке scripts/parser/.</p>
+                    <p className="text-xs text-slate-400 mb-2">Старое имя файла оставлено для совместимости. Новые версии создавайте ниже — они не требуют деплоя.</p>
                     <div className="flex items-center gap-2">
                       <input
                         name="post_process_script"
@@ -972,6 +973,7 @@ export default function SupplierList({
                     </div>
                     <p className="mt-2 text-[11px] text-slate-500">Выкл. по умолчанию: можно продолжать запускать скрипт вручную.</p>
                   </div>
+                  {editingSupplier?.id && <SupplierPostProcessEditor supplierId={editingSupplier.id} legacyScript={editingSupplier.post_process_script} />}
 
                   <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4">
                     <div className="flex items-center justify-between">
