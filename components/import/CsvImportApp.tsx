@@ -1746,7 +1746,7 @@ export default function CsvImportApp({
               </div>
               <button
                 onClick={handleStopPublish}
-                disabled={isStoppingPublish || publishOperation.cancelling}
+                disabled={isStoppingPublish || (!publishOperation.stale && publishOperation.cancelling)}
                 className={`shrink-0 rounded-lg border px-4 py-2 text-sm font-bold transition-colors disabled:opacity-50 ${publishOperation.stale ? "border-amber-400/40 text-amber-200 hover:bg-amber-500/10" : "border-red-400/40 text-red-200 hover:bg-red-500/10"}`}
               >
                 {isStoppingPublish ? "Подождите…" : publishOperation.stale ? "Сбросить операцию" : publishOperation.cancelling ? "Остановка…" : "Остановить"}
