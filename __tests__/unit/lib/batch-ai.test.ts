@@ -346,11 +346,11 @@ describe('batch AI normalization', () => {
         name: 'Classic Flap',
         category: 'bags',
         subcategory: 'shoulder-bags',
-        description: 'Сумка с золотистой фурнитурой. Размер: 25,5 × 15 × 6,5 см.',
+        description: 'Сумка. Размер: 25,5 × 15 × 6,5 см.',
         catalog_attributes: { model_name: 'Classic Flap', materials: ['Натуральная кожа ягненка'] },
       },
     }, {
-      product: { category: 'bags', subcategory: 'shoulder-bags', photos: [], attributes: { sizes: ['25'] } },
+      product: { category: 'bags', subcategory: 'shoulder-bags', photos: [], description: '【D-Joy26米白金】', attributes: { sizes: ['25'] } },
       brandIds: new Set(),
       categoryIds: new Set(['bags']),
       categoryNames: new Map([['bags', 'Сумки']]),
@@ -360,7 +360,7 @@ describe('batch AI normalization', () => {
       // Raw suppliers may not assign a category before AI. Their prompt then
       // receives common fields (including materials), while the resolved
       // «Сумки» category recovers its remaining registered attributes.
-      attributeCodes: new Set(['sizes', 'model_name', 'materials']),
+      attributeCodes: new Set(['sizes', 'model_name', 'materials', 'hardware_color']),
       knownAttributeCodes: new Set(['sizes', 'model_name', 'materials', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
     })
 

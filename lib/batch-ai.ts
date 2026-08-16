@@ -876,13 +876,13 @@ function explicitDimensions(values: unknown[]): ParsedDimensions | null {
 
 function hardwareColorFromConfirmedText(values: unknown[]) {
   const text = values.map((value) => String(value || '')).join('\n').toLowerCase()
-  const hasHardwareContext = /(фурнитур|замок|цепочк|металл|五金|金扣|银扣|链条)/iu.test(text)
+  const hasHardwareContext = /(фурнитур|замок|цепочк|металл|五金|金扣|银扣|链条|(?:米白|黑|红|粉|蓝|绿|棕)金(?:扣)?)/iu.test(text)
   if (!hasHardwareContext) return ''
   if (/(паллади|palladium)/iu.test(text)) return 'Палладиевая'
   if (/(розов(?:ое|ая) золот|rose gold)/iu.test(text)) return 'Розовое золото'
   if (/(графит|gunmetal)/iu.test(text)) return 'Графитовая'
   if (/(бронз|bronze)/iu.test(text)) return 'Бронзовая'
-  if (/(золотист|золот(?:ая|ое)|浅金|金色五金|金扣|gold(?:-tone)? hardware)/iu.test(text)) return 'Золотистая'
+  if (/(золотист|золот(?:ая|ое)|浅金|金色五金|金扣|(?:米白|黑|红|粉|蓝|绿|棕)金(?:扣)?|gold(?:-tone)? hardware)/iu.test(text)) return 'Золотистая'
   if (/(серебрист|серебр(?:яная|ое)|银扣|银色五金|silver(?:-tone)? hardware)/iu.test(text)) return 'Серебристая'
   if (/(чёрн(?:ая|ое) фурнитур|черн(?:ая|ое) фурнитур|black hardware)/iu.test(text)) return 'Чёрная'
   return ''
