@@ -220,7 +220,7 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Используй только существующие бренды, категории, подкатегории и коды атрибутов. Не возвращай attribute_suggestions или subcategory_suggestion и не предлагай новые сущности.
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
-- Для сумок с подтверждёнными габаритами обязательно заполни dimensions в формате «Ш × В × Г см», bag_width_cm и bag_height_cm. Не записывай размер сумки в sizes: это не размерный ряд. Если подтверждён номинальный размер модели, например Classic Flap 25, включи его в name без бренда.
+- Для сумок с подтверждёнными габаритами обязательно заполни dimensions в формате «Ш × В × Г см» или, если глубина не дана, «Ш × В см», а также bag_width_cm и bag_height_cm. Для кошельков, картхолдеров и обложек паспорта сохраняй подтверждённые габариты в dimensions, в том числе если известны только ширина и высота. Не записывай размер сумки в sizes: это не размерный ряд. Если подтверждён номинальный размер модели, например Classic Flap 25, включи его в name без бренда.
 - Для сумок при подтверждённом тексте или фото обязательно заполни hardware_color допустимым значением из схемы атрибутов. Не угадывай цвет фурнитуры.
 
 Глобальные правила сверки текста с фотографиями:
@@ -822,7 +822,7 @@ function nameWithoutLeadingBrand(value: string, brand?: string) {
   return name.replace(new RegExp(`^${escapedBrand}[\\s\\-–—_:,]*`, 'iu'), '').trim() || name
 }
 
-type BagDimensions = { width: number; height: number; depth: number; value: string }
+type ParsedDimensions = { width: number; height: number; depth?: number; value: string }
 
 function dimensionNumber(value: string) {
   const number = Number(value.replace(',', '.'))
@@ -833,23 +833,25 @@ function displayDimension(value: number) {
   return Number.isInteger(value) ? String(value) : String(value).replace('.', ',')
 }
 
-function explicitBagDimensions(values: unknown[]): BagDimensions | null {
+function explicitDimensions(values: unknown[]): ParsedDimensions | null {
   for (const value of values) {
     const text = String(value || '')
-    // Без слова «размер»/«尺寸» сохраняем только тройку с единицей измерения:
+    // Без слова «размер»/«尺寸» сохраняем только габариты с единицей измерения:
     // это не позволяет принять номер модели вроде CF25 за габарит.
-    const match = text.match(/(?:(?:размер(?:ы)?|габариты|dimensions?|尺寸)\s*[:：]?\s*)?(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)(?:\s*(?:см|cm))?/iu)
+    const match = text.match(/(?:(?:размер(?:ы)?|габариты|dimensions?|尺寸)\s*[:：]?\s*)?(\d+(?:[.,]\d+)?)\s*[xх×*]\s*(\d+(?:[.,]\d+)?)(?:\s*[xх×*]\s*(\d+(?:[.,]\d+)?))?(?:\s*(?:см|cm))?/iu)
     if (!match) continue
     const labelled = /(размер(?:ы)?|габариты|dimensions?|尺寸)/iu.test(text.slice(0, match.index! + match[0].length))
     const hasUnit = /(?:см|cm)\b/iu.test(match[0])
     if (!labelled && !hasUnit) continue
-    const [width, height, depth] = match.slice(1).map(dimensionNumber)
+    const width = dimensionNumber(match[1])
+    const height = dimensionNumber(match[2])
+    const depth = match[3] ? dimensionNumber(match[3]) : undefined
     if (width === null || height === null || depth === null) continue
     return {
       width,
       height,
       depth,
-      value: `${displayDimension(width)} × ${displayDimension(height)} × ${displayDimension(depth)} см`,
+      value: `${displayDimension(width)} × ${displayDimension(height)}${depth === undefined ? '' : ` × ${displayDimension(depth)}`} см`,
     }
   }
   return null
@@ -1156,15 +1158,27 @@ export function normalizeBatchAiOutput(raw: any, input: {
       }
     }
   }
-  if (normalizedName(input.categoryNames?.get(category)) === 'сумки') {
+  const categoryName = normalizedName(input.categoryNames?.get(category))
+  const canWriteAttribute = (code: string) => (
+    input.attributeCodes.has(code) || input.knownAttributeCodes?.has(code) === true
+  )
+  const dimensions = explicitDimensions([
+    attributes.dimensions,
+    proposed.catalog_attributes?.dimensions,
+    original.description,
+    proposed.description,
+  ])
+  if (['сумки', 'аксессуары'].includes(categoryName) && dimensions && canWriteAttribute('dimensions')) {
+    attributes.dimensions = dimensions.value
+  }
+
+  if (categoryName === 'сумки') {
     // Сырые товары нередко поступают без категории, поэтому их initial schema
     // содержит только общие поля. После того как AI выбрал «Сумки», разрешаем
     // зарегистрированные bag-поля из ответа — иначе они безвозвратно теряются
     // до детерминированного разбора габаритов и подбора цены.
     const bagAttributeCodes = ['dimensions', 'bag_width_cm', 'bag_height_cm', 'size_class', 'strap_length', 'capacity', 'hardware_color']
-    const canWriteBagAttribute = (code: string) => (
-      input.attributeCodes.has(code) || input.knownAttributeCodes?.has(code) === true
-    )
+    const canWriteBagAttribute = canWriteAttribute
     for (const code of bagAttributeCodes) {
       if (!canWriteBagAttribute(code) || attributes[code] !== undefined) continue
       const value = proposed.catalog_attributes?.[code]
@@ -1193,12 +1207,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
       throw new Error('Для категории «Сумки» требуется конкретная подкатегория вместо «Сумки»')
     }
 
-    const dimensions = explicitBagDimensions([
-      attributes.dimensions,
-      proposed.catalog_attributes?.dimensions,
-      original.description,
-      proposed.description,
-    ])
     if (dimensions) {
       if (canWriteBagAttribute('dimensions')) attributes.dimensions = dimensions.value
       if (canWriteBagAttribute('bag_width_cm') && !attributes.bag_width_cm) attributes.bag_width_cm = dimensions.width

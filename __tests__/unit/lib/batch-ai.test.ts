@@ -379,6 +379,45 @@ describe('batch AI normalization', () => {
     }])?.price).toBe(90_000)
   })
 
+  it('preserves two-part wallet dimensions and derives their price-rule fields', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'bags', subcategory: 'wallets' },
+    }, {
+      product: { photos: [], attributes: {}, description: '尺寸：11 × 8 см' },
+      brandIds: new Set(),
+      categoryIds: new Set(['bags']),
+      categoryNames: new Map([['bags', 'Сумки']]),
+      subcategoryIds: new Set(['wallets']),
+      subcategoryNames: new Map([['wallets', 'Кошельки и картхолдеры']]),
+      subcategoryParents: new Map([['wallets', 'bags']]),
+      attributeCodes: new Set(),
+      knownAttributeCodes: new Set(['dimensions', 'bag_width_cm', 'bag_height_cm']),
+    })
+
+    expect(result.product.attributes).toEqual({
+      dimensions: '11 × 8 см',
+      bag_width_cm: 11,
+      bag_height_cm: 8,
+    })
+  })
+
+  it('preserves two-part passport-cover dimensions for accessories', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'accessories', subcategory: 'passport-covers' },
+    }, {
+      product: { photos: [], attributes: {}, description: '尺寸：14 × 10 cm' },
+      brandIds: new Set(),
+      categoryIds: new Set(['accessories']),
+      categoryNames: new Map([['accessories', 'Аксессуары']]),
+      subcategoryIds: new Set(['passport-covers']),
+      subcategoryNames: new Map([['passport-covers', 'Обложки для паспорта']]),
+      subcategoryParents: new Map([['passport-covers', 'accessories']]),
+      attributeCodes: new Set(['dimensions']),
+    })
+
+    expect(result.product.attributes).toEqual({ dimensions: '14 × 10 см' })
+  })
+
   it('moves top-handle bags into shoulder bags', () => {
     const result = normalizeBatchAiOutput({
       product: { category: 'bags', subcategory: 'top-handle-bags' },
