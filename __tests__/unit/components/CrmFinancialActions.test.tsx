@@ -58,6 +58,6 @@ describe('CRM financial actions', () => {
       />
     )
 
-    expect(screen.getByRole('button', { name: 'Mark paid' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Отметить как оплаченное' })).toBeInTheDocument()
   })
 })

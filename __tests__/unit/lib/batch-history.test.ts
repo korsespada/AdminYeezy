@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canDeletePublishedCatalog,
   currentBatchHistoryStatus,
   effectiveBatchHistoryStage,
   shouldOpenBatchArtifactAsFile,
@@ -23,5 +24,12 @@ describe('batch history navigation', () => {
     expect(effectiveBatchHistoryStage('PUSHED', true)).toBe('PUSHED')
     expect(effectiveBatchHistoryStage('DELETED_FROM_DB', true)).toBe('DELETED_FROM_DB')
     expect(effectiveBatchHistoryStage('SCRIPT_PROCESSED', true)).toBe('AI_PROCESSED')
+  })
+
+  it('offers catalog removal for legacy published batches without a publication registry', () => {
+    expect(canDeletePublishedCatalog('PUSHED', 0)).toBe(true)
+    expect(canDeletePublishedCatalog('AI_PROCESSED', 3)).toBe(true)
+    expect(canDeletePublishedCatalog('AI_PROCESSED', 0)).toBe(false)
+    expect(canDeletePublishedCatalog('DELETED_FROM_DB', 0)).toBe(false)
   })
 })

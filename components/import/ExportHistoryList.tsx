@@ -44,7 +44,7 @@ import {
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
 import SupplierModelReferencesDialog from './SupplierModelReferencesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
-import { shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
+import { canDeletePublishedCatalog, shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
 type ModalState = {
   localPath: string
@@ -464,6 +464,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 // catalog import was interrupted after the stage was marked
                 // PUSHED. Both publication modes are idempotent by external_id.
                 const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
+                const canDeleteCatalog = canDeletePublishedCatalog(batch.stage, batch.published_external_count)
                 const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'
@@ -588,7 +589,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               <RotateCcw className="mt-0.5 h-4 w-4 shrink-0" />
                               <span><b className="block">Восстановить версию…</b><small className="text-slate-500">Вернуть товары к сохранённому этапу</small></span>
                             </button>
-                            {Boolean(batch.published_external_count) && !batch.isSynthetic && (
+                            {canDeleteCatalog && !batch.isSynthetic && (
                               <button
                               onClick={() => handleDeleteFromCatalog(batch)}
                               disabled={isBusy}

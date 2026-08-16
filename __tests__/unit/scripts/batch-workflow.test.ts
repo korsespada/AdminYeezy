@@ -379,13 +379,44 @@ describe('batch workflow CSV compatibility adapter', () => {
   })
 
   it('clamps Rails JSON chunks to the API limit', () => {
-    const previous = process.env.RAILS_IMPORT_CHUNK_SIZE
-    process.env.RAILS_IMPORT_CHUNK_SIZE = '200'
+    const previous = process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
+    process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE = '200'
     try {
       expect(workflow.railsImportChunkSize()).toBe(100)
     } finally {
-      if (previous === undefined) delete process.env.RAILS_IMPORT_CHUNK_SIZE
-      else process.env.RAILS_IMPORT_CHUNK_SIZE = previous
+      if (previous === undefined) delete process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
+      else process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE = previous
     }
+  })
+
+  it('uses production-safe defaults for publish concurrency and Rails chunks', () => {
+    const previousChunkSize = process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
+    const previousMediaConcurrency = process.env.MEDIA_UPLOAD_CONCURRENCY
+    delete process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
+    delete process.env.MEDIA_UPLOAD_CONCURRENCY
+    try {
+      expect(workflow.railsImportChunkSize()).toBe(50)
+      expect(workflow.mediaUploadConcurrency()).toBe(4)
+    } finally {
+      if (previousChunkSize === undefined) delete process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
+      else process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE = previousChunkSize
+      if (previousMediaConcurrency === undefined) delete process.env.MEDIA_UPLOAD_CONCURRENCY
+      else process.env.MEDIA_UPLOAD_CONCURRENCY = previousMediaConcurrency
+    }
+  })
+
+  it('keeps concurrent mapping ordered and within the configured limit', async () => {
+    let active = 0
+    let peak = 0
+    const result = await workflow.mapWithConcurrency([30, 5, 20, 10], 2, async (delay: number) => {
+      active += 1
+      peak = Math.max(peak, active)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      active -= 1
+      return delay / 5
+    })
+
+    expect(result).toEqual([6, 1, 4, 2])
+    expect(peak).toBe(2)
   })
 })

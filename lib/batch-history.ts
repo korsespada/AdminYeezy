@@ -15,3 +15,9 @@ export function effectiveBatchHistoryStage(stage?: string | null, allAiProcessed
   if (stage === 'PUSHED' || stage === 'DELETED_FROM_DB') return stage
   return allAiProcessed ? 'AI_PROCESSED' : stage || null
 }
+
+// Early published batches predate batch_publications, so their registry count
+// is zero even though the server can safely recover their external_id values.
+export function canDeletePublishedCatalog(stage?: string | null, publishedExternalCount = 0) {
+  return stage === 'PUSHED' || publishedExternalCount > 0
+}

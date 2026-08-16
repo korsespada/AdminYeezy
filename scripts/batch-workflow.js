@@ -339,6 +339,25 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+function mediaUploadConcurrency() {
+  const configured = Number(process.env.MEDIA_UPLOAD_CONCURRENCY || 4);
+  if (!Number.isFinite(configured) || configured < 1) return 4;
+  return Math.min(8, Math.floor(configured));
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await mapper(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function fetchJsonWithRetry(url, init, label) {
   const { timeoutMs = 45_000, ...requestInit } = init || {};
   let lastError;
@@ -587,8 +606,8 @@ async function postRailsImportBatch({ name, products, sourceSupplierId, supplier
 }
 
 function railsImportChunkSize() {
-  const configured = Number(process.env.RAILS_IMPORT_CHUNK_SIZE || 20);
-  if (!Number.isFinite(configured) || configured < 1) return 20;
+  const configured = Number(process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE || 50);
+  if (!Number.isFinite(configured) || configured < 1) return 50;
   return Math.min(100, Math.floor(configured));
 }
 
@@ -1792,18 +1811,31 @@ async function recordBatchPublications(batchId, externalIds, payloadHashes = new
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
   if (!ids.length) return;
   const publishedProducts = await existingRailsProducts(ids);
-  for (const externalId of ids) {
+  const rows = ids.flatMap((externalId) => {
     const railsProduct = publishedProducts.get(externalId);
-    if (!railsProduct) continue;
-    await scrapingPool.query(`
-      INSERT INTO batch_publications(batch_id,external_id,rails_product_id,payload_hash,published_at)
-      VALUES($1,$2,$3,$4,NOW())
-      ON CONFLICT(batch_id,external_id) DO UPDATE SET
-        rails_product_id=EXCLUDED.rails_product_id,
-        payload_hash=EXCLUDED.payload_hash,
-        published_at=NOW()
-    `, [batchId, externalId, railsProduct.id ? String(railsProduct.id) : null, payloadHashes.get(externalId) || null]);
-  }
+    if (!railsProduct) return [];
+    return [{
+      externalId,
+      railsProductId: railsProduct.id ? String(railsProduct.id) : null,
+      payloadHash: payloadHashes.get(externalId) || null,
+    }];
+  });
+  if (!rows.length) return;
+  await scrapingPool.query(`
+    INSERT INTO batch_publications(batch_id,external_id,rails_product_id,payload_hash,published_at)
+    SELECT $1,payload.external_id,payload.rails_product_id,payload.payload_hash,NOW()
+    FROM UNNEST($2::text[],$3::text[],$4::text[])
+      AS payload(external_id,rails_product_id,payload_hash)
+    ON CONFLICT(batch_id,external_id) DO UPDATE SET
+      rails_product_id=EXCLUDED.rails_product_id,
+      payload_hash=EXCLUDED.payload_hash,
+      published_at=NOW()
+  `, [
+    batchId,
+    rows.map((row) => row.externalId),
+    rows.map((row) => row.railsProductId),
+    rows.map((row) => row.payloadHash),
+  ]);
 }
 
 async function recordBatchPublication(batchId, externalId, railsProductId, payloadHash) {
@@ -1832,6 +1864,19 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   `, [batchId, operationOwnerId]);
   if (!operation.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
   try {
+  const publishStartedAt = Date.now();
+  let phaseStartedAt = publishStartedAt;
+  const reportPhaseTiming = (phase, details = {}) => {
+    const now = Date.now();
+    console.info('[batch-publish-timing]', JSON.stringify({
+      batchId,
+      phase,
+      durationMs: now - phaseStartedAt,
+      totalDurationMs: now - publishStartedAt,
+      ...details,
+    }));
+    phaseStartedAt = now;
+  };
   const products = Array.isArray(options.sourceProducts)
     ? options.sourceProducts.map((product) => normalizeProduct({ ...product, batch_id: batchId }))
     : await getBatchProducts(batchId);
@@ -1892,6 +1937,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
         : undefined,
     },
   );
+  reportPhaseTiming('lookup', { products: products.length, existing: existingProducts.size });
   const existingExternalIds = new Set(existingProducts.keys());
   const existingHostedVideosBySource = new Map();
   for (const product of products) {
@@ -1962,12 +2008,13 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     // Старая партия может хранить Szwego URL, хотя Rails уже имеет S3-галерею.
     // При upsert берем готовые фото Rails и обновляем только остальные поля.
     const publicationPhotos = rewriteSeoMedia ? requestedPhotos : (preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos);
-    for (let photoIndex = 0; photoIndex < publicationPhotos.length; photoIndex += 1) {
-      const sourceUrl = publicationPhotos[photoIndex];
+    const photoResults = await mapWithConcurrency(
+      publicationPhotos,
+      mediaUploadConcurrency(),
+      async (sourceUrl, photoIndex) => {
       const existingRailsUrl = existingPhotoUrls.get(String(sourceUrl || '').trim());
       if (existingRailsUrl && !rewriteSeoMedia) {
-        photos.push(existingRailsUrl);
-        continue;
+        return { url: existingRailsUrl };
       }
       const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
       const photoSlug = String(product.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`)
@@ -1976,12 +2023,17 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
         ? `batches/${batchId}/${safeSlug}-${photoSlug}.webp`
         : `batches/${batchId}/${safeExternalId}_${photoIndex}.webp`;
       try {
-        photos.push(await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }));
+        return { url: await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }) };
       } catch (error) {
-        productFailed = true;
-        photos.push(sourceUrl);
-        errors.push(`${product.external_id || product.name}, фото ${photoIndex + 1}: ${error.message}`);
+        return { url: sourceUrl, error, photoIndex };
       }
+      },
+    );
+    for (const result of photoResults) {
+      photos.push(result.url);
+      if (!result.error) continue;
+      productFailed = true;
+      errors.push(`${product.external_id || product.name}, фото ${result.photoIndex + 1}: ${result.error.message}`);
     }
     product.photos = photos.filter(Boolean);
     const sourceAttributes = normalizeAttributes(product.attributes);
@@ -2034,6 +2086,12 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   }
 
   if (batchProductsChanged) await saveBatchProducts(batchId, updatedProducts);
+  reportPhaseTiming('media', {
+    candidates: candidates.length,
+    prepared,
+    failed: errors.length,
+    concurrency: mediaUploadConcurrency(),
+  });
   if (errors.length > 0) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
   }
@@ -2144,6 +2202,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
   }
   await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
+  reportPhaseTiming('publish', { imported, updated, deleted });
 
   return {
     success: imported,
@@ -2197,6 +2256,8 @@ module.exports = {
   parseCsvObjects,
   publicationPayloadHash,
   productToRailsJsonRow,
+  mapWithConcurrency,
+  mediaUploadConcurrency,
   railsImportChunkSize,
   railsUpdatePayload,
   listAllSuppliers,
