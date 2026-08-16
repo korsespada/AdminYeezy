@@ -21,3 +21,17 @@ export function effectiveBatchHistoryStage(stage?: string | null, allAiProcessed
 export function canDeletePublishedCatalog(stage?: string | null, publishedExternalCount = 0) {
   return stage === 'PUSHED' || publishedExternalCount > 0
 }
+
+export function protectedCatalogExternalIds(
+  candidateIds: Iterable<string>,
+  replacementBatchIds: Iterable<string> | null,
+  fallbackSharedIds: Iterable<string>,
+) {
+  const normalize = (value: string) => String(value || '').trim()
+  const candidates = new Set([...candidateIds].map(normalize).filter(Boolean))
+  const protectedIds = new Set(
+    [...(replacementBatchIds || fallbackSharedIds)].map(normalize).filter(Boolean),
+  )
+
+  return new Set([...candidates].filter((externalId) => protectedIds.has(externalId)))
+}

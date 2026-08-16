@@ -3,6 +3,7 @@ import {
   canDeletePublishedCatalog,
   currentBatchHistoryStatus,
   effectiveBatchHistoryStage,
+  protectedCatalogExternalIds,
   shouldOpenBatchArtifactAsFile,
 } from '@/lib/batch-history'
 
@@ -31,5 +32,21 @@ describe('batch history navigation', () => {
     expect(canDeletePublishedCatalog('AI_PROCESSED', 3)).toBe(true)
     expect(canDeletePublishedCatalog('AI_PROCESSED', 0)).toBe(false)
     expect(canDeletePublishedCatalog('DELETED_FROM_DB', 0)).toBe(false)
+  })
+
+  it('protects only the newest replacement batch when removing a legacy export', () => {
+    expect([...protectedCatalogExternalIds(
+      ['old-only', 'kept-by-new', 'also-in-older-history'],
+      ['kept-by-new'],
+      ['kept-by-new', 'also-in-older-history'],
+    )]).toEqual(['kept-by-new'])
+  })
+
+  it('keeps the conservative shared-id fallback when no newer replacement exists', () => {
+    expect([...protectedCatalogExternalIds(
+      ['old-only', 'shared'],
+      null,
+      ['shared'],
+    )]).toEqual(['shared'])
   })
 })

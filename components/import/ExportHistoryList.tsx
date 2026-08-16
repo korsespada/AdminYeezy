@@ -201,7 +201,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     if (batch.isSynthetic) return
     if (!confirm(`Удалить опубликованные товары выгрузки "${batch.name}" из основного каталога?\n\nЛокальные товары и история останутся.`)) return
     const replaceShared = window.confirm(
-      'Удалить также товары с тем же external_id, которые встречаются в других партиях?\n\n' +
+      'Удалить также товары с тем же external_id, которые входят в новую опубликованную выгрузку этого поставщика?\n\n' +
       'Да — удалить совпадения.\nНет — сохранить общие товары.',
     )
     setPendingAction(`catalog-${batch.id}`)

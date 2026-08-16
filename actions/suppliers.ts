@@ -11,6 +11,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
+import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { spawn } from 'child_process'
 import path from 'path'
@@ -1423,11 +1424,14 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
         await requireAdmin()
         operationOwnerId = await claimBatchOperation(batchId, 'delete')
         if (!operationOwnerId) throw new Error('Выгрузка занята другой операцией')
-        const batchResult = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
+        const batchResult = await scrapingQuery('SELECT stage,supplier_id,created_at FROM scraping_batches WHERE id=$1', [batchId])
         const batchStage = String(batchResult.rows[0]?.stage || '')
+        const supplierId = batchResult.rows[0]?.supplier_id
+        const batchCreatedAt = batchResult.rows[0]?.created_at
 
-        // Удаляем из Rails только товары, опубликованные исключительно этой партией.
-        // Общий external_id другой партии нельзя удалять вместе с историей текущей.
+        // При замене старой выгрузки совпадения с самой новой опубликованной
+        // партией этого поставщика сохраняются, а архивные партии не мешают
+        // очистить устаревшие карточки.
         const publications = await scrapingQuery(`
           SELECT bp.external_id,EXISTS(
             SELECT 1 FROM batch_publications other
@@ -1440,6 +1444,38 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           .filter((row) => !row.shared)
           .map((row) => String(row.external_id))
           .filter(Boolean)
+        const publicationCandidateIds = publications.rows
+          .map((row) => String(row.external_id).trim())
+          .filter(Boolean)
+
+        const replacementBatch = supplierId && batchCreatedAt
+          ? await scrapingQuery(`
+              SELECT id
+              FROM scraping_batches
+              WHERE supplier_id=$1
+                AND stage='PUSHED'
+                AND id<>$2
+                AND created_at>$3
+              ORDER BY created_at DESC
+              LIMIT 1
+            `, [supplierId, batchId, batchCreatedAt])
+          : { rows: [] }
+        const replacementBatchId = replacementBatch.rows[0]?.id ? String(replacementBatch.rows[0].id) : null
+        const replacementExternalIds = replacementBatchId
+          ? await scrapingQuery(`
+              SELECT external_id
+              FROM batch_publications
+              WHERE batch_id=$1 AND external_id IS NOT NULL AND BTRIM(external_id)<>''
+              UNION
+              SELECT external_id
+              FROM products
+              WHERE batch_id=$1 AND external_id IS NOT NULL AND BTRIM(external_id)<>''
+            `, [replacementBatchId])
+          : { rows: [] }
+        const replacementBatchIds = replacementExternalIds.rows
+          .map((row) => String(row.external_id).trim())
+          .filter(Boolean)
+        const replacementIdsForProtection = replacementBatchIds.length > 0 ? replacementBatchIds : null
 
         // Старые PUSHED-партии могли быть опубликованы до появления
         // batch_publications. В этом случае восстанавливаем кандидатов из
@@ -1484,12 +1520,25 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
               GROUP BY snapshot_product->>'external_id'
             `, [legacyCandidates, batchId])
           : { rows: [] }
-        const legacySharedIds = new Set(legacyShared.rows.map((row) => String(row.external_id).trim()))
-        const legacyExternalIds = legacyCandidates.filter((externalId) => !legacySharedIds.has(externalId))
-        const protectedExternalIds = new Set([
-          ...legacySharedIds,
-          ...publications.rows.filter((row) => row.shared).map((row) => String(row.external_id).trim()),
-        ])
+        const legacySharedIds = legacyShared.rows.map((row) => String(row.external_id).trim())
+        const publicationSharedIds = publications.rows
+          .filter((row) => row.shared)
+          .map((row) => String(row.external_id).trim())
+        const protectedLegacyIds = protectedCatalogExternalIds(
+          legacyCandidates,
+          replacementIdsForProtection,
+          legacySharedIds,
+        )
+        const protectedPublicationIds = protectedCatalogExternalIds(
+          publicationCandidateIds,
+          replacementIdsForProtection,
+          publicationSharedIds,
+        )
+        const legacyExternalIds = legacyCandidates.filter((externalId) => !protectedLegacyIds.has(externalId))
+        const publishableExternalIds = replacementIdsForProtection
+          ? publicationCandidateIds.filter((externalId) => !protectedPublicationIds.has(externalId))
+          : publicationExternalIds
+        const protectedExternalIds = new Set([...protectedLegacyIds, ...protectedPublicationIds])
         const catalogOnly = Boolean(options.catalogOnly)
         // Локальная очистка никогда не трогает Rails. Каталог можно чистить
         // только отдельной явной операцией и только для реально опубликованной
@@ -1501,7 +1550,7 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
               ...legacyCandidates,
             ].filter(Boolean))]
           : canTouchCatalog
-            ? [...new Set([...publicationExternalIds, ...legacyExternalIds])]
+            ? [...new Set([...publishableExternalIds, ...legacyExternalIds])]
             : []
 
         // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
