@@ -175,3 +175,19 @@ source labels both at the end of the description for AI context and in
 `attributes.szwego_tags` for deterministic post-processing. Existing raw
 snapshots without this attribute merge only cards with the same concrete
 article; recurring Chinese marketing text never proves one product.
+
+## LV Сумки, кошельки
+
+`process_lv_bags_timeline.py` handles the supplier's reverse service-card
+pattern. The source block is typically `комплектация → видео → основной
+альбом`, optionally followed by a short detail album. The result is one
+product card with photos in the order `основные → детали → комплектация`; the
+video URL remains in `attributes.szwego_video_url` and the video card is not
+emitted as a separate product.
+
+The detail album is joined only when the main album has at least seven photos
+and the cards share a parsed Szwego tag, concrete model code, or a meaningful
+Chinese product phrase. Service cards are assigned to the nearest matching
+product block, so packaging photos are appended after all product/detail
+photos. The original `external_id` and `source_position` of the main card are
+preserved.

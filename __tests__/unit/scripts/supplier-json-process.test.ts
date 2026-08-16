@@ -195,6 +195,65 @@ describe('supplier JSON post-process contract', () => {
     ])
   })
 
+  it('builds an LV bag from packaging, video and the main album', async () => {
+    const result = await runSupplierJsonProcess('process_lv_bags_timeline.py', [
+      {
+        external_id: 'packaging', description: '包装展示', photos: ['package.jpg'], source_position: 0,
+        attributes: { szwego_tags: ['M12821'] },
+      },
+      {
+        external_id: 'video', description: '实拍视频', photos: ['poster.jpg'], source_position: 1,
+        attributes: { szwego_tags: ['M12821'], szwego_video_url: 'https://video/lv.mp4' },
+      },
+      {
+        external_id: 'main', description: 'M12821 黑色钱包',
+        photos: Array.from({ length: 11 }, (_, index) => `main-${index}.jpg`), source_position: 2,
+        attributes: { szwego_tags: ['M12821'] },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'main',
+      photos: [...Array.from({ length: 11 }, (_, index) => `main-${index}.jpg`), 'package.jpg'],
+      attributes: { szwego_video_url: 'https://video/lv.mp4' },
+    })
+  })
+
+  it('puts an LV detail album between the main and packaging photos', async () => {
+    const result = await runSupplierJsonProcess('process_lv_bags_timeline.py', [
+      {
+        external_id: 'packaging', description: '包装展示', photos: ['package.jpg'], source_position: 0,
+        attributes: { szwego_tags: ['M29783'] },
+      },
+      {
+        external_id: 'video', description: '实拍视频', photos: ['poster.jpg'], source_position: 1,
+        attributes: { szwego_tags: ['M29783'], szwego_video_url: 'https://video/lv.mp4' },
+      },
+      {
+        external_id: 'main', description: 'M29783 黑色手袋',
+        photos: Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`), source_position: 2,
+        attributes: { szwego_tags: ['M29783'] },
+      },
+      {
+        external_id: 'details', description: 'M29783 尺寸与细节',
+        photos: Array.from({ length: 4 }, (_, index) => `detail-${index}.jpg`), source_position: 3,
+        attributes: { szwego_tags: ['M29783'] },
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'main',
+      photos: [
+        ...Array.from({ length: 9 }, (_, index) => `main-${index}.jpg`),
+        ...Array.from({ length: 4 }, (_, index) => `detail-${index}.jpg`),
+        'package.jpg',
+      ],
+      attributes: { szwego_video_url: 'https://video/lv.mp4' },
+    })
+  })
+
   it('uses exact Szwego tags for a Chanel group when it reaches the photo threshold', async () => {
     const result = await runSupplierJsonProcess('process_chanel_bags_timeline.py', [
       {
