@@ -32,7 +32,7 @@ describe('catalog attribute schema', () => {
 
   it('keeps size attributes available when a mixed supplier has no category', () => {
     const unclassified = getCatalogAttributeDefinitionsForCategory().map((item) => item.code)
-    expect(unclassified).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'size_system', 'measurements']))
+    expect(unclassified).toEqual(expect.arrayContaining(['colors', 'model_name', 'materials', 'sizes', 'size_system', 'measurements']))
   })
 
   it('adds subcategory attributes without making sizes mandatory', () => {

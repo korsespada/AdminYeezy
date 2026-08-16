@@ -347,7 +347,7 @@ describe('batch AI normalization', () => {
         category: 'bags',
         subcategory: 'shoulder-bags',
         description: 'Сумка с золотистой фурнитурой. Размер: 25,5 × 15 × 6,5 см.',
-        catalog_attributes: { model_name: 'Classic Flap' },
+        catalog_attributes: { model_name: 'Classic Flap', materials: ['Натуральная кожа ягненка'] },
       },
     }, {
       product: { category: 'bags', subcategory: 'shoulder-bags', photos: [], attributes: { sizes: ['25'] } },
@@ -358,15 +358,16 @@ describe('batch AI normalization', () => {
       subcategoryNames: new Map([['shoulder-bags', 'Сумки на плечо']]),
       subcategoryParents: new Map([['shoulder-bags', 'bags']]),
       // Raw suppliers may not assign a category before AI. Their prompt then
-      // receives only common fields, while the resolved «Сумки» category must
-      // still recover its registered attributes after processing.
-      attributeCodes: new Set(['sizes', 'model_name']),
-      knownAttributeCodes: new Set(['sizes', 'model_name', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
+      // receives common fields (including materials), while the resolved
+      // «Сумки» category recovers its remaining registered attributes.
+      attributeCodes: new Set(['sizes', 'model_name', 'materials']),
+      knownAttributeCodes: new Set(['sizes', 'model_name', 'materials', 'dimensions', 'bag_width_cm', 'bag_height_cm', 'hardware_color']),
     })
 
     expect(result.product.name).toBe('Classic Flap 25')
     expect(result.product.attributes).toEqual({
       model_name: 'Classic Flap',
+      materials: ['Кожа ягнёнка'],
       dimensions: '25,5 × 15 × 6,5 см',
       bag_width_cm: 25.5,
       bag_height_cm: 15,

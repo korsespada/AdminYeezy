@@ -36,7 +36,7 @@ type CategoryRule = {
 // Unclassified supplier products still need enough schema for AI to preserve
 // size information before it chooses the final category. These attributes are
 // safe fallbacks for mixed supplier albums such as clothing + footwear.
-const COMMON_ATTRIBUTE_CODES = ['colors', 'model_name', 'sizes', 'size_system', 'measurements']
+const COMMON_ATTRIBUTE_CODES = ['colors', 'model_name', 'materials', 'sizes', 'size_system', 'measurements']
 
 export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   definition('colors', 'Цвет', 'Все категории', 'multi_enum', 10, {
