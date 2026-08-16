@@ -524,6 +524,20 @@ function railsUpdateCategoryId(product, lookups, railsProduct = null) {
   return subcategoryId || categoryId || railsProduct?.category?.id || null;
 }
 
+function isBagsProduct(product, lookups) {
+  return catalogLookupKey(lookupName(lookups.categories, product.category, 'категории')) === 'сумки';
+}
+
+function withoutBagSizes(product, lookups) {
+  if (!isBagsProduct(product, lookups)) return product;
+
+  const attributes = normalizeAttributes(product.attributes);
+  if (!Object.hasOwn(attributes, 'sizes')) return product;
+
+  const { sizes: _sizes, ...attributesWithoutSizes } = attributes;
+  return { ...product, attributes: attributesWithoutSizes };
+}
+
 function productToRailsCsvRow(product, lookups) {
   return {
     external_id: product.external_id || '',
@@ -1965,21 +1979,24 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (unfinished.length > 0) {
     throw new Error(`Публикация остановлена: ${unfinished.length} товаров ещё не обработаны ИИ`);
   }
-  const withPublicationContext = (product, railsProduct = null) => ({
-    ...product,
-    supplier_name: batch.supplier_name || null,
-    supplier_avatar: batch.supplier_avatar || null,
-    supplier_id: batch.supplier_album_id || null,
-    _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
-      ? railsProduct.metadata
-      : undefined,
-    ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(product, lookups, railsProduct) } : {}),
-    attributes: {
-      ...normalizeAttributes(product.attributes),
-      ...(hostedVideo(product, railsProduct).url ? { hosted_video_url: hostedVideo(product, railsProduct).url } : {}),
-      ...(hostedVideo(product, railsProduct).posterUrl ? { hosted_video_poster_url: hostedVideo(product, railsProduct).posterUrl } : {}),
-    },
-  });
+  const withPublicationContext = (product, railsProduct = null) => {
+    const publicationProduct = withoutBagSizes(product, lookups);
+    return {
+      ...publicationProduct,
+      supplier_name: batch.supplier_name || null,
+      supplier_avatar: batch.supplier_avatar || null,
+      supplier_id: batch.supplier_album_id || null,
+      _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
+        ? railsProduct.metadata
+        : undefined,
+      ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(publicationProduct, lookups, railsProduct) } : {}),
+      attributes: {
+        ...normalizeAttributes(publicationProduct.attributes),
+        ...(hostedVideo(publicationProduct, railsProduct).url ? { hosted_video_url: hostedVideo(publicationProduct, railsProduct).url } : {}),
+        ...(hostedVideo(publicationProduct, railsProduct).posterUrl ? { hosted_video_poster_url: hostedVideo(publicationProduct, railsProduct).posterUrl } : {}),
+      },
+    };
+  };
 
   const seenExternalIds = new Set();
   const validationErrors = [];
