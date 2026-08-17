@@ -29,6 +29,7 @@ interface ChromoffCatalogProps {
   brands: Brand[]
   attributeDefinitions?: CatalogAttributeDefinition[]
   suppliers: ChromoffSupplierOption[]
+  assignableSuppliers: ChromoffSupplierOption[]
   totalItems: number
   totalPages: number
   page: number
@@ -133,6 +134,7 @@ export default function ChromoffCatalog({
   brands,
   attributeDefinitions,
   suppliers,
+  assignableSuppliers,
   totalItems,
   totalPages,
   page,
@@ -296,7 +298,9 @@ export default function ChromoffCatalog({
     if (!selectedSupplier) return
     const selectedListingIds = listings.filter((listing) => selectedIds.includes(listingProductId(listing))).map((listing) => listing.id)
     if (!selectedListingIds.length) return
-    const supplier = suppliers.find((item) => item.id === selectedSupplier)
+    const supplier = selectedSupplier === '__none__'
+      ? { id: '__none__', name: 'Без поставщика', count: 0 }
+      : assignableSuppliers.find((item) => item.id === selectedSupplier)
     if (!supplier) return
     if (!confirm(`Изменить поставщика у ${selectedListingIds.length} товаров?`)) return
     setIsBulkSupplierUpdating(true)
@@ -386,7 +390,7 @@ export default function ChromoffCatalog({
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
           <Select value={selectedPublication || '__unchanged__'} onValueChange={(value) => setSelectedPublication(value === '__unchanged__' ? '' : value as 'published' | 'hidden')}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Публикация Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Chromoff: без изменений</SelectItem><SelectItem value="published">Опубликовать</SelectItem><SelectItem value="hidden">Скрыть</SelectItem></SelectContent></Select>
           <Button type="button" variant="secondary" onClick={handleBulkPublication} disabled={!selectedPublication || isBulkPublishing || isPending} className="h-10">{isBulkPublishing ? 'Публикация…' : 'Применить Chromoff'}</Button>
-          <Select value={selectedSupplier || '__unchanged__'} onValueChange={(value) => setSelectedSupplier(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Поставщик Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Поставщик: без изменений</SelectItem>{suppliers.map((supplier) => <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>)}</SelectContent></Select>
+          <Select value={selectedSupplier || '__unchanged__'} onValueChange={(value) => setSelectedSupplier(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Поставщик Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Поставщик: без изменений</SelectItem>{assignableSuppliers.map((supplier) => <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>)}<SelectItem value="__none__">Без поставщика</SelectItem></SelectContent></Select>
           <Button type="button" variant="secondary" onClick={handleBulkSupplier} disabled={!selectedSupplier || isBulkSupplierUpdating || isPending} className="h-10">{isBulkSupplierUpdating ? 'Поставщик…' : 'Применить поставщика'}</Button>
           <Select value={selectedGender || '__unchanged__'} onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Пол" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Пол: без изменений</SelectItem><SelectItem value="Для мужчин">Для мужчин</SelectItem><SelectItem value="Для женщин">Для женщин</SelectItem><SelectItem value="Унисекс">Унисекс</SelectItem></SelectContent></Select>
           <Select value={selectedCategory || '__unchanged__'} onValueChange={(value) => { setSelectedCategory(value === '__unchanged__' ? '' : value); setSelectedSubcategory('') }}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Категория" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Категория: без изменений</SelectItem>{catalogCategories.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>

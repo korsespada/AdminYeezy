@@ -294,6 +294,9 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                 <div className="min-w-[90px] max-w-[120px] resize-x overflow-hidden pr-2">Пол</div>
                             </TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
+                                <div className="min-w-[150px] max-w-[220px] resize-x overflow-hidden pr-2">Поставщик</div>
+                            </TableHead>
+                            <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
                                 <div className="min-w-[250px] max-w-xl resize-x overflow-hidden pr-2">Описание</div>
                             </TableHead>
                             <TableHead className="border-b border-slate-700 p-3 text-xs uppercase tracking-wider text-slate-400">
@@ -351,6 +354,11 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
                                     </TableCell>
                                     <TableCell className="p-3 align-top">
                                         <ProductGenderBadge gender={product.gender} />
+                                    </TableCell>
+                                    <TableCell className="p-3 align-top text-sm text-slate-300">
+                                        <div className="min-w-[150px] max-w-[220px] truncate" title={product.supplier?.name || 'Без поставщика'}>
+                                            {product.supplier?.name || 'Без поставщика'}
+                                        </div>
                                     </TableCell>
                                     <TableCell className="p-2 align-top">
                                         <Textarea

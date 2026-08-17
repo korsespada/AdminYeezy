@@ -312,6 +312,9 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         {categoryLabel.subcategory && ` • ${categoryLabel.subcategory}`}
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
+                    <div className="mt-1 truncate text-[10px] text-slate-500" title={product.supplier?.name || 'Без поставщика'}>
+                        Поставщик: {product.supplier?.name || 'Без поставщика'}
+                    </div>
                 </div>
                 {extraBadges && <div className="mb-2 flex flex-wrap gap-1.5">{extraBadges}</div>}
                 {/* Editable Name */}

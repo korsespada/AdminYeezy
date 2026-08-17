@@ -839,6 +839,7 @@ export async function updateRailsChromoffCategory(id: string, input: {
 
 export interface RailsChromoffListingList extends RailsCrmListResult<RailsChromoffListing> {
   supplierOptions: RailsChromoffSupplierOption[]
+  assignableSupplierOptions: RailsChromoffSupplierOption[]
 }
 
 export async function listRailsChromoffListings(options: {
@@ -875,7 +876,7 @@ export async function listRailsChromoffListings(options: {
   if (options.sourceSupplierId) params.set('source_supplier_id', options.sourceSupplierId)
   if (options.aiStatus) params.set('ai_status', options.aiStatus)
 
-  const result = await railsFetch<{ listings: RailsChromoffListing[]; supplier_options?: RailsChromoffSupplierOption[]; meta?: { total?: number; pages?: number } }>(
+  const result = await railsFetch<{ listings: RailsChromoffListing[]; supplier_options?: RailsChromoffSupplierOption[]; assignable_supplier_options?: RailsChromoffSupplierOption[]; meta?: { total?: number; pages?: number } }>(
     `/admin/chromoff/listings?${params}`
   )
   return {
@@ -883,6 +884,7 @@ export async function listRailsChromoffListings(options: {
     totalItems: Number(result.meta?.total || 0),
     totalPages: Number(result.meta?.pages || 0),
     supplierOptions: result.supplier_options || [],
+    assignableSupplierOptions: result.assignable_supplier_options || [],
   }
 }
 

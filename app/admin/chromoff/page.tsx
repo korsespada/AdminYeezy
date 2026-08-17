@@ -109,6 +109,7 @@ export default async function ChromoffPage({
             }),
           { id: '__none__', name: 'Без поставщика', count: 0 },
         ]}
+        assignableSuppliers={listings.assignableSupplierOptions.length > 0 ? listings.assignableSupplierOptions : listings.supplierOptions}
         totalItems={listings.totalItems}
         totalPages={listings.totalPages}
         page={page}
