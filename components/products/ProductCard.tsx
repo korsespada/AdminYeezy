@@ -45,11 +45,12 @@ interface ProductCardProps {
     variantColors?: string[];
     showAttributeSummary?: boolean;
     showDescription?: boolean;
+    sourceNumber?: number;
     extraBadges?: React.ReactNode;
     extraFooter?: React.ReactNode;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, extraBadges, extraFooter }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -292,10 +293,19 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         {product.photos.length} фото
                     </Badge>
                 )}
-                {product.video_url && (
-                    <Badge variant="outline" className="absolute bottom-2 left-2 z-10 gap-1 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-200 backdrop-blur-sm">
-                        <Play className="h-3 w-3 fill-current" /> видео
-                    </Badge>
+                {(sourceNumber || product.video_url) && (
+                    <div className="absolute bottom-2 left-2 z-10 flex flex-wrap gap-1">
+                        {sourceNumber && (
+                            <Badge variant="outline" className="border-slate-700/50 bg-slate-900/80 px-1.5 py-0 font-mono text-[10px] text-slate-200 backdrop-blur-sm">
+                                #{sourceNumber}
+                            </Badge>
+                        )}
+                        {product.video_url && (
+                            <Badge variant="outline" className="gap-1 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-200 backdrop-blur-sm">
+                                <Play className="h-3 w-3 fill-current" /> видео
+                            </Badge>
+                        )}
+                    </div>
                 )}
             </div>
 

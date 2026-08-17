@@ -2784,6 +2784,7 @@ export default function CsvImportApp({
                           categories={(lookups?.categories || []) as any}
                           subcategories={(lookups?.subcategories || []) as any}
                           allowDuplicate={false}
+                          sourceNumber={Number(product.source_position ?? realIndex) + 1}
                           variantCount={variants.length}
                           variantColors={variantColors}
                           onInlineUpdate={async (_current, patch) => {
@@ -2821,6 +2822,7 @@ export default function CsvImportApp({
                     categories={(lookups?.categories || []) as any}
                     subcategories={(lookups?.subcategories || []) as any}
                     allowDuplicate={false}
+                    sourceNumber={Number(product.source_position ?? realIndex) + 1}
                     variantCount={variants.length}
                     variantColors={variantColors}
                     onInlineUpdate={async (_current, patch) => {
