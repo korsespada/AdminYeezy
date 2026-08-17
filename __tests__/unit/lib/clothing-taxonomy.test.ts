@@ -20,11 +20,19 @@ describe('clothing taxonomy', () => {
     ['Вязаная футболка с коротким рукавом и несколькими пуговицами', 'Футболки и майки'],
     ['Loro Piana плавательные шорты', 'Шорты'],
     ['男士轻薄皮衣夹克', 'Кожаные куртки'],
+    ['Женская замшевая куртка', 'Кожаные куртки'],
+    ['Куртка из замши', 'Кожаные куртки'],
     ['羊绒开衫', 'Кардиганы'],
     ['男士羽绒服', 'Пуховики'],
-    ['Куртка из замши', 'Куртки'],
   ])('infers %s as %s', (source, expected) => {
     expect(inferClothingSubcategoryName(source)).toBe(expected)
+  })
+
+  it.each([
+    ['Замшевая куртка', 'Кожаные куртки'],
+    ['Куртка из замши', 'Кожаные куртки'],
+  ])('normalizes %s to %s', (source, expected) => {
+    expect(canonicalClothingSubcategoryName(source)).toBe(expected)
   })
 
   it('does not classify generic Chinese outerwear without visual context', () => {
