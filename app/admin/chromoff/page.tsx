@@ -11,6 +11,9 @@ const CHROMOFF_AUTO_SUPPLIER_IDS = [
   '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag',
   '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ',
 ]
+const CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS = [
+  { id: '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ', name: 'CH Ювелирка, сумки, ремни', count: 0 },
+]
 
 type ChromoffSearchParams = {
   page?: string
@@ -88,6 +91,11 @@ export default async function ChromoffPage({
       getRailsCatalogLookups(),
       getCatalogAttributeDefinitions(),
     ])
+    const assignableSuppliers = Array.from(new Map([
+      ...listings.assignableSupplierOptions,
+      ...listings.supplierOptions,
+      ...CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS,
+    ].map((item) => [item.id, item] as const)).values())
     return (
       <ChromoffCatalog
         categories={categories}
@@ -109,7 +117,7 @@ export default async function ChromoffPage({
             }),
           { id: '__none__', name: 'Без поставщика', count: 0 },
         ]}
-        assignableSuppliers={listings.assignableSupplierOptions.length > 0 ? listings.assignableSupplierOptions : listings.supplierOptions}
+        assignableSuppliers={assignableSuppliers}
         totalItems={listings.totalItems}
         totalPages={listings.totalPages}
         page={page}
