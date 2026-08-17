@@ -597,7 +597,7 @@ export default function CsvImportApp({
   // Local file mode
   const [importMode, setImportMode] = useState<"upload" | "local">("upload");
   const [localPath, setLocalPath] = useState("");
-  const [isLoadingPath, setIsLoadingPath] = useState(false);
+  const [isLoadingPath, setIsLoadingPath] = useState(Boolean(initialBatchId || initialLocalPath));
   
   const [pathError, setPathError] = useState("");
 
@@ -630,7 +630,7 @@ export default function CsvImportApp({
   const actionBarRef = useRef<HTMLDivElement | null>(null);
   const [actionBarHeight, setActionBarHeight] = useState(72);
   const [activeSnapshotId, setActiveSnapshotId] = useState<string | null>(initialSnapshotId);
-  const isBatchSource = Boolean(batchId);
+  const isBatchSource = Boolean(batchId || initialBatchId);
   const isSnapshotSource = Boolean(activeSnapshotId);
   const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
@@ -2598,7 +2598,25 @@ export default function CsvImportApp({
             </div>
           )}
 
-        {products.length === 0 && isBatchSource && (
+        {isLoadingPath && isBatchSource && (
+          <div className="mx-auto mb-10 max-w-6xl animate-pulse space-y-4" aria-label="Загрузка товаров партии" aria-busy="true">
+            <div className="h-8 w-56 rounded-lg bg-slate-800" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 8 }, (_, index) => (
+                <div key={index} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-800/70">
+                  <div className="aspect-[4/3] bg-slate-700/60" />
+                  <div className="space-y-3 p-4">
+                    <div className="h-4 w-4/5 rounded bg-slate-700/70" />
+                    <div className="h-3 w-2/5 rounded bg-slate-700/60" />
+                    <div className="h-3 w-3/5 rounded bg-slate-700/60" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {products.length === 0 && !isLoadingPath && isBatchSource && (
           <div className="mx-auto mb-10 max-w-2xl rounded-2xl border border-slate-700 bg-slate-800 p-10 text-center shadow-xl">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900">
               <Database className="h-7 w-7 text-slate-500" />

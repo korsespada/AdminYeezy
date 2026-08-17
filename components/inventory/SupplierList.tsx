@@ -430,6 +430,11 @@ export default function SupplierList({
 
     const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
     const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
+    const requiresFeedTag = selectedSupplier?.szwego_parse_mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
+    if (requiresFeedTag && !overrideValue.startsWith('tag:')) {
+      alert('Для единой ленты выберите включённый тег при запуске выгрузки.')
+      return
+    }
     if (configuredTags.length > 0 && !overrideValue) {
       alert('Выберите включённый альбом или категорию для выгрузки.')
       return
@@ -1111,11 +1116,13 @@ export default function SupplierList({
               <div className="space-y-4">
                 {/* Unified Selector */}
                 {selectedSupplierId && (() => {
-                  const configuredTags = parseBrandTags(suppliers.find(s => s.id === selectedSupplierId)?.brand_tags || '')
-                  const enabledTags = configuredTags.filter((tag) => tag.enabled)
-                  return configuredTags.length > 0 ? (
+                  const selectedSupplier = suppliers.find(s => s.id === selectedSupplierId)
+                  const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
+                  const requiresFeedTag = selectedSupplier?.szwego_parse_mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
+                  const enabledTags = configuredTags.filter((tag) => tag.enabled && (!requiresFeedTag || tag.type === 'tag'))
+                  return (configuredTags.length > 0 || requiresFeedTag) ? (
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-2">Выберите включённый альбом или категорию</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">{requiresFeedTag ? 'Выберите включённый тег' : 'Выберите включённый альбом или категорию'}</label>
                     <select
                       value={overrideValue}
                       onChange={(e) => setOverrideValue(e.target.value)}

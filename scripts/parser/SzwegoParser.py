@@ -196,6 +196,27 @@ def _collect_szwego_tags(value, found, seen, parent_key=""):
     for key, child in value.items():
         _collect_szwego_tags(child, found, seen, key)
 
+def _item_has_szwego_tag_id(value, wanted_id, parent_key=""):
+    """Match a selected Szwego tag in an item from the full timeline response."""
+    wanted = str(wanted_id or "").strip()
+    if not wanted:
+        return False
+    if isinstance(value, list):
+        return any(_item_has_szwego_tag_id(item, wanted, parent_key) for item in value)
+    if not isinstance(value, dict):
+        return False
+
+    for key in TAG_ID_KEYS:
+        if str(value.get(key) or "").strip() == wanted:
+            return True
+
+    # Some responses use a generic `id` inside a `tag`/`tags` object.
+    if "tag" in parent_key.lower() and "group" not in parent_key.lower():
+        if str(value.get("id") or "").strip() == wanted:
+            return True
+
+    return any(_item_has_szwego_tag_id(child, wanted, key) for key, child in value.items())
+
 def _fetch_szwego_tag_references(session, album_id, headers):
     """Read the category tree from one Szwego response, never the whole product feed."""
     found = []
@@ -419,8 +440,11 @@ def main():
                 print("API Error:", data)
                 break
 
-            items = data.get("result", {}).get("items", [])
-            if not items: break
+            raw_items = data.get("result", {}).get("items", [])
+            if not raw_items: break
+            items = raw_items
+            if args.parse_mode == "all" and args.tag_id:
+                items = [item for item in raw_items if _item_has_szwego_tag_id(item, args.tag_id)]
 
             page_saved = 0
             date_skip_count = 0

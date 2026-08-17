@@ -852,6 +852,21 @@ async function forwardScrapingToWorker(supplierId: number, endDate?: string, ove
   }
 }
 
+function hasConfiguredSzwegoTag(brandTags: unknown) {
+  return String(brandTags || '').split('\n').some((line) => {
+    const [definition] = line.split('|', 2)
+    return definition.trim().startsWith('tag:')
+  })
+}
+
+function validateScrapingScope(supplier: any, overrideTag?: string, overrideGroup?: string) {
+  if (supplier.szwego_parse_mode !== 'all' || !hasConfiguredSzwegoTag(supplier.brand_tags)) return null
+  if (overrideGroup || !String(overrideTag || '').trim()) {
+    return 'Для единой ленты выберите включённый тег при запуске выгрузки.'
+  }
+  return null
+}
+
 async function importScrapedProductsTransaction(taskId: number, supplier: any, parserDefaults: any, items: any[]) {
   if (!Array.isArray(items) || items.length === 0) throw new Error('Парсер не вернул товары')
   const client = await getScrapingClient()
@@ -933,6 +948,11 @@ export async function toggleSupplierFavoriteAction(id: number): Promise<ActionRe
 
 export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
   await requireAdmin()
+  const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
+  const supplier = supplierRes.rows[0]
+  if (!supplier) return { success: false, error: 'Supplier not found' }
+  const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup)
+  if (scopeError) return { success: false, error: scopeError }
   const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
   if (workerResult) return workerResult
   return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup)
@@ -946,6 +966,8 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
     const supplier = supplierRes.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
+    const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup)
+    if (scopeError) return { success: false, error: scopeError }
     const parserDefaults = {
       brand: supplier.default_brand,
       category: supplier.default_category,
