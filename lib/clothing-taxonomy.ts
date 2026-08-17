@@ -86,6 +86,10 @@ export function canonicalClothingSubcategoryName(value: unknown) {
   return ALIASES.get(normalize(value)) || ''
 }
 
+export function isLegacyClothingSubcategory(value: unknown) {
+  return normalize(value) === 'кофты'
+}
+
 export function inferClothingSubcategoryName(value: unknown) {
   const text = normalize(value)
   if (!text) return ''

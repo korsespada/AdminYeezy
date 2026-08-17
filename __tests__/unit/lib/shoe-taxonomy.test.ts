@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalShoeSubcategoryName, inferGenericShoeSubcategoryName } from '@/lib/shoe-taxonomy'
+import { canonicalShoeSubcategoryName, filterShoeSubcategoriesForAi, inferGenericShoeSubcategoryName, inferShoeSlingbackSubcategoryName } from '@/lib/shoe-taxonomy'
 
 describe('shoe taxonomy', () => {
   it.each([
@@ -24,5 +24,29 @@ describe('shoe taxonomy', () => {
     ['Mary Jane без указания каблука', 'Туфли на плоской подошве'],
   ])('resolves a generic shoe result from construction evidence: %s', (source, target) => {
     expect(inferGenericShoeSubcategoryName(source)).toBe(target)
+  })
+
+  it.each([
+    ['Чёрные туфли-слингбэки с открытой пяткой на каблуке', 'Туфли на каблуке'],
+    ['Черные туфли с ремешком на пятке на каблуке', 'Туфли на каблуке'],
+    ['露跟高跟鞋 с лентой сзади', 'Туфли на каблуке'],
+    ['Плоские слингбэки с ремешком сзади', 'Туфли на плоской подошве'],
+  ])('classifies slingbacks separately from mules: %s', (source, target) => {
+    expect(inferShoeSlingbackSubcategoryName(source)).toBe(target)
+  })
+
+  it('does not classify a true mule without a heel strap as a slingback', () => {
+    expect(inferShoeSlingbackSubcategoryName('Чёрные мюли с закрытым мысом и открытой пяткой')).toBe('')
+  })
+
+  it('leaves open-toe strapped shoes for sandal classification', () => {
+    expect(inferShoeSlingbackSubcategoryName('Розовые босоножки с открытым мысом и ремешком сзади на каблуке')).toBe('')
+  })
+
+  it('hides the legacy generic shoe subcategory from the AI context', () => {
+    expect(filterShoeSubcategoriesForAi([
+      { id: 'generic', name: 'Туфли' },
+      { id: 'heel', name: 'Туфли на каблуке' },
+    ])).toEqual([{ id: 'heel', name: 'Туфли на каблуке' }])
   })
 })

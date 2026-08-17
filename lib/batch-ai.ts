@@ -7,11 +7,13 @@ import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender
 import {
   canonicalShoeSubcategoryName,
   inferGenericShoeSubcategoryName,
+  inferShoeSlingbackSubcategoryName,
   isGenericShoeSubcategory,
 } from '@/lib/shoe-taxonomy'
 import {
   canonicalClothingSubcategoryName,
   inferClothingSubcategoryName,
+  isLegacyClothingSubcategory,
 } from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
@@ -117,6 +119,15 @@ function anthropicResponseText(payload: Record<string, any>) {
 
 export type BatchAiLookup = { id: string; name: string; parent_id?: string | null }
 export type BatchAiChromoffCategory = BatchAiLookup & { slug?: string; path?: string }
+
+const LEGACY_SUBCATEGORY_NAMES_HIDDEN_FROM_AI = new Set(['туфли', 'сумки', 'кофты'])
+
+export function filterLegacySubcategoriesForAi<T extends { id: string; name: string }>(subcategories: T[]) {
+  return subcategories.filter((subcategory) => {
+    const normalizedName = String(subcategory.name || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+    return !LEGACY_SUBCATEGORY_NAMES_HIDDEN_FROM_AI.has(normalizedName)
+  })
+}
 
 export const CHROMOFF_AUTO_SUPPLIER_IDS = new Set([
   '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I',
@@ -1244,8 +1255,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
     ? { name: raw.subcategory_suggestion }
     : raw?.subcategory_suggestion || null
   if (normalizedName(input.categoryNames?.get(category)) === 'одежда') {
+    const currentClothingSubcategoryIsLegacy = isLegacyClothingSubcategory(input.subcategoryNames?.get(subcategory))
     const canonicalName = canonicalClothingSubcategoryName(subcategorySuggestion?.name)
-      || canonicalClothingSubcategoryName(input.subcategoryNames?.get(subcategory))
+      || (currentClothingSubcategoryIsLegacy ? '' : canonicalClothingSubcategoryName(input.subcategoryNames?.get(subcategory)))
       || inferClothingSubcategoryName([
         proposed.name,
         proposed.description,
@@ -1263,6 +1275,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
       : undefined
     if (canonicalEntry) {
       subcategory = canonicalEntry[0]
+    } else if (currentClothingSubcategoryIsLegacy) {
+      subcategory = ''
     }
     // Таксономия одежды закрыта: известные синонимы нормализованы выше,
     // неизвестные типы остаются без подкатегории для ручной классификации.
@@ -1278,8 +1292,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
       proposed.seo_title,
       proposed.catalog_attributes?.model_name,
     ].filter(Boolean).join(' ')
+    const shoeConstructionText = [
+      original.name,
+      original.description,
+      proposed.name,
+      proposed.description,
+      proposed.h1,
+      proposed.seo_title,
+      proposed.catalog_attributes?.model_name,
+    ].filter(Boolean).join(' ')
+    const slingbackName = inferShoeSlingbackSubcategoryName(shoeConstructionText)
+    if (slingbackName) canonicalName = slingbackName
+
     const explicitlyMules = /(мюл(?:и|ей|ям|ями|ях)?|\bmules?\b|穆勒鞋)/i.test(proposedShoeText)
-    if (explicitlyMules && ['Туфли на каблуке', 'Туфли на плоской подошве'].includes(canonicalName)) {
+    if (!slingbackName && explicitlyMules && ['Туфли на каблуке', 'Туфли на плоской подошве'].includes(canonicalName)) {
       canonicalName = 'Мюли и сабо'
     }
     const canonicalEntry = canonicalName

@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
 describe('batch AI normalization', () => {
+  it('hides legacy generic subcategories from the AI context', () => {
+    expect(filterLegacySubcategoriesForAi([
+      { id: 'generic-shoes', name: 'Туфли' },
+      { id: 'generic-bags', name: 'Сумки' },
+      { id: 'generic-clothing', name: 'Кофты' },
+      { id: 'heel-shoes', name: 'Туфли на каблуке' },
+    ])).toEqual([{ id: 'heel-shoes', name: 'Туфли на каблуке' }])
+  })
+
   it('extracts a structured response wrapped in markdown and repairs control characters', () => {
     expect(parseBatchAiJson('Ответ:\n```json\n{"unit":"см","columns":[],"rows":[],"note":"строка\nс допуском",}\n```')).toEqual({
       unit: 'см',
@@ -823,6 +832,38 @@ describe('batch AI normalization', () => {
     expect(result.product.ai_confidence).toBe(0.95)
   })
 
+  it('moves explicit slingbacks out of the mule taxonomy', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Чёрные мюли J\'Adior (туфли-слингбэки)',
+        description: 'Модель с закрытым мысом, открытой пяткой и ремешком сзади на каблуке 6,5 см.',
+        category: 'shoes',
+        subcategory: 'mules',
+      },
+    }, {
+      product: {
+        name: '',
+        description: '露跟高跟鞋 с ремешком сзади',
+        category: 'shoes',
+        subcategory: 'mules',
+        photos: [],
+        attributes: {},
+      },
+      brandIds: new Set(),
+      categoryIds: new Set(['shoes']),
+      categoryNames: new Map([['shoes', 'Обувь']]),
+      subcategoryIds: new Set(['heel-shoes', 'mules']),
+      subcategoryParents: new Map([['heel-shoes', 'shoes'], ['mules', 'shoes']]),
+      subcategoryNames: new Map([
+        ['heel-shoes', 'Туфли на каблуке'],
+        ['mules', 'Мюли и сабо'],
+      ]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('heel-shoes')
+  })
+
   it('adds category rules only for the matching product category', () => {
     const base = {
       product: { category: 'shoes' },
@@ -989,6 +1030,40 @@ describe('batch AI normalization', () => {
 
     expect(result.product.subcategory).toBe('')
     expect(result.subcategorySuggestion).toBeNull()
+  })
+
+  it('does not preserve the legacy clothing subcategory', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: 'legacy-knit' },
+    }, {
+      product: { name: 'Неопределённая модель', category: 'clothes', subcategory: 'legacy-knit', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['legacy-knit']),
+      subcategoryParents: new Map([['legacy-knit', 'clothes']]),
+      subcategoryNames: new Map([['legacy-knit', 'Кофты']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('')
+  })
+
+  it('maps a legacy clothing subcategory to a concrete type when the text is enough', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: 'legacy-knit', name: 'Шерстяной свитер' },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: 'legacy-knit', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['legacy-knit', 'sweaters']),
+      subcategoryParents: new Map([['legacy-knit', 'clothes'], ['sweaters', 'clothes']]),
+      subcategoryNames: new Map([['legacy-knit', 'Кофты'], ['sweaters', 'Свитеры']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('sweaters')
   })
 
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {

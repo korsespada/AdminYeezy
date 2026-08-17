@@ -29,6 +29,7 @@ import {
   normalizeBatchAiProcessingOptions,
   DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
   CHROMOFF_AUTO_SUPPLIER_IDS,
+  filterLegacySubcategoriesForAi,
   runBatchAiOpenRouter,
   runBatchAiOpenRouterRefinement,
   type BatchAiProvider,
@@ -590,12 +591,13 @@ function priceRuleHints(rules: any[], product?: any) {
 }
 
 function promptSubcategoriesForContext(context: any) {
+  const availableSubcategories = filterLegacySubcategoriesForAi(context.subcategories)
   if (context.categories.length === 1) {
     const fixedCategoryId = String(context.categories[0].id)
-    const scoped = context.subcategories.filter((row: any) => String(row.parent_id || '') === fixedCategoryId)
+    const scoped = availableSubcategories.filter((row: any) => String(row.parent_id || '') === fixedCategoryId)
     if (scoped.length) return scoped
   }
-  return context.subcategories
+  return availableSubcategories
 }
 
 function isChromoffSupplier(supplierId: unknown) {
