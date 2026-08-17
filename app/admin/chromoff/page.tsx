@@ -43,6 +43,11 @@ function pageSize(value?: string) {
   return PAGE_SIZES.includes(parsed as typeof PAGE_SIZES[number]) ? parsed : PAGE_SIZES[0]
 }
 
+function supplierOptionKey(name: string, id: string) {
+  const normalizedName = name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru-RU')
+  return normalizedName || id
+}
+
 export default async function ChromoffPage({
   searchParams,
 }: {
@@ -92,10 +97,10 @@ export default async function ChromoffPage({
       getCatalogAttributeDefinitions(),
     ])
     const assignableSuppliers = Array.from(new Map([
-      ...listings.assignableSupplierOptions,
-      ...listings.supplierOptions,
       ...CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS,
-    ].map((item) => [item.id, item] as const)).values())
+      ...listings.supplierOptions,
+      ...listings.assignableSupplierOptions,
+    ].map((item) => [supplierOptionKey(item.name, item.id), item] as const)).values())
     return (
       <ChromoffCatalog
         categories={categories}
