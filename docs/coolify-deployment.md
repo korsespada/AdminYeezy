@@ -48,6 +48,28 @@ CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yeez
 6. Выполнить redeploy проекта `AdminYeezy` в Coolify.
 7. Проверить логи контейнера.
 
+### Runtime-образ и память сборки
+
+Основной `Dockerfile` не устанавливает Python, ffmpeg и Python-зависимости при
+каждом деплое. Они находятся в заранее собранном локальном образе
+`adminyeezy-runtime:python311-ffmpeg`. Перед первым деплоем или после изменения
+`requirements.txt` образ нужно собрать на сервере с ограничением ресурсов:
+
+```bash
+./scripts/build-runtime-image.sh
+```
+
+Скрипт использует заранее созданный BuildKit-builder `coolify-safe`, ограниченный
+одним builder-контейнером до 2 ГБ RAM и 3 ГБ RAM+swap. Обычный деплой после этого
+собирает только Node/Next.js-часть.
+Если используется другой registry или тег, передайте его первым аргументом и
+задайте в Coolify build variable `RUNTIME_IMAGE` с тем же значением.
+
+Ограничение `limits_memory` в Coolify относится к запущенному контейнеру и не
+ограничивает BuildKit. Поэтому для тяжёлого runtime-образа используется именно
+отдельный BuildKit-builder с лимитами; Node-сборка дополнительно ограничена через
+`NODE_OPTIONS=--max-old-space-size=768` в builder-stage.
+
 Минимальная ручная проверка перед production deploy:
 
 ```bash

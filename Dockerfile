@@ -1,6 +1,9 @@
+ARG RUNTIME_IMAGE=adminyeezy-runtime:python311-ffmpeg
+
 FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
+ENV NODE_OPTIONS=--max-old-space-size=768
 
 COPY package*.json ./
 RUN if [ "$(nproc)" -gt 1 ]; then \
@@ -17,24 +20,9 @@ RUN if [ "$(nproc)" -gt 1 ]; then \
     fi
 RUN npm prune --omit=dev
 
-FROM node:20-bookworm-slim AS runner
+FROM ${RUNTIME_IMAGE} AS runner
 
 WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV PYTHON_PATH=python
-ENV VIRTUAL_ENV=/opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-venv python-is-python3 ca-certificates ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-RUN python -m venv /opt/venv \
-  && pip install --no-cache-dir --upgrade pip \
-  && pip install --no-cache-dir -r requirements.txt
 
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules

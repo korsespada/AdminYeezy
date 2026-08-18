@@ -1,0 +1,23 @@
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    PORT=3000 \
+    PYTHON_PATH=python \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    python-is-python3 \
+    ca-certificates \
+    ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt /tmp/requirements.txt
+RUN python -m venv /opt/venv \
+  && pip install --no-cache-dir -r /tmp/requirements.txt \
+  && rm -f /tmp/requirements.txt
