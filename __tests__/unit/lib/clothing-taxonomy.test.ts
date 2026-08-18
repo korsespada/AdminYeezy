@@ -58,4 +58,14 @@ describe('clothing taxonomy', () => {
   it('does not classify generic Chinese outerwear without visual context', () => {
     expect(inferClothingSubcategoryName('男士外套')).toBe('')
   })
+
+  it('does not confuse a wearing-comfort phrase with socks', () => {
+    expect(inferClothingSubcategoryName(
+      'Голубые прямые джинсы из денима. Натуральный хлопковый материал обеспечивает комфорт в носке.',
+    )).toBe('Джинсы')
+  })
+
+  it('recognizes diminutive sock names', () => {
+    expect(inferClothingSubcategoryName('Носочки из хлопка')).toBe('Носки')
+  })
 })

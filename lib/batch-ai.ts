@@ -1290,18 +1290,16 @@ export function normalizeBatchAiOutput(raw: any, input: {
     : raw?.subcategory_suggestion || null
   if (normalizedName(input.categoryNames?.get(category)) === 'одежда') {
     const currentClothingSubcategoryIsLegacy = isLegacyClothingSubcategory(input.subcategoryNames?.get(subcategory))
-    const aiEvidence = [
-      proposed.name,
-      proposed.description,
-      proposed.h1,
-      proposed.seo_title,
-      proposed.seo_description,
-    ].filter(Boolean).join('\n')
-    const inferredAiName = inferClothingSubcategoryName(aiEvidence)
-    const inferredSourceName = inferClothingSubcategoryName([
-      original.name,
-      original.description,
-    ].filter(Boolean).join('\n'))
+    const inferredAiName = [proposed.name, proposed.h1]
+      .map(inferClothingSubcategoryName)
+      .find(Boolean)
+      || inferClothingSubcategoryName([
+        proposed.description,
+        proposed.seo_title,
+        proposed.seo_description,
+      ].filter(Boolean).join('\n'))
+    const inferredSourceName = inferClothingSubcategoryName(original.name)
+      || inferClothingSubcategoryName(original.description)
     // The model's generated name/description are its visual interpretation of
     // the complete photo series. Prefer that evidence over a contradictory ID
     // (for example, a jacket returned with the pants ID). Fall back to source

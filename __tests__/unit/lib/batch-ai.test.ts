@@ -1215,6 +1215,101 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('jacket')
   })
 
+  it('prioritizes the clothing type in the title over an incidental description word', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'socks',
+        name: 'Голубые прямые джинсы с логотипом',
+        description: 'Джинсы поставляются с ремнём в комплекте.',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jeans', 'sets', 'socks']),
+      subcategoryParents: new Map([['jeans', 'clothes'], ['sets', 'clothes'], ['socks', 'clothes']]),
+      subcategoryNames: new Map([
+        ['jeans', 'Джинсы'],
+        ['sets', 'Комплекты'],
+        ['socks', 'Носки'],
+      ]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('jeans')
+  })
+
+  it('does not let a wearing-comfort phrase override the clothing type in the title', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'socks',
+        name: 'Голубые прямые джинсы с логотипом',
+        description: 'Натуральный хлопковый материал обеспечивает комфорт в носке.',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jeans', 'socks']),
+      subcategoryParents: new Map([['jeans', 'clothes'], ['socks', 'clothes']]),
+      subcategoryNames: new Map([['jeans', 'Джинсы'], ['socks', 'Носки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('jeans')
+  })
+
+  it('uses h1 before the description when the AI name is empty', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'socks',
+        name: '',
+        h1: 'Голубые прямые джинсы с логотипом',
+        description: 'Джинсы поставляются с ремнём в комплекте.',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jeans', 'sets', 'socks']),
+      subcategoryParents: new Map([['jeans', 'clothes'], ['sets', 'clothes'], ['socks', 'clothes']]),
+      subcategoryNames: new Map([['jeans', 'Джинсы'], ['sets', 'Комплекты'], ['socks', 'Носки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('jeans')
+  })
+
+  it('uses the source name before its description when the AI text is empty', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: 'socks', name: '' },
+    }, {
+      product: {
+        name: 'Голубые прямые джинсы с логотипом',
+        description: 'Джинсы поставляются с ремнём в комплекте.',
+        category: 'clothes',
+        subcategory: '',
+        photos: [],
+        attributes: {},
+      },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jeans', 'sets', 'socks']),
+      subcategoryParents: new Map([['jeans', 'clothes'], ['sets', 'clothes'], ['socks', 'clothes']]),
+      subcategoryNames: new Map([['jeans', 'Джинсы'], ['sets', 'Комплекты'], ['socks', 'Носки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('jeans')
+  })
+
   it('drops unknown clothing subcategory suggestions instead of creating taxonomy proposals', () => {
     const result = normalizeBatchAiOutput({
       product: { category: 'clothes', subcategory: '' },
