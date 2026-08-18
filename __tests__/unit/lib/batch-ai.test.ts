@@ -1059,6 +1059,23 @@ describe('batch AI normalization', () => {
     expect(clothingPrompt).toContain('Никогда не заполняй subcategory_suggestion для одежды')
   })
 
+  it('includes all configured category rules when the product category is unresolved', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { category: '', subcategory: '' },
+      brands: [],
+      categories: [
+        { id: 'clothes', name: 'Одежда' },
+        { id: 'shoes', name: 'Обувь' },
+      ],
+      subcategories: [],
+      attributes: [],
+    })
+
+    expect(prompt).toContain('Автоматические правила категорий')
+    expect(prompt).toContain('Никогда не заполняй subcategory_suggestion для одежды')
+    expect(prompt).toContain('Слингбэки')
+  })
+
   it('uses an operator-edited category rule from settings', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { category: 'textile' },
@@ -1174,6 +1191,28 @@ describe('batch AI normalization', () => {
 
     expect(result.product.subcategory).toBe('tees')
     expect(result.subcategorySuggestion).toBeNull()
+  })
+
+  it('repairs a clothing subcategory that contradicts the AI product text', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'pants',
+        name: 'Чёрный твидовый жакет с зелёными пуговицами',
+        description: 'Укороченный жакет из плотного твида с контрастной отделкой и четырьмя карманами.',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jacket', 'pants']),
+      subcategoryParents: new Map([['jacket', 'clothes'], ['pants', 'clothes']]),
+      subcategoryNames: new Map([['jacket', 'Жакеты'], ['pants', 'Штаны']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('jacket')
   })
 
   it('drops unknown clothing subcategory suggestions instead of creating taxonomy proposals', () => {

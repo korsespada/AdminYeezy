@@ -286,3 +286,37 @@ Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. A
 Chrome Hearts block is always excluded after brand detection. A
 block without a recognisable final brand card or without a usable preceding
 gallery is skipped. The processor is idempotent and preserves source identity.
+
+## Женская одежда ZP
+
+The DB-backed post-process for `Женская одежда ZP` keeps only substantial
+product albums with at least eight photos whose description starts with a
+`P<number>` price marker. Albums without that marker, including short marketing
+descriptions, are not product cards. Standalone accessories such as hats,
+scarves, gloves, jewellery, bags, shoes, and glasses are also excluded even
+when their description starts with a price marker. One-photo `尺码表`/size-chart
+albums are attached to the matching product and appended last; lookbook, model,
+packaging, shipping, and generic service albums are not emitted.
+
+ZP sometimes places a product's size chart before a `细节图` or
+`反面细节图` album and before the descriptive product album. The processor
+matches charts inside the bounded product block by the source media folder and
+the timestamp embedded in the photo URL; products with a detail album claim
+the chart before adjacent products without one. It then emits photos in the
+order `main -> detail -> size chart`. For example, the visible cards `#139`,
+`#138`, and `#136` are retained as one product in that order; the same pattern
+applies to `#162`, `#161`, and `#157`. The descriptive album remains
+authoritative for `external_id`, `source_position`, and description. Exact
+duplicate photo URLs are removed and the processor is idempotent.
+
+Cards whose description contains `Chrome Heart*`, `Chrome Hearts`, the common
+misspelling `Chrome hearth`, or `克罗心` are excluded completely.
+
+The ZP supplier AI instruction treats the leading `P<number>` as a source
+price marker rather than a public price. Product photos are analysed through
+the standard 3-by-3 contact sheets, with optional full-size refinement for
+ambiguous frames. Size charts remain technical evidence for sizes and
+measurements, and reversible garments remain one product when both sides show
+the same item. ZP uses the nine price-rule records and the price instruction
+list copied from `Женская одежда 3`; the price mapping is kept outside the
+supplier text prompt.

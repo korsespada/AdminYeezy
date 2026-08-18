@@ -286,9 +286,20 @@ export function buildBatchAiUserPrompt(input: {
   processingOptions?: BatchAiProcessingOptions
 }) {
   const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
+  const configuredCategoryRules = normalizeBatchAiCategoryRules(input.categoryRules)
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
+    || (() => {
+      const selectedSubcategory = subcategories.find((subcategory) => String(subcategory.id) === String(product.subcategory))
+      return categories.find((category) => String(category.id) === String(selectedSubcategory?.parent_id))
+    })()
     || (categories.length === 1 ? categories[0] : null)
-  const categoryRule = batchAiCategoryRuleForRules(selectedCategory?.name, normalizeBatchAiCategoryRules(input.categoryRules))
+  const matchingCategoryRule = batchAiCategoryRuleForRules(selectedCategory?.name, configuredCategoryRules)
+  const categoryRules = selectedCategory
+    ? (matchingCategoryRule ? [matchingCategoryRule] : [])
+    : configuredCategoryRules
+  const categoryRulePrompt = categoryRules.length > 0
+    ? categoryRules.map((rule) => `Автоматические правила категории «${rule.categoryName}». Они важнее особенностей поставщика:\n${rule.rules}`).join('\n\n')
+    : 'Для категории товара дополнительные автоматические правила пока не заданы.'
   let referenceOffset = 0
   const priceRulePrompt = priceRules.map((rule) => {
     const references = (rule.reference_images || []).map((_, index) => referenceOffset + index + 1)
@@ -337,9 +348,9 @@ export function buildBatchAiUserPrompt(input: {
     'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, логотипа, таблицы замеров или конфликта между исходным текстом и фотографиями.',
     'До заполнения product сначала внутренне проверь согласованность текста и всей серии фотографий. Исходный текст может принадлежать другой карточке; противоречащие фотографиям сведения не используй.',
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
-    categoryRule
-      ? `Автоматические правила категории «${categoryRule.categoryName}». Они важнее особенностей поставщика:\n${categoryRule.rules}`
-      : 'Для категории товара дополнительные автоматические правила пока не заданы.',
+    categoryRules.length > 1
+      ? `Автоматические правила категорий. Выбери правило после определения верхней категории; эти правила важнее особенностей поставщика:\n${categoryRulePrompt}`
+      : categoryRulePrompt,
     `Товар: ${JSON.stringify(product)}`,
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
@@ -1279,17 +1290,26 @@ export function normalizeBatchAiOutput(raw: any, input: {
     : raw?.subcategory_suggestion || null
   if (normalizedName(input.categoryNames?.get(category)) === 'одежда') {
     const currentClothingSubcategoryIsLegacy = isLegacyClothingSubcategory(input.subcategoryNames?.get(subcategory))
-    const canonicalName = canonicalClothingSubcategoryName(subcategorySuggestion?.name)
+    const aiEvidence = [
+      proposed.name,
+      proposed.description,
+      proposed.h1,
+      proposed.seo_title,
+      proposed.seo_description,
+    ].filter(Boolean).join('\n')
+    const inferredAiName = inferClothingSubcategoryName(aiEvidence)
+    const inferredSourceName = inferClothingSubcategoryName([
+      original.name,
+      original.description,
+    ].filter(Boolean).join('\n'))
+    // The model's generated name/description are its visual interpretation of
+    // the complete photo series. Prefer that evidence over a contradictory ID
+    // (for example, a jacket returned with the pants ID). Fall back to source
+    // text only when the generated fields do not identify a garment type.
+    const canonicalName = inferredAiName
+      || inferredSourceName
+      || canonicalClothingSubcategoryName(subcategorySuggestion?.name)
       || (currentClothingSubcategoryIsLegacy ? '' : canonicalClothingSubcategoryName(input.subcategoryNames?.get(subcategory)))
-      || inferClothingSubcategoryName([
-        proposed.name,
-        proposed.description,
-        proposed.h1,
-        proposed.seo_title,
-        proposed.seo_description,
-        original.name,
-        original.description,
-      ].filter(Boolean).join('\n'))
     const canonicalEntry = canonicalName
       ? [...(input.subcategoryNames?.entries() || [])].find(([id, name]) => (
         canonicalClothingSubcategoryName(name) === canonicalName
