@@ -44,8 +44,12 @@ export function applyMeasurementTableAttributes(
   attributes: Record<string, any> | null | undefined,
   measurements: unknown,
 ) {
-  const next: Record<string, any> = { ...(attributes || {}), measurements }
-  const sizes = measurementTableSizes(measurements)
+  const normalizedMeasurements = normalizeMeasurementTable(measurements)
+  const next: Record<string, any> = {
+    ...(attributes || {}),
+    measurements: normalizedMeasurements || measurements,
+  }
+  const sizes = measurementTableSizes(normalizedMeasurements)
   if (!sizes.length) return next
 
   const existing = next.sizes
@@ -127,18 +131,71 @@ function normalizedKey(value: unknown, fallback: string, used: Set<string>) {
   return key
 }
 
+const MEASUREMENT_KEY_ALIASES: Record<string, string> = {
+  shoulder: 'shoulders',
+  shoulders: 'shoulders',
+  shoulder_width: 'shoulders',
+  shoulderwidth: 'shoulders',
+  sleeve: 'sleeve',
+  sleeve_length: 'sleeve',
+  sleevelength: 'sleeve',
+  chest: 'chest',
+  bust: 'chest',
+  chest_girth: 'chest',
+  chest_circ: 'chest',
+  chest_circumference: 'chest',
+  chest_width: 'chest',
+  hip: 'hips',
+  hips: 'hips',
+  back_length: 'length',
+  garment_length: 'length',
+  length: 'length',
+}
+
+function measurementToken(value: unknown) {
+  return shortText(value, 80).toLocaleLowerCase('en-US')
+    .replace(/[^a-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function canonicalMeasurementKey(key: unknown, label: unknown) {
+  const keyToken = measurementToken(key)
+  const labelToken = measurementToken(label)
+  return MEASUREMENT_KEY_ALIASES[keyToken] || MEASUREMENT_KEY_ALIASES[labelToken] || keyToken || labelToken
+}
+
+function parseMeasurementValue(value: unknown) {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (!/^[\[{]/u.test(text)) return value
+  try {
+    return JSON.parse(text)
+  } catch {
+    return value
+  }
+}
+
 export function normalizeMeasurementTable(value: unknown): MeasurementTable | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const source = value as Record<string, unknown>
+  const parsed = parseMeasurementValue(value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const source = parsed as Record<string, unknown>
   if (!Array.isArray(source.columns) || !Array.isArray(source.rows)) return null
 
   const usedKeys = new Set<string>()
+  const sourceKeys = new Map<string, string>()
+  const canonicalKeys = new Map<string, string>()
   const columns = source.columns.slice(0, 12).flatMap((entry, index) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const item = entry as Record<string, unknown>
     const label = shortText(item.label || item.key, 80)
     if (!label) return []
-    return [{ key: normalizedKey(item.key, `measurement_${index + 1}`, usedKeys), label }]
+    const canonicalKey = canonicalMeasurementKey(item.key, item.label)
+    const key = normalizedKey(canonicalKey, `measurement_${index + 1}`, usedKeys)
+    for (const alias of [item.key, item.label, canonicalKey].map(measurementToken).filter(Boolean)) {
+      if (!sourceKeys.has(alias)) sourceKeys.set(alias, key)
+    }
+    if (!canonicalKeys.has(canonicalKey)) canonicalKeys.set(canonicalKey, key)
+    return [{ key, label }]
   })
   if (!columns.length) return null
 
@@ -150,11 +207,13 @@ export function normalizeMeasurementTable(value: unknown): MeasurementTable | nu
     const rawValues = item.values && typeof item.values === 'object' && !Array.isArray(item.values)
       ? item.values as Record<string, unknown>
       : {}
-    const values = Object.fromEntries(
-      Object.entries(rawValues)
-        .filter(([key]) => allowedKeys.has(key))
-        .map(([key, cell]) => [key, shortText(cell, 80)]),
-    )
+    const values = Object.fromEntries(Object.entries(rawValues).flatMap(([key, cell]) => {
+      const token = measurementToken(key)
+      const outputKey = sourceKeys.get(token)
+        || canonicalKeys.get(canonicalMeasurementKey(key, ''))
+        || (allowedKeys.has(key) ? key : '')
+      return outputKey ? [[outputKey, shortText(cell, 80)]] : []
+    }))
     return [{ size, values }]
   })
   if (!rows.length) return null
@@ -163,7 +222,7 @@ export function normalizeMeasurementTable(value: unknown): MeasurementTable | nu
     unit: shortText(source.unit || 'см', 16) || 'см',
     columns,
     rows,
-    note: shortText(source.note, 1000),
+    ...(source.note !== undefined ? { note: shortText(source.note, 1000) } : {}),
   }
 }
 

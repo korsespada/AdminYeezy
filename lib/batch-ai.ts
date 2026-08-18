@@ -18,6 +18,7 @@ import {
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
+import { normalizeMeasurementTable } from '@/lib/measurement-templates'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -1031,7 +1032,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
   if (attributes.measurements !== undefined) {
-    attributes.measurements = normalizeMeasurementRowSizes(attributes.measurements)
+    const normalizedMeasurements = normalizeMeasurementTable(attributes.measurements)
+    attributes.measurements = normalizeMeasurementRowSizes(normalizedMeasurements || attributes.measurements)
   }
   if (input.attributeCodes.has('sizes')) {
     const sizeSourceText = [original.description, proposed.description].filter(Boolean).join('\n')
@@ -1454,8 +1456,9 @@ function extractShoeSizeGroups(value: unknown): Array<Record<string, unknown> & 
 }
 
 function measurementRowSizes(value: unknown): string[] {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-  const rows = (value as Record<string, unknown>).rows
+  const normalized = normalizeMeasurementTable(value)
+  if (!normalized) return []
+  const rows = normalized.rows
   if (!Array.isArray(rows)) return []
   return rows.flatMap((row) => (
     row && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>).size
@@ -1465,8 +1468,9 @@ function measurementRowSizes(value: unknown): string[] {
 }
 
 function normalizeMeasurementRowSizes(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
-  const table = value as Record<string, unknown>
+  const normalized = normalizeMeasurementTable(value)
+  if (!normalized) return value
+  const table = normalized as Record<string, unknown>
   if (!Array.isArray(table.rows)) return value
   const rows = table.rows.map((row) => (
     row && typeof row === 'object' && !Array.isArray(row)

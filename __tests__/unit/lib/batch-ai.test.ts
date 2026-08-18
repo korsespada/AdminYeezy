@@ -688,6 +688,34 @@ describe('batch AI normalization', () => {
     })
   })
 
+  it('normalizes an encoded measurement table returned by the model', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothing',
+        catalog_attributes: {
+          measurements: JSON.stringify({
+            unit: 'см',
+            columns: [{ key: 'shoulder_width', label: 'Плечи' }],
+            rows: [{ size: '38', values: { shoulder_width: '40' } }],
+          }),
+        },
+      },
+    }, {
+      product: { category: 'clothing', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'measurements']),
+    })
+
+    expect(result.product.attributes.measurements).toEqual({
+      unit: 'см',
+      columns: [{ key: 'shoulders', label: 'Плечи' }],
+      rows: [{ size: '38', values: { shoulders: '40' } }],
+    })
+    expect(result.product.attributes.sizes).toEqual(['38'])
+  })
+
   it('removes an empty duplicate size column from measurements', () => {
     const result = normalizeBatchAiOutput({
       product: {

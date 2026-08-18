@@ -25,6 +25,35 @@ describe('measurement template normalization', () => {
     })
   })
 
+  it('parses JSON strings and canonicalizes AI measurement aliases', () => {
+    const encoded = JSON.stringify({
+      unit: 'см',
+      columns: [
+        { key: 'shoulder_width', label: 'Плечи' },
+        { key: 'chest_girth', label: 'Обхват груди' },
+        { key: 'sleeve_length', label: 'Длина рукава' },
+        { key: 'back_length', label: 'Длина' },
+      ],
+      rows: [{ size: '38', values: {
+        shoulder_width: '40', chest_girth: '88', sleeve_length: '23', back_length: '53',
+      } }],
+    })
+
+    const expected = {
+      unit: 'см',
+      columns: [
+        { key: 'shoulders', label: 'Плечи' },
+        { key: 'chest', label: 'Обхват груди' },
+        { key: 'sleeve', label: 'Длина рукава' },
+        { key: 'length', label: 'Длина' },
+      ],
+      rows: [{ size: '38', values: { shoulders: '40', chest: '88', sleeve: '23', length: '53' } }],
+    }
+
+    expect(normalizeMeasurementTable(encoded)).toEqual(expected)
+    expect(applyMeasurementTableAttributes({}, encoded).measurements).toEqual(expected)
+  })
+
   it('matches a single supplier template only to an unambiguous garment type', () => {
     const templates: MeasurementTemplate[] = [
       {

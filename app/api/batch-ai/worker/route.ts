@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
-import { applyMeasurementTableAttributes, measurementTemplateForProduct, type MeasurementTemplate } from '@/lib/measurement-templates'
+import { applyMeasurementTableAttributes, measurementTemplateForProduct, normalizeMeasurementTable, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
@@ -151,12 +151,12 @@ async function complete(body: any) {
     product.slug = buildProductSeoSlug(product, String(brandName))
   }
   const measurementRecoveryOnly = input.measurementRecoveryOnly === true
-  const recoveredMeasurements = product?.attributes?.measurements
-  if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
+  const recoveredMeasurements = normalizeMeasurementTable(product?.attributes?.measurements)
+  if (measurementRecoveryOnly && !recoveredMeasurements) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
-  if (!measurementRecoveryOnly && product?.attributes?.measurements) {
-    product.attributes = applyMeasurementTableAttributes(product.attributes, product.attributes.measurements)
+  if (!measurementRecoveryOnly && recoveredMeasurements) {
+    product.attributes = applyMeasurementTableAttributes(product.attributes, recoveredMeasurements)
   } else if (!measurementRecoveryOnly) {
     const templates = Array.isArray(input.measurementTemplates) ? input.measurementTemplates as MeasurementTemplate[] : []
     const subcategoryName = (input.subcategories || []).find((row: any) => String(row.id) === String(product.subcategory))?.name || product.subcategory
