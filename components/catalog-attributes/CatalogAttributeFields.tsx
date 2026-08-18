@@ -7,6 +7,10 @@ import {
   type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
+import {
+  normalizeMeasurementTable,
+  type MeasurementTable,
+} from '@/lib/measurement-templates'
 
 export default function CatalogAttributeFields({
   value,
@@ -233,15 +237,6 @@ function formatAttributeValue(definition: CatalogAttributeDefinition, value: unk
   return formatAttributePart(definition, value)
 }
 
-type MeasurementColumn = { key: string; label: string }
-type MeasurementRow = { size: string; values: Record<string, string> }
-type MeasurementTable = {
-  unit: string
-  columns: MeasurementColumn[]
-  rows: MeasurementRow[]
-  note?: string
-}
-
 export function MeasurementsField({ value, onChange, shoe = false }: { value: unknown; onChange: (value: unknown) => void; shoe?: boolean }) {
   const table = normalizeMeasurementTable(value)
   const legacyText = typeof value === 'string' ? value.trim() : ''
@@ -390,35 +385,6 @@ export function MeasurementsField({ value, onChange, shoe = false }: { value: un
       />
     </div>
   )
-}
-
-function normalizeMeasurementTable(value: unknown): MeasurementTable | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const source = value as Record<string, unknown>
-  if (!Array.isArray(source.columns) || !Array.isArray(source.rows)) return null
-
-  const columns = source.columns.flatMap((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-    const item = entry as Record<string, unknown>
-    const key = String(item.key || `measurement_${index + 1}`).trim()
-    if (!key) return []
-    return [{ key, label: String(item.label || key).trim() }]
-  })
-  const rows = source.rows.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-    const item = entry as Record<string, unknown>
-    const values = item.values && typeof item.values === 'object' && !Array.isArray(item.values)
-      ? Object.fromEntries(Object.entries(item.values).map(([key, entryValue]) => [key, String(entryValue ?? '')]))
-      : {}
-    return [{ size: String(item.size || '').trim(), values }]
-  })
-
-  return {
-    unit: String(source.unit || 'см').trim() || 'см',
-    columns,
-    rows,
-    note: String(source.note || '').trim(),
-  }
 }
 
 function defaultMeasurementTable(note = '', shoe = false): MeasurementTable {

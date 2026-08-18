@@ -84,6 +84,38 @@ describe('CatalogAttributeFields', () => {
     })
   })
 
+  it('renders an encoded measurement table as an editable table', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{
+          measurements: JSON.stringify({
+            unit: 'см',
+            columns: [{ key: 'waist', label: 'Обхват талии' }],
+            rows: [{ size: '36', values: { waist: '60' } }],
+            note: '',
+          }),
+        }}
+        onChange={onChange}
+        categoryName="Одежда"
+      />,
+    )
+
+    expect(screen.getByLabelText('Обхват талии, размер 36')).toBeInTheDocument()
+    expect(screen.queryByText('Преобразовать в таблицу')).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Обхват талии, размер 36'), { target: { value: '61' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      measurements: {
+        unit: 'см',
+        columns: [{ key: 'waist', label: 'Обхват талии' }],
+        rows: [{ size: '36', values: { waist: '61' } }],
+        note: '',
+      },
+    })
+  })
+
   it('edits structured shoe measurements in the same table format', () => {
     const onChange = vi.fn()
     render(
