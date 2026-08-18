@@ -9,6 +9,8 @@ import {
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import {
   normalizeMeasurementTable,
+  type MeasurementColumn,
+  type MeasurementRow,
   type MeasurementTable,
 } from '@/lib/measurement-templates'
 
