@@ -18,6 +18,7 @@ import { activeBatchOperation, claimBatchOperation, releaseBatchOperation } from
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
+import type { ActionResponse } from '@/lib/types'
 
 export interface CsvProduct {
     id?: string | number
@@ -244,6 +245,100 @@ function parseServerCsv(text: string): CsvProduct[] {
     })
     return normalizeBatchProduct(row)
   }).filter((product) => product.external_id || product.name)
+}
+
+function parseRawArtifactProducts(content: string): CsvProduct[] {
+  const trimmed = content.trim()
+  if (!trimmed) return []
+
+  try {
+    const parsed = JSON.parse(trimmed)
+    if (Array.isArray(parsed)) {
+      return parsed.map((row) => normalizeBatchProduct(row)).filter((product) => product.external_id || product.name)
+    }
+  } catch {
+    // Historical file artifacts are normally CSV; keep the JSON fallback above
+    // for older workers that persisted the parser output directly.
+  }
+
+  return parseServerCsv(content)
+}
+
+export async function restoreMissingRawSnapshotAction(batchId: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const client = await getScrapingClient()
+    try {
+      await client.query('BEGIN')
+
+      const existing = await client.query(`
+        SELECT id, jsonb_array_length(products)::int AS items_count
+        FROM batch_snapshots
+        WHERE batch_id=$1 AND stage='SCRAPED'
+        ORDER BY created_at ASC
+        LIMIT 1
+      `, [batchId])
+      if (existing.rows[0]) {
+        await client.query('COMMIT')
+        return { success: true, data: { restored: false, count: Number(existing.rows[0].items_count || 0) } }
+      }
+
+      const task = await client.query(`
+        SELECT id, result_path, items_count
+        FROM scraping_tasks
+        WHERE batch_id=$1 AND status IN ('Сырой товар','Сырой CSV','completed')
+        ORDER BY created_at ASC
+        LIMIT 1
+      `, [batchId])
+      const rawTask = task.rows[0]
+      if (!rawTask?.result_path) throw new Error('У сырого этапа нет сохранённого пути файла')
+
+      const artifact = await getScrapingFileArtifact(rawTask.result_path, Number(rawTask.id))
+      if (!artifact?.content) {
+        throw new Error('Сохранённый raw-файл не найден. Без резервной копии открыть исходные товары нельзя.')
+      }
+
+      const parsedProducts = parseRawArtifactProducts(String(artifact.content))
+      const expectedCount = Number(rawTask.items_count || 0)
+      if (!parsedProducts.length) throw new Error('Сохранённый raw-файл пуст или имеет неподдерживаемый формат')
+      if (expectedCount > 0 && parsedProducts.length !== expectedCount) {
+        throw new Error(`Размер сохранённого raw-файла не совпадает с задачей: ${parsedProducts.length} вместо ${expectedCount}`)
+      }
+
+      const products = parsedProducts.map((product, position) => ({
+        external_id: product.external_id,
+        name: product.name || 'Без названия',
+        description: product.description || '',
+        price: Number(product.price || 0),
+        price_source: product.price_source || 'default',
+        status: 'inactive',
+        brand: product.brand || '',
+        category: product.category || '',
+        subcategory: product.subcategory || null,
+        gender: product.gender || '',
+        photos: product.photos || [],
+        attributes: product.attributes || {},
+        ai_processed: false,
+        source_position: Number.isFinite(Number(product.source_position)) ? Number(product.source_position) : position,
+        supplier_published_on: product.supplier_published_on || null,
+      }))
+
+      await client.query(`
+        INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
+        VALUES($1,$2,'SCRAPED','Сырой товар',$3::jsonb,'{}'::jsonb)
+      `, [crypto.randomUUID(), batchId, JSON.stringify(products)])
+      await client.query('COMMIT')
+      revalidatePath('/admin/batches')
+      return { success: true, data: { restored: true, count: products.length } }
+    } catch (error) {
+      await client.query('ROLLBACK')
+      throw error
+    } finally {
+      client.release()
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message }
+  }
 }
 
 /**

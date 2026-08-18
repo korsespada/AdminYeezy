@@ -456,6 +456,7 @@ export interface ExportHistoryFile {
   snapshot_id?: string | null
   snapshot_label?: string | null
   snapshot_missing?: boolean
+  raw_artifact_available?: boolean
   is_current?: boolean
 }
 
@@ -594,6 +595,10 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         t.end_date,
         t.created_at,
         t.updated_at,
+        EXISTS (
+          SELECT 1 FROM scraping_files sf
+          WHERE sf.task_id=t.id AND COALESCE(sf.content, '') <> ''
+        ) AS artifact_available,
         s.name as supplier_name,
         s.avatar_url as supplier_avatar,
         NULLIF(BTRIM(s.post_process_script), '') IS NOT NULL as has_script,
@@ -658,6 +663,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         end_date: row.end_date,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        raw_artifact_available: Boolean(row.artifact_available),
       }
 
       if (!grouped.has(key)) {

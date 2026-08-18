@@ -29,6 +29,7 @@ import {
   type ExportHistoryBatch,
   type ExportHistoryFile,
 } from '@/actions/suppliers'
+import { restoreMissingRawSnapshotAction } from '@/actions/csv-import'
 import CsvModal from './CsvModal'
 import {
   createExportFolderAction,
@@ -196,6 +197,21 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     }
     setPendingAction(null)
     setOpenMenuId(null)
+  }
+
+  const restoreRaw = async (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
+    if (!file.batch_id) return
+    const batchId = file.batch_id
+    setPendingAction(`restore-raw-${file.id}`)
+    const result = await restoreMissingRawSnapshotAction(batchId)
+    if (result.success) {
+      const refreshed = await getExportHistoryAction()
+      if (refreshed.success && refreshed.data) setBatches(refreshed.data as ExportHistoryBatch[])
+      alert(`Сырой снимок восстановлен: ${result.data?.count || 0} товаров. Теперь его можно открыть.`)
+    } else {
+      alert(result.error || 'Не удалось восстановить сырой снимок')
+    }
+    setPendingAction(null)
   }
 
   const handleDeleteFromCatalog = async (batch: ExportHistoryBatch) => {
@@ -677,6 +693,17 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                         <td className="whitespace-nowrap px-6 py-4 text-sm font-semibold text-slate-300">{file.items_count || 0} шт.</td>
                         <td className="px-6 py-4"><StatusBadge status={file.status} loading={file.status === 'Запущено'} /></td>
                         <td className="px-6 py-4 text-right">
+                          {file.snapshot_missing && file.status === 'Сырой товар' && <button
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              restoreRaw(batch, file)
+                            }}
+                            disabled={!file.raw_artifact_available || pendingAction === `restore-raw-${file.id}`}
+                            className="mr-1 rounded-lg p-2 text-indigo-300 transition-colors hover:bg-indigo-500/10 disabled:cursor-not-allowed disabled:text-slate-600"
+                            title={file.raw_artifact_available ? 'Восстановить сырой снимок из сохранённого файла' : 'Сохранённого файла для восстановления нет'}
+                          >
+                            {pendingAction === `restore-raw-${file.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                          </button>}
                           {!file.is_virtual && <button
                             onClick={(event) => {
                               event.stopPropagation()
