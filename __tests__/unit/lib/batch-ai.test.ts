@@ -103,6 +103,11 @@ describe('batch AI normalization', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('одно русское слово')
   })
 
+  it('prioritizes visible clothing type over loose set wording', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('комбинезоны и ромперы также относятся к «Платья»')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('только когда на фотографиях видны два разных предмета одежды')
+  })
+
   it('never creates new taxonomy proposals', () => {
     const output = {
       product: { category: 'accessories', subcategory: '', catalog_attributes: {} },
