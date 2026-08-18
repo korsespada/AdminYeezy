@@ -107,6 +107,7 @@ async function init() {
         supplier_id INTEGER REFERENCES suppliers(id) ON DELETE SET NULL,
         items_count INTEGER,
         status TEXT,
+        catalog_deleted_at TIMESTAMPTZ,
         created_at TIMESTAMP DEFAULT NOW()
       );
     `);

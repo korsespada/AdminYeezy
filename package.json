@@ -16,6 +16,7 @@
     "db:migrate:measurement-templates": "node scripts/migrate-measurement-templates.js",
     "db:migrate:media-seo": "node scripts/ensure-media-seo-schema.js",
     "db:migrate:supplier-ai": "node scripts/ensure-supplier-ai-schema.js",
+    "db:migrate:catalog-deletion": "node scripts/migrate-catalog-deletion.js",
     "batch:reset-media-seo": "node scripts/reset-batch-media-seo.js",
     "db:migrate:supplier-catalog-ids": "node scripts/migrate-supplier-catalog-ids.js",
     "db:audit:batches": "node scripts/audit-batch-workflow.js",

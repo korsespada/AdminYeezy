@@ -2295,7 +2295,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       }
     }
   }
-  await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', updated_at=NOW() WHERE id=$1", [batchId]);
+  await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', catalog_deleted_at=NULL, updated_at=NOW() WHERE id=$1", [batchId]);
   reportPhaseTiming('publish', { imported, updated, deleted });
 
   return {

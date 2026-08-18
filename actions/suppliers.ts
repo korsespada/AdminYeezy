@@ -486,6 +486,7 @@ export interface ExportHistoryBatch {
   ai_product_count?: number
   active_operation?: string | null
   published_external_count?: number
+  catalog_deleted_at?: string | null
 }
 
 function normalizeTaskStatus(status: string | null, resultPath: string | null) {
@@ -496,8 +497,9 @@ function normalizeTaskStatus(status: string | null, resultPath: string | null) {
   return status || 'Запущено'
 }
 
-function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[]) {
+function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[], catalogDeletedAt?: string | null) {
   if (stage === 'DELETED_FROM_DB') return 'Удалено из БД'
+  if (catalogDeletedAt) return 'Каталог удалён'
   if (stage === 'PUSHED') return 'Запушено в БД'
   if (stage === 'AI_PROCESSED') return 'Обработано ИИ'
   if (files.some((file) => file.status === 'Запущено')) return 'Запущено'
@@ -599,6 +601,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         b.name as batch_name,
         b.items_count as batch_items_count,
         b.stage as batch_stage,
+        b.catalog_deleted_at,
         b.created_at as batch_created_at,
         b.folder_id,
         f.name as folder_name,
@@ -669,6 +672,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             has_script: Boolean(row.has_script),
             items_count: Number(row.batch_items_count || row.items_count || 0),
             stage: row.batch_stage,
+            catalog_deleted_at: row.catalog_deleted_at || null,
             created_at: row.batch_created_at || row.created_at,
             updated_at: row.updated_at,
             folder_id: row.folder_id || null,
@@ -782,7 +786,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         has_script: batch.has_script,
         items_count: Math.max(Number(batch.items_count || 0), latestItemsCount),
         stage: batch.stage,
-        status: normalizeBatchStatus(effectiveBatchHistoryStage(batch.stage, allAiProcessed), sortedFiles),
+        status: normalizeBatchStatus(effectiveBatchHistoryStage(batch.stage, allAiProcessed), sortedFiles, batch.catalog_deleted_at),
         end_date: latestEndDate,
         created_at: batch.created_at,
         updated_at: latestFile?.updated_at || batch.updated_at,
@@ -799,6 +803,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai_product_count: batch.ai_product_count,
         active_operation: batch.active_operation,
         published_external_count: batch.published_external_count,
+        catalog_deleted_at: batch.catalog_deleted_at,
       }
     })
 
@@ -1599,6 +1604,7 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
         if (catalogOnly) {
           if (catalogFailedCount > 0) throw new Error('Не все товары удалось удалить из основного каталога')
           await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
+          await scrapingQuery('UPDATE scraping_batches SET catalog_deleted_at=NOW(), updated_at=NOW() WHERE id=$1', [batchId])
           try { await redis.del('catalog:all') } catch (redisErr: any) { console.warn('Redis clear cache error:', redisErr.message) }
           revalidatePath('/admin')
           revalidatePath('/admin/batches')

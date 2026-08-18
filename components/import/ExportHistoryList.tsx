@@ -66,6 +66,7 @@ const statusStyles: Record<string, string> = {
   'Запущено': 'bg-sky-500/10 text-sky-300 border-sky-500/20',
   'Обработка ИИ': 'bg-violet-500/10 text-violet-300 border-violet-500/20',
   'Публикация в БД': 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
+  'Каталог удалён': 'bg-amber-500/10 text-amber-300 border-amber-500/20',
   'Удалено из БД': 'bg-rose-500/10 text-rose-300 border-rose-500/20',
   failed: 'bg-red-500/10 text-red-300 border-red-500/20',
 }
@@ -176,8 +177,8 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const handleDeleteFromDb = async (batch: ExportHistoryBatch) => {
     if (batch.isSynthetic) return
     if (!confirm(
-      `Удалить локальные товары и медиа для выгрузки "${batch.name}"? История этапов останется в админке.` +
-      '\n\nОсновной каталог не будет затронут.',
+      `Удалить локальные товары и медиа из технической БД для выгрузки "${batch.name}"? История этапов останется в админке.` +
+      '\n\nТовары основного каталога не будут затронуты.',
     )) return
 
     setPendingAction(`db-${batch.id}`)
@@ -199,7 +200,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
   const handleDeleteFromCatalog = async (batch: ExportHistoryBatch) => {
     if (batch.isSynthetic) return
-    if (!confirm(`Удалить опубликованные товары выгрузки "${batch.name}" из основного каталога?\n\nЛокальные товары и история останутся.`)) return
+    if (!confirm(`Удалить опубликованные товары выгрузки "${batch.name}" из основного каталога?\n\nЛокальные товары и история останутся. Статус выгрузки станет «Каталог удалён · локальная выгрузка сохранена».`)) return
     const replaceShared = window.confirm(
       'Удалить также товары с тем же external_id, которые входят в новую опубликованную выгрузку этого поставщика?\n\n' +
       'Да — удалить совпадения.\nНет — сохранить общие товары.',
@@ -403,7 +404,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                     </div>
                     <div className="min-w-0"><h3 className="break-words font-semibold text-white">{batch.supplier_name || 'Поставщик не найден'}</h3><p className="mt-1 break-words text-xs text-slate-500">{batch.name}</p></div>
                   </div>
-                  <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                  <div className="flex min-w-0 flex-col items-end gap-1">
+                    <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                    {batch.catalog_deleted_at && <span className="text-right text-[10px] text-amber-300">Локальная выгрузка сохранена</span>}
+                  </div>
                 </div>
                 <dl className="grid grid-cols-2 gap-3 text-sm">
                   <div><dt className="text-xs text-slate-500">Период</dt><dd className="mt-1 text-slate-300">с {formatDate(batch.created_at)}{batch.end_date ? ` · до ${formatDate(batch.end_date)}` : ''}</dd></div>
@@ -464,7 +468,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 // catalog import was interrupted after the stage was marked
                 // PUSHED. Both publication modes are idempotent by external_id.
                 const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
-                const canDeleteCatalog = canDeletePublishedCatalog(batch.stage, batch.published_external_count)
+                const canDeleteCatalog = canDeletePublishedCatalog(batch.stage, batch.published_external_count, batch.catalog_deleted_at)
                 const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'
@@ -511,7 +515,12 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
-                      <td className="px-4 py-3"><StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                          {batch.catalog_deleted_at && <span className="text-[10px] text-amber-300">Локальная выгрузка сохранена</span>}
+                        </div>
+                      </td>
                       <td className="relative px-3 py-3 text-right">
                         <div className="ml-auto flex w-fit flex-nowrap items-center justify-end gap-0.5 whitespace-nowrap rounded-lg bg-slate-900/35 p-0.5">
                           {!batch.isSynthetic && hasAiRemaining && batch.status !== 'Удалено из БД' && (
@@ -596,7 +605,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:text-slate-600"
                             >
                               <Trash2 className="h-4 w-4" />
-                              Удалить из основного каталога
+                              <span><b className="block">Удалить с сайта</b><small className="block text-slate-500">Локальная выгрузка останется</small></span>
                             </button>
                             )}
                             <button
@@ -605,7 +614,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600"
                             >
                               <Database className="h-4 w-4" />
-                              Удалить локальную партию
+                              <span><b className="block">Удалить локальную выгрузку</b><small className="block text-slate-500">Товары сайта останутся</small></span>
                             </button>
                             <button
                               onClick={() => handleDeleteBatchFromAdmin(batch)}

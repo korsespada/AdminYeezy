@@ -179,6 +179,7 @@ async function migrate() {
         items_count INTEGER DEFAULT 0,
         status TEXT,
         stage TEXT DEFAULT 'SCRAPED',
+        catalog_deleted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -191,6 +192,7 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS items_count INTEGER DEFAULT 0,
         ADD COLUMN IF NOT EXISTS status TEXT,
         ADD COLUMN IF NOT EXISTS stage TEXT DEFAULT 'SCRAPED',
+        ADD COLUMN IF NOT EXISTS catalog_deleted_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);

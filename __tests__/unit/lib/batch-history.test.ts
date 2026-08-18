@@ -29,6 +29,7 @@ describe('batch history navigation', () => {
 
   it('offers catalog removal for legacy published batches without a publication registry', () => {
     expect(canDeletePublishedCatalog('PUSHED', 0)).toBe(true)
+    expect(canDeletePublishedCatalog('PUSHED', 0, '2026-08-18T12:00:00Z')).toBe(false)
     expect(canDeletePublishedCatalog('AI_PROCESSED', 3)).toBe(true)
     expect(canDeletePublishedCatalog('AI_PROCESSED', 0)).toBe(false)
     expect(canDeletePublishedCatalog('DELETED_FROM_DB', 0)).toBe(false)
