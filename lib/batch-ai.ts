@@ -350,6 +350,7 @@ export function buildBatchAiUserPrompt(input: {
     `Визуальный справочник моделей Chanel: ${JSON.stringify(modelReferencePrompt)}`,
     'После contact sheet товара приложен отдельный лист «Эталоны моделей Chanel». Сопоставляй текущий товар с этими эталонами прежде всего по силуэту, конструкции, клапану, ручкам, цепи, застёжке и пропорциям. Китайские aliases и visual_hint — только подсказка, не доказательство. Если уверенно совпал эталон, верни его model_key в catalog_attributes.model_reference_key; затем используй каноническое model_name этого эталона. Если совпадения нет, оставь model_reference_key пустым и выбери точный тип товара по фотографиям. Не переноси модель только из текста.',
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
+    'В conditions.ai_instruction может быть свободное правило поставщика, например «футболки — 5000, худи — 8000». Используй его как инструкцию для выбора price_rule_key; числовые поля условий заполнять необязательно.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
@@ -1617,7 +1618,7 @@ export function matchingPriceRule(product: any, rules: any[]) {
     if (!rule.enabled) return false
     const conditions = rule.conditions || {}
     return Object.entries(conditions).every(([key, expected]) => {
-      if (key === 'price_formula' || key === 'price_instruction') return true
+      if (key === 'price_formula' || key === 'price_instruction' || key === 'ai_instruction') return true
       const actual = key.startsWith('attributes.')
         ? product.attributes?.[key.slice('attributes.'.length)]
         : product[key]
@@ -1638,7 +1639,7 @@ export function matchingPriceRule(product: any, rules: any[]) {
     })
   })
   return candidates.sort((left, right) => {
-    const score = (rule: any) => Object.keys(rule.conditions || {}).length
+    const score = (rule: any) => Object.keys(rule.conditions || {}).filter((key) => !['price_formula', 'price_instruction', 'ai_instruction'].includes(key)).length
       + (rule.conditions?.price_rule_key ? 1000 : 0)
     const specificity = score(right) - score(left)
     return specificity || Number(right.priority || 0) - Number(left.priority || 0)

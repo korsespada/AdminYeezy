@@ -3,6 +3,7 @@
 import React, { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import CsvImportApp from './CsvImportApp'
+import { useModalDismiss } from '@/components/ui/use-modal-dismiss'
 
 export default function CsvModal({ 
   isOpen, 
@@ -29,6 +30,8 @@ export default function CsvModal({
   supplierAvatar?: string | null,
   forceFileMode?: boolean
 }) {
+  useModalDismiss(isOpen, onClose)
+
   useEffect(() => {
     if (isOpen) document.body.style.overflow = 'hidden'
     else document.body.style.overflow = 'unset'

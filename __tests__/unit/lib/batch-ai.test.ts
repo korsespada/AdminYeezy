@@ -327,6 +327,17 @@ describe('batch AI normalization', () => {
     expect(calculatePriceRulePrice({ ...rule, conditions: { ...rule.conditions, price_formula: { ...rule.conditions.price_formula, rounding: 'up' } } }, '💰带扣：780/实时价格 💰带身：1980/实时价格')).toBe(65000)
   })
 
+  it('treats a free AI pricing instruction as guidance, not a product condition', () => {
+    const rule = matchingPriceRule({ category: 'clothing', attributes: {} }, [{
+      enabled: true,
+      priority: 10,
+      conditions: { category: 'clothing', ai_instruction: 'Футболки — 5000 ₽' },
+      price: 5_000,
+    }])
+
+    expect(rule?.price).toBe(5_000)
+  })
+
   it('applies suggestions for already registered attributes instead of asking for approval', () => {
     const result = normalizeBatchAiOutput({
       product: { category: 'bags' },

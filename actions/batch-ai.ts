@@ -336,6 +336,7 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         [{ conditions: inputConditions }],
         mappings.rows,
       )[0].conditions || {}
+      normalizedConditions.ai_instruction = String(normalizedConditions.ai_instruction || '').trim().slice(0, 4000)
       if (normalizedConditions.price_formula && typeof normalizedConditions.price_formula === 'object') {
         const formula = normalizedConditions.price_formula as Record<string, unknown>
         normalizedConditions.price_formula = {
@@ -348,7 +349,6 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         normalizedConditions.price_instruction = String(normalizedConditions.price_instruction || '').trim().slice(0, 4000)
       } else {
         delete normalizedConditions.price_formula
-        delete normalizedConditions.price_instruction
       }
       const referenceImages = Array.isArray(rule.reference_images)
         ? [...new Set(rule.reference_images.map(String).filter((url: string) => /^https:\/\//i.test(url)))].slice(0, 9)

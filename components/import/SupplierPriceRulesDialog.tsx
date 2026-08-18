@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { ImagePlus, Loader2, Plus, Save, Trash2, X } from 'lucide-react'
 import { fetchLookupsAction } from '@/actions/csv-import'
 import { getSupplierPriceRulesAction, saveSupplierPriceRulesAction, uploadPriceRuleReferenceAction } from '@/actions/batch-ai'
+import { useModalDismiss } from '@/components/ui/use-modal-dismiss'
 
 type Rule = {
   id?: number
@@ -12,6 +13,7 @@ type Rule = {
   priority: number
   price: number
   pricingMode: 'fixed' | 'custom'
+  aiInstruction: string
   priceInstruction: string
   sourcePrice: 'max' | 'min'
   multiplier: number
@@ -61,6 +63,7 @@ function fromStored(rule: any): Rule {
     priority: Number(rule.priority || 0),
     price: Number(rule.price || 0),
     pricingMode: formula ? 'custom' : 'fixed',
+    aiInstruction: String(conditions.ai_instruction || (!formula ? conditions.price_instruction : '') || ''),
     priceInstruction: String(conditions.price_instruction || ''),
     sourcePrice: formula?.source_price === 'min' ? 'min' : 'max',
     multiplier: Number.isFinite(Number(formula?.multiplier)) ? Number(formula.multiplier) : 1,
@@ -92,6 +95,9 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
   const [uploadingRule, setUploadingRule] = useState<number | null>(null)
   const [loadingRules, setLoadingRules] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useModalDismiss(true, onClose, contentRef)
 
   useEffect(() => {
     let cancelled = false
@@ -109,7 +115,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
 
   const update = (index: number, patch: Partial<Rule>) => setRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
   const add = () => setRules((items) => [...items, {
-    name: `Правило ${items.length + 1}`, priority: 0, price: 0, pricingMode: 'fixed', priceInstruction: '',
+    name: `Правило ${items.length + 1}`, priority: 0, price: 0, pricingMode: 'fixed', aiInstruction: '', priceInstruction: '',
     sourcePrice: 'max', multiplier: 1, secondaryMultiplier: 1, roundingStep: 1000, roundingMode: 'nearest', enabled: true,
     ruleKey: `rule_${Date.now()}_${items.length + 1}`, matchByReference: false, referenceImages: [],
   }])
@@ -151,9 +157,10 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
         'attributes.model_name': storedTextCondition(rule.model),
         'attributes.materials': storedTextCondition(rule.material),
         'attributes.size_class': rule.sizeClass,
-        'attributes.bag_width_cm': range(rule.minWidth, rule.maxWidth),
-        'attributes.bag_height_cm': range(rule.minHeight, rule.maxHeight),
+        'attributes.bag_width_cm': isBagCategory(rule.category, lookups.categories) ? range(rule.minWidth, rule.maxWidth) : '',
+        'attributes.bag_height_cm': isBagCategory(rule.category, lookups.categories) ? range(rule.minHeight, rule.maxHeight) : '',
         price_rule_key: rule.matchByReference ? rule.ruleKey : '',
+        ai_instruction: rule.aiInstruction,
         price_instruction: rule.pricingMode === 'custom' ? rule.priceInstruction : '',
         price_formula: rule.pricingMode === 'custom' ? {
           source_price: rule.sourcePrice,
@@ -173,8 +180,8 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
   })
 
   return (
-    <div className="fixed inset-0 z-[120] bg-slate-950/90 p-3 backdrop-blur-sm">
-      <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+    <div className="fixed inset-0 z-[120] bg-slate-950/90 p-3 backdrop-blur-sm" onMouseDown={onClose}>
+      <div ref={contentRef} role="dialog" aria-modal="true" aria-label={`Правила цен для ${supplierName}`} className="mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
           <div><h2 className="text-lg font-bold text-white">Правила цен · {supplierName}</h2><p className="mt-1 text-xs text-slate-400">Побеждает самое конкретное условие, затем больший приоритет.</p></div>
           <button onClick={onClose} className="rounded p-2 text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button>
@@ -201,8 +208,8 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                   <span className="rounded bg-slate-950 px-2 py-1">приоритет {rule.priority}</span>
                   {rule.model && <span className="max-w-48 truncate rounded bg-indigo-500/10 px-2 py-1 text-indigo-200">{rule.model}</span>}
                   {rule.sizeClass && <span className="rounded bg-cyan-500/10 px-2 py-1 text-cyan-200">{rule.sizeClass}</span>}
-                  {(rule.minWidth !== undefined || rule.maxWidth !== undefined) && <span className="rounded bg-slate-950 px-2 py-1">Ш {rule.minWidth ?? '…'}–{rule.maxWidth ?? '…'} см</span>}
-                  {(rule.minHeight !== undefined || rule.maxHeight !== undefined) && <span className="rounded bg-slate-950 px-2 py-1">В {rule.minHeight ?? '…'}–{rule.maxHeight ?? '…'} см</span>}
+                  {isBagCategory(rule.category, lookups.categories) && (rule.minWidth !== undefined || rule.maxWidth !== undefined) && <span className="rounded bg-slate-950 px-2 py-1">Ш {rule.minWidth ?? '…'}–{rule.maxWidth ?? '…'} см</span>}
+                  {isBagCategory(rule.category, lookups.categories) && (rule.minHeight !== undefined || rule.maxHeight !== undefined) && <span className="rounded bg-slate-950 px-2 py-1">В {rule.minHeight ?? '…'}–{rule.maxHeight ?? '…'} см</span>}
                   {rule.matchByReference && <span className="rounded bg-amber-500/10 px-2 py-1 text-amber-200">точный эталон</span>}
                   {rule.referenceImages.slice(0, 4).map((url) => <Image key={url} src={url} alt="Эталон" width={30} height={30} unoptimized className="h-7 w-7 rounded object-cover" />)}
                   {rule.referenceImages.length > 4 && <span>+{rule.referenceImages.length - 4}</span>}
@@ -213,7 +220,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                   <div className="mt-3 space-y-3">
                     <div className="grid grid-cols-3 gap-2">
                       <Field label="Бренд"><Select value={rule.brand} onChange={(value) => update(index, { brand: value })} items={lookups.brands} /></Field>
-                      <Field label="Категория"><Select value={rule.category} onChange={(value) => update(index, { category: value, subcategory: '' })} items={lookups.categories} /></Field>
+                      <Field label="Категория"><Select value={rule.category} onChange={(value) => update(index, isBagCategory(value, lookups.categories) ? { category: value, subcategory: '' } : { category: value, subcategory: '', minWidth: undefined, maxWidth: undefined, minHeight: undefined, maxHeight: undefined })} items={lookups.categories} /></Field>
                       <Field label="Подкатегория"><Select value={rule.subcategory} onChange={(value) => update(index, { subcategory: value })} items={lookups.subcategories.filter((item: any) => !rule.category || String(item.category_id || item.category) === rule.category)} /></Field>
                     </div>
                     <div className="grid grid-cols-4 gap-2">
@@ -223,6 +230,9 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                       <Field label="Приоритет"><input type="number" value={rule.priority} onChange={(event) => update(index, { priority: Number(event.target.value) })} className="price-rule-field" /></Field>
                     </div>
                     <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+                      <label className="mb-2 block text-xs font-medium text-amber-200">Свободное правило для ИИ</label>
+                      <textarea value={rule.aiInstruction} onChange={(event) => update(index, { aiInstruction: event.target.value })} placeholder="Например: футболки — 5 000 ₽, худи — 8 000 ₽; определяй по типу товара" rows={2} className="price-rule-field resize-y" />
+                      <p className="mt-1 text-[11px] text-slate-500">Опишите обычными словами, как выбрать это правило и цену. Поля ниже нужны только для точной формулы по цене из описания.</p>
                       <label className="mb-2 block text-[10px] uppercase tracking-wide text-slate-500">Тип расчёта</label>
                       <select value={rule.pricingMode} onChange={(event) => update(index, { pricingMode: event.target.value as Rule['pricingMode'] })} className="price-rule-field">
                         <option value="fixed">Фиксированная цена</option>
@@ -239,7 +249,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                         </div>
                       </>}
                     </div>
-                    <div className="grid grid-cols-2 gap-2"><Field label="Ширина, см"><RangeInputs min={rule.minWidth} max={rule.maxWidth} onChange={(min, max) => update(index, { minWidth: min, maxWidth: max })} /></Field><Field label="Высота, см"><RangeInputs min={rule.minHeight} max={rule.maxHeight} onChange={(min, max) => update(index, { minHeight: min, maxHeight: max })} /></Field></div>
+                    {isBagCategory(rule.category, lookups.categories) && <div className="grid grid-cols-2 gap-2"><Field label="Ширина, см"><RangeInputs min={rule.minWidth} max={rule.maxWidth} onChange={(min, max) => update(index, { minWidth: min, maxWidth: max })} /></Field><Field label="Высота, см"><RangeInputs min={rule.minHeight} max={rule.maxHeight} onChange={(min, max) => update(index, { minHeight: min, maxHeight: max })} /></Field></div>}
                     <textarea value={rule.visualHint || ''} onChange={(event) => update(index, { visualHint: event.target.value })} placeholder="Как AI отличить эту модель по фото" rows={2} className="price-rule-field resize-none" />
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" checked={rule.matchByReference} onChange={(event) => update(index, { matchByReference: event.target.checked })} />Точное совпадение с эталоном</label>
@@ -253,10 +263,17 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
           </div>}
           {!loadingRules && !loadError && rules.length === 0 && <p className="py-10 text-center text-slate-500">Правил пока нет. При отсутствии совпадения используется стандартная цена поставщика, затем 0.</p>}
         </div>
-        <footer className="flex shrink-0 gap-3 border-t border-slate-700 bg-slate-900 p-3"><button onClick={add} disabled={loadingRules || Boolean(loadError)} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-40"><Plus className="h-4 w-4" /> Добавить</button><button onClick={save} disabled={pending || loadingRules || Boolean(loadError)} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> Сохранить правила</button><span className="ml-auto self-center text-xs text-slate-500">{loadingRules ? 'Загрузка…' : `${rules.length} правил`}</span></footer>
+        <footer className="flex shrink-0 gap-3 border-t border-slate-700 bg-slate-900 p-3"><button onClick={save} disabled={pending || loadingRules || Boolean(loadError)} className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> Сохранить правила</button><button onClick={add} disabled={loadingRules || Boolean(loadError)} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 disabled:opacity-40"><Plus className="h-4 w-4" /> Добавить</button><span className="ml-auto self-center text-xs text-slate-500">{loadingRules ? 'Загрузка…' : `${rules.length} правил`}</span></footer>
       </div>
     </div>
   )
+}
+
+function isBagCategory(categoryId: string | undefined, categories: any[]) {
+  const category = categories.find((item) => String(item.id) === String(categoryId || ''))
+  const name = String(category?.name || '').trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
+  const slug = String(category?.slug || '').trim().toLocaleLowerCase('ru-RU')
+  return name === 'сумки' || slug === 'bags'
 }
 
 function Select({ value, onChange, items }: { value?: string; onChange: (value: string) => void; items: any[] }) {

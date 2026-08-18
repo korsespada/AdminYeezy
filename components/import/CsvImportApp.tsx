@@ -44,6 +44,7 @@ import {
   FileText,
   Layers3,
 } from "lucide-react";
+import { useModalDismiss } from '@/components/ui/use-modal-dismiss';
 import {
   fetchLookupsAction,
   readLocalCsvAction,
@@ -604,6 +605,7 @@ export default function CsvImportApp({
   // Dirty flag — были ли изменения с момента последнего сохранения
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
   const [filterSearch, setFilterSearch] = useState("");
@@ -1597,6 +1599,53 @@ export default function CsvImportApp({
     setBulkPrice("");
     setBulkMeasurements(null);
     setIsDirty(true);
+  };
+
+  const handleBulkDelete = async () => {
+    if (isSnapshotSource || isBulkDeleting || selectedForMerge.length === 0) return;
+    const selectedProducts = selectedForMerge
+      .map((index) => products[index])
+      .filter((product): product is CsvProduct => Boolean(product));
+    if (!selectedProducts.length) return;
+    if (!window.confirm(`Удалить выбранные товары (${selectedProducts.length})? Это действие нельзя отменить.`)) return;
+
+    setIsBulkDeleting(true);
+    try {
+      if (!batchId) {
+        const selectedIndexes = new Set(selectedForMerge);
+        setProducts((current) => current.filter((_, index) => !selectedIndexes.has(index)));
+        setSelectedForMerge([]);
+        setSelectedIdx(null);
+        setIsDirty(true);
+        setSaveMsg(`✓ Удалено товаров: ${selectedProducts.length}`);
+        return;
+      }
+
+      const deletedIdentifiers = new Set<string>();
+      const failures: string[] = [];
+      for (const product of selectedProducts) {
+        const identifier = product.id || product.external_id;
+        if (!identifier) {
+          failures.push(product.name || product.external_id || 'товар без идентификатора');
+          continue;
+        }
+        const result = await deleteBatchProductAction(identifier, batchId);
+        if (result.success) deletedIdentifiers.add(String(identifier));
+        else failures.push(`${product.name || product.external_id}: ${result.error || 'ошибка удаления'}`);
+      }
+
+      if (deletedIdentifiers.size > 0) {
+        setProducts((current) => current.filter((product) => !deletedIdentifiers.has(String(product.id || product.external_id))));
+        setSelectedForMerge([]);
+        setSelectedIdx(null);
+      }
+      setIsDirty(false);
+      setSaveMsg(failures.length
+        ? `Удалено: ${deletedIdentifiers.size}. Не удалось удалить: ${failures.length}. ${failures.slice(0, 2).join(' · ')}`
+        : `✓ Удалено товаров: ${deletedIdentifiers.size}`);
+    } finally {
+      setIsBulkDeleting(false);
+    }
   };
 
   const handleMergePhotos = () => {
@@ -2956,6 +3005,15 @@ export default function CsvImportApp({
                 </button>
                 <button
                   type="button"
+                  onClick={handleBulkDelete}
+                  disabled={isBulkDeleting || isSnapshotSource}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-2.5 text-sm font-bold text-red-200 transition-all hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {isBulkDeleting ? "Удаляем…" : "Удалить"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowBulkVariantFamily(true)}
                   disabled={!batchId || isSnapshotSource}
                   className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-2.5 text-sm font-bold text-violet-100 transition-all hover:bg-violet-500/20 disabled:opacity-50"
@@ -4108,6 +4166,9 @@ function VariantFamiliesDialog({
   const [openFamilyKey, setOpenFamilyKey] = useState<string | null>(null);
   const [deletingFamilyKey, setDeletingFamilyKey] = useState<string | null>(null);
   const openFamily = families.find((family) => family.key === openFamilyKey) || null;
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useModalDismiss(open, onClose, contentRef);
 
   useEffect(() => {
     if (!open) setOpenFamilyKey(null);
@@ -4127,7 +4188,7 @@ function VariantFamiliesDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Семейные группы">
+      <div ref={contentRef} className="flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Семейные группы">
         <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
           <div>
             <h2 className="font-semibold text-white">Семейные группы</h2>
@@ -4203,6 +4264,9 @@ function BulkVariantFamilyDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const targetFamily = families.find((family) => family.key === targetFamilyKey) || null;
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useModalDismiss(open, onClose, contentRef);
 
   useEffect(() => {
     if (!open) {
@@ -4244,7 +4308,7 @@ function BulkVariantFamilyDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Добавить в семейную группу">
+      <div ref={contentRef} className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Добавить в семейную группу">
         <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
           <div>
             <h2 className="font-semibold text-white">В семейную группу</h2>
@@ -4311,8 +4375,11 @@ function VariantFamilyManager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [groupName, setGroupName] = useState("");
+  const contentRef = useRef<HTMLDivElement>(null);
   const productId = Number(product.id);
   const currentFamily = approvedVariantGroupKey(product);
+
+  useModalDismiss(open, () => setOpen(false), contentRef);
 
   const familySizes = useMemo(() => {
     const sizes = new Map<string, number>();
@@ -4431,7 +4498,7 @@ function VariantFamilyManager({
       </button>
       {open && createPortal(
         <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={() => setOpen(false)}>
-          <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Управление цветовыми вариантами">
+          <div ref={contentRef} className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Управление цветовыми вариантами">
             <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
               <div>
                 <h2 className="font-semibold text-white">Цветовые варианты товара</h2>

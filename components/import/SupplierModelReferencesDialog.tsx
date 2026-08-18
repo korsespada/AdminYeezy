@@ -1,12 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useState, useTransition } from 'react'
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { Loader2, RefreshCw, Save, X } from 'lucide-react'
 import {
   buildSupplierModelReferencesAction,
   getSupplierModelReferencesAction,
   saveSupplierModelReferencesAction,
 } from '@/actions/batch-ai'
+import { useModalDismiss } from '@/components/ui/use-modal-dismiss'
 
 type ModelReference = {
   model_key: string
@@ -34,6 +35,9 @@ export default function SupplierModelReferencesDialog({
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [pending, startTransition] = useTransition()
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useModalDismiss(true, onClose, contentRef)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -68,8 +72,8 @@ export default function SupplierModelReferencesDialog({
   })
 
   return (
-    <div className="fixed inset-0 z-[125] bg-slate-950/90 p-3 backdrop-blur-sm">
-      <div className="mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+    <div className="fixed inset-0 z-[125] bg-slate-950/90 p-3 backdrop-blur-sm" onMouseDown={onClose}>
+      <div ref={contentRef} role="dialog" aria-modal="true" aria-label={`Справочник моделей для ${supplierName}`} className="mx-auto flex max-h-[calc(100vh-1.5rem)] max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
         <header className="flex shrink-0 items-center justify-between border-b border-slate-700 px-4 py-3">
           <div>
             <h2 className="text-lg font-bold text-white">Справочник моделей · {supplierName}</h2>
