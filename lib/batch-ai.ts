@@ -274,13 +274,14 @@ export function buildBatchAiUserPrompt(input: {
   subcategories: BatchAiLookup[]
   attributes: BatchAiAttributeDefinition[]
   priceRules?: BatchAiPriceRuleHint[]
+  priceAiInstructions?: string | null
   modelReferences?: BatchAiModelReference[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
   categoryRules?: BatchAiCategoryRule[]
   processingOptions?: BatchAiProcessingOptions
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
     || (categories.length === 1 ? categories[0] : null)
   const categoryRule = batchAiCategoryRuleForRules(selectedCategory?.name, normalizeBatchAiCategoryRules(input.categoryRules))
@@ -315,7 +316,7 @@ export function buildBatchAiUserPrompt(input: {
       product: {
         name: '', description: '',
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
-        gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '' }, price_rule_key: '', confidence: 0,
+        gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '' }, price_rule_key: '', price: null, confidence: 0,
       },
       chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
       photo_alts: [],
@@ -347,10 +348,11 @@ export function buildBatchAiUserPrompt(input: {
     ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
+    `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
     `Визуальный справочник моделей Chanel: ${JSON.stringify(modelReferencePrompt)}`,
     'После contact sheet товара приложен отдельный лист «Эталоны моделей Chanel». Сопоставляй текущий товар с этими эталонами прежде всего по силуэту, конструкции, клапану, ручкам, цепи, застёжке и пропорциям. Китайские aliases и visual_hint — только подсказка, не доказательство. Если уверенно совпал эталон, верни его model_key в catalog_attributes.model_reference_key; затем используй каноническое model_name этого эталона. Если совпадения нет, оставь model_reference_key пустым и выбери точный тип товара по фотографиям. Не переноси модель только из текста.',
-    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если точного правила нет, price_rule_key оставь пустым; size_class всё равно определи для резервного правила.',
-    'В conditions.ai_instruction может быть свободное правило поставщика, например «футболки — 5000, худи — 8000». Используй его как инструкцию для выбора price_rule_key; числовые поля условий заполнять необязательно.',
+    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
+    'Общую инструкцию поставщика по ценам используй как дополнительную подсказку для выбора price_rule_key. Она может содержать несколько товаров и цен; сопоставляй товар по смыслу, но не выдумывай цену и не помещай её в публичные поля.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
@@ -427,13 +429,14 @@ export function buildBatchAiColorSplitPrompt(input: {
   subcategories: BatchAiLookup[]
   attributes: BatchAiAttributeDefinition[]
   priceRules?: BatchAiPriceRuleHint[]
+  priceAiInstructions?: string | null
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
   processingOptions?: BatchAiProcessingOptions
   allowSingleVariant?: boolean
   videoPreviewAvailable?: boolean
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS, allowSingleVariant = false, videoPreviewAvailable = false } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS, allowSingleVariant = false, videoPreviewAvailable = false } = input
   return [
     'Один исходный альбом содержит несколько отдельно продаваемых цветовых вариантов одной физической модели.',
     'За один ответ раздели фотографии по цветам и полностью обработай каждый получившийся товар. Второго AI-прохода не будет.',
@@ -464,7 +467,7 @@ export function buildBatchAiColorSplitPrompt(input: {
         product: {
           name: '', description: '',
           brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
-          gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', confidence: 0,
+          gender: 'male|female|unisex|null', catalog_attributes: {}, price_rule_key: '', price: null, confidence: 0,
         },
         chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
         photo_alts: [],
@@ -486,6 +489,8 @@ export function buildBatchAiColorSplitPrompt(input: {
     ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRules)}`,
+    `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
+    'Если заполнена общая инструкция поставщика по ценам, верни в каждом product.price только явно указанную этой инструкцией цену для текущего варианта; иначе оставь product.price равным null. Не помещай цену в тексты товаров.',
   ].join('\n\n')
 }
 
@@ -933,6 +938,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     aliases?: string[]
   }>
   priceRuleKeys?: Set<string>
+  priceAiInstructions?: string | null
   modelReferences?: BatchAiModelReference[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
@@ -1387,6 +1393,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
       delete attributes.sizes
     }
   }
+  const proposedPrice = String(input.priceAiInstructions || '').trim() && Number.isFinite(Number(proposed.price)) && Number(proposed.price) >= 0
+    ? Math.round(Number(proposed.price))
+    : null
   return {
     product: {
       ...original,
@@ -1401,6 +1410,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       category,
       subcategory,
       gender: resolvedGender,
+      ...(proposedPrice !== null ? { price: proposedPrice, price_source: 'ai_instruction' } : {}),
       photos: photos.length > 0 ? photos : original.photos,
       photo_alts: photoAlts,
       attributes,

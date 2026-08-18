@@ -13,7 +13,6 @@ type Rule = {
   priority: number
   price: number
   pricingMode: 'fixed' | 'custom'
-  aiInstruction: string
   priceInstruction: string
   sourcePrice: 'max' | 'min'
   multiplier: number
@@ -63,7 +62,6 @@ function fromStored(rule: any): Rule {
     priority: Number(rule.priority || 0),
     price: Number(rule.price || 0),
     pricingMode: formula ? 'custom' : 'fixed',
-    aiInstruction: String(conditions.ai_instruction || (!formula ? conditions.price_instruction : '') || ''),
     priceInstruction: String(conditions.price_instruction || ''),
     sourcePrice: formula?.source_price === 'min' ? 'min' : 'max',
     multiplier: Number.isFinite(Number(formula?.multiplier)) ? Number(formula.multiplier) : 1,
@@ -90,6 +88,7 @@ function fromStored(rule: any): Rule {
 
 export default function SupplierPriceRulesDialog({ supplierId, supplierName, onClose }: { supplierId: number; supplierName: string; onClose: () => void }) {
   const [rules, setRules] = useState<Rule[]>([])
+  const [aiInstruction, setAiInstruction] = useState('')
   const [lookups, setLookups] = useState<any>({ brands: [], categories: [], subcategories: [] })
   const [pending, startTransition] = useTransition()
   const [uploadingRule, setUploadingRule] = useState<number | null>(null)
@@ -105,7 +104,14 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
     setLoadError(null)
     Promise.allSettled([getSupplierPriceRulesAction(supplierId), fetchLookupsAction()]).then(([stored, dictionaries]) => {
       if (cancelled) return
-      if (stored.status === 'fulfilled' && stored.value.success) setRules((stored.value.data || []).map(fromStored))
+      if (stored.status === 'fulfilled' && stored.value.success) {
+        const storedRules = stored.value.data?.rules || []
+        const legacyInstructions = storedRules
+          .map((rule: any) => String(rule.conditions?.ai_instruction || '').trim())
+          .filter(Boolean)
+        setRules(storedRules.map(fromStored))
+        setAiInstruction(String(stored.value.data?.aiInstruction || legacyInstructions.join('\n')).trim())
+      }
       else setLoadError(stored.status === 'rejected' ? stored.reason?.message || 'Не удалось загрузить правила' : 'Не удалось загрузить правила')
       if (dictionaries.status === 'fulfilled') setLookups(dictionaries.value)
       setLoadingRules(false)
@@ -115,7 +121,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
 
   const update = (index: number, patch: Partial<Rule>) => setRules((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
   const add = () => setRules((items) => [...items, {
-    name: `Правило ${items.length + 1}`, priority: 0, price: 0, pricingMode: 'fixed', aiInstruction: '', priceInstruction: '',
+    name: `Правило ${items.length + 1}`, priority: 0, price: 0, pricingMode: 'fixed', priceInstruction: '',
     sourcePrice: 'max', multiplier: 1, secondaryMultiplier: 1, roundingStep: 1000, roundingMode: 'nearest', enabled: true,
     ruleKey: `rule_${Date.now()}_${items.length + 1}`, matchByReference: false, referenceImages: [],
   }])
@@ -160,7 +166,6 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
         'attributes.bag_width_cm': isBagCategory(rule.category, lookups.categories) ? range(rule.minWidth, rule.maxWidth) : '',
         'attributes.bag_height_cm': isBagCategory(rule.category, lookups.categories) ? range(rule.minHeight, rule.maxHeight) : '',
         price_rule_key: rule.matchByReference ? rule.ruleKey : '',
-        ai_instruction: rule.aiInstruction,
         price_instruction: rule.pricingMode === 'custom' ? rule.priceInstruction : '',
         price_formula: rule.pricingMode === 'custom' ? {
           source_price: rule.sourcePrice,
@@ -174,7 +179,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
       visual_hint: rule.visualHint,
       reference_images: rule.referenceImages,
     }))
-    const result = await saveSupplierPriceRulesAction(supplierId, payload)
+    const result = await saveSupplierPriceRulesAction(supplierId, payload, aiInstruction)
     if (result.success) onClose()
     else alert(result.error)
   })
@@ -189,6 +194,11 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {loadingRules && <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Загрузка правил…</div>}
           {loadError && <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{loadError}</div>}
+          {!loadingRules && <div className="mb-4 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+            <label className="mb-2 block text-xs font-medium text-amber-200">Общее свободное правило для ИИ</label>
+            <textarea value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="Например: футболки — 5 000 ₽, худи — 8 000 ₽, платья — 12 000 ₽" rows={3} className="price-rule-field resize-y" />
+            <p className="mt-1 text-[11px] text-slate-500">Одна инструкция для всех правил этого поставщика. Перечисляйте несколько товаров и цен в одном поле.</p>
+          </div>}
           {!loadingRules && <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             {rules.map((rule, index) => (
               <article key={rule.id || rule.ruleKey || index} className={`rounded-lg border p-3 ${rule.enabled ? 'border-slate-700 bg-slate-800/55' : 'border-slate-800 bg-slate-900/60 opacity-60'}`}>
@@ -229,10 +239,7 @@ export default function SupplierPriceRulesDialog({ supplierId, supplierName, onC
                       <Field label="Класс"><select value={rule.sizeClass || ''} onChange={(event) => update(index, { sizeClass: event.target.value })} className="price-rule-field"><option value="">Любой</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></Field>
                       <Field label="Приоритет"><input type="number" value={rule.priority} onChange={(event) => update(index, { priority: Number(event.target.value) })} className="price-rule-field" /></Field>
                     </div>
-                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
-                      <label className="mb-2 block text-xs font-medium text-amber-200">Свободное правило для ИИ</label>
-                      <textarea value={rule.aiInstruction} onChange={(event) => update(index, { aiInstruction: event.target.value })} placeholder="Например: футболки — 5 000 ₽, худи — 8 000 ₽; определяй по типу товара" rows={2} className="price-rule-field resize-y" />
-                      <p className="mt-1 text-[11px] text-slate-500">Опишите обычными словами, как выбрать это правило и цену. Поля ниже нужны только для точной формулы по цене из описания.</p>
+                    <div className="rounded-lg border border-slate-700/70 bg-slate-950/30 p-3">
                       <label className="mb-2 block text-[10px] uppercase tracking-wide text-slate-500">Тип расчёта</label>
                       <select value={rule.pricingMode} onChange={(event) => update(index, { pricingMode: event.target.value as Rule['pricingMode'] })} className="price-rule-field">
                         <option value="fixed">Фиксированная цена</option>

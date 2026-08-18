@@ -284,7 +284,21 @@ export async function getSupplierPriceRulesAction(supplierId: number) {
     FROM catalog_id_mappings
     WHERE entity_type IN ('brand','category','subcategory')
   `)
-  return { success: true, data: normalizePriceRulesCatalogReferences(result.rows, mappings.rows) }
+  const supplier = await scrapingQuery(
+    'SELECT price_ai_instructions FROM suppliers WHERE id=$1',
+    [supplierId],
+  )
+  const rules = normalizePriceRulesCatalogReferences(result.rows, mappings.rows)
+  const legacyInstructions = rules
+    .map((rule: any) => String(rule.conditions?.ai_instruction || '').trim())
+    .filter(Boolean)
+  return {
+    success: true,
+    data: {
+      rules,
+      aiInstruction: String(supplier.rows[0]?.price_ai_instructions || '').trim() || legacyInstructions.join('\n'),
+    },
+  }
 }
 
 export async function createBatchAiCatalogCategoryAction(name: string) {
@@ -316,7 +330,7 @@ export async function createBatchAiCatalogSubcategoryAction(name: string, parent
   }
 }
 
-export async function saveSupplierPriceRulesAction(supplierId: number, rules: any[]) {
+export async function saveSupplierPriceRulesAction(supplierId: number, rules: any[], aiInstruction = '') {
   await requireAdmin()
   const mappings = await scrapingQuery(`
     SELECT entity_type,legacy_id,canonical_id,name
@@ -336,7 +350,7 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         [{ conditions: inputConditions }],
         mappings.rows,
       )[0].conditions || {}
-      normalizedConditions.ai_instruction = String(normalizedConditions.ai_instruction || '').trim().slice(0, 4000)
+      delete normalizedConditions.ai_instruction
       if (normalizedConditions.price_formula && typeof normalizedConditions.price_formula === 'object') {
         const formula = normalizedConditions.price_formula as Record<string, unknown>
         normalizedConditions.price_formula = {
@@ -368,6 +382,10 @@ export async function saveSupplierPriceRulesAction(supplierId: number, rules: an
         JSON.stringify(referenceImages),
       ])
     }
+    await client.query(
+      'UPDATE suppliers SET price_ai_instructions=$2, updated_at=NOW() WHERE id=$1',
+      [supplierId, String(aiInstruction || '').trim().slice(0, 4000)],
+    )
     await client.query('COMMIT')
     return { success: true }
   } catch (error: any) {
@@ -676,7 +694,7 @@ function productAttributeDefinitions(product: any, context: any) {
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
   const currentCatalog = await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
-    SELECT b.*, s.ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
+    SELECT b.*, s.ai_instructions, s.price_ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
            s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids,
            s.ai_processing_options
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
@@ -1323,6 +1341,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
               subcategories: promptSubcategories,
               attributes: attributeDefinitions,
               priceRules,
+              priceAiInstructions: mode === 'recover_measurements' ? '' : context.batch.price_ai_instructions,
               chromoffMode: context.chromoffMode,
             chromoffCategories: context.chromoffCategories,
             processingOptions: normalizedProcessingOptions,
@@ -1339,6 +1358,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           subcategories: promptSubcategories,
           attributes: attributeDefinitions,
           priceRules,
+          priceAiInstructions: mode === 'recover_measurements' ? '' : context.batch.price_ai_instructions,
           modelReferences: context.modelReferences,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
@@ -1370,6 +1390,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           knownAttributeCodes: context.definitions.map((item: any) => item.code),
           attributeDictionaryValues: attributeDefinitions.flatMap((item: any) => item.dictionary_values || []),
           priceRules,
+          priceAiInstructions: mode === 'recover_measurements' ? '' : context.batch.price_ai_instructions,
           modelReferences: context.modelReferences,
           measurementTemplates: context.measurementTemplates,
           priceReferenceUrls,
@@ -1537,6 +1558,7 @@ function batchAiNormalizationOptions(input: any, context: any) {
     knownAttributeCodes: new Set<string>((input.knownAttributeCodes || []).map(String)),
     attributeDictionaryValues: input.attributeDictionaryValues || [],
     priceRuleKeys: new Set<string>((input.priceRules || []).map((row: any) => String(row.rule_key))),
+    priceAiInstructions: input.priceAiInstructions,
     modelReferences: Array.isArray(input.modelReferences) ? input.modelReferences : [],
     chromoffMode: input.chromoffMode === true,
     chromoffCategories: Array.isArray(input.chromoffCategories) ? input.chromoffCategories : [],

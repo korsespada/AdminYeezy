@@ -338,6 +338,23 @@ describe('batch AI normalization', () => {
     expect(rule?.price).toBe(5_000)
   })
 
+  it('applies a shared supplier pricing instruction to an explicit AI price', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { name: 'Худи', photos: [] },
+      brands: [], categories: [], subcategories: [], attributes: [],
+      priceAiInstructions: 'Футболки — 5000 ₽, худи — 8000 ₽',
+    })
+    expect(prompt).toContain('Футболки — 5000 ₽, худи — 8000 ₽')
+
+    const result = normalizeBatchAiOutput({ product: { name: 'Худи', price: 8000 } }, {
+      product: { name: 'Худи', photos: [], attributes: {} },
+      brandIds: new Set<string>(), categoryIds: new Set<string>(), subcategoryIds: new Set<string>(),
+      attributeCodes: new Set<string>(), priceAiInstructions: 'Футболки — 5000 ₽, худи — 8000 ₽',
+    })
+    expect(result.product.price).toBe(8000)
+    expect(result.product.price_source).toBe('ai_instruction')
+  })
+
   it('applies suggestions for already registered attributes instead of asking for approval', () => {
     const result = normalizeBatchAiOutput({
       product: { category: 'bags' },
