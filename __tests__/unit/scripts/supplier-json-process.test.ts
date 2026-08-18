@@ -3,6 +3,53 @@ import { describe, expect, it } from 'vitest'
 const { runSupplierJsonProcess } = require('../../../scripts/lib/supplier-json-process')
 
 describe('supplier JSON post-process contract', () => {
+  it('moves Женская одежда 3 description to the preceding gallery and appends its size chart', async () => {
+    const products = [
+      { external_id: 'separator', description: '•••提莫·TIMO (只做Zp研发)••• тест', photos: [], source_position: 0, attributes: {} },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        external_id: `preview-${index}`,
+        description: '测试商品',
+        photos: [`preview-${index}.jpg`],
+        source_position: index + 1,
+        attributes: {},
+      })),
+      { external_id: 'size-chart', description: '下单尺寸表～', photos: ['size-chart.jpg'], source_position: 7, attributes: {} },
+      { external_id: 'lookbook', description: '模特上身效果图~', photos: ['lookbook.jpg'], source_position: 8, attributes: {} },
+      { external_id: 'gallery', description: '真实不调色', photos: ['gallery-1.jpg', 'gallery-2.jpg', 'gallery-3.jpg'], source_position: 14, attributes: {} },
+      {
+        external_id: 'description-card',
+        description: '220💰MiuMiu 26春夏新款短袖，订织订染美利奴进口面料，码数：S M L',
+        photos: Array.from({ length: 8 }, (_, index) => `description-${index}.jpg`),
+        source_position: 15,
+        attributes: {},
+      },
+      { external_id: 'next-separator', description: '•••提莫·TIMO (只做Zp研发)••• следующий', photos: [], source_position: 16, attributes: {} },
+      { external_id: 'unknown-gallery', description: '真实不调色', photos: ['unknown-1.jpg', 'unknown-2.jpg', 'unknown-3.jpg'], source_position: 17, attributes: {} },
+      { external_id: 'unknown-description', description: '220💰Unknown Brand 26新款', photos: Array.from({ length: 8 }, (_, index) => `unknown-${index}.jpg`), source_position: 18, attributes: {} },
+      { external_id: 'chrome-separator', description: '•••提莫·TIMO (只做Zp研发)••• Chrome Hearts item', photos: [], source_position: 19, attributes: {} },
+      { external_id: 'chrome-gallery', description: '真实不调色', photos: ['chrome-1.jpg', 'chrome-2.jpg', 'chrome-3.jpg'], source_position: 20, attributes: {} },
+      { external_id: 'chrome-description', description: '220💰Chrome Hearts 26春夏新款短袖', photos: Array.from({ length: 8 }, (_, index) => `chrome-${index}.jpg`), source_position: 21, attributes: {} },
+    ]
+
+    const result = await runSupplierJsonProcess('process_womens_clothing_3.py', products)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({
+      external_id: 'gallery',
+      source_position: 14,
+      name: 'Miu Miu',
+      brand: '296b4bac-ca5c-44d6-bc19-5892c8ac3bae',
+      description: products.find((product) => product.external_id === 'description-card')?.description,
+      photos: ['gallery-1.jpg', 'gallery-2.jpg', 'gallery-3.jpg', 'size-chart.jpg'],
+      attributes: {
+        description_source_id: 'description-card',
+        size_chart_source_id: 'size-chart',
+      },
+    })
+    expect(result.some((product: { brand: string }) => product.brand === '84ea2b2d-4f88-495b-9bba-7fd2bc191c73')).toBe(false)
+    expect(await runSupplierJsonProcess('process_womens_clothing_3.py', result)).toEqual(result)
+  })
+
   it('attaches a Dior video only to the nearby bracketed product, not a later unrelated bag', async () => {
     const result = await runSupplierJsonProcess('process_dior_bags_timeline.py', [
       {

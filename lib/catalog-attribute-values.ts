@@ -3,6 +3,7 @@ import {
   resolveCatalogAttributeCode,
   type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
+import { normalizeProductMeasurements } from '@/lib/measurement-templates'
 
 const COLOR_VALUES: Record<string, string> = {
   black: 'Чёрный', 'черный': 'Чёрный', 'чёрный': 'Чёрный', noir: 'Чёрный',
@@ -155,34 +156,7 @@ export function normalizeAttributeValue(code: string, value: unknown): unknown {
 }
 
 function normalizeMeasurements(value: unknown) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const source = value as Record<string, unknown>
-  if (!Array.isArray(source.columns) || !Array.isArray(source.rows)) return undefined
-
-  const columns = source.columns.flatMap((entry, index) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-    const column = entry as Record<string, unknown>
-    const key = String(column.key || `measurement_${index + 1}`).trim()
-    if (!key) return []
-    return [{ key, label: String(column.label || key).trim() || key }]
-  })
-  if (columns.length === 0) return undefined
-
-  const rows = source.rows.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
-    const row = entry as Record<string, unknown>
-    const values = row.values && typeof row.values === 'object' && !Array.isArray(row.values)
-      ? Object.fromEntries(Object.entries(row.values).map(([key, cell]) => [key, String(cell ?? '').trim()]))
-      : {}
-    return [{ size: String(row.size || '').trim(), values }]
-  })
-
-  return {
-    unit: String(source.unit || 'см').trim() || 'см',
-    columns,
-    rows,
-    note: String(source.note || '').trim(),
-  }
+  return normalizeProductMeasurements(value) || undefined
 }
 
 function structuredAttributeValue(value: unknown): unknown {

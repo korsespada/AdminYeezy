@@ -144,4 +144,51 @@ describe('CatalogAttributeFields', () => {
       },
     })
   })
+
+  it('shows tabs only for separate tables in a confirmed set and keeps their values separate', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{
+          measurements: {
+            tabs: [
+              {
+                label: 'Майка', unit: 'см',
+                columns: [{ key: 'chest', label: 'Грудь' }],
+                rows: [{ size: 'S', values: { chest: '44' } }],
+              },
+              {
+                label: 'Джемпер', unit: 'см',
+                columns: [{ key: 'length', label: 'Длина' }],
+                rows: [{ size: 'M', values: { length: '54' } }],
+              },
+            ],
+          },
+        }}
+        onChange={onChange}
+        categoryName="Одежда"
+      />,
+    )
+
+    expect(screen.getByRole('tab', { name: 'Майка' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(screen.getByRole('tab', { name: 'Джемпер' }))
+    fireEvent.change(screen.getByLabelText('Длина, размер M'), { target: { value: '55' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      measurements: {
+        tabs: [
+          {
+            label: 'Майка', unit: 'см',
+            columns: [{ key: 'chest', label: 'Грудь' }],
+            rows: [{ size: 'S', values: { chest: '44' } }],
+          },
+          {
+            label: 'Джемпер', unit: 'см',
+            columns: [{ key: 'length', label: 'Длина' }],
+            rows: [{ size: 'M', values: { length: '55' } }],
+          },
+        ],
+      },
+    })
+  })
 })

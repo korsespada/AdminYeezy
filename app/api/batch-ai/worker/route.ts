@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, priceFromAiInstructions, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import { applyMeasurementTableAttributes, measurementTemplateForProduct, normalizeMeasurementTable, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
@@ -172,6 +172,13 @@ async function complete(body: any) {
     product.price_source = input.product?.price_source || 'legacy'
   } else {
     const rule = input.mediaSeoOnly || input.variantScanOnly || product.price_source === 'manual' ? null : matchingPriceRule(product, priceRules)
+    const priceSourceText = [
+      input.product?.name,
+      input.product?.description,
+      product.name,
+      product.description,
+      (input.subcategories || []).find((row: any) => String(row.id) === String(product.subcategory))?.name,
+    ].filter(Boolean).join('\n')
     const calculatedPrice = !input.mediaSeoOnly && !input.variantScanOnly && rule
       ? calculatePriceRulePrice(rule, [
         input.product?.name,
@@ -180,7 +187,24 @@ async function complete(body: any) {
         product.description,
       ].filter(Boolean).join('\n'))
       : null
-    if (calculatedPrice !== null) {
+    const instructionPrice = !input.mediaSeoOnly && !input.variantScanOnly
+      ? priceFromAiInstructions(input.priceAiInstructions, priceSourceText)
+      : null
+    const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
+      ? Number(product.price)
+      : null
+    // A zero-valued catch-all rule means "no configured price" in practice;
+    // let the supplier's explicit category price fill that gap.
+    if (calculatedPrice !== null && calculatedPrice > 0) {
+      product.price = calculatedPrice
+      product.price_source = 'rule'
+    } else if (instructionPrice !== null) {
+      product.price = instructionPrice
+      product.price_source = 'ai_instruction'
+    } else if (explicitAiPrice !== null) {
+      product.price = explicitAiPrice
+      product.price_source = 'ai_instruction'
+    } else if (calculatedPrice !== null) {
       product.price = calculatedPrice
       product.price_source = 'rule'
     } else if (!input.mediaSeoOnly && !input.variantScanOnly && !Number(product.price) && Number(context.rows[0]?.default_price)) {

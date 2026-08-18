@@ -23,6 +23,7 @@ import {
   calculatePriceRulePrice,
   matchingPriceRule,
   normalizePriceRulesCatalogReferences,
+  priceFromAiInstructions,
   restoreRetryProductsFromSnapshots,
   shouldPreserveExistingPrice,
   normalizeBatchAiOutput,
@@ -1838,6 +1839,13 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
       product.price_source = source.price_source || 'legacy'
     } else {
       const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
+      const priceSourceText = [
+        source.name,
+        source.description,
+        product.name,
+        product.description,
+        catalogName(product.subcategory, 'subcategory', context.mappings),
+      ].filter(Boolean).join('\n')
       const calculatedPrice = rule
         ? calculatePriceRulePrice(rule, [
           source.name,
@@ -1846,7 +1854,20 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
           product.description,
         ].filter(Boolean).join('\n'))
         : null
-      if (calculatedPrice !== null) {
+      const instructionPrice = priceFromAiInstructions(context.batch.price_ai_instructions, priceSourceText)
+      const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
+        ? Number(product.price)
+        : null
+      if (calculatedPrice !== null && calculatedPrice > 0) {
+        product.price = calculatedPrice
+        product.price_source = 'rule'
+      } else if (instructionPrice !== null) {
+        product.price = instructionPrice
+        product.price_source = 'ai_instruction'
+      } else if (explicitAiPrice !== null) {
+        product.price = explicitAiPrice
+        product.price_source = 'ai_instruction'
+      } else if (calculatedPrice !== null) {
         product.price = calculatedPrice
         product.price_source = 'rule'
       } else if (!Number(product.price) && Number(context.batch.default_price)) {
@@ -2001,6 +2022,13 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
     product.price_source = item.input_snapshot.product?.price_source || 'legacy'
   } else {
     const rule = product.price_source === 'manual' ? null : matchingPriceRule(product, context.priceRules)
+    const priceSourceText = [
+      item.input_snapshot?.product?.name,
+      item.input_snapshot?.product?.description,
+      product.name,
+      product.description,
+      catalogName(product.subcategory, 'subcategory', context.mappings),
+    ].filter(Boolean).join('\n')
     const calculatedPrice = rule
       ? calculatePriceRulePrice(rule, [
         item.input_snapshot?.product?.name,
@@ -2009,7 +2037,23 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
         product.description,
       ].filter(Boolean).join('\n'))
       : null
-    if (calculatedPrice !== null) {
+    const instructionPrice = priceFromAiInstructions(
+      item.input_snapshot?.priceAiInstructions || context.batch.price_ai_instructions,
+      priceSourceText,
+    )
+    const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
+      ? Number(product.price)
+      : null
+    if (calculatedPrice !== null && calculatedPrice > 0) {
+      product.price = calculatedPrice
+      product.price_source = 'rule'
+    } else if (instructionPrice !== null) {
+      product.price = instructionPrice
+      product.price_source = 'ai_instruction'
+    } else if (explicitAiPrice !== null) {
+      product.price = explicitAiPrice
+      product.price_source = 'ai_instruction'
+    } else if (calculatedPrice !== null) {
       product.price = calculatedPrice
       product.price_source = 'rule'
     } else if (!Number(product.price) && Number(context.batch.default_price)) {

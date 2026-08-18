@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -95,6 +95,12 @@ describe('batch AI normalization', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('name — видимый заголовок товара без бренда и артикула, но с точным цветом')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Сервер записывает h1 равным name')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Не возвращай attribute_suggestions или subcategory_suggestion')
+  })
+
+  it('requires unrelated size charts to be discarded and allows tabs only for a confirmed set', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('не относится ни к основному товару, ни к подтверждённой части комплекта')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('measurements.tabs')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('одно русское слово')
   })
 
   it('never creates new taxonomy proposals', () => {
@@ -254,7 +260,7 @@ describe('batch AI normalization', () => {
         catalog_attributes: { colors: ['black'], exotic_detail: 'value' }, price_rule_key: 'known-rule',
         confidence: 0.9,
       },
-      media: { discard_indexes: [2], size_chart_indexes: [3] },
+      media: { discard_indexes: [2, 3] },
       attribute_suggestions: [],
     }, {
       product: {
@@ -275,6 +281,41 @@ describe('batch AI normalization', () => {
     expect(result.product.attributes).toEqual({ colors: ['black'] })
     expect(result.product.price_rule_key).toBe('known-rule')
     expect(result.suggestions).toEqual([])
+  })
+
+  it('keeps a size-chart photo when the AI did not return readable measurements', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Футболка' },
+      media: { discard_indexes: [2], size_chart_indexes: [2] },
+    }, {
+      product: { name: '', photos: ['product.jpg', 'size-chart.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.photos).toEqual(['product.jpg', 'size-chart.jpg'])
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [] })
+  })
+
+  it('removes a size-chart photo after readable measurements are normalized', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Футболка',
+        catalog_attributes: {
+          measurements: {
+            unit: 'см',
+            columns: [{ key: 'length', label: 'Длина' }],
+            rows: [{ size: 'S', values: { length: '65' } }],
+          },
+        },
+      },
+      media: { size_chart_indexes: [2] },
+    }, {
+      product: { name: '', photos: ['product.jpg', 'size-chart.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(['measurements', 'sizes']),
+    })
+
+    expect(result.product.photos).toEqual(['product.jpg'])
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [2] })
   })
 
   it('chooses the most specific price rule and normalizes common attribute aliases', () => {
@@ -336,6 +377,17 @@ describe('batch AI normalization', () => {
     }])
 
     expect(rule?.price).toBe(5_000)
+  })
+
+  it('derives a fallback price from a matching supplier pricing instruction', () => {
+    expect(priceFromAiInstructions(
+      'Футболки — 21000\nДжинсы, Худи и толстовки — 25000',
+      'Белая футболка с логотипом',
+    )).toBe(21_000)
+    expect(priceFromAiInstructions(
+      'Футболки — 21000',
+      'Кожаная юбка',
+    )).toBeNull()
   })
 
   it('applies a shared supplier pricing instruction to an explicit AI price', () => {
@@ -742,6 +794,56 @@ describe('batch AI normalization', () => {
       rows: [{ size: '38', values: { shoulders: '40' } }],
     })
     expect(result.product.attributes.sizes).toEqual(['38'])
+  })
+
+  it('keeps separately labelled measurements for a confirmed clothing set', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothing',
+        catalog_attributes: {
+          measurements: {
+            tabs: [
+              {
+                label: 'Майка',
+                unit: 'см',
+                columns: [{ key: 'chest', label: 'Грудь' }],
+                rows: [{ size: 'S', values: { chest: '44' } }],
+              },
+              {
+                label: 'Джемпер',
+                unit: 'см',
+                columns: [{ key: 'length', label: 'Длина' }],
+                rows: [{ size: 'M', values: { length: '54' } }],
+              },
+            ],
+          },
+        },
+      },
+    }, {
+      product: { category: 'clothing', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'measurements']),
+    })
+
+    expect(result.product.attributes.measurements).toEqual({
+      tabs: [
+        {
+          label: 'Майка',
+          unit: 'см',
+          columns: [{ key: 'chest', label: 'Грудь' }],
+          rows: [{ size: 'S', values: { chest: '44' } }],
+        },
+        {
+          label: 'Джемпер',
+          unit: 'см',
+          columns: [{ key: 'length', label: 'Длина' }],
+          rows: [{ size: 'M', values: { length: '54' } }],
+        },
+      ],
+    })
+    expect(result.product.attributes.sizes).toEqual(['S', 'M'])
   })
 
   it('removes an empty duplicate size column from measurements', () => {

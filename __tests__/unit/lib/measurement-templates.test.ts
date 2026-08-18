@@ -3,7 +3,9 @@ import {
   measurementTemplateForProduct,
   measurementTemplateGarmentForProduct,
   applyMeasurementTableAttributes,
+  measurementTables,
   measurementTableSizes,
+  normalizeProductMeasurements,
   normalizeMeasurementTable,
   type MeasurementTemplate,
 } from '@/lib/measurement-templates'
@@ -84,5 +86,40 @@ describe('measurement template normalization', () => {
     expect(applyMeasurementTableAttributes({ colors: ['Чёрный'] }, table)).toMatchObject({
       colors: ['Чёрный'], sizes: ['S', 'M', 'L', 'XL'], size_system: 'International', measurements: table,
     })
+  })
+
+  it('keeps multiple named garment tables separate and collapses a single tab back to the legacy shape', () => {
+    const vest = {
+      unit: 'см',
+      columns: [{ key: 'chest', label: 'Обхват груди' }],
+      rows: [{ size: 'S', values: { chest: '84' } }],
+    }
+    const jumper = {
+      unit: 'см',
+      columns: [{ key: 'length', label: 'Длина' }],
+      rows: [{ size: 'S', values: { length: '54' } }],
+    }
+
+    expect(normalizeProductMeasurements({
+      tabs: [
+        { label: 'Майка', ...vest },
+        { label: 'Джемпер', ...jumper },
+      ],
+    })).toEqual({
+      tabs: [
+        { label: 'Майка', ...vest },
+        { label: 'Джемпер', ...jumper },
+      ],
+    })
+    expect(measurementTables({
+      tabs: [
+        { label: 'Майка', ...vest },
+        { label: 'Джемпер', ...jumper },
+      ],
+    })).toEqual([
+      { label: 'Майка', ...vest },
+      { label: 'Джемпер', ...jumper },
+    ])
+    expect(normalizeProductMeasurements({ tabs: [{ label: 'Майка', ...vest }] })).toEqual(vest)
   })
 })

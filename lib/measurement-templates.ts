@@ -18,6 +18,14 @@ export type MeasurementTable = {
   note?: string
 }
 
+export type MeasurementTab = MeasurementTable & {
+  label: string
+}
+
+export type ProductMeasurements = MeasurementTable | {
+  tabs: MeasurementTab[]
+}
+
 export type MeasurementTemplate = {
   id: number
   supplierId: number
@@ -40,16 +48,29 @@ export function measurementTableSizes(value: unknown): string[] {
     .filter(Boolean))]
 }
 
+/** Named tables are used only for multi-piece products. A legacy single table stays tab-free. */
+export function measurementTables(value: unknown): MeasurementTab[] {
+  const normalized = normalizeProductMeasurements(value)
+  return normalized && 'tabs' in normalized ? normalized.tabs : []
+}
+
+export function productMeasurementSizes(value: unknown): string[] {
+  const normalized = normalizeProductMeasurements(value)
+  if (!normalized) return []
+  if ('tabs' in normalized) return normalized.tabs.flatMap(measurementTableSizes)
+  return measurementTableSizes(normalized)
+}
+
 export function applyMeasurementTableAttributes(
   attributes: Record<string, any> | null | undefined,
   measurements: unknown,
 ) {
-  const normalizedMeasurements = normalizeMeasurementTable(measurements)
+  const normalizedMeasurements = normalizeProductMeasurements(measurements)
   const next: Record<string, any> = {
     ...(attributes || {}),
     measurements: normalizedMeasurements || measurements,
   }
-  const sizes = measurementTableSizes(normalizedMeasurements)
+  const sizes = productMeasurementSizes(normalizedMeasurements)
   if (!sizes.length) return next
 
   const existing = next.sizes
@@ -224,6 +245,47 @@ export function normalizeMeasurementTable(value: unknown): MeasurementTable | nu
     rows,
     ...(source.note !== undefined ? { note: shortText(source.note, 1000) } : {}),
   }
+}
+
+/**
+ * Supports the legacy single-table shape and the multi-piece product shape.
+ * A single valid tab deliberately collapses back to the legacy shape so the
+ * storefront does not render a redundant tab control.
+ */
+export function normalizeProductMeasurements(value: unknown): ProductMeasurements | null {
+  const single = normalizeMeasurementTable(value)
+  if (single) return single
+
+  const parsed = parseMeasurementValue(value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const source = parsed as Record<string, unknown>
+  if (!Array.isArray(source.tabs)) return null
+
+  const usedLabels = new Set<string>()
+  const tabs = source.tabs.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const tab = entry as Record<string, unknown>
+    const label = normalizedMeasurementTabLabel(tab.label)
+    const table = normalizeMeasurementTable(tab)
+    const labelKey = label.toLocaleLowerCase('ru-RU')
+    if (!label || !table || usedLabels.has(labelKey)) return []
+    usedLabels.add(labelKey)
+    return [{ label, ...table }]
+  }).slice(0, 4)
+
+  if (tabs.length === 0) return null
+  if (tabs.length === 1) {
+    const tab = tabs[0]
+    return { unit: tab.unit, columns: tab.columns, rows: tab.rows, note: tab.note }
+  }
+  return { tabs }
+}
+
+function normalizedMeasurementTabLabel(value: unknown) {
+  return shortText(value, 80)
+    .trim()
+    .split(/\s+/u)[0]
+    .replace(/[^\p{L}-]/gu, '')
 }
 
 export function normalizeMeasurementTemplateInput(value: {

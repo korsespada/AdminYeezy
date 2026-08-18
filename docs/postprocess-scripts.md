@@ -216,3 +216,73 @@ family. An unlabelled photo album is emitted only when it lies between proven
 variants in that family; an overview collage before the first variant is not a
 product. The script never merges their galleries: every colour keeps its own
 `external_id`, photos and `source_position`.
+
+## Женская одежда 5
+
+`process_womens_clothing_5.py` handles the supplier's reverse album pattern.
+The raw stream usually starts a product with a one-photo price/size card,
+continues with service, styling, or lookbook albums, and ends with a
+substantive 6+ photo product card whose description contains the season code.
+
+The output starts with the substantive branded product album, then adds up to
+two nearby detail albums whose descriptions contain real detail text. Their
+descriptions are appended to the main product description. Short service
+labels such as `GW`, `Show`, `大图`, `大图 细节`, `搭配/look`, `系列` and
+`全套礼盒` are excluded together with their photos. The matching one-photo
+size-card image is added last. The size card is assigned by brand and
+Chinese/Latin product-name overlap, so multiple queued tables can be matched
+to later products without relying on timestamp alone.
+
+When two final product cards reuse the same first photo, that shared photo is
+removed from both galleries. This prevents a combined outfit image from
+becoming the hero image for two separate products. The final card's
+`description`, `external_id`, and `source_position` remain authoritative.
+
+Brand detection uses the alias order and boundary matching from the previous
+`filter_task_152.py` script, with `BV`/`BVLG` mapped to Bottega Veneta.
+Eyewear is excluded by its product terms, and clothing cards without a
+recognised brand are dropped at the final assembly step. The main product
+description, `external_id`, and `source_position` remain authoritative.
+
+## Женская одежда 2
+
+The DB-backed post-process for `Женская одежда 2` reads the supplier's
+all-timeline blocks. A catalogue item is an album with at least five photos,
+at least 60 meaningful description characters, and a recognised brand in the
+first part of the description. Short marketing albums and cards without a
+current canonical brand are not emitted. Every qualifying main album remains
+an independent product, so two different garments in one source block are
+not merged.
+
+The preceding size-chart album is recognised by `尺码表`, `尺码`, `尺寸`,
+`size chart/guide/table`, or a price marker and may contain one to three
+photos. Its photos are appended after the main gallery for every qualifying
+product in that source block. The main album's description, `external_id`, and
+`source_position` remain authoritative, and the assigned canonical brand is
+stored in `brand`.
+
+The alias map includes the observed source spellings such as `1V` for Louis
+Vuitton, `FEND*` for Fendi, `Prad*` for Prada, `Dio*` for Dior, `CHANE*` for
+Chanel, `CELIN*` for Celine, `Burberr*`/`BBR` for Burberry, `Loew*` for Loewe,
+`MiuMi*` for Miu Miu, and `GUCC*` for Gucci. Standalone belts, waist belts,
+caps, hats, and other accessories are excluded from the title prefix; hooded
+garments and clothing with a detachable scarf remain eligible. The processor
+is idempotent and keeps its source identity fields unchanged.
+
+## Женская одежда 3
+
+`process_womens_clothing_3.py` reads the supplier's TIMO-separated blocks.
+The final substantial album in a block contains the full description, price,
+sizes, and brand; the product keeps the `external_id` and `source_position` of
+the immediately preceding gallery album, as required by the source pattern.
+The final album's description and the current Rails canonical brand id are
+copied to that gallery album. The one-photo `下单尺寸表` album from the same
+block is appended last and recorded as `attributes.size_chart_source_id`.
+
+Other preview, lookbook, packaging, and service albums are not emitted. Brand
+matching supports the observed Latin/Chinese spellings for Chrome Hearts,
+Acne Studios, Gucci, Dior, Prada, Chanel, Loewe, Celine, Saint Laurent, Miu
+Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. A
+Chrome Hearts block is always excluded after brand detection. A
+block without a recognisable final brand card or without a usable preceding
+gallery is skipped. The processor is idempotent and preserves source identity.

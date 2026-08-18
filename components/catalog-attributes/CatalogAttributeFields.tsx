@@ -8,10 +8,11 @@ import {
 } from '@/lib/catalog-attribute-schema'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import {
-  normalizeMeasurementTable,
+  normalizeProductMeasurements,
   type MeasurementColumn,
   type MeasurementRow,
   type MeasurementTable,
+  type MeasurementTab,
 } from '@/lib/measurement-templates'
 
 export default function CatalogAttributeFields({
@@ -240,10 +241,10 @@ function formatAttributeValue(definition: CatalogAttributeDefinition, value: unk
 }
 
 export function MeasurementsField({ value, onChange, shoe = false }: { value: unknown; onChange: (value: unknown) => void; shoe?: boolean }) {
-  const table = normalizeMeasurementTable(value)
+  const measurements = normalizeProductMeasurements(value)
   const legacyText = typeof value === 'string' ? value.trim() : ''
 
-  if (!table) {
+  if (!measurements) {
     return (
       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
         <div className="text-[11px] font-semibold text-slate-300">Замеры</div>
@@ -259,6 +260,89 @@ export function MeasurementsField({ value, onChange, shoe = false }: { value: un
       </div>
     )
   }
+
+  if ('tabs' in measurements) {
+    return <MeasurementTabsField tabs={measurements.tabs} onChange={onChange} />
+  }
+
+  return <MeasurementTableEditor table={measurements} onChange={onChange} />
+}
+
+function MeasurementTabsField({ tabs, onChange }: { tabs: MeasurementTab[]; onChange: (value: unknown) => void }) {
+  const [activeIndex, setActiveIndex] = useState(0)
+  useEffect(() => setActiveIndex((index) => Math.min(index, tabs.length - 1)), [tabs.length])
+  const activeTab = tabs[activeIndex] || tabs[0]
+
+  const saveTabs = (nextTabs: MeasurementTab[]) => {
+    if (nextTabs.length === 1) {
+      const tab = nextTabs[0]
+      onChange({ unit: tab.unit, columns: tab.columns, rows: tab.rows, note: tab.note })
+      return
+    }
+    onChange({ tabs: nextTabs })
+  }
+  const updateTab = (index: number, next: MeasurementTable) => saveTabs(tabs.map((tab, tabIndex) => (
+    tabIndex === index ? { label: tab.label, ...next } : tab
+  )))
+  const updateLabel = (label: string) => saveTabs(tabs.map((tab, tabIndex) => (
+    tabIndex === activeIndex ? { ...tab, label } : tab
+  )))
+  const removeTab = () => {
+    const nextTabs = tabs.filter((_, index) => index !== activeIndex)
+    if (!nextTabs.length) {
+      onChange(undefined)
+      return
+    }
+    setActiveIndex(Math.max(0, activeIndex - 1))
+    saveTabs(nextTabs)
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold text-slate-300">Замеры комплекта</span>
+        <button type="button" onClick={() => onChange(undefined)} title="Удалить все таблицы замеров" className="text-slate-500 hover:text-red-400">
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1" role="tablist" aria-label="Таблицы замеров">
+        {tabs.map((tab, index) => (
+          <button
+            key={`${tab.label}-${index}`}
+            type="button"
+            role="tab"
+            aria-selected={index === activeIndex}
+            onClick={() => setActiveIndex(index)}
+            className={`rounded-md px-2.5 py-1.5 text-[11px] font-semibold ${index === activeIndex ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          value={activeTab.label}
+          onChange={(event) => updateLabel(event.target.value)}
+          aria-label="Название вкладки замеров"
+          placeholder="Название вещи"
+          className="h-8 w-40 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+        />
+        <button type="button" onClick={removeTab} className="text-[11px] text-slate-500 hover:text-red-400">Удалить вкладку</button>
+      </div>
+      <MeasurementTableEditor table={activeTab} onChange={(next) => { if (next) updateTab(activeIndex, next) }} embedded />
+    </div>
+  )
+}
+
+function MeasurementTableEditor({
+  table,
+  onChange,
+  embedded = false,
+}: {
+  table: MeasurementTable
+  onChange: (value: MeasurementTable | undefined) => void
+  embedded?: boolean
+}) {
 
   const update = (next: Partial<MeasurementTable>) => onChange({ ...table, ...next })
   const updateColumn = (index: number, label: string) => {
@@ -284,13 +368,15 @@ export function MeasurementsField({ value, onChange, shoe = false }: { value: un
   })
 
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold text-slate-300">Замеры</span>
-        <button type="button" onClick={() => onChange(undefined)} title="Удалить таблицу замеров" className="text-slate-500 hover:text-red-400">
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </div>
+    <div className={embedded ? 'mt-2' : 'rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2'}>
+      {!embedded && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold text-slate-300">Замеры</span>
+          <button type="button" onClick={() => onChange(undefined)} title="Удалить таблицу замеров" className="text-slate-500 hover:text-red-400">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
         <table className="min-w-full border-collapse text-xs">

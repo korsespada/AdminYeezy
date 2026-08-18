@@ -18,7 +18,7 @@ import {
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
-import { normalizeMeasurementTable } from '@/lib/measurement-templates'
+import { normalizeMeasurementTable, normalizeProductMeasurements, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -263,7 +263,9 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - При наличии нескольких информативных фотографий делай description содержательным, обычно 350–700 знаков. Не сокращай его до одной общей фразы, даже если исходное китайское описание короткое.
 - Не добавляй рекламные и неподтверждённые фразы вроде «идеальный выбор», «обеспечивает комфорт», «гарантирует устойчивость», «универсальное дополнение» или «купить».
 - Не смешивай признаки разных товаров. Если основной товар лежит рядом с упаковкой или другим товаром, но явно является главным объектом, оставь кадр и описывай только его. Исключи кадр через media.discard_indexes, только если другой товар, упаковка или реклама доминируют и делают основной товар неясным; также исключай изображения с крупным наложенным рекламным/информационным текстом, ценой, акцией или призывом на любом языке. Не исключай из-за небольшого логотипа или водяного знака.
-- Таблицу замеров сохраняй в catalog_attributes.measurements строго как {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. Одна строка соответствует одному размеру; один параметр — одной колонке. Используй только читаемые значения и не объединяй замеры разных товаров.
+- Сначала сопоставь каждую таблицу замеров с видимым товаром. Если таблица не относится ни к основному товару, ни к подтверждённой части комплекта, добавь её фото в media.discard_indexes: не записывай её в sizes или measurements и не добавляй в media.size_chart_indexes.
+- Для одного товара сохраняй только одну наиболее подходящую читаемую таблицу в catalog_attributes.measurements как {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. Одна строка соответствует одному размеру; один параметр — одной колонке. Если в альбоме несколько таблиц, но это не подтверждённый комплект с разными вещами, выбери только таблицу основного товара; остальные неподходящие таблицы исключи через media.discard_indexes.
+- Только для подтверждённого комплекта из двух или более разных вещей, когда для каждой вещи есть явно соответствующая ей читаемая таблица, верни measurements.tabs: [{label:"Майка",unit:"см",columns:[...],rows:[...],note:""},{label:"Джемпер",unit:"см",columns:[...],rows:[...],note:""}]. label — точное название вещи, одно русское слово, без цвета, размера, цифр и повторов. Не возвращай measurements.tabs, если подходящая таблица только одна.
 - При противоречии текста и фотографий или плохо читаемой таблице запроси через inspect_full_size_indexes до трёх наиболее информативных оригиналов, если они помогут уточнить модель, логотип, конструкцию или замеры.`
 
 export function buildBatchAiUserPrompt(input: {
@@ -1038,6 +1040,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
+  const normalizedProductMeasurements = attributes.measurements !== undefined
+    ? normalizeProductMeasurements(attributes.measurements)
+    : null
   if (attributes.measurements !== undefined) {
     const normalizedMeasurements = normalizeMeasurementTable(attributes.measurements)
     attributes.measurements = normalizeMeasurementRowSizes(normalizedMeasurements || attributes.measurements)
@@ -1119,8 +1124,15 @@ export function normalizeBatchAiOutput(raw: any, input: {
       attributes.size_system = explicit.size_system
     }
   }
-  const discard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
-  const sizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
+  const rawDiscard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
+  const rawSizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
+  // Never lose the only evidence needed for manual recovery. A chart may be
+  // excluded from the public gallery only after a valid structured table was
+  // actually normalized from the AI response.
+  const sizeCharts = normalizedProductMeasurements ? rawSizeCharts : new Set<number>()
+  const discard = normalizedProductMeasurements
+    ? rawDiscard
+    : new Set([...rawDiscard].filter((index) => !rawSizeCharts.has(index)))
   const originalPhotos = Array.isArray(original.photos) ? original.photos : []
   const retainedIndexes = originalPhotos
     .map((_: string, index: number) => index + 1)
@@ -1467,58 +1479,37 @@ function extractShoeSizeGroups(value: unknown): Array<Record<string, unknown> & 
 }
 
 function measurementRowSizes(value: unknown): string[] {
-  const normalized = normalizeMeasurementTable(value)
-  if (!normalized) return []
-  const rows = normalized.rows
-  if (!Array.isArray(rows)) return []
-  return rows.flatMap((row) => (
-    row && typeof row === 'object' && !Array.isArray(row) && (row as Record<string, unknown>).size
-      ? [String((row as Record<string, unknown>).size)]
-      : []
-  ))
+  return productMeasurementSizes(value)
 }
 
 function normalizeMeasurementRowSizes(value: unknown) {
-  const normalized = normalizeMeasurementTable(value)
+  const normalized = normalizeProductMeasurements(value)
   if (!normalized) return value
-  const table = normalized as Record<string, unknown>
-  if (!Array.isArray(table.rows)) return value
-  const rows = table.rows.map((row) => (
-    row && typeof row === 'object' && !Array.isArray(row)
-      ? { ...row, size: canonicalClothingSize((row as Record<string, unknown>).size) }
-      : row
-  ))
-  if (!Array.isArray(table.columns)) {
-    return { ...table, rows }
+  if ('tabs' in normalized) {
+    return {
+      tabs: normalized.tabs.map(({ label, ...table }) => ({
+        label,
+        ...normalizeSingleMeasurementRowSizes(table),
+      })),
+    }
   }
+  return normalizeSingleMeasurementRowSizes(normalized)
+}
+
+function normalizeSingleMeasurementRowSizes(table: MeasurementTable) {
+  const rows = table.rows.map((row) => ({ ...row, size: canonicalClothingSize(row.size) }))
   const columns = table.columns.filter((column) => {
-      if (!column || typeof column !== 'object' || Array.isArray(column)) return true
-      const item = column as Record<string, unknown>
-      const key = String(item.key || '').trim().toLowerCase()
-      const label = String(item.label || '').trim().toLowerCase().replace(/ё/g, 'е')
+      const key = column.key.trim().toLowerCase()
+      const label = column.label.trim().toLowerCase().replace(/ё/g, 'е')
       const isSizeColumn = key === 'size' || key === 'sizes' || label === 'размер' || label === 'размеры' || label === 'size' || label === 'sizes'
       if (!isSizeColumn) return true
-      return rows.some((row) => {
-        if (!row || typeof row !== 'object' || Array.isArray(row)) return false
-        const values = (row as Record<string, unknown>).values
-        if (!values || typeof values !== 'object' || Array.isArray(values)) return false
-        return String((values as Record<string, unknown>)[String(item.key || '')] ?? '').trim() !== ''
-      })
+      return rows.some((row) => String(row.values[column.key] ?? '').trim() !== '')
     })
-  const columnKeys = new Set(columns.flatMap((column) => {
-    if (!column || typeof column !== 'object' || Array.isArray(column)) return []
-    const key = String((column as Record<string, unknown>).key || '').trim()
-    return key ? [key] : []
+  const columnKeys = new Set(columns.map((column) => column.key))
+  const cleanedRows = rows.map((row) => ({
+    ...row,
+    values: Object.fromEntries(Object.entries(row.values).filter(([key]) => columnKeys.has(key))),
   }))
-  const cleanedRows = rows.map((row) => {
-    if (!row || typeof row !== 'object' || Array.isArray(row)) return row
-    const values = (row as Record<string, unknown>).values
-    if (!values || typeof values !== 'object' || Array.isArray(values)) return row
-    return {
-      ...row,
-      values: Object.fromEntries(Object.entries(values).filter(([key]) => columnKeys.has(key))),
-    }
-  })
   return {
     ...table,
     columns,
@@ -1678,6 +1669,47 @@ export function calculatePriceRulePrice(rule: any, sourceText: unknown): number 
     ? Math.floor(ratio) * roundTo
     : Math.round(ratio) * roundTo
   return Number.isFinite(rounded) && rounded >= 0 ? Math.round(rounded) : null
+}
+
+/**
+ * Applies the simple supplier price list when AI did not return a price rule.
+ * The list is intentionally matched against the normalized product text, not
+ * against the supplier's Chinese purchase prices.
+ */
+export function priceFromAiInstructions(instructions: unknown, sourceText: unknown): number | null {
+  const source = normalizePriceInstructionText(sourceText)
+  if (!source) return null
+
+  for (const line of String(instructions || '').split(/\r?\n/)) {
+    const match = line.trim().match(/^(.+?)\s*[-–—:]\s*([\d\s]+(?:[.,]\d+)?)\s*(?:₽|руб(?:лей|ля)?|р\.)?\s*$/iu)
+    if (!match) continue
+    const price = Number(String(match[2]).replace(/\s+/g, '').replace(',', '.'))
+    if (!Number.isFinite(price) || price < 0) continue
+
+    const terms = match[1]
+      .split(/\s*(?:[,;/]|\bи\b)\s*/iu)
+      .map((term) => normalizePriceInstructionText(term))
+      .filter(Boolean)
+    if (terms.some((term) => priceInstructionTermMatches(term, source))) return Math.round(price)
+  }
+  return null
+}
+
+function normalizePriceInstructionText(value: unknown) {
+  return String(value || '')
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е')
+    .replace(/[^a-zа-я0-9]+/giu, ' ')
+    .trim()
+}
+
+function priceInstructionTermMatches(term: string, source: string) {
+  if (source.includes(term)) return true
+  return term.split(/\s+/u).some((word) => {
+    if (word.length < 3) return false
+    const stem = /[аяыиэоеё]$/u.test(word) ? word.slice(0, -1) : word
+    return source.includes(stem)
+  })
 }
 
 function finitePriceFormulaNumber(value: unknown, fallback: number) {
