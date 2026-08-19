@@ -608,13 +608,6 @@ function openRouterRuntimeKeyPayload() {
   return apiKey ? { openrouter_api_key: apiKey } : {}
 }
 
-async function publicRailsFetch<T>(pathname: string): Promise<T> {
-  const response = await fetch(railsApiUrl(pathname), { cache: 'no-store' })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.message || payload.error || `Rails API failed with ${response.status}`)
-  return payload as T
-}
-
 function mapBrand(brand: any): Brand {
   return {
     id: String(brand.id),
@@ -800,7 +793,7 @@ export function mapRailsProduct(product: any): Product {
 
 export async function getRailsCatalogLookups() {
   const [brandsPayload, categoriesPayload] = await Promise.all([
-    publicRailsFetch<{ brands: any[] }>('/catalog/brands'),
+    railsFetch<{ brands: any[] }>('/admin/catalog_taxonomy/brands'),
     railsFetch<{ categories: any[] }>('/admin/catalog_taxonomy/categories'),
   ])
   const { categories, subcategories } = flattenCategories(categoriesPayload.categories || [])

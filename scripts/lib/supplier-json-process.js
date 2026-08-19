@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 
 function runSupplierJsonProcess(script, products, options = {}) {
   const runnerPath = path.join(process.cwd(), 'scripts', 'parser', 'json_postprocess_runner.py');
@@ -15,14 +16,18 @@ function runSupplierJsonProcess(script, products, options = {}) {
     });
     let stdout = '';
     let stderr = '';
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
 
-    child.stdout.on('data', (data) => { stdout += data.toString(); });
-    child.stderr.on('data', (data) => { stderr += data.toString(); });
+    child.stdout.on('data', (data) => { stdout += stdoutDecoder.write(data); });
+    child.stderr.on('data', (data) => { stderr += stderrDecoder.write(data); });
     child.stdin.on('error', (error) => {
       if (error.code !== 'EPIPE' && error.code !== 'EOF') reject(error);
     });
     child.on('error', reject);
     child.on('close', (code) => {
+      stdout += stdoutDecoder.end();
+      stderr += stderrDecoder.end();
       if (code !== 0) {
         reject(new Error(stderr || `Post-process exited with ${code}`));
         return;

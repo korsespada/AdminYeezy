@@ -3,6 +3,22 @@ import { describe, expect, it } from 'vitest'
 const { runSupplierJsonProcess } = require('../../../scripts/lib/supplier-json-process')
 
 describe('supplier JSON post-process contract', () => {
+  it('preserves multibyte UTF-8 when a stored processor returns a large payload', async () => {
+    const products = Array.from({ length: 1200 }, (_, index) => ({
+      external_id: `utf8-${index}`,
+      description: `鞋面：羊皮；大底：橡胶；${'复古文艺氛围感 '.repeat(12)}`,
+      photos: [`shoe-${index}.jpg`],
+      source_position: index,
+      attributes: { szwego_tags: ['鞋款复古文艺'] },
+    }))
+    const result = await runSupplierJsonProcess({
+      name: 'utf8-roundtrip.py',
+      source: 'def process_products(products):\n    return products\n',
+    }, products)
+
+    expect(result).toEqual(products)
+  })
+
   it('moves Женская одежда 3 description to the preceding gallery and appends its size chart', async () => {
     const products = [
       { external_id: 'separator', description: '•••提莫·TIMO (只做Zp研发)••• тест', photos: [], source_position: 0, attributes: {} },
@@ -48,6 +64,26 @@ describe('supplier JSON post-process contract', () => {
     })
     expect(result.some((product: { brand: string }) => product.brand === '84ea2b2d-4f88-495b-9bba-7fd2bc191c73')).toBe(false)
     expect(await runSupplierJsonProcess('process_womens_clothing_3.py', result)).toEqual(result)
+  })
+
+  it.each([
+    ['Ami', '35cb6e05-f37c-4976-9b78-d3ede3d7400c', 'AMI'],
+    ['Arcteryx', 'a4801740-6290-4712-bff0-4e22b79c7ec6', "Arc'teryx"],
+  ])('recognizes %s in Женская одежда 3 descriptions', async (brandName, brandId, brandText) => {
+    const result = await runSupplierJsonProcess('process_womens_clothing_3.py', [
+      { external_id: 'separator', description: '•••提莫·TIMO (只做Zp研发)•••', photos: [], source_position: 0, attributes: {} },
+      { external_id: 'gallery', description: '真实不调色', photos: ['one.jpg', 'two.jpg', 'three.jpg'], source_position: 1, attributes: {} },
+      {
+        external_id: 'description-card',
+        description: `220💰${brandText} 26春夏新款外套，码数：S M L`,
+        photos: Array.from({ length: 8 }, (_, index) => `description-${index}.jpg`),
+        source_position: 2,
+        attributes: {},
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ name: brandName, brand: brandId })
   })
 
   it('attaches a Dior video only to the nearby bracketed product, not a later unrelated bag', async () => {

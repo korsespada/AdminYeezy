@@ -34,6 +34,8 @@ BRANDS = [
     {"name": "Hermes", "id": "0996bebe-0108-476f-8e73-2b23f034aa56", "aliases": ["Hermes", "HERMES", "爱马仕"]},
     {"name": "Burberry", "id": "5b9f23ff-b05b-4c89-8ea7-45e472440dda", "aliases": ["Burberry", "巴宝莉"]},
     {"name": "New Balance", "id": "1970d718-1f79-4a2f-8e44-3e4f4341c97d", "aliases": ["New Balance"]},
+    {"name": "Ami", "id": "35cb6e05-f37c-4976-9b78-d3ede3d7400c", "aliases": ["Ami", "AMI"]},
+    {"name": "Arcteryx", "id": "a4801740-6290-4712-bff0-4e22b79c7ec6", "aliases": ["Arcteryx", "Arc'teryx", "Arc’teryx"]},
 ]
 
 SEPARATOR_RE = re.compile(r"^•••提莫·TIMO\s*\(只做Zp研发\)•••")

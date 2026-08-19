@@ -246,28 +246,26 @@ description, `external_id`, and `source_position` remain authoritative.
 
 ## Женская одежда 2
 
-The DB-backed post-process for `Женская одежда 2` reads the supplier's
-all-timeline blocks. A catalogue item is an album with at least five photos,
-at least 60 meaningful description characters, and a recognised brand in the
-first part of the description. Short marketing albums and cards without a
-current canonical brand are not emitted. Every qualifying main album remains
-an independent product, so two different garments in one source block are
-not merged.
+The DB-backed post-process for `Женская одежда ZP 2` reads the supplier's
+all-timeline blocks separated by `✨✨✨ ✨✨分割线✨✨✨ ✨✨`. A catalogue
+product is every album with at least five photos whose description contains
+`随意实拍`. These albums are emitted independently: the same Szwego tag does
+not merge them, because separate albums can be separate colours. Model,
+packaging, `挂拍对比图` and other service albums are not emitted.
 
-The preceding size-chart album is recognised by `尺码表`, `尺码`, `尺寸`,
-`size chart/guide/table`, or a price marker and may contain one to three
-photos. Its photos are appended after the main gallery for every qualifying
-product in that source block. The main album's description, `external_id`, and
-`source_position` remain authoritative, and the assigned canonical brand is
-stored in `brand`.
+The final album in the same block containing a price, `顶版`/`出货` and `码数`
+is the authoritative description source. Its text and catalog fields are
+copied to each retained gallery, while the gallery's `external_id`,
+`source_position` and photo order remain authoritative. The preceding
+one-to-three-photo `尺码表`/`尺寸表`/`尺码` album is attached only when its
+`szwego_tags` intersects the gallery's tags and the albums are in the same
+separator block. Its photo is appended last and the source id is recorded as
+`attributes.size_chart_source_id`.
 
-The alias map includes the observed source spellings such as `1V` for Louis
-Vuitton, `FEND*` for Fendi, `Prad*` for Prada, `Dio*` for Dior, `CHANE*` for
-Chanel, `CELIN*` for Celine, `Burberr*`/`BBR` for Burberry, `Loew*` for Loewe,
-`MiuMi*` for Miu Miu, and `GUCC*` for Gucci. Standalone belts, waist belts,
-caps, hats, and other accessories are excluded from the title prefix; hooded
-garments and clothing with a detachable scarf remain eligible. The processor
-is idempotent and keeps its source identity fields unchanged.
+The processor keeps exact source identities, does not merge on adjacency or
+generic text, and is idempotent. If a legacy block has no tags, an attachment
+is allowed only when that block contains exactly one matching service card;
+otherwise the ambiguous data is left unattached.
 
 ## Женская одежда 3
 
@@ -282,7 +280,8 @@ block is appended last and recorded as `attributes.size_chart_source_id`.
 Other preview, lookbook, packaging, and service albums are not emitted. Brand
 matching supports the observed Latin/Chinese spellings for Chrome Hearts,
 Acne Studios, Gucci, Dior, Prada, Chanel, Loewe, Celine, Saint Laurent, Miu
-Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. A
+Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. Ami
+and Arcteryx are also recognized by their Latin spellings. A
 Chrome Hearts block is always excluded after brand detection. A
 block without a recognisable final brand card or without a usable preceding
 gallery is skipped. The processor is idempotent and preserves source identity.
@@ -320,3 +319,20 @@ measurements, and reversible garments remain one product when both sides show
 the same item. ZP uses the nine price-rule records and the price instruction
 list copied from `Женская одежда 3`; the price mapping is kept outside the
 supplier text prompt.
+
+## Обувь
+
+The DB-backed post-process for `Обувь` reads the Szwego all-timeline stream in
+bounded blocks separated by an empty untagged album. It keeps only albums with
+at least nine photos, a substantial description of at least 200 characters,
+and a source price marker (`💰`, `￥`, or `¥`). This excludes covers, videos,
+size cards, lookbook/model cards, separators, and other short service albums.
+
+Each retained gallery keeps its original `external_id`, `source_position`,
+description, and photo order. A video is copied only from an earlier card in
+the same separator block with the exact same complete `szwego_tags` value;
+the processor never carries a video across a separator or from a neighbouring
+model. When at least two retained galleries share that evidence, they receive
+one stable `variant_group_key` while their galleries remain separate colour
+variants. The processor is idempotent and leaves an ambiguous or video-less
+gallery retained without inventing a video.

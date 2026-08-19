@@ -5,6 +5,7 @@ import {
   approveRailsCrmWalletWithdrawal,
   buildRailsAdminProductsParams,
   deleteRailsChromoffListing,
+  getRailsCatalogLookups,
   getRailsCatalogLookupFacets,
   getRailsProductFilterFacets,
   listRailsCrmCustomers,
@@ -24,6 +25,24 @@ describe('rails admin product adapter', () => {
     vi.restoreAllMocks()
     process.env.RAILS_API_URL = 'https://rails.example.test'
     process.env.RAILS_ADMIN_TOKEN = 'test-token'
+  })
+
+  it('loads the complete brand lookup from the authenticated admin taxonomy endpoint', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ brands: [{ id: 'ami-id', name: 'Ami', slug: 'ami' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ categories: [] }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await getRailsCatalogLookups()
+
+    expect(result.brands[0]).toMatchObject({ id: 'ami-id', name: 'Ami', slug: 'ami' })
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://rails.example.test/api/v1/admin/catalog_taxonomy/brands')
   })
 
   it('builds product list query params for filters', () => {

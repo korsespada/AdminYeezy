@@ -96,7 +96,7 @@ CSV adapter должен:
 
 Если при публикации найден архивный Rails-товар с тем же `external_id`, Rails переиспользует эту запись независимо от её исторического поставщика: восстанавливает статус из входной строки, очищает `archived_at`, назначает текущего поставщика и синхронизирует варианты. Это предотвращает создание второго товара с теми же глобально уникальными SKU размеров; активные товары другого поставщика такой логикой не затрагиваются.
 
-Для ручного ведения таксономии `Настройки ИИ` читает полный административный справочник через `GET /api/v1/admin/catalog_taxonomy/categories` и вызывает `POST /api/v1/admin/catalog_taxonomy/categories` и `POST /api/v1/admin/catalog_taxonomy/subcategories`. Поэтому новая категория с `indexing_status=needs_review` сразу доступна для правил и AI, но не появляется в публичном каталоге до отдельного одобрения. AdminYeezy не записывает Rails CRM напрямую.
+Для ручного ведения таксономии `Настройки ИИ` читает полный административный справочник брендов и категорий через `GET /api/v1/admin/catalog_taxonomy/brands` и `GET /api/v1/admin/catalog_taxonomy/categories`, а категории создаёт через `POST /api/v1/admin/catalog_taxonomy/categories` и `POST /api/v1/admin/catalog_taxonomy/subcategories`. Поэтому новый бренд или категория с `indexing_status=needs_review` сразу доступны для правил и AI, но не появляются в публичном каталоге до отдельного одобрения/публикации. AdminYeezy не записывает Rails CRM напрямую.
 
 Если архивная карточка удерживается только историческими `order_items`, owner/admin
 может удалить её через `DELETE /api/v1/admin/products/:id/force_destroy`: снимки
