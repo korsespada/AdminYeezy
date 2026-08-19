@@ -10,10 +10,18 @@ describe('batch AI normalization', () => {
     expect(shouldRunBatchAiVisualSetCorrection({ product: { name: 'Комплект из рубашки и шорт' } }, ['https://example.test/1.jpg'])).toBe(true)
     expect(shouldRunBatchAiVisualSetCorrection({ product: { description: '套装，上衣和短裤' } }, ['https://example.test/1.jpg'])).toBe(true)
 
-    const prompt = buildBatchAiVisualSetCorrectionPrompt('Исходный товар: {"description":"套装"}')
+    const prompt = buildBatchAiVisualSetCorrectionPrompt([
+      'Верни объект следующей формы: {"product":{}}',
+      'Товар: {"description":"套装，上衣270 裤子260","attributes":{"measurements":"верх и брюки"}}',
+      'Бренды: [{"id":"brand","name":"Dior"}]',
+      'Подкатегории: [{"id":"shirts","name":"Рубашки"}]',
+    ].join('\n\n'))
 
     expect(prompt).toContain('две разные вещи')
     expect(prompt).toContain('не упоминай отсутствующие предметы')
+    expect(prompt).toContain('Бренды:')
+    expect(prompt).not.toContain('Товар:')
+    expect(prompt).not.toContain('上衣270')
   })
 
   it('hides legacy generic subcategories from the AI context', () => {
