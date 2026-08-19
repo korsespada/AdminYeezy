@@ -282,7 +282,11 @@ matching supports the observed Latin/Chinese spellings for Chrome Hearts,
 Acne Studios, Gucci, Dior, Prada, Chanel, Loewe, Celine, Saint Laurent, Miu
 Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. Ami,
 Arcteryx, On, Rick Owens, Emporio Armani, Norda, Maison Mihara Yasuhiro, xVESSEL,
-and Kailas are also recognized by their Latin/Chinese spellings. A
+Kailas, Gimaguas, Cotemp, VIBAe, AnOther Project, Ann Demeulemeester, HIDEMI,
+ICE DUST, Christen, ODTD, SHUSHU/TONG, 3.1 Phillip Lim, IIIVIVINIKO, Elia
+Maurizi, Benci Brothers, Ann Andelman, DYMONLATRY, ABRA, Casadei, Aeyde, Lost
+in Echo, untitlab, Pierre Hardy, Alohas, and ORINOU are also recognized by their
+Latin spellings. A
 Chrome Hearts block is always excluded after brand detection. A
 block without a recognisable final brand card or without a usable preceding
 gallery is skipped. The processor is idempotent and preserves source identity.
