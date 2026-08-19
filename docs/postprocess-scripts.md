@@ -280,8 +280,9 @@ block is appended last and recorded as `attributes.size_chart_source_id`.
 Other preview, lookbook, packaging, and service albums are not emitted. Brand
 matching supports the observed Latin/Chinese spellings for Chrome Hearts,
 Acne Studios, Gucci, Dior, Prada, Chanel, Loewe, Celine, Saint Laurent, Miu
-Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. Ami
-and Arcteryx are also recognized by their Latin spellings. A
+Miu, Louis Vuitton, Valentino, Fendi, Hermes, Burberry, and New Balance. Ami,
+Arcteryx, On, Rick Owens, Emporio Armani, Norda, Maison Mihara Yasuhiro, xVESSEL,
+and Kailas are also recognized by their Latin/Chinese spellings. A
 Chrome Hearts block is always excluded after brand detection. A
 block without a recognisable final brand card or without a usable preceding
 gallery is skipped. The processor is idempotent and preserves source identity.
@@ -336,3 +337,23 @@ model. When at least two retained galleries share that evidence, they receive
 one stable `variant_group_key` while their galleries remain separate colour
 variants. The processor is idempotent and leaves an ambiguous or video-less
 gallery retained without inventing a video.
+
+## Обувь 2
+
+`Обувь 2` публикует ленту без отдельных альбомов деталей: каждый альбом с
+девятью и более фотографиями остаётся самостоятельной товарной карточкой.
+Фотографии, описание, `external_id` и `source_position` не объединяются и не
+переносятся между альбомами. Однокадровые карточки с видео являются служебными
+и удаляются из результата; видео и poster не записываются в товарные карточки.
+
+Цветовая семья определяется непрерывной серией товарных альбомов с одинаковым
+нормализованным полным набором тегов **и одинаковой текстовой сигнатурой
+модели**. Один тег сам по себе недостаточен: например, `Nike 002` и `Nike 001`
+разделяются, как и `Balenciaga Venom` и `Balenciaga Hummer`. Китайские варианты
+цвета вроде `米色` и `米白色` нормализуются и не разрывают одну модель. Повтор той
+же модели после другой модели начинает новую семью; серия из одной карточки не
+получает ключ цветовой семьи. Внутри семьи карточки получают общий
+стабильный `variant_group_key`, но остаются отдельными цветами. Правило
+идемпотентно и не требует маркера цены или минимальной длины китайского
+описания: в этой ленте такие маркеры отсутствуют даже у обычных товарных
+альбомов.

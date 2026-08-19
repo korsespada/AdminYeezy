@@ -36,6 +36,13 @@ BRANDS = [
     {"name": "New Balance", "id": "1970d718-1f79-4a2f-8e44-3e4f4341c97d", "aliases": ["New Balance"]},
     {"name": "Ami", "id": "35cb6e05-f37c-4976-9b78-d3ede3d7400c", "aliases": ["Ami", "AMI"]},
     {"name": "Arcteryx", "id": "a4801740-6290-4712-bff0-4e22b79c7ec6", "aliases": ["Arcteryx", "Arc'teryx", "Arc’teryx"]},
+    {"name": "On", "id": "085f112c-d6a9-44de-9176-d6fbb5eeab03", "aliases": ["On Running", "On"]},
+    {"name": "Rick Owens", "id": "837433da-2847-4128-85ba-1892b4d47cd3", "aliases": ["Rick Owens", "RickOwens"]},
+    {"name": "Emporio Armani", "id": "f2c53014-0500-4c8c-a905-51b3c41be1a1", "aliases": ["Emporio Armani"]},
+    {"name": "Norda", "id": "7a86c94d-d7cd-4388-be65-56ba24462068", "aliases": ["Norda"]},
+    {"name": "Maison Mihara Yasuhiro", "id": "aba3c0ce-79e6-4c42-96c6-dd9d23ea38f2", "aliases": ["Maison Mihara Yasuhiro", "Mihara Yasuhiro"]},
+    {"name": "xVESSEL", "id": "4c96f687-a419-4c8f-b478-19a490740786", "aliases": ["xVESSEL", "x Vessel"]},
+    {"name": "Kailas", "id": "01ca0c86-b593-4b61-8f7c-ad6c4cbcf538", "aliases": ["Kailas", "凯乐石"]},
 ]
 
 SEPARATOR_RE = re.compile(r"^•••提莫·TIMO\s*\(只做Zp研发\)•••")

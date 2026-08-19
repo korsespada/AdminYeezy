@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -75,6 +75,31 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('Второго AI-прохода не будет')
     expect(prompt).toContain('photo_indexes')
     expect(prompt).toContain('catalog_attributes')
+  })
+
+  it('adapts the description brief to the factual density of each source', () => {
+    const richProduct = {
+      external_id: 'technical-shoe',
+      photos: ['1.jpg', '2.jpg'],
+      description: '新一代缓震跑鞋，中底印有 HYPERBOOST PRO 字样，采用 TPU 发泡科技和更高的堆栈结构。白红配色的织物鞋面结合热熔TPU，三道杠延伸至中底外侧；厚实后跟填充配合橡胶大底与鞋带系统，提供稳定包裹。Size：36 37 38 39 40',
+    }
+    const sparseProduct = {
+      external_id: 'photo-first',
+      photos: ['1.jpg', '2.jpg'],
+      description: '新品百搭，现货。',
+    }
+
+    expect(batchAiDescriptionEvidenceProfile(richProduct).mode).toBe('rich_source')
+    expect(batchAiDescriptionEvidenceProfile(sparseProduct).mode).toBe('photo_first')
+
+    const richPrompt = buildBatchAiUserPrompt({ product: richProduct, brands: [], categories: [], subcategories: [], attributes: [] })
+    expect(richPrompt).toContain('богатый фактический источник')
+    expect(richPrompt).toContain('500–800 знаков')
+    expect(richPrompt).toContain('технологии, материалы, конструкцию')
+
+    const sparsePrompt = buildBatchAiColorSplitPrompt({ product: sparseProduct, brands: [], categories: [], subcategories: [], attributes: [] })
+    expect(sparsePrompt).toContain('скудный текст, фотографии — основной источник')
+    expect(sparsePrompt).toContain('Не выдумывай точный состав')
   })
 
   it('asks for a video color only when a separate video preview is available', () => {

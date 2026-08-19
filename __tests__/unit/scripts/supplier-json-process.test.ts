@@ -69,6 +69,13 @@ describe('supplier JSON post-process contract', () => {
   it.each([
     ['Ami', '35cb6e05-f37c-4976-9b78-d3ede3d7400c', 'AMI'],
     ['Arcteryx', 'a4801740-6290-4712-bff0-4e22b79c7ec6', "Arc'teryx"],
+    ['On', '085f112c-d6a9-44de-9176-d6fbb5eeab03', 'On Running'],
+    ['Rick Owens', '837433da-2847-4128-85ba-1892b4d47cd3', 'RickOwens'],
+    ['Emporio Armani', 'f2c53014-0500-4c8c-a905-51b3c41be1a1', 'Emporio Armani'],
+    ['Norda', '7a86c94d-d7cd-4388-be65-56ba24462068', 'Norda'],
+    ['Maison Mihara Yasuhiro', 'aba3c0ce-79e6-4c42-96c6-dd9d23ea38f2', 'Mihara Yasuhiro'],
+    ['xVESSEL', '4c96f687-a419-4c8f-b478-19a490740786', 'xVESSEL'],
+    ['Kailas', '01ca0c86-b593-4b61-8f7c-ad6c4cbcf538', '凯乐石'],
   ])('recognizes %s in Женская одежда 3 descriptions', async (brandName, brandId, brandText) => {
     const result = await runSupplierJsonProcess('process_womens_clothing_3.py', [
       { external_id: 'separator', description: '•••提莫·TIMO (只做Zp研发)•••', photos: [], source_position: 0, attributes: {} },
