@@ -382,6 +382,26 @@ export function buildBatchAiUserPrompt(input: {
   ].join('\n\n')
 }
 
+export function shouldRunBatchAiVisualSetCorrection(rawOutput: unknown, photoUrls: unknown[]) {
+  if (!Array.isArray(photoUrls) || photoUrls.length === 0 || !rawOutput || typeof rawOutput !== 'object') return false
+  const product = (rawOutput as { product?: unknown }).product
+  if (!product || typeof product !== 'object') return false
+  const text = ['name', 'description', 'h1', 'seo_title', 'seo_description']
+    .map((field) => (product as Record<string, unknown>)[field])
+    .filter((value): value is string => typeof value === 'string')
+    .join('\n')
+  return /комплект[а-яё]*|套装/iu.test(text)
+}
+
+export function buildBatchAiVisualSetCorrectionPrompt(userPrompt: string) {
+  return [
+    userPrompt,
+    'ОБЯЗАТЕЛЬНАЯ ВИЗУАЛЬНАЯ ПЕРЕПРОВЕРКА: предварительный ответ назвал товар комплектом. Это не доказательство: слова «комплект», «套装», «шорты», «брюки», цены и таблицы в исходном тексте могут относиться к другой карточке.',
+    'Независимо заново определи товар только по приложенным contact sheet. Признавай комплектом только случай, когда на серии фотографий отчётливо видны минимум две разные вещи. Если на всех фото показана одна вещь, укажи только её фактический тип, название, описание и подкатегорию; не упоминай отсутствующие предметы.',
+    'Верни полный итоговый JSON исходной схемы без markdown. Не запрашивай дополнительные фотографии.',
+  ].join('\n\n')
+}
+
 export function buildBatchAiVariantPrompt(product: any) {
   const textOnlyProduct = {
     external_id: product.external_id,

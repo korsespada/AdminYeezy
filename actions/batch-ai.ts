@@ -20,12 +20,14 @@ import {
   buildBatchAiUserPrompt,
   buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
+  buildBatchAiVisualSetCorrectionPrompt,
   calculatePriceRulePrice,
   matchingPriceRule,
   normalizePriceRulesCatalogReferences,
   priceFromAiInstructions,
   restoreRetryProductsFromSnapshots,
   shouldPreserveExistingPrice,
+  shouldRunBatchAiVisualSetCorrection,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
   DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
@@ -1668,6 +1670,18 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         previousOutput: raw,
         photoUrls: input.photoUrls || [],
         indexes: raw.inspect_full_size_indexes,
+      })
+      rawOutput = raw
+    }
+    if (shouldRunBatchAiVisualSetCorrection(raw, input.photoUrls || [])) {
+      raw = await runBatchAiOpenRouter({
+        settings,
+        systemPrompt: input.systemPrompt,
+        userPrompt: buildBatchAiVisualSetCorrectionPrompt(input.userPrompt),
+        contactSheets: sheets,
+        referenceSheets,
+        modelReferenceSheets,
+        extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
       })
       rawOutput = raw
     }

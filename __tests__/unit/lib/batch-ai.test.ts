@@ -1,9 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
 describe('batch AI normalization', () => {
+  it('rechecks a set claim against photos, including Chinese source wording', () => {
+    expect(shouldRunBatchAiVisualSetCorrection({ product: { name: 'Синяя рубашка' } }, ['https://example.test/1.jpg'])).toBe(false)
+    expect(shouldRunBatchAiVisualSetCorrection({ product: { name: 'Комплект из рубашки и шорт' } }, [])).toBe(false)
+    expect(shouldRunBatchAiVisualSetCorrection({ product: { name: 'Комплект из рубашки и шорт' } }, ['https://example.test/1.jpg'])).toBe(true)
+    expect(shouldRunBatchAiVisualSetCorrection({ product: { description: '套装，上衣和短裤' } }, ['https://example.test/1.jpg'])).toBe(true)
+
+    const prompt = buildBatchAiVisualSetCorrectionPrompt('Исходный товар: {"description":"套装"}')
+
+    expect(prompt).toContain('две разные вещи')
+    expect(prompt).toContain('не упоминай отсутствующие предметы')
+  })
+
   it('hides legacy generic subcategories from the AI context', () => {
     expect(filterLegacySubcategoriesForAi([
       { id: 'generic-shoes', name: 'Туфли' },
