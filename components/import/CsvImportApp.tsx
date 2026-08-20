@@ -63,6 +63,7 @@ import {
 } from "@/actions/csv-import";
 import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
+import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
 import {
   getBatchAiRunAction,
   getBatchAiRunLogsAction,
@@ -1141,6 +1142,10 @@ export default function CsvImportApp({
       setSaveMsg("Публикация доступна только из JSONB-партии. Откройте текущую выгрузку, а не старый CSV-артефакт.");
       return;
     }
+    if (batchPublishSyncDecision({ isSnapshotSource, isDirty }) === "wait_for_save") {
+      setSaveMsg("Изменения ещё сохраняются в БД. Дождитесь сообщения «Сохранено в БД» и повторите публикацию.");
+      return;
+    }
     const validationIssues = validateProducts(products);
     const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
     if (validationErrors.length > 0) {
@@ -1175,8 +1180,6 @@ export default function CsvImportApp({
       setIsPushing(true);
       setPublishProgress({ phase: "lookup", current: 0, total: products.length });
       try {
-        const saved = isSnapshotSource ? true : await persistBatchProducts(products);
-        if (!saved) return;
         const pushResult = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId, replaceMissing);
         if (pushResult.success) {
           setResult({
