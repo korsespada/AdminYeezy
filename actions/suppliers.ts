@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { query, scrapingQuery, getScrapingClient, redis, describeScrapingDatabaseConnection } from '@/lib/db'
-import { deleteS3Folder } from '@/lib/s3'
+import { deleteS3Folder, uploadToS3 } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
 import { requireAdmin } from '@/lib/admin-session'
 import { resolveSafeRuntimePath } from '@/lib/runtime-paths'
@@ -18,6 +18,7 @@ import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import sharp from 'sharp'
 import nodeFetch from 'node-fetch'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import {
@@ -26,6 +27,7 @@ import {
 } from '@/lib/scraping-files'
 import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
+import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 // --- Suppliers CRUD ---
 
@@ -92,6 +94,7 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
     `)
     const names = new Map(mappings.rows.map((row) => [`${row.entity_type}:${row.id}`, row.name]))
     for (const row of res.rows) {
+      row.ai_visual_examples = normalizeSupplierAiVisualExamples(row.ai_visual_examples)
       row.allowed_brand_ids = Array.isArray(row.allowed_brand_ids) && row.allowed_brand_ids.length
         ? row.allowed_brand_ids.map(String)
         : row.default_brand ? [String(row.default_brand)] : []
@@ -219,6 +222,10 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
     const ai_cache_enabled = formData.get('ai_cache_enabled') === 'on'
     const ai_instructions = formData.get('ai_instructions') as string || ''
+    let ai_visual_examples: SupplierAiVisualExample[] = []
+    try {
+      ai_visual_examples = normalizeSupplierAiVisualExamples(JSON.parse(String(formData.get('ai_visual_examples') || '[]')))
+    } catch { /* keep an empty visual example list */ }
 
     const avatar_url = formData.get('avatar_url') as string || null
     const cookie = formData.get('cookie') as string || null
@@ -233,9 +240,9 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const ai_processing_options = normalizeSupplierAiProcessingOptions(formData.get('ai_processing_options'))
 
     const res = await scrapingQuery(
-      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb) RETURNING id`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options)]
+      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options, ai_visual_examples)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb) RETURNING id`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples)]
     )
 
     revalidatePath('/admin/suppliers')
@@ -281,6 +288,10 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
       formData.get('ai_instructions'),
       currentInstructions.rows[0]?.ai_photo_instructions,
     )
+    let ai_visual_examples: SupplierAiVisualExample[] = []
+    try {
+      ai_visual_examples = normalizeSupplierAiVisualExamples(JSON.parse(String(formData.get('ai_visual_examples') || '[]')))
+    } catch { /* keep an empty visual example list */ }
 
     const avatar_url = formData.get('avatar_url') as string || null
     const cookie = formData.get('cookie') as string || null
@@ -300,9 +311,9 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
        allowed_category_ids=$8::jsonb,allowed_subcategory_ids=$9::jsonb,allowed_brand_ids=$10::jsonb,
        min_photos=$11,max_on_model_media=$12,min_desc_len=$13,brand_tags=$14,
        default_price=$15,default_gender=$16,
-       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,updated_at=NOW()
-       WHERE id=$34`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), id]
+       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,ai_visual_examples=$34::jsonb,updated_at=NOW()
+       WHERE id=$35`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), id]
     )
 
     revalidatePath('/admin/suppliers')
@@ -357,6 +368,32 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
         }
       })
     })
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+export async function uploadSupplierAiVisualExampleAction(supplierId: number, formData: FormData): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const file = formData.get('file')
+    if (!(file instanceof File)) return { success: false, error: 'Файл не выбран' }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      return { success: false, error: 'Поддерживаются JPG, PNG и WebP' }
+    }
+    if (file.size <= 0 || file.size > 12 * 1024 * 1024) {
+      return { success: false, error: 'Размер фотографии должен быть не больше 12 МБ' }
+    }
+    const supplier = await scrapingQuery('SELECT id FROM suppliers WHERE id=$1', [supplierId])
+    if (!supplier.rows[0]) return { success: false, error: 'Поставщик не найден' }
+    const id = crypto.randomUUID()
+    const normalized = await sharp(Buffer.from(await file.arrayBuffer()))
+      .rotate()
+      .resize(1800, 1800, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 88 })
+      .toBuffer()
+    const url = await uploadToS3(`supplier-ai-visual-examples/${supplierId}/${id}.jpg`, normalized, 'image/jpeg')
+    return { success: true, data: { id, url } }
   } catch (err: any) {
     return { success: false, error: err.message }
   }

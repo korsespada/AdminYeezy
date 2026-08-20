@@ -51,6 +51,7 @@ async function processItem(item) {
     const sheets = await buildContactSheets(input.photoUrls || [])
     const referenceSheets = await cachedReferenceSheets(input.priceReferenceUrls || [])
     const modelReferenceSheets = await cachedReferenceSheets(input.modelReferenceUrls || [])
+    const visualExampleSheets = await cachedReferenceSheets(input.visualExampleUrls || [])
     const content = [{ type: 'text', text: input.userPrompt }]
     sheets.forEach((url, index) => {
       content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
@@ -62,6 +63,10 @@ async function processItem(item) {
     })
     modelReferenceSheets.forEach((url, index) => {
       content.push({ type: 'text', text: `Эталоны моделей Chanel ${index + 1}. Это отдельный лист справочника, не фотографии текущего товара.` })
+      content.push({ type: 'image_url', image_url: { url } })
+    })
+    visualExampleSheets.forEach((url, index) => {
+      content.push({ type: 'text', text: `Визуальные эталоны поставщика ${index + 1}. Это отдельный справочник ракурсов, не фотографии текущего товара.` })
       content.push({ type: 'image_url', image_url: { url } })
     })
     let output = await cockpitJson({

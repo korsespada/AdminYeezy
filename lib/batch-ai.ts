@@ -19,6 +19,7 @@ import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchA
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 import { normalizeMeasurementTable, normalizeProductMeasurements, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
+import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
 
@@ -360,12 +361,14 @@ export function buildBatchAiUserPrompt(input: {
   priceRules?: BatchAiPriceRuleHint[]
   priceAiInstructions?: string | null
   modelReferences?: BatchAiModelReference[]
+  visualExamples?: SupplierAiVisualExample[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
   categoryRules?: BatchAiCategoryRule[]
   processingOptions?: BatchAiProcessingOptions
 }) {
   const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
+  const visualExamples = normalizeSupplierAiVisualExamples(input.visualExamples)
   const configuredCategoryRules = normalizeBatchAiCategoryRules(input.categoryRules)
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
     || (() => {
@@ -405,6 +408,11 @@ export function buildBatchAiUserPrompt(input: {
       reference_photo_numbers: references,
     }
   })
+  const visualExamplePrompt = visualExamples.map((example, index) => ({
+    example_number: index + 1,
+    label: example.label || `Визуальный пример ${index + 1}`,
+    instruction: example.instruction || '',
+  }))
   return [
     'Верни объект следующей формы:',
     JSON.stringify({
@@ -450,6 +458,10 @@ export function buildBatchAiUserPrompt(input: {
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
     'Общую инструкцию поставщика по ценам используй как дополнительную подсказку для выбора price_rule_key. Она может содержать несколько товаров и цен; сопоставляй товар по смыслу, но не выдумывай цену и не помещай её в публичные поля.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
+    ...(visualExamples.length ? [
+      `Визуальные эталоны ракурсов поставщика: ${JSON.stringify(visualExamplePrompt)}`,
+      'После фотографий текущего товара приложен отдельный лист «Визуальные эталоны поставщика». Это не фотографии текущего товара и не доказательство бренда, цвета или материала. Используй его только для понимания качества и типа ракурса, который требуется выбрать первым или исключить.',
+    ] : []),
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
       `Определи цветовое семейство по артикулу/коду модели. Пример пользователя: «${processingOptions.articleExample || 'SP001 blue'}». Если в таких артикулах цвет идёт после общей основы (например, SP001 blue и SP001 green), в color_family.group_signature и ai_processing.article_key оставь только общую основу SP001, а цвет запиши отдельно в color. Не объединяй разные модели только из-за похожего артикула.`,
@@ -715,6 +727,7 @@ export async function runBatchAiOpenRouter(input: {
   contactSheets: string[]
   referenceSheets?: string[]
   modelReferenceSheets?: string[]
+  visualExampleSheets?: string[]
   extraImages?: Array<{ label: string; url: string; detail?: 'low' | 'high' | 'auto' }>
 }) {
   const content: any[] = [{ type: 'text', text: input.userPrompt }]
@@ -728,6 +741,10 @@ export async function runBatchAiOpenRouter(input: {
   })
   ;(input.modelReferenceSheets || []).forEach((url, index) => {
     content.push({ type: 'text', text: `Эталоны моделей Chanel ${index + 1}. Это отдельный лист справочника, не фотографии текущего товара.` })
+    content.push({ type: 'image_url', image_url: { url } })
+  })
+  ;(input.visualExampleSheets || []).forEach((url, index) => {
+    content.push({ type: 'text', text: `Визуальные эталоны поставщика ${index + 1}. Это отдельный справочник ракурсов, не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
   ;(input.extraImages || []).forEach((image) => {
@@ -1549,7 +1566,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       subcategory,
       gender: resolvedGender,
       ...(proposedPrice !== null ? { price: proposedPrice, price_source: 'ai_instruction' } : {}),
-      photos: photos.length > 0 ? photos : original.photos,
+      photos,
       photo_alts: photoAlts,
       attributes,
       ai_processed: true,

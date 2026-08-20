@@ -223,6 +223,35 @@ describe('batch AI normalization', () => {
     expect(result.coverPhotoIndex).toBe(3)
   })
 
+  it('keeps all AI-discarded photos removed instead of restoring the original gallery', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Товар' },
+      media: { discard_indexes: [1, 2] },
+    }, {
+      product: { name: '', photos: ['screenshot-1.jpg', 'screenshot-2.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.photos).toEqual([])
+  })
+
+  it('adds supplier visual examples to the prompt without treating them as product evidence', () => {
+    const prompt = buildBatchAiUserPrompt({
+      product: { external_id: 'scarf-1', photos: ['1.jpg', '2.jpg'] },
+      brands: [], categories: [], subcategories: [], attributes: [],
+      visualExamples: [{
+        id: 'flat-shawl',
+        url: 'https://static.example.test/flat-shawl.jpg',
+        label: 'Шаль — растянутая',
+        instruction: 'Ставь такой ракурс первым, если он есть.',
+      }],
+    })
+
+    expect(prompt).toContain('Шаль — растянутая')
+    expect(prompt).toContain('не фотографии текущего товара')
+    expect(prompt).toContain('отдельный лист «Визуальные эталоны поставщика»')
+  })
+
   it('keeps supplier publication date out of AI attributes and on the product', () => {
     const result = normalizeBatchAiOutput({
       product: { name: 'Товар' },

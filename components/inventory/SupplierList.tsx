@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle } from 'lucide-react'
-import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, toggleSupplierFavoriteAction } from '@/actions/suppliers'
+import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle, ClipboardPaste, Upload } from 'lucide-react'
+import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
@@ -10,6 +10,7 @@ import {
   getCatalogAttributeDefinitionsForCategory,
 } from '@/lib/catalog-attribute-schema'
 import { SupplierPostProcessEditor } from '@/components/inventory/SupplierPostProcessEditor'
+import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 type SupplierAiProcessingOptions = {
   colorFamilyByArticle: boolean
@@ -65,6 +66,7 @@ interface Supplier {
   ai_resize_enabled: boolean
   ai_instructions?: string | null
   ai_processing_options?: SupplierAiProcessingOptions | null
+  ai_visual_examples?: SupplierAiVisualExample[] | null
   avatar_url?: string | null
   cookie?: string | null
   post_process_script?: string | null
@@ -171,6 +173,7 @@ export default function SupplierList({
         ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS,
         ...(supplier.ai_processing_options || {}),
       },
+      ai_visual_examples: normalizeSupplierAiVisualExamples(supplier.ai_visual_examples),
       allowed_category_ids: supplier.allowed_category_ids?.length ? supplier.allowed_category_ids : supplier.default_category ? [supplier.default_category] : [],
       allowed_subcategory_ids: supplier.allowed_subcategory_ids?.length ? supplier.allowed_subcategory_ids : supplier.default_subcategory ? [supplier.default_subcategory] : [],
       allowed_brand_ids: supplier.allowed_brand_ids?.length ? supplier.allowed_brand_ids : supplier.default_brand ? [supplier.default_brand] : [],
@@ -288,6 +291,7 @@ export default function SupplierList({
         ai_resize_enabled: true,
         ai_instructions: '',
         ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS },
+        ai_visual_examples: [],
         ai_photo_models: '',
         ai_parallel_enabled: false,
         ai_parallel_count: 5,
@@ -386,6 +390,7 @@ export default function SupplierList({
     formData.set('allowed_subcategory_ids', JSON.stringify(editingSupplier?.allowed_subcategory_ids || []))
     formData.set('allowed_brand_ids', JSON.stringify(editingSupplier?.allowed_brand_ids || []))
     formData.set('ai_processing_options', JSON.stringify(editingSupplier?.ai_processing_options || DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS))
+    formData.set('ai_visual_examples', JSON.stringify(editingSupplier?.ai_visual_examples || []))
 
     let res
     if (editingSupplier && editingSupplier.id !== 0) {
@@ -404,6 +409,48 @@ export default function SupplierList({
     } else {
       alert(res.error)
     }
+  }
+
+  const uploadVisualExample = async (file: File | null) => {
+    if (!file || !editingSupplier || editingSupplier.id === 0) {
+      if (editingSupplier?.id === 0) alert('Сначала сохраните поставщика, затем добавляйте визуальные примеры.')
+      return
+    }
+    const formData = new FormData()
+    formData.set('file', file)
+    const result = await uploadSupplierAiVisualExampleAction(editingSupplier.id, formData)
+    if (!result.success || !result.data) {
+      alert(result.error || 'Не удалось загрузить визуальный пример')
+      return
+    }
+    const example = result.data as SupplierAiVisualExample
+    setEditingSupplier((current) => current ? {
+      ...current,
+      ai_visual_examples: [...(current.ai_visual_examples || []), { ...example, label: '', instruction: '' }],
+    } : current)
+  }
+
+  const updateVisualExample = (index: number, patch: Partial<SupplierAiVisualExample>) => {
+    setEditingSupplier((current) => current ? {
+      ...current,
+      ai_visual_examples: (current.ai_visual_examples || []).map((example, exampleIndex) => exampleIndex === index ? { ...example, ...patch } : example),
+    } : current)
+  }
+
+  const removeVisualExample = (index: number) => {
+    setEditingSupplier((current) => current ? {
+      ...current,
+      ai_visual_examples: (current.ai_visual_examples || []).filter((_, exampleIndex) => exampleIndex !== index),
+    } : current)
+  }
+
+  const handleVisualExamplePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const file = Array.from(event.clipboardData.items)
+      .find((item) => item.type.startsWith('image/'))
+      ?.getAsFile()
+    if (!file) return
+    event.preventDefault()
+    void uploadVisualExample(file)
   }
 
   const handleFetchAvatar = async (id: number) => {
@@ -1015,6 +1062,61 @@ export default function SupplierList({
                           placeholder="Например: Classic Flap, Chanel 22, Boy Chanel"
                           className="w-full min-h-[80px] bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 text-white text-sm outline-none focus:border-indigo-500 custom-scrollbar resize-y"
                         />
+                      </div>
+                      <div className="space-y-3 border-t border-indigo-500/20 pt-4">
+                        <div>
+                          <h5 className="text-xs font-bold uppercase tracking-widest text-indigo-300">Визуальные примеры для AI</h5>
+                          <p className="mt-1 text-[11px] text-slate-500">Добавьте эталоны ракурсов товара. Можно вставить изображение через Ctrl+V в область ниже.</p>
+                        </div>
+                        <div
+                          tabIndex={0}
+                          onPaste={handleVisualExamplePaste}
+                          className="flex min-h-20 cursor-text items-center justify-center rounded-lg border border-dashed border-indigo-500/40 bg-slate-900/70 px-4 py-3 text-center text-xs text-slate-400 outline-none transition hover:border-indigo-400 focus:border-indigo-400"
+                        >
+                          <ClipboardPaste className="mr-2 h-4 w-4 text-indigo-300" />
+                          <span>Вставьте скопированное изображение сюда</span>
+                        </div>
+                        <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-indigo-500">
+                          <Upload className="h-4 w-4" /> Загрузить файл
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(event) => {
+                              const file = event.target.files?.[0] || null
+                              event.currentTarget.value = ''
+                              void uploadVisualExample(file)
+                            }}
+                          />
+                        </label>
+                        {(editingSupplier?.ai_visual_examples || []).length > 0 && (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            {(editingSupplier?.ai_visual_examples || []).map((example, index) => (
+                              <div key={example.id} className="grid grid-cols-[96px_1fr_auto] gap-3 rounded-lg border border-slate-700 bg-slate-900/70 p-2">
+                                <img src={example.url} alt={example.label || `Визуальный пример ${index + 1}`} className="h-24 w-24 rounded object-cover" />
+                                <div className="space-y-2">
+                                  <input
+                                    value={example.label}
+                                    onChange={(event) => updateVisualExample(index, { label: event.target.value })}
+                                    placeholder="Например: Шаль — растянутая"
+                                    className="w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
+                                  />
+                                  <textarea
+                                    value={example.instruction}
+                                    onChange={(event) => updateVisualExample(index, { instruction: event.target.value })}
+                                    placeholder="Что AI должен понять по этому примеру"
+                                    rows={2}
+                                    className="w-full resize-none rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-indigo-500"
+                                  />
+                                </div>
+                                <button type="button" onClick={() => removeVisualExample(index)} className="self-start rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-300" title="Удалить пример">
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {editingSupplier?.id === 0 && <p className="text-[11px] text-amber-300">Сначала сохраните поставщика, чтобы загружать визуальные примеры.</p>}
                       </div>
                     </div>
                   )}

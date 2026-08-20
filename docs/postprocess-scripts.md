@@ -1,8 +1,8 @@
 # Post-Processing Scripts Guide
 
-This project uses Python post-processing scripts to transform JSON products before AI processing or publication through Rails API.
+This project uses Python post-processing sources to transform JSON products before AI processing or publication through Rails API. For new supplier rules, the normal runtime source is stored in `supplier_post_process_scripts` and assigned through the DB-backed supplier workflow; a committed file under `scripts/parser/` is only a legacy fallback or an explicitly requested Git artifact.
 
-## Where Scripts Live
+## Where Legacy Scripts Live
 
 Put every supplier post-processing script in:
 
@@ -16,7 +16,7 @@ Then set the supplier field `post_process_script` to the file name only:
 process_new_supplier.py
 ```
 
-Do not store scripts only on the VPS or inside a running container. They must be committed to the repo, pushed, and deployed to Coolify so they survive redeploys.
+For a DB-backed version, do not create a repository file or deploy it to Coolify: save, Preview, and activate the source through the supplier post-process action/API or the dedicated scraping database. Legacy files must still be committed and deployed so they survive redeploys.
 
 ## Required JSON Contract
 
@@ -130,6 +130,29 @@ yeezy_scraping.products -> AdminYeezy publication adapter -> Rails API -> Rails 
 ```
 
 The legacy `shop` database is not the source of truth for the new storefront.
+
+## Шарфы (supplier 58)
+
+The active DB-backed version `Шарфы: бренды и фильтр альбомов v2` keeps the
+original `external_id`, `source_position`, photo order, and all non-filtered
+fields. It detects the canonical Rails brand from the normalized description
+and writes the current canonical brand id to `brand` and the canonical brand
+name to `name`.
+
+The processor removes an album when:
+
+- it has zero or one photo;
+- its normalized description is shorter than 100 characters;
+- the description contains `披肩现货`;
+- it is a small ribbon/twilly/hair-ribbon product, identified by ribbon terms
+  together with a narrow size such as `120x5cm` or `86x5cm`;
+- it is home textile rather than a wearable scarf, with terms such as
+  `毛毯`, `抱枕`, `沙发毯`, `汽车毯`, `家居用品`, `家居旅行`, `blanket`, or
+  `pillow`.
+
+Normal 90x90cm or 140x140cm scarf albums remain separate even when their
+description mentions wearing the scarf as a hair ribbon. The rule does not
+merge similar albums and does not rewrite the immutable raw snapshot.
 
 ## Chanel Bags
 

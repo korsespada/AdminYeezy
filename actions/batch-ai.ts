@@ -87,6 +87,7 @@ import {
   type AiProviderRecord,
 } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
+import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -697,7 +698,7 @@ function productAttributeDefinitions(product: any, context: any) {
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
   const currentCatalog = await syncCurrentRailsCatalogMappings()
   const batch = await scrapingQuery(`
-    SELECT b.*, s.ai_instructions, s.price_ai_instructions, s.ai_photo_models, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
+    SELECT b.*, s.ai_instructions, s.price_ai_instructions, s.ai_photo_models, s.ai_visual_examples, s.default_price, s.ai_photo_enabled, s.ai_deep_search_enabled,
            s.ai_parallel_enabled, s.allowed_brand_ids, s.allowed_category_ids, s.allowed_subcategory_ids,
            s.ai_processing_options
     FROM scraping_batches b JOIN suppliers s ON s.id=b.supplier_id WHERE b.id=$1
@@ -908,6 +909,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   const allowedBrands = allowedIdsToCurrent(batch.rows[0].allowed_brand_ids, 'brand', brands)
   const allowedCategories = allowedIdsToCurrent(batch.rows[0].allowed_category_ids, 'category', categories)
   const allowedSubcategories = allowedIdsToCurrent(batch.rows[0].allowed_subcategory_ids, 'subcategory', subcategories)
+  const visualExamples = normalizeSupplierAiVisualExamples(batch.rows[0].ai_visual_examples)
   return {
     batch: batch.rows[0], products: selectedProducts, definitions, mappings: mappings.rows,
     brands: allowedBrands ? brands.filter((row) => allowedBrands.has(String(row.id))) : brands,
@@ -918,6 +920,7 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     priceRules: normalizePriceRulesCatalogReferences(priceRules.rows, mappings.rows),
     modelReferences: modelReferencesResult.rows.map(normalizeModelReferenceRow),
     measurementTemplates,
+    visualExamples,
     chromoffMode,
     chromoffCategories: resolvedChromoffCategories,
   }
@@ -1363,6 +1366,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           priceRules,
           priceAiInstructions: mode === 'recover_measurements' ? '' : context.batch.price_ai_instructions,
           modelReferences: context.modelReferences,
+          visualExamples: context.visualExamples,
           chromoffMode: context.chromoffMode,
           chromoffCategories: context.chromoffCategories,
           categoryRules: settings.categoryRules,
@@ -1395,6 +1399,8 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           priceRules,
           priceAiInstructions: mode === 'recover_measurements' ? '' : context.batch.price_ai_instructions,
           modelReferences: context.modelReferences,
+          visualExamples: context.visualExamples,
+          visualExampleUrls: context.visualExamples.flatMap((example: SupplierAiVisualExample) => example.url),
           measurementTemplates: context.measurementTemplates,
           priceReferenceUrls,
           modelReferenceUrls: context.modelReferences.flatMap((reference: ChanelModelReference) => reference.reference_images || []),
@@ -1650,8 +1656,10 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
     context.priceReferenceSheetsPromise ||= buildBatchAiContactSheets(input.priceReferenceUrls || [])
     context.modelReferenceSheetsPromise ||= buildBatchAiContactSheets(input.modelReferenceUrls || [])
+    context.visualExampleSheetsPromise ||= buildBatchAiContactSheets(input.visualExampleUrls || [])
     const referenceSheets = await context.priceReferenceSheetsPromise
     const modelReferenceSheets = await context.modelReferenceSheetsPromise
+    const visualExampleSheets = await context.visualExampleSheetsPromise
     let raw = await runBatchAiOpenRouter({
       settings,
       systemPrompt: input.systemPrompt,
@@ -1659,6 +1667,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       contactSheets: sheets,
       referenceSheets,
       modelReferenceSheets,
+      visualExampleSheets,
       extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
     })
     rawOutput = raw
@@ -1681,6 +1690,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         contactSheets: sheets,
         referenceSheets,
         modelReferenceSheets,
+        visualExampleSheets,
         extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
       })
       rawOutput = raw
