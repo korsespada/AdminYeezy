@@ -104,6 +104,8 @@ const DEFAULT_PRODUCT_COLUMNS = [
   { name: "variant_group_key", key: "variant_group_key" },
 ];
 
+const PRODUCTS_PER_LAZY_PAGE = 100;
+
 const CSV_CORE_KEYS = new Set([
   ...DEFAULT_PRODUCT_COLUMNS.map((column) => column.key),
   "h1",
@@ -618,6 +620,7 @@ export default function CsvImportApp({
   const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
   const [filterVideo, setFilterVideo] = useState<"" | "with" | "without">("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
+  const [visibleProductCount, setVisibleProductCount] = useState(PRODUCTS_PER_LAZY_PAGE);
   const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
   const [cardColumns, setCardColumns] = useState(4);
   const [showVariantFamilies, setShowVariantFamilies] = useState(false);
@@ -925,6 +928,31 @@ export default function CsvImportApp({
       : filteredProducts,
     [filteredProducts, sampleProducts],
   );
+  const visibleProducts = useMemo(
+    () => displayedProducts.slice(0, visibleProductCount),
+    [displayedProducts, visibleProductCount],
+  );
+  const hasMoreVisibleProducts = visibleProducts.length < displayedProducts.length;
+  const lazyLoadSentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setVisibleProductCount(PRODUCTS_PER_LAZY_PAGE);
+  }, [filterSearch, filterBrand, filterCategory, filterSubcategory, filterGender, filterPrice, filterColor, filterVariants, filterVideo, filterAiStatus]);
+
+  useEffect(() => {
+    const sentinel = lazyLoadSentinelRef.current;
+    if (!sentinel || !hasMoreVisibleProducts) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        setVisibleProductCount((current) => Math.min(current + PRODUCTS_PER_LAZY_PAGE, displayedProducts.length));
+      },
+      { rootMargin: "800px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [displayedProducts.length, hasMoreVisibleProducts]);
 
   // ─── Upload Mode ──────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
@@ -2772,7 +2800,7 @@ export default function CsvImportApp({
                   <div />
                 </div>
               )}
-              {displayedProducts.map((product, displayedIndex) => {
+              {visibleProducts.map((product, displayedIndex) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
@@ -2896,6 +2924,15 @@ export default function CsvImportApp({
                 </React.Fragment>;
               })}
             </div>
+            {hasMoreVisibleProducts && (
+              <div
+                ref={lazyLoadSentinelRef}
+                className="flex min-h-16 items-center justify-center text-xs text-slate-500"
+                aria-label={`Загрузка следующих товаров. Показано ${visibleProducts.length} из ${displayedProducts.length}`}
+              >
+                Загружаем следующие {Math.min(PRODUCTS_PER_LAZY_PAGE, displayedProducts.length - visibleProducts.length)} товаров…
+              </div>
+            )}
           </>
         )}
 
@@ -3388,25 +3425,11 @@ function CsvProductCard({
         {video.url && <span className="absolute top-3 left-3 rounded-md border border-cyan-300/30 bg-cyan-950/80 px-2 py-1 text-[10px] font-semibold text-cyan-200 z-10">Видео</span>}
 
         {/* Photo Count Tag & Quick Actions */}
-        <div className="absolute bottom-3 right-3 flex items-center gap-1.5 z-10">
-          {product.photos && product.photos.length > 0 && (
-            <>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUpdate(index, "photos", product.photos.slice(1));
-                }}
-                title="Удалить первое фото"
-                className="px-2 py-1 bg-red-500/80 hover:bg-red-600 backdrop-blur-sm rounded text-[10px] font-bold text-white transition-colors border border-red-400/20"
-              >
-                Удалить 1-е
-              </button>
-              <div className="px-2 py-1 bg-slate-900/80 backdrop-blur-sm rounded-md text-[10px] font-bold text-slate-300 border border-slate-700/50">
-                {product.photos.length} фото
-              </div>
-            </>
-          )}
-        </div>
+        {product.photos && product.photos.length > 0 && (
+          <div className="absolute bottom-3 right-3 z-10 rounded-md border border-slate-700/50 bg-slate-900/80 px-2 py-1 text-[10px] font-bold text-slate-300 backdrop-blur-sm">
+            {product.photos.length} фото
+          </div>
+        )}
       </div>
 
       <div className="p-5 flex-1 flex flex-col">
@@ -3629,6 +3652,7 @@ function CsvProductDrawer({
   const technicalAttributes = Object.entries(attributes).filter(([key]) => isTechnicalAttribute(key));
   const supplierPublishedOn = normalizeSupplierPublishedOn(local.supplier_published_on)
     || supplierPublishedOnFromAttributes(attributes);
+  const externalId = String(local.external_id || "").trim();
   const video = productVideoForDisplay(local);
   const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
   const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
@@ -3761,18 +3785,10 @@ function CsvProductDrawer({
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto p-4 pb-32 sm:p-6">
             {/* Photos */}
             <section className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-start">
                 <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                   Фотографии ({local.photos.length})
                 </h3>
-                {local.photos.length > 0 && (
-                  <button
-                    onClick={() => removePhoto(0)}
-                    className="text-[10px] font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-wider"
-                  >
-                    Удалить первое фото
-                  </button>
-                )}
               </div>
               <ProductPhotoGallery
                 photos={local.photos}
@@ -3929,7 +3945,7 @@ function CsvProductDrawer({
                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm"
                 />
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-slate-800">
+              <div className="grid grid-cols-1 gap-4 pt-4 border-t border-slate-800 md:grid-cols-2">
                 <div className="space-y-1">
                   <label className="text-xs text-slate-500">
                     Бренд
@@ -3978,7 +3994,7 @@ function CsvProductDrawer({
                     <option value="unisex">Унисекс</option>
                   </select>
                 </div>
-                <div className="space-y-1 md:col-span-2">
+                <div className="space-y-1">
                   <label className="text-xs text-slate-500">
                     Подкатегория
                   </label>
@@ -4062,12 +4078,13 @@ function CsvProductDrawer({
                 )}
               </div>
 
-              {(supplierPublishedOn || technicalAttributes.length > 0) && <div className="space-y-3 border-t border-slate-800 pt-4">
+              {(externalId || supplierPublishedOn || technicalAttributes.length > 0) && <div className="space-y-3 border-t border-slate-800 pt-4">
                 <div>
                   <label className="text-xs text-slate-500">Техническая информация</label>
                   <p className="mt-1 text-[11px] text-slate-600">Данные источника и импорта. В карточку товара не публикуются.</p>
                 </div>
                 <div className="space-y-2">
+                  {externalId && <TechnicalAttributeRow label="External ID" value={externalId} />}
                   {supplierPublishedOn && <TechnicalAttributeRow label="Выложен у поставщика" value={formatSupplierPublishedOn(supplierPublishedOn)} />}
                   {technicalAttributes.map(([key, value]) => (
                     <TechnicalAttributeRow key={key} label={technicalAttributeLabel(key)} value={formatTechnicalAttributeValue(key, value)} />
