@@ -114,6 +114,20 @@ function isJsonAttributeValue(value, depth = 0) {
   return Object.values(value).every((item) => isJsonAttributeValue(item, depth + 1));
 }
 
+function normalizeMeasurementAttributeValue(value) {
+  if (typeof value !== 'string') return value;
+
+  try {
+    const parsed = JSON.parse(value.trim());
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return value;
+    if ((Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) || Array.isArray(parsed.tabs)) return parsed;
+  } catch {
+    // Keep ordinary free-form attribute text unchanged.
+  }
+
+  return value;
+}
+
 function normalizeAttributes(value) {
   if (!value) return {};
   let parsed = value;
@@ -125,7 +139,10 @@ function normalizeAttributes(value) {
     }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-  return Object.fromEntries(Object.entries(parsed).filter(([key, item]) => {
+  return Object.fromEntries(Object.entries(parsed).map(([key, item]) => [
+    key,
+    key.trim().toLowerCase() === 'measurements' ? normalizeMeasurementAttributeValue(item) : item,
+  ]).filter(([key, item]) => {
     if (!key.trim() || CORE_PRODUCT_FIELDS.has(key.toLowerCase())) return false;
     return isJsonAttributeValue(item);
   }));

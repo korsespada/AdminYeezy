@@ -273,6 +273,30 @@ describe('batch workflow CSV compatibility adapter', () => {
       .not.toBe(workflow.publicationPayloadHash(product))
   })
 
+  it('decodes encoded measurement tables before a Rails publication', () => {
+    const measurements = {
+      unit: 'см',
+      columns: [{ key: 'bust', label: 'Обхват груди' }],
+      rows: [{ size: 'S', values: { bust: '116' } }],
+      note: '',
+    }
+    const payload = workflow.railsUpdatePayload({
+      external_id: 'encoded-measurements',
+      name: 'Футболка',
+      description: '',
+      price: 0,
+      status: 'active',
+      brand: '',
+      category: '',
+      subcategory: '',
+      gender: '',
+      photos: [],
+      attributes: { measurements: JSON.stringify(measurements) },
+    })
+
+    expect(payload.product.catalog_attributes.measurements).toEqual(measurements)
+  })
+
   it('includes supplier identity and publication time in Rails updates', () => {
     const payload = workflow.railsUpdatePayload({
       external_id: 'item-1',

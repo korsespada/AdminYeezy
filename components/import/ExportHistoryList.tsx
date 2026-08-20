@@ -87,7 +87,7 @@ function fileName(filePath?: string | null) {
 
 function StatusBadge({ status, loading = false }: { status: string; loading?: boolean }) {
   return (
-    <span className={`inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
+    <span className={`inline-flex w-fit min-w-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
       {loading && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
       {status === 'failed' ? 'Ошибка' : status}
     </span>

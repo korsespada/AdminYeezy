@@ -23,6 +23,7 @@
     "db:backfill:batch-products": "node scripts/backfill-batch-products.js",
     "db:backfill:scraping-files": "node scripts/backfill-scraping-files.js",
     "db:repair:gender": "node scripts/repair-canonical-gender.js",
+    "db:repair:measurements": "node scripts/repair-encoded-measurements.js",
     "db:normalize-result-paths": "node scripts/normalize-result-paths.js",
     "ai:catalog-worker": "concurrently --kill-others-on-fail \"node scripts/ai-catalog-worker.js\" \"node scripts/batch-ai-worker.js\"",
     "ai:seo-worker": "node scripts/ai-catalog-worker.js",
