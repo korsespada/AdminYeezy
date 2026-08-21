@@ -9,9 +9,9 @@ import {
 import { resolveBatchAiMediaHosts } from '@/lib/batch-ai'
 
 describe('Chromoff AI SEO helpers', () => {
-  it('defaults to BYESU Gemini 3.7 Flash and clamps runtime settings', () => {
+  it('defaults to BYESU Gemini 3.7 Flash High and clamps runtime settings', () => {
     expect(DEFAULT_CHROMOFF_AI_SETTINGS.provider).toBe('byesu')
-    expect(DEFAULT_CHROMOFF_AI_SETTINGS.byesuModel).toBe('gemini-3.7-flash')
+    expect(DEFAULT_CHROMOFF_AI_SETTINGS.byesuModel).toBe('gemini-3.7-flash-high')
 
     expect(hydrateChromoffAiSettings({
       provider: 'unknown',

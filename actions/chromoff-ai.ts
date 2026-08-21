@@ -35,7 +35,7 @@ const SETTINGS_KEYS = [
 ]
 
 const FALLBACK_BYESU_MODELS = [
-  { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', group: 'gemini' as const },
+  { value: 'gemini-3.7-flash-high', label: 'Gemini 3.7 Flash High', group: 'gemini' as const },
   { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' as const },
   { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' as const },
 ]
@@ -293,6 +293,16 @@ export async function getChromoffAiDashboardAction(listingIds: string[] = []) {
   } catch (error: unknown) {
     if (errorCode(error) === '42P01') return { success: true, data: { runs: [], items: [] } }
     return { success: false, error: errorMessage(error), data: { runs: [], items: [] } }
+  }
+}
+
+export async function getChromoffAiListingAction(listingId: string) {
+  await requireAdmin()
+  try {
+    const listing = await getRailsChromoffAiContent(String(listingId || '').trim())
+    return { success: true as const, data: listing }
+  } catch (error: unknown) {
+    return { success: false as const, error: errorMessage(error) }
   }
 }
 

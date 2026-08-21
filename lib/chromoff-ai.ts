@@ -72,7 +72,7 @@ export const DEFAULT_CHROMOFF_AI_SYSTEM_PROMPT = `Ты редактор гото
 export const DEFAULT_CHROMOFF_AI_SETTINGS: ChromoffAiSettings = {
   provider: 'byesu',
   openrouterModel: 'google/gemini-2.5-flash',
-  byesuModel: 'gemini-3.7-flash',
+  byesuModel: 'gemini-3.7-flash-high',
   temperature: 0.1,
   maxTokens: 5000,
   concurrency: 5,
