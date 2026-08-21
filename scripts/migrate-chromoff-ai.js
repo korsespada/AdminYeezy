@@ -48,6 +48,13 @@ async function migrate() {
       ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
     ALTER TABLE chromoff_ai_runs ALTER COLUMN settings DROP NOT NULL;
 
+    ALTER TABLE chromoff_ai_items
+      ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS input_snapshot JSONB,
+      ADD COLUMN IF NOT EXISTS output JSONB,
+      ADD COLUMN IF NOT EXISTS error_message TEXT,
+      ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
     UPDATE chromoff_ai_items
     SET status='failed',
         error_message=COALESCE(error_message, 'Старый запуск требует ручного возобновления после обновления AI SEO'),
@@ -66,13 +73,6 @@ async function migrate() {
     SET settings_snapshot=CASE WHEN settings_snapshot='{}'::jsonb THEN settings ELSE settings_snapshot END,
         settings=NULL
     WHERE settings IS NOT NULL;
-
-    ALTER TABLE chromoff_ai_items
-      ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS input_snapshot JSONB,
-      ADD COLUMN IF NOT EXISTS output JSONB,
-      ADD COLUMN IF NOT EXISTS error_message TEXT,
-      ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
 
     CREATE INDEX IF NOT EXISTS idx_chromoff_ai_runs_created_at
       ON chromoff_ai_runs(created_at DESC);
