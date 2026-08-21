@@ -31,7 +31,7 @@ export default function ChromoffAiSettingsModal({
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" className="h-10 border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white">
+        <Button type="button" variant="outline" className="h-11 border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white">
           <Bot className="mr-2 h-4 w-4 text-emerald-400" />
           Настройки AI
         </Button>
