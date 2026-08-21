@@ -290,6 +290,36 @@ generic text, and is idempotent. If a legacy block has no tags, an attachment
 is allowed only when that block contains exactly one matching service card;
 otherwise the ambiguous data is left unattached.
 
+## Одежда МЖ 2
+
+The active DB-backed version `Одежда МЖ 2 — галерея, описание и размерная
+таблица v1` keeps only substantive product galleries marked `【实拍图一组】`
+with at least eight photos. The target gallery remains the authoritative
+product identity, photo order, and base description. Lookbook, model,
+packaging, receipt, stock, and other service albums are not emitted as
+separate products and their photos are not copied into the gallery.
+
+The processor matches a one-photo `尺码表`/`尺寸表` album to the target by the
+same complete `attributes.szwego_tags` value. The chart photo is appended last
+and its source is recorded as `attributes.size_chart_source_id`. Technical
+descriptions from the same tag group between the chart and target, including
+`Compare`/`对比`, fabric, construction, embroidery, trim, button, ribbing, and
+wash details, are appended to the target description. Their source ids are
+recorded as `attributes.post_process_description_source_ids`; marketing and
+lookbook text is not copied.
+
+No gallery is merged with another product: `external_id` and
+`source_position` stay those of the target album. Exact duplicate photo URLs
+are removed and the processor is idempotent. A target with a missing tag is
+left without an inferred attachment unless the same tag is positively present
+on both sides of its bounded source run. The immutable `SCRAPED` snapshot is
+kept as the recovery boundary.
+
+The first verified batch `54133cc0-9629-40ac-83f9-5b19589b9f1b` produced 119
+cards from 3427 raw albums. Display albums #14 and #60 each retained nine
+product photos, received one size-chart photo, and received respectively
+three and four technical description sources.
+
 ## Женская одежда 3
 
 `process_womens_clothing_3.py` reads the supplier's TIMO-separated blocks.
@@ -440,3 +470,35 @@ DB-backed post-process для `Обувь жен муж new` читает Szwego
 одинаковой ценой получают разные семьи. Внутри семьи альбомы не объединяются:
 им присваивается общий стабильный `variant_group_key`; одиночные или
 неоднозначные карточки остаются без ключа. Правило идемпотентно.
+
+## LV, DG, Dior, Loro — сумки экзотика (supplier 51)
+
+Активная DB-backed версия `LV, DG, Dior, Loro — альбомы и видео v1` оставляет
+каждый содержательный фотоальбом самостоятельным товаром. Альбомы между собой
+не склеиваются: сохраняются исходные `external_id`, `source_position`, описание
+и порядок фотографий. Обычная однокадровая карточка без видео не становится
+товаром; явные сервисные/коллажные альбомы с маркерами вроде `合集`, `图集` и
+`九宫格` также не публикуются.
+
+Видео присоединяется только если в исходной карточке есть непустой
+`attributes.szwego_video_url`. Такая короткая карточка удаляется из результата,
+а URL записывается в фотоальбом товара; poster сохраняется только как атрибут и
+не добавляется фотографией в галерею. В пределах трёх позиций сначала ищется
+положительное совпадение полного `szwego_tags` и папки/даты медиа в URL. Если
+теги отличаются, допускается только сильное пересечение идентификаторов; при
+неоднозначности видео остаётся неприсоединённым. Пример из выгрузки сохраняется
+как `#166 → #165`.
+
+Preview на исходных снимках дал следующие результаты:
+
+| Выгрузка | Сырьё | Товарные альбомы | Видео-карточки удалены | Видео присоединено |
+| --- | ---: | ---: | ---: | ---: |
+| Louis Vuitton | 320 | 191 | 129 | 105 |
+| Dolce & Gabbana | 331 | 233 | 98 | 92 |
+| Dior | 136 | 71 | 65 | 50 |
+| Loro Piana | 315 | 256 | 59 | 50 |
+
+Проверены сохранение identity и порядка, отсутствие удаления длинных товарных
+альбомов и повторный прогон без изменений. Четыре исходных выгрузки оставлены
+в стадии `SCRAPED`; правило активировано для поставщика, но к существующим
+выгрузкам постобработка не применялась.
