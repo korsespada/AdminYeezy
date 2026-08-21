@@ -10,9 +10,6 @@ import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListin
 import { getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import { createChromoffListingAction, deleteChromoffListingAction, deleteChromoffListingsAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
-import { startChromoffAiRunAction } from '@/actions/chromoff-ai'
-import ChromoffAiSettingsModal from '@/components/chromoff/ChromoffAiSettingsModal'
-import type { ChromoffAiSettings } from '@/lib/chromoff-ai'
 import ProductCard from '@/components/products/ProductCard'
 import ProductForm from '@/components/products/ProductForm'
 import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chromoff/ChromoffSidebar'
@@ -31,7 +28,6 @@ interface ChromoffCatalogProps {
   catalogSubcategories: Subcategory[]
   brands: Brand[]
   attributeDefinitions?: CatalogAttributeDefinition[]
-  aiSettings: ChromoffAiSettings
   suppliers: ChromoffSupplierOption[]
   assignableSuppliers: ChromoffSupplierOption[]
   totalItems: number
@@ -137,7 +133,6 @@ export default function ChromoffCatalog({
   catalogSubcategories,
   brands,
   attributeDefinitions,
-  aiSettings,
   suppliers,
   assignableSuppliers,
   totalItems,
@@ -162,7 +157,6 @@ export default function ChromoffCatalog({
   const [selectedGender, setSelectedGender] = useState('')
   const [selectedPrice, setSelectedPrice] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
-  const [isAiGenerating, setIsAiGenerating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isBulkPublishing, setIsBulkPublishing] = useState(false)
   const [isBulkSupplierUpdating, setIsBulkSupplierUpdating] = useState(false)
@@ -338,23 +332,6 @@ export default function ChromoffCatalog({
     setImportMessage(result.success ? `Импортировано: ${Number(result.imported || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
     if (result.success) router.refresh()
   })
-  const handleBulkAiGenerate = () => startTransition(async () => {
-    if (!selectedIds.length || !confirm(`Запустить AI генерацию для ${selectedIds.length} товаров?`)) return
-    setIsAiGenerating(true)
-    try {
-      const result = await startChromoffAiRunAction(selectedIds)
-      if (result.success) {
-        alert('Задача успешно добавлена в очередь. Процесс займет некоторое время.')
-        setSelectedIds([])
-      } else {
-        alert(`Ошибка: ${result.error}`)
-      }
-    } finally {
-      setIsAiGenerating(false)
-    }
-  })
-
-
   return (
     <div className="min-h-screen bg-slate-900 font-sans text-slate-200 lg:flex">
       <ChromoffSidebar categories={catalogCategories} subcategories={catalogSubcategories} chromoffCategories={categories} suppliers={suppliers} count={totalItems} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} isNavigationPending={isPending} />
@@ -365,7 +342,7 @@ export default function ChromoffCatalog({
             <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <Button type="button" variant="outline" onClick={() => setIsSidebarOpen(true)} className="h-11 flex-1 border-slate-700 bg-slate-800 text-slate-200 lg:hidden"><Filter className="h-4 w-4" />Фильтры</Button>
               <Button type="button" variant="outline" onClick={() => setIsImportOpen(true)} className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Upload className="h-4 w-4" />Импорт</Button>
-              <ChromoffAiSettingsModal settings={aiSettings} />
+              <Button asChild type="button" variant="outline" className="h-11 border-emerald-700/60 bg-emerald-950/30 text-emerald-200"><Link href="/admin/chromoff/ai-seo">AI SEO</Link></Button>
               <Button asChild type="button" variant="outline" className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Link href="/admin/chromoff/categories"><FolderTree className="h-4 w-4" />Категории</Link></Button>
               <Button type="button" onClick={() => setIsAddOpen(true)} className="h-11"><Plus className="h-4 w-4" />Добавить</Button>
             </div>
@@ -412,7 +389,6 @@ export default function ChromoffCatalog({
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
           <Select value={selectedPublication || '__unchanged__'} onValueChange={(value) => setSelectedPublication(value === '__unchanged__' ? '' : value as 'published' | 'hidden')}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Публикация Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Chromoff: без изменений</SelectItem><SelectItem value="published">Опубликовать</SelectItem><SelectItem value="hidden">Скрыть</SelectItem></SelectContent></Select>
-          <Button type="button" variant="secondary" onClick={handleBulkAiGenerate} disabled={!selectedIds.length || isAiGenerating || isPending} className="h-10 border border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-800 hover:text-emerald-100">{isAiGenerating ? 'Запуск...' : 'Сгенерировать AI SEO'}</Button>
           <Button type="button" variant="secondary" onClick={handleBulkPublication} disabled={!selectedPublication || isBulkPublishing || isPending} className="h-10">{isBulkPublishing ? 'Публикация…' : 'Применить Chromoff'}</Button>
           <Select value={selectedSupplier || '__unchanged__'} onValueChange={(value) => setSelectedSupplier(value === '__unchanged__' ? '' : value)}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Поставщик Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Поставщик: без изменений</SelectItem>{assignableSuppliers.map((supplier) => <SelectItem key={supplier.id} value={supplier.id}>{supplier.name}</SelectItem>)}<SelectItem value="__none__">Без поставщика</SelectItem></SelectContent></Select>
           <Button type="button" variant="secondary" onClick={handleBulkSupplier} disabled={!selectedSupplier || isBulkSupplierUpdating || isPending} className="h-10">{isBulkSupplierUpdating ? 'Поставщик…' : 'Применить поставщика'}</Button>

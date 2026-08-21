@@ -77,6 +77,10 @@ export type BatchAiSettings = {
   processingOptions?: BatchAiProcessingOptions
 }
 
+export type AiCompletionSettings = Pick<BatchAiSettings,
+  'provider' | 'providerBaseUrl' | 'providerApiKey' | 'openrouterModel' | 'byesuModel' | 'temperature' | 'maxTokens'
+>
+
 export function restoreRetryProductsFromSnapshots(products: any[], sourceRows: Array<{ product_id?: number; source_product?: unknown }>) {
   const sources = new Map(
     sourceRows
@@ -721,7 +725,7 @@ export async function buildBatchAiContactSheets(photoUrls: string[]) {
 }
 
 export async function runBatchAiOpenRouter(input: {
-  settings: BatchAiSettings
+  settings: AiCompletionSettings
   systemPrompt: string
   userPrompt: string
   contactSheets: string[]

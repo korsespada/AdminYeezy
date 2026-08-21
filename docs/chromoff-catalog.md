@@ -49,6 +49,8 @@ Rails API и server actions AdminYeezy.
 - отдельная страница `/admin/chromoff/categories` для изменения названия,
   slug, порядка, активности и соответствия общей категории у разделов и
   подразделов Chromoff;
+- отдельная страница `/admin/chromoff/ai-seo` для массовой AI-обработки готовых
+  товаров, очереди запусков и системного/категорийных промптов;
 - модальное ручное добавление уже существующего товара в подкатегорию;
 - модальное окно dry-run импорта и запуска импорта из прежнего Supabase-каталога.
 
@@ -67,8 +69,25 @@ Rails API и server actions AdminYeezy.
 
 `ChromoffListing.published` управляет видимостью только на Chromoff.
 Он не меняет доступность или категорию товара на YeezyUnique. У listing есть
-свои `legacy_slug`, `seo_title`, `seo_description` и `h1`; если override пустой,
-используется значение общего товара.
+свои `legacy_slug`, `seo_title`, `seo_description` и `h1`. SEO-описание Chromoff
+не наследуется из общего товара; H1 и title при отсутствии сохранённого значения
+строятся по правилам Chromoff.
+
+## AI SEO готовых товаров
+
+`/admin/chromoff/ai-seo` фильтрует готовые listings по разделу и подразделу,
+позволяет выбрать до 500 позиций и показывает очередь со статусами и повтором
+ошибок. Настройки включают системный промпт и правила для каждого раздела или
+подраздела; правило родителя применяется перед правилом дочерней категории.
+
+По умолчанию используется BYESU `gemini-3.7-flash`. Фотографии передаются как
+contact sheets 3×3 вместе с текущими названием, описанием и характеристиками.
+AI может вернуть только название, описание, характеристики, alt-тексты,
+уникальные H1 и SEO-описание Chromoff. Категория, подкатегория, бренд, гендер и
+цена остаются неизменными. Rails атомарно применяет результат через Admin API,
+сам строит `seo_title` в формате `Бренд Название - Цена | CHROMOFF` и новый slug
+из названия. При смене slug создаётся постоянный redirect со старого URL, а
+цепочки ранее созданных автоматических redirect схлопываются до нового URL.
 
 Для импортированных в общий каталог товаров, которые должны существовать только
 на Chromoff, используется `noindex` на YeezyUnique. Это не запрещает их
@@ -159,7 +178,10 @@ Chromoff-категориями. Данные заказов, корзин, Tele
 ```text
 GET/PATCH /api/v1/admin/chromoff/categories
 GET/POST/PATCH/DELETE /api/v1/admin/chromoff/listings
+GET /api/v1/admin/chromoff/ai_contents
 PATCH /api/v1/admin/chromoff/listings/bulk_update
+GET /api/v1/admin/chromoff/listings/:id/ai_content
+PATCH /api/v1/admin/chromoff/listings/:id/apply_ai_content
 POST /api/v1/admin/chromoff/imports
 ```
 

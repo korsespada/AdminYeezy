@@ -202,6 +202,7 @@ export interface RailsChromoffListing {
   name: string
   image_url?: string | null
   images?: string[]
+  media?: ProductMedia[]
   price_cents: number
   status: string
   published: boolean
@@ -232,6 +233,8 @@ export interface RailsChromoffListing {
   video_url?: string | null
   video_poster_url?: string | null
   color_variants?: Array<{ id: string; name?: string; color?: string | null; slug?: string; image_url?: string | null; price_cents?: number; current?: boolean }>
+  created_at?: string
+  updated_at?: string
 }
 
 export interface RailsChromoffImportCategory {
@@ -573,8 +576,10 @@ function mapUiGenderToRails(gender: string) {
 }
 export async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<T> {
   const token = await railsAdminToken()
+  const signal = init.signal || AbortSignal.timeout(180_000)
   const response = await fetch(railsApiUrl(pathname), {
     ...init,
+    signal,
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -900,6 +905,65 @@ export async function updateRailsChromoffListing(id: string, input: {
     method: 'PATCH',
     body: JSON.stringify({ listing }),
   })
+  return result.listing
+}
+
+export async function listRailsChromoffAiListings(options: {
+  page?: number
+  perPage?: number
+  search?: string
+  categoryId?: string
+} = {}) {
+  const params = new URLSearchParams({
+    page: String(options.page || 1),
+    per_page: String(options.perPage || 40),
+  })
+  if (options.search?.trim()) params.set('q', options.search.trim())
+  if (options.categoryId) params.set('category_id', options.categoryId)
+  const result = await railsFetch<{
+    listings: RailsChromoffListing[]
+    meta?: { total?: number; pages?: number }
+  }>(`/admin/chromoff/ai_contents?${params}`)
+  return {
+    items: result.listings || [],
+    totalItems: Number(result.meta?.total || 0),
+    totalPages: Number(result.meta?.pages || 0),
+  }
+}
+
+export async function getRailsChromoffAiContent(id: string) {
+  const result = await railsFetch<{ listing: RailsChromoffListing }>(
+    `/admin/chromoff/listings/${encodeURIComponent(id)}/ai_content`,
+  )
+  return result.listing
+}
+
+export async function applyRailsChromoffAiContent(id: string, input: {
+  name: string
+  description: string
+  catalogAttributes: Record<string, unknown>
+  mediaAlts: string[]
+  h1: string
+  seoDescription: string
+}) {
+  const result = await railsFetch<{ listing: RailsChromoffListing }>(
+    `/admin/chromoff/listings/${encodeURIComponent(id)}/apply_ai_content`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        product: {
+          name: input.name,
+          description: input.description,
+          catalog_attributes: input.catalogAttributes,
+          media_alts: input.mediaAlts,
+        },
+        listing: {
+          h1: input.h1,
+          seo_description: input.seoDescription,
+        },
+      }),
+    },
+  )
   return result.listing
 }
 

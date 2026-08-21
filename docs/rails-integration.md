@@ -169,6 +169,9 @@ GET    /api/v1/admin/chromoff/listings
 PATCH  /api/v1/admin/chromoff/listings/:id
 DELETE /api/v1/admin/chromoff/listings/:id
 PATCH  /api/v1/admin/chromoff/listings/bulk_update
+GET    /api/v1/admin/chromoff/listings/:id/ai_content
+PATCH  /api/v1/admin/chromoff/listings/:id/apply_ai_content
+GET    /api/v1/admin/chromoff/ai_contents?page=1&per_page=40&q=&category_id=
 ```
 
 Публичная витрина Chromoff получает только опубликованные listings через
