@@ -571,8 +571,7 @@ function mapUiGenderToRails(gender: string) {
   if (gender === 'Унисекс' || gender === 'unisex') return 'unisex'
   return ''
 }
-
-async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<T> {
+export async function railsFetch<T>(pathname: string, init: RequestInit = {}): Promise<T> {
   const token = await railsAdminToken()
   const response = await fetch(railsApiUrl(pathname), {
     ...init,

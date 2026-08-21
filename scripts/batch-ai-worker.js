@@ -23,28 +23,106 @@ main().catch((error) => {
   console.error(`[batch-ai-worker] fatal: ${error.message}`)
   process.exitCode = 1
 })
-
 async function main() {
   console.log(`[batch-ai-worker] ready: ${COCKPIT_MODEL}, concurrency: ${concurrency}`)
-  const active = new Set()
+  const activeBatches = new Set()
+  const activeChromoff = new Set()
+  
   while (!stopping) {
     const heartbeat = await api({ action: 'heartbeat', worker_id: WORKER_ID, model: COCKPIT_MODEL, metadata: { concurrency } }).catch((error) => {
       console.error(`[batch-ai-worker] heartbeat: ${error.message}`)
       return null
     })
     if (heartbeat?.concurrency) concurrency = Math.max(1, Math.min(10, Number(heartbeat.concurrency)))
-    while (!stopping && active.size < concurrency) {
+    
+    const totalActive = activeBatches.size + activeChromoff.size
+    
+    while (!stopping && totalActive < concurrency) {
+      // Try to claim a Chromoff item first
+      const chromoffClaimed = await chromoffApi({ action: 'claim', worker_id: WORKER_ID }).catch(() => null)
+      if (chromoffClaimed?.item) {
+        const promise = processChromoffItem(chromoffClaimed.item).finally(() => activeChromoff.delete(promise))
+        activeChromoff.add(promise)
+        continue
+      }
+      
+      // Then try a Batches item
       const claimed = await api({ action: 'claim', worker_id: WORKER_ID }).catch(() => null)
-      if (!claimed?.item) break
-      const promise = processItem(claimed.item).finally(() => active.delete(promise))
-      active.add(promise)
+      if (claimed?.item) {
+        const promise = processItem(claimed.item).finally(() => activeBatches.delete(promise))
+        activeBatches.add(promise)
+        continue
+      }
+      
+      break // Nothing to claim
     }
-    if (active.size) await Promise.race([Promise.allSettled([...active]), delay(POLL_MS)])
+    
+    if (activeBatches.size || activeChromoff.size) await Promise.race([Promise.allSettled([...activeBatches, ...activeChromoff]), delay(POLL_MS)])
     else await delay(POLL_MS)
   }
-  await Promise.allSettled([...active])
+  await Promise.allSettled([...activeBatches, ...activeChromoff])
 }
 
+async function chromoffApi(body) {
+  const response = await fetch(`${ADMIN_URL}/api/chromoff-ai/worker`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${WORKER_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${await response.text().catch(() => '')}`)
+  return response.json()
+}
+
+async function processChromoffItem(item) {
+  try {
+    const input = item.input_snapshot || {}
+    const photos = Array.isArray(input.images) ? input.images : []
+    const systemPrompt = item.settings_snapshot?.systemPrompt || 'Ты эксперт-копирайтер.'
+    
+    if (photos.length === 0) {
+      await chromoffApi({ action: 'complete', id: item.id, token: item.lease_token, result: { error: 'Нет фотографий' } })
+      return
+    }
+    
+    const prompt = `Товар: ${input.name || 'Без названия'}
+Бренд: ${input.brand || 'Неизвестно'}
+Категория: ${input.category || 'Неизвестно'}`
+
+    const content = [{ type: 'text', text: prompt }]
+    for (const photo of photos) {
+      content.push({ type: 'image_url', image_url: { url: buildImageUrl(photo) } })
+    }
+
+    const payload = {
+      model: COCKPIT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content }
+      ],
+      temperature: Number(item.settings_snapshot?.temperature || 0.1),
+      max_tokens: Number(item.settings_snapshot?.maxTokens || 2000),
+      response_format: { type: 'json_object' }
+    }
+
+    let resultJson = null
+    let errorStr = null
+
+    try {
+      const raw = await generateViaCockpit(payload)
+      resultJson = parseJsonFromResponse(raw)
+    } catch (error) {
+      errorStr = error.message
+    }
+
+    if (errorStr) {
+      await chromoffApi({ action: 'fail', id: item.id, token: item.lease_token, error: errorStr })
+    } else {
+      await chromoffApi({ action: 'complete', id: item.id, token: item.lease_token, result: resultJson })
+    }
+  } catch (error) {
+    await chromoffApi({ action: 'fail', id: item.id, token: item.lease_token, error: error.message }).catch(console.error)
+  }
+}
 async function processItem(item) {
   try {
     const input = item.input_snapshot || {}

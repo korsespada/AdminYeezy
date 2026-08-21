@@ -1,6 +1,7 @@
 import ChromoffCatalog from '@/components/chromoff/ChromoffCatalog'
 import { getRailsCatalogLookups, listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
+import { getChromoffAiSettingsAction } from '@/actions/chromoff-ai'
 import { connection } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -74,7 +75,7 @@ export default async function ChromoffPage({
   }
 
   try {
-    const [categories, listings, candidates, lookups, attributeDefinitions] = await Promise.all([
+    const [categories, listings, candidates, lookups, attributeDefinitions, settingsRes] = await Promise.all([
       listRailsChromoffCategories(),
       listRailsChromoffListings({
         page,
@@ -95,6 +96,7 @@ export default async function ChromoffPage({
       listRailsChromoffCandidates(),
       getRailsCatalogLookups(),
       getCatalogAttributeDefinitions(),
+      getChromoffAiSettingsAction(),
     ])
     const assignableSuppliers = Array.from(new Map([
       ...CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS,
@@ -109,7 +111,7 @@ export default async function ChromoffPage({
         catalogCategories={lookups.categories}
         catalogSubcategories={lookups.subcategories}
         brands={lookups.brands}
-        attributeDefinitions={attributeDefinitions}
+        aiSettings={settingsRes.data}
         suppliers={[
           ...Array.from(listings.supplierOptions
             .filter((item) => item.id)
