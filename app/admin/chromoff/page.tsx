@@ -111,8 +111,26 @@ export default async function ChromoffPage({
         brands={lookups.brands}
         attributeDefinitions={attributeDefinitions}
         suppliers={[
-          ...listings.supplierOptions
+          ...Array.from(listings.supplierOptions
             .filter((item) => item.id)
+            .reduce((map, item) => {
+              const key = supplierOptionKey(item.name, item.id)
+              const existing = map.get(key)
+              if (existing) {
+                const existingIsAuto = CHROMOFF_AUTO_SUPPLIER_IDS.includes(existing.id)
+                const itemIsAuto = CHROMOFF_AUTO_SUPPLIER_IDS.includes(item.id)
+                const count = (existing.count || 0) + (item.count || 0)
+                if (itemIsAuto && !existingIsAuto) {
+                  map.set(key, { ...item, count })
+                } else {
+                  existing.count = count
+                }
+              } else {
+                map.set(key, { ...item })
+              }
+              return map
+            }, new Map<string, typeof listings.supplierOptions[0]>())
+            .values())
             .sort((left, right) => {
               const leftIndex = CHROMOFF_AUTO_SUPPLIER_IDS.indexOf(left.id)
               const rightIndex = CHROMOFF_AUTO_SUPPLIER_IDS.indexOf(right.id)
