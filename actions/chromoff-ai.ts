@@ -56,6 +56,17 @@ function errorCode(error: unknown) {
   return error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
 }
 
+function chromoffMediaHosts() {
+  return [
+    ...(process.env.CHROMOFF_MEDIA_HOSTS || '').split(','),
+    ...['CHROMOFF_SUPABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'S3_PUBLIC_DOMAIN']
+      .map((key) => process.env[key]?.trim() || '')
+      .flatMap((value) => {
+        try { return [new URL(value).hostname] } catch { return [] }
+      }),
+  ]
+}
+
 async function loadChromoffAiSettings() {
   const result = await scrapingQuery('SELECT key,value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
@@ -335,7 +346,7 @@ async function processChromoffAiItem(
     )
     const input = { ...listing, media: listing.media || photos.map((original_url) => ({ original_url })) }
     const userPrompt = buildChromoffAiUserPrompt(input, categoryPrompts, attributeDefinitions)
-    const contactSheets = await buildBatchAiContactSheets(photos)
+    const contactSheets = await buildBatchAiContactSheets(photos, { additionalHosts: chromoffMediaHosts() })
     const raw = settings.provider === 'cockpit'
       ? await runChromoffCockpit(settings, userPrompt, contactSheets)
       : await runBatchAiOpenRouter({

@@ -132,6 +132,11 @@ slug и SEO-overrides. Категория, назначенная вручную
 При confidence ниже `0.75` listing создаётся или обновляется скрытым с `needs_review`, а
 оператор назначает категорию вручную в карточке `/admin/chromoff`.
 
+Для отдельного AI SEO-прохода все фото должны быть доступны по HTTPS. Базовый
+allowlist использует `AI_CATALOG_MEDIA_HOSTS`; дополнительные CDN-хосты Chromoff
+задаются через `CHROMOFF_MEDIA_HOSTS` списком через запятую. Хост Supabase из
+`CHROMOFF_SUPABASE_URL` и публичный домен S3 добавляются автоматически.
+
 ## Импорт из старого Chromoff
 
 Перед импортом в production-env AdminYeezy задать только на сервере:

@@ -679,14 +679,24 @@ export function buildBatchAiShadeRepairPrompt(products: any[], variants: any[]) 
   ].join('\n\n')
 }
 
-export async function buildBatchAiContactSheets(photoUrls: string[]) {
-  const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
+export function resolveBatchAiMediaHosts(additionalHosts: string[] = []) {
+  return new Set([
+    ...(process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(','),
+    ...additionalHosts,
+  ].map((host) => host.trim().toLowerCase()).filter(Boolean))
+}
+
+export async function buildBatchAiContactSheets(photoUrls: string[], options: { additionalHosts?: string[] } = {}) {
+  const allowedHosts = resolveBatchAiMediaHosts(options.additionalHosts)
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {
     try {
       const parsed = new URL(url)
       return ['http:', 'https:'].includes(parsed.protocol) && allowedHosts.has(parsed.hostname.toLowerCase())
     } catch { return false }
   }))]
+  if (photoUrls.length && !validUrls.length) {
+    throw new Error('Не удалось найти доступные фото для AI: добавьте их CDN-хост в AI_CATALOG_MEDIA_HOSTS или CHROMOFF_MEDIA_HOSTS')
+  }
   const sheets: string[] = []
   for (let start = 0; start < validUrls.length; start += 9) {
     const urls = validUrls.slice(start, start + 9)

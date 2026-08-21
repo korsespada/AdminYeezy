@@ -6,6 +6,7 @@ import {
   normalizeChromoffAiOutput,
   promptRulesForChromoffCategory,
 } from '@/lib/chromoff-ai'
+import { resolveBatchAiMediaHosts } from '@/lib/batch-ai'
 
 describe('Chromoff AI SEO helpers', () => {
   it('defaults to BYESU Gemini 3.7 Flash and clamps runtime settings', () => {
@@ -110,5 +111,13 @@ describe('Chromoff AI SEO helpers', () => {
     }])
 
     expect(result.attributes).toEqual({ sizes: ['40'], materials: ['Кожа'] })
+  })
+
+  it('keeps configured Chromoff media hosts in the AI allowlist', () => {
+    expect(resolveBatchAiMediaHosts(['images.example.com'])).toEqual(new Set([
+      'static.yeezyunique.ru',
+      'xcimg.szwego.com',
+      'images.example.com',
+    ]))
   })
 })
