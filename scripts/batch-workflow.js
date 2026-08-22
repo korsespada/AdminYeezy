@@ -2362,6 +2362,7 @@ module.exports = {
   getSupplier,
   isAlreadyHosted,
   needsVideoTransfer,
+  uploadVideoIfNeeded,
   videoStorageKeys,
   lookupName,
   parseCsvObjects,

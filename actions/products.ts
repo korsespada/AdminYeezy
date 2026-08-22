@@ -45,6 +45,50 @@ export async function getProductAction(id: string): Promise<ActionResponse> {
   }
 }
 
+export interface ProductVideoRehostResponse extends ActionResponse {
+  /** True, когда ссылка уже ведёт на наш S3 и перезалив не требуется. */
+  alreadyHosted?: boolean
+  url?: string
+  posterUrl?: string | null
+}
+
+/**
+ * Перезаливает внешнее видео в собственный S3 по схеме выгрузок:
+ * детерминированные ключи videos/{sha256}.mp4, перекодирование ffmpeg
+ * и автоматический постер. Возвращает публичные ссылки на наш бакет.
+ */
+export async function rehostProductVideoAction(url: string): Promise<ProductVideoRehostResponse> {
+  try {
+    await requireAdmin()
+
+    const sourceUrl = String(url || '').trim()
+    // Ленивый динамический импорт: модуль выгрузок создаёт пулы и S3-клиент,
+    // поэтому не должен загружаться при обычных операциях с товарами.
+    const workflow = await import('../scripts/batch-workflow')
+
+    if (!sourceUrl) {
+      return { success: false, error: 'Пустая ссылка на видео' }
+    }
+    const parsed = new URL(sourceUrl)
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return { success: false, error: 'Для видео разрешены только HTTP(S) ссылки' }
+    }
+    if (workflow.isAlreadyHosted(sourceUrl)) {
+      return { success: true, alreadyHosted: true, url: sourceUrl, posterUrl: null }
+    }
+    if (!process.env.S3_BUCKET) {
+      return { success: false, error: 'S3_BUCKET не настроен — перезалив видео недоступен' }
+    }
+
+    const { videoKey, posterKey } = workflow.videoStorageKeys(sourceUrl)
+    const hosted = await workflow.uploadVideoIfNeeded(sourceUrl, videoKey, posterKey)
+    return { success: true, url: hosted.url || undefined, posterUrl: hosted.posterUrl || undefined }
+  } catch (error: any) {
+    console.error('Rehost product video error:', error)
+    return { success: false, error: error.message || 'Не удалось перезалить видео в S3' }
+  }
+}
+
 export async function deleteProductAction(id: string): Promise<ActionResponse> {
   return moveProductToTrashAction(id)
 }

@@ -4,9 +4,9 @@ import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
 import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
-import { createProductAction, updateProductAction } from '@/actions/products'
+import { createProductAction, rehostProductVideoAction, updateProductAction } from '@/actions/products'
 import { updateChromoffListingAction } from '@/actions/chromoff'
-import { Download, ExternalLink, Palette, Settings2, Upload } from 'lucide-react'
+import { CloudUpload, Download, ExternalLink, Palette, Settings2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -101,6 +101,11 @@ export default function ProductForm({
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
   const [videoUrl, setVideoUrl] = useState('')
   const [videoPosterUrl, setVideoPosterUrl] = useState('')
+  const [isRehostingVideo, setIsRehostingVideo] = useState(false)
+  const [videoRehostError, setVideoRehostError] = useState('')
+  const [videoRehostNote, setVideoRehostNote] = useState('')
+  const lastVideoRehostRef = useRef('')
+  const videoRehostTokenRef = useRef(0)
   const [chromoffCategoryId, setChromoffCategoryId] = useState('')
   const [chromoffPublished, setChromoffPublished] = useState(false)
   const [chromoffLegacySlug, setChromoffLegacySlug] = useState('')
@@ -282,6 +287,11 @@ export default function ProductForm({
         setExistingMedia([])
       }
       setError('')
+      setVideoRehostError('')
+      setVideoRehostNote('')
+      setIsRehostingVideo(false)
+      lastVideoRehostRef.current = ''
+      videoRehostTokenRef.current += 1
     }
   }, [isOpen, product, brands, categories, chromoffListing])
 
@@ -295,6 +305,42 @@ export default function ProductForm({
       setExistingPhotos(prev => [...prev, ...urls])
       setPhotoUrlsToAdd('')
       setIsPhotoModalOpen(false)
+    }
+  }
+
+  // Перезалив внешнего видео в собственный S3 по схеме выгрузок поставщиков
+  // (ffmpeg-перекодирование и автопостер). При ошибке исходная ссылка
+  // сохраняется как есть, чтобы не блокировать редактирование товара.
+  const rehostVideo = async (explicit = false) => {
+    const url = videoUrl.trim()
+    if (!url || isRehostingVideo || isPending) return
+    if (!explicit && lastVideoRehostRef.current === url) return
+    lastVideoRehostRef.current = url
+    const token = videoRehostTokenRef.current
+    setVideoRehostError('')
+    setVideoRehostNote('')
+    setIsRehostingVideo(true)
+    try {
+      const result = await rehostProductVideoAction(url)
+      // Форму переоткрыли с другим товаром, пока шла заливка, — результат не применяем.
+      if (token !== videoRehostTokenRef.current) return
+      if (!result.success) {
+        setVideoRehostError(result.error || 'Не удалось перезалить видео в S3')
+      } else if (result.alreadyHosted) {
+        setVideoRehostNote('Ссылка уже ведёт на наш S3 — перезалив не требуется')
+      } else if (result.url) {
+        setVideoUrl(result.url)
+        if (result.posterUrl && !videoPosterUrl.trim()) setVideoPosterUrl(result.posterUrl)
+        setVideoRehostNote('Видео перезалито в наш S3, ссылка заменена автоматически')
+      } else {
+        setVideoRehostError('Сервер не вернул ссылку на перезалитое видео')
+      }
+    } catch {
+      if (token === videoRehostTokenRef.current) {
+        setVideoRehostError('Не удалось связаться с сервером при перезаливе видео')
+      }
+    } finally {
+      if (token === videoRehostTokenRef.current) setIsRehostingVideo(false)
     }
   }
 
@@ -325,6 +371,13 @@ export default function ProductForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    // Пока видео перезаливается в S3, сохранение заблокировано, чтобы в каталог
+    // не ушла внешняя ссылка вместо ссылки на наш бакет.
+    if (isRehostingVideo) {
+      setError('Дождитесь окончания заливки видео в наш S3')
+      return
+    }
 
     // Validation
     if (!productId.trim()) {
@@ -495,14 +548,14 @@ export default function ProductForm({
       if (!isSaveShortcut) return
 
       event.preventDefault()
-      if (event.repeat || isPending || isPhotoModalOpen) return
+      if (event.repeat || isPending || isPhotoModalOpen || isRehostingVideo) return
 
       formRef.current?.requestSubmit()
     }
 
     window.addEventListener('keydown', handleSaveShortcut)
     return () => window.removeEventListener('keydown', handleSaveShortcut)
-  }, [isOpen, isPending, isPhotoModalOpen, onClose])
+  }, [isOpen, isPending, isPhotoModalOpen, isRehostingVideo, onClose])
 
   if (!isOpen) return null
 
@@ -592,7 +645,7 @@ export default function ProductForm({
             <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/35 p-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Видео товара</label>
-                <p className="mt-1 text-xs text-gray-500">Видео хранится отдельно от фотографий и показывается последней миниатюрой на сайте.</p>
+                <p className="mt-1 text-xs text-gray-500">Видео хранится отдельно от фотографий и показывается последней миниатюрой на сайте. Ссылка не с нашего S3 автоматически перезаливается в наш бакет с конвертацией и постером.</p>
               </div>
               {videoUrl && (
                 <video
@@ -605,24 +658,50 @@ export default function ProductForm({
                   <source src={videoUrl} type="video/mp4" />
                 </video>
               )}
-              <input
-                type="url"
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
-                placeholder="https://.../video.mp4"
-                disabled={isPending}
-              />
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  onBlur={() => rehostVideo()}
+                  className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
+                  placeholder="https://.../video.mp4"
+                  disabled={isPending || isRehostingVideo}
+                />
+                {videoUrl && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => rehostVideo(true)}
+                    className="h-fit shrink-0 border-blue-800/50 bg-blue-900/20 text-blue-400 hover:bg-blue-900/30 hover:text-blue-300"
+                    disabled={isPending || isRehostingVideo}
+                    title="Скачать видео по ссылке, конвертировать и залить в наш S3"
+                  >
+                    <CloudUpload size={16} />
+                    Перезалить
+                  </Button>
+                )}
+              </div>
+              {isRehostingVideo && (
+                <p className="text-xs text-blue-400">Видео скачивается, конвертируется через ffmpeg и заливается в наш S3…</p>
+              )}
+              {!isRehostingVideo && videoRehostError && (
+                <p className="text-xs text-amber-400">{videoRehostError}. Товар можно сохранить с исходной ссылкой.</p>
+              )}
+              {!isRehostingVideo && videoRehostNote && (
+                <p className="text-xs text-green-400">{videoRehostNote}</p>
+              )}
               <input
                 type="url"
                 value={videoPosterUrl}
                 onChange={(e) => setVideoPosterUrl(e.target.value)}
                 className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                 placeholder="URL постера (необязательно)"
-                disabled={isPending}
+                disabled={isPending || isRehostingVideo}
               />
               {(videoUrl || videoPosterUrl) && (
-                <Button type="button" variant="outline" size="sm" onClick={() => { setVideoUrl(''); setVideoPosterUrl('') }} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending}>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setVideoUrl(''); setVideoPosterUrl(''); setVideoRehostError(''); setVideoRehostNote(''); lastVideoRehostRef.current = '' }} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending || isRehostingVideo}>
                   Удалить видео
                 </Button>
               )}
