@@ -855,6 +855,28 @@ describe('rails admin product adapter', () => {
     })
   })
 
+  it('passes a variant group key through to the Rails product patch without extra reads', async () => {
+    const familyKey = 'a'.repeat(32)
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        product: {
+          id: 'product-id',
+          external_id: 'ext-1',
+          name: 'Product',
+          variant_group_key: familyKey,
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await patchRailsAdminProduct('product-id', { variantGroupKey: familyKey })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const patchBody = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(patchBody.product).toMatchObject({ variant_group_key: familyKey })
+  })
+
   it('keeps archived status and uses subcategory as Rails category id', () => {
     const formData = new FormData()
     formData.append('status', 'archived')

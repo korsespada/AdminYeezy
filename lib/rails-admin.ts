@@ -2548,6 +2548,9 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
     metadata.price_on_request = isPriceOnRequest(data.price)
     product.metadata = metadata
   }
+  if (data.variantGroupKey !== undefined) {
+    product.variant_group_key = String(data.variantGroupKey || '').trim() || null
+  }
   if (data.gender !== undefined) {
     const currentMetadata = await getCurrentMetadata()
     const metadata = product.metadata && typeof product.metadata === 'object'
