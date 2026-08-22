@@ -94,6 +94,14 @@ chmod +x ensure-runtime-image.sh && ./ensure-runtime-image.sh
 отдельный BuildKit-builder с лимитами; Node-сборка дополнительно ограничена через
 `NODE_OPTIONS=--max-old-space-size=768` в builder-stage.
 
+Сервер небольшой (4 vCPU / 5.8 ГБ RAM) и во время деплоя остаётся занят
+прод-контейнерами (Elasticsearch ~1 ГБ, Postgres, само приложение). Чтобы сборка
+Next не вымывала у них память, в `next.config.js` ограничены воркеры
+(`experimental.cpus: 2`) и память движка Turbopack
+(`experimental.turbopackMemoryLimit`, байты), а на сервере есть запасной swap
+`/swapfile2` на 2 ГБ (итого 4 ГБ, записан в `/etc/fstab`) — при пике сборки
+сервер замедляется, но остаётся доступным и не требует ребута.
+
 Минимальная ручная проверка перед production deploy:
 
 ```bash

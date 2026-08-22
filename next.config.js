@@ -29,6 +29,12 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: '10mb',
     },
+    // Сборка идёт на сервере рядом с прод-контейнерами (4 ядра / 5.8 ГБ RAM):
+    // ограничиваем число воркеров сборки и память Turbopack, иначе деплой
+    // вымывает память у Elasticsearch и Postgres, и сервер перестаёт отвечать.
+    cpus: 2,
+    // 1.5 ГБ в байтах — потолок движка Turbopack при next build.
+    turbopackMemoryLimit: 1610612736,
   },
 }
 
