@@ -1,4 +1,6 @@
 ARG RUNTIME_IMAGE=adminyeezy-runtime:python311-ffmpeg
+ARG RAILS_ADMIN_EMAIL
+ARG RAILS_API_URL=https://api.yeezyunique.ru/api/v1
 
 FROM node:20-bookworm-slim AS builder
 

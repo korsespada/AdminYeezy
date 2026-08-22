@@ -102,6 +102,45 @@ Next не вымывала у них память, в `next.config.js` огра�
 `/swapfile2` на 2 ГБ (итого 4 ГБ, записан в `/etc/fstab`) — при пике сборки
 сервер замедляется, но остаётся доступным и не требует ребута.
 
+### Сборка через GitHub Actions (основной путь)
+
+`.github/workflows/docker.yml` собирает оба образа на раннерах GitHub и пушит их
+в GitHub Container Registry (`ghcr.io`), поэтому прод-сервер вообще не строит
+ничего и не испытывает нагрузок деплоя:
+
+- job `runtime` — образ из `Dockerfile.runtime` →
+  `ghcr.io/korsespada/adminyeezy-runtime:{latest,<sha>}`; слои кэшируются через
+  GHA-cache, поэтому без изменений `requirements.txt` пересборка занимает
+  секунды;
+- job `app` — основной образ из `Dockerfile` с
+  `RUNTIME_IMAGE=ghcr.io/korsespada/adminyeezy-runtime:<sha>` →
+  `ghcr.io/korsespada/adminyeezy:{latest,<sha>}`; build-args
+  `RAILS_ADMIN_EMAIL` и `RAILS_API_URL` берутся из секретов репозитория.
+
+Нужные secrets в настройках репозитория (Settings → Secrets and variables →
+Actions):
+
+| Secret | Назначение |
+|---|---|
+| `RAILS_ADMIN_EMAIL` | Значение build-переменной Coolify `RAILS_ADMIN_EMAIL` |
+| `RAILS_API_URL` | Обычно `https://api.yeezyunique.ru/api/v1` |
+
+Чтобы Coolify перестал собирать сам и начал тянуть готовый образ:
+
+1. Создать PAT на GitHub с правом `read:packages`
+   (Settings → Developer settings → Personal access tokens).
+2. В Coolify: Sources → добавить Docker Registry `ghcr.io` с логином
+   `korsespada` и этим токеном.
+3. В приложении AdminYeezy сменить Source с «Git Repository» на «Docker Image»,
+   указать `ghcr.io/korsespada/adminyeezy:latest`, привязать registry из шага 2.
+4. Удалить ставшие ненужными build-переменные (`RUNTIME_IMAGE`,
+   `RAILS_ADMIN_EMAIL`, `RAILS_API_URL`) — они больше не участвуют в сборке.
+5. Redeploy. Дальше каждый пуш в main обновляет образ в ghcr.io, а Coolify
+   просто подтягивает новую версию.
+
+Пока Coolify не переключён, он продолжает локальную сборку по инструкции выше —
+workflow от этого не ломается и просто готовит образы заранее.
+
 Минимальная ручная проверка перед production deploy:
 
 ```bash
