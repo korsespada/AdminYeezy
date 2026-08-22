@@ -65,6 +65,30 @@ CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yeez
 Если используется другой registry или тег, передайте его первым аргументом и
 задайте в Coolify build variable `RUNTIME_IMAGE` с тем же значением.
 
+### Самовосстановление runtime-образа
+
+Базовый образ не используется ни одним контейнером напрямую, поэтому плановая
+чистка Docker в Coolify (ежедневная задача, около 00:00 UTC) считает его
+«неиспользуемым» и может удалить. Тогда очередной деплой падает с
+`pull access denied ... adminyeezy-runtime:python311-ffmpeg`.
+
+Чтобы это не повторялось, на сервере стоит ежедневная проверка: cron
+(`30 5 * * *`) запускает `/opt/adminyeezy-runtime/ensure-runtime-image.sh`
+(каноничная копия — `scripts/ensure-runtime-image.sh`). Скрипт проверяет наличие
+тега `adminyeezy-runtime:python311-ffmpeg` и при отсутствии пересобирает образ
+через builder `coolify-safe`; слои кэшируются, восстановление занимает секунды.
+Рядом лежат `Dockerfile.runtime` и `requirements.txt`, лог —
+`/var/log/adminyeezy-runtime-guard.log`.
+
+При пересоздании сервера с нуля вернуть защиту:
+
+```bash
+mkdir -p /opt/adminyeezy-runtime && cd /opt/adminyeezy-runtime
+# скопировать scripts/ensure-runtime-image.sh, Dockerfile.runtime, requirements.txt из репозитория
+chmod +x ensure-runtime-image.sh && ./ensure-runtime-image.sh
+(crontab -l; echo '30 5 * * * /opt/adminyeezy-runtime/ensure-runtime-image.sh >> /var/log/adminyeezy-runtime-guard.log 2>&1') | crontab -
+```
+
 Ограничение `limits_memory` в Coolify относится к запущенному контейнеру и не
 ограничивает BuildKit. Поэтому для тяжёлого runtime-образа используется именно
 отдельный BuildKit-builder с лимитами; Node-сборка дополнительно ограничена через
