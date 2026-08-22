@@ -28,7 +28,7 @@ Production-доступ к `/admin/*` должен быть только по Ra
 | `/admin/brands` | Бренды | Rails catalog lookups, read-only |
 | `/admin/categories` | Категории и подкатегории | Rails catalog lookups, read-only |
 | `/admin/chromoff` | Каталог Chromoff: общий формат карточек, 40/100/500 карточек на странице, bulk actions, массовая смена любого Rails-поставщика, фильтры по товару и Chromoff-статусам, отдельные поля публикации и SEO | Rails Chromoff API + Rails catalog lookups |
-| `/admin/chromoff/categories` | Редактор разделов и подразделов Chromoff: название, slug, порядок, активность и сопоставление общей категории | Rails Chromoff API + Rails catalog lookups |
+| `/admin/chromoff/categories` | Редактор разделов и подразделов Chromoff: название, slug, порядок, активность, сопоставление общей категории и добавление новых подразделов | Rails Chromoff API + Rails catalog lookups |
 | `/admin/trash` | Архивированные товары | Rails admin/products |
 
 Все изменения опубликованного каталога идут через Rails API. Прямые SQL-записи в Rails CRM Postgres запрещены.

@@ -83,7 +83,7 @@ function normalize(value: string) {
   return value.trim().toLocaleLowerCase('ru-RU').replace(/ё/g, 'е')
 }
 
-function slugify(value: string) {
+export function slugify(value: string) {
   const letters: Record<string, string> = {
     а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
   }
@@ -109,6 +109,27 @@ function productMedia(product: SourceProduct): ProductMedia[] {
     sort_order: index,
     processing_status: 'processed',
   }))
+}
+
+export function buildChromoffManualSubcategoryPayload(input: {
+  parentSourceId: string
+  name: string
+  slug?: string
+  catalogCategoryId?: string
+  sortOrder?: number
+}): RailsChromoffImportPayload {
+  const slug = (input.slug?.trim() || slugify(input.name))
+  return {
+    categories: [{
+      source_id: `manual-${slug}`,
+      parent_source_id: input.parentSourceId,
+      catalog_category_id: input.catalogCategoryId?.trim() || '',
+      name: input.name.trim(),
+      slug,
+      sort_order: Number.isInteger(input.sortOrder) ? Number(input.sortOrder) : 0,
+    }],
+    products: [],
+  }
 }
 
 export async function buildChromoffImportPayload(): Promise<RailsChromoffImportPayload> {

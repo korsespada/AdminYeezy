@@ -172,7 +172,13 @@ PATCH  /api/v1/admin/chromoff/listings/bulk_update
 GET    /api/v1/admin/chromoff/listings/:id/ai_content
 PATCH  /api/v1/admin/chromoff/listings/:id/apply_ai_content
 GET    /api/v1/admin/chromoff/ai_contents?page=1&per_page=40&q=&category_id=
+POST   /api/v1/admin/chromoff/imports
 ```
+
+Создание новых категорий Chromoff выполняется только через
+`POST /api/v1/admin/chromoff/imports` (upsert по `source_id`): ручные
+подразделы со страницы `/admin/chromoff/categories` отправляются туда с
+псевдо-`source_id` вида `manual-<slug>` и пустым списком товаров.
 
 Публичная витрина Chromoff получает только опубликованные listings через
 `/api/v1/catalog/chromoff/*`. У listing есть собственная категория, legacy URL

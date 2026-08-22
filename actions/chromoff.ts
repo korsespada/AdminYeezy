@@ -1,8 +1,8 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { buildChromoffImportPayload } from '@/lib/chromoff-source'
-import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { buildChromoffImportPayload, buildChromoffManualSubcategoryPayload, slugify } from '@/lib/chromoff-source'
+import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, listRailsChromoffCategories, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
 
 export async function deleteChromoffListingAction(id: string) {
   const listingId = String(id || '').trim()
@@ -70,6 +70,47 @@ export async function setChromoffListingsSupplierAction(listingIds: string[], so
     return { success: true, updated: result.updated, message: 'Поставщик обновлён у выбранных товаров.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить поставщика.' }
+  }
+}
+
+export async function createChromoffSubcategoryAction(formData: FormData) {
+  const parentId = String(formData.get('parent_id') || '').trim()
+  const parentSourceId = String(formData.get('parent_source_id') || '').trim()
+  const name = String(formData.get('name') || '').trim()
+  const catalogCategoryId = String(formData.get('catalog_category_id') || '').trim()
+  const sortOrder = Number(formData.get('sort_order'))
+  if (!parentId || !parentSourceId) return { success: false, message: 'Не указан раздел Chromoff.' }
+  if (!name) return { success: false, message: 'Укажи название подраздела.' }
+  if (!catalogCategoryId) return { success: false, message: 'Сопоставь подраздел с категорией общего каталога.' }
+  if (!Number.isInteger(sortOrder)) return { success: false, message: 'Порядок должен быть целым числом.' }
+
+  const slug = (String(formData.get('slug') || '').trim() || slugify(name)).toLowerCase()
+  if (!/^[a-z0-9-]+$/.test(slug)) return { success: false, message: 'Slug — только латиница, цифры и дефисы.' }
+
+  try {
+    const existing = await listRailsChromoffCategories()
+    if (existing.some((category) => category.slug === slug || category.source_id === `manual-${slug}`)) {
+      return { success: false, message: `Подраздел со slug «${slug}» уже существует.` }
+    }
+    const normalize = (value: string) => value.trim().toLocaleLowerCase('ru-RU')
+    if (existing.some((category) => category.parent_id === parentId && normalize(category.name) === normalize(name))) {
+      return { success: false, message: `В этом разделе уже есть подраздел «${name}».` }
+    }
+
+    const summary = await runRailsChromoffImport(buildChromoffManualSubcategoryPayload({
+      parentSourceId,
+      name,
+      slug,
+      catalogCategoryId,
+      sortOrder,
+    }), false)
+    if (!summary.categories_received) return { success: false, message: 'Rails не принял новую категорию.' }
+
+    revalidatePath('/admin/chromoff')
+    revalidatePath('/admin/chromoff/categories')
+    return { success: true, message: `Подраздел «${name}» добавлен.` }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось добавить подраздел.' }
   }
 }
 
