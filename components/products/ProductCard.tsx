@@ -270,7 +270,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         size="icon"
                         onClick={(e) => { e.stopPropagation(); onDelete(product.id); }}
                         className="h-8 w-8 rounded-full bg-slate-900/80 text-slate-300 shadow-lg backdrop-blur-sm hover:bg-red-600 hover:text-white"
-                        title="Удалить"
+                        title="В корзину"
                     >
                         <Trash2 className="w-4 h-4" />
                     </Button>

@@ -67,7 +67,7 @@ describe('ProductCard grid presentation', () => {
       />,
     )
 
-    expect(screen.getByTitle('Удалить')).toBeInTheDocument()
+    expect(screen.getByTitle('В корзину')).toBeInTheDocument()
     expect(screen.queryByTitle('Дублировать')).not.toBeInTheDocument()
   })
 

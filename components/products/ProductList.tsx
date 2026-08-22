@@ -1,17 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback, useTransition } from 'react'
+import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
 import { deleteProductAction, getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
-import { Filter, LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
+import { Filter, Layers3, LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
 import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
 import CategoryBrowser from '@/components/products/CategoryBrowser'
 import MeasurementTemplateBulkPicker from '@/components/products/MeasurementTemplateBulkPicker'
+import VariantFamilyBulkDialog from '@/components/products/VariantFamilyBulkDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,6 +33,7 @@ interface ProductListProps {
   totalItems: number
   showCategoryBrowser?: boolean
   pagination?: React.ReactNode
+  perPageSelector?: React.ReactNode
 }
 
 export default function ProductList({
@@ -46,6 +48,7 @@ export default function ProductList({
   totalItems,
   showCategoryBrowser = false,
   pagination,
+  perPageSelector,
 }: ProductListProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -53,15 +56,18 @@ export default function ProductList({
 
   const [products, setProducts] = useState<Product[]>(initialData)
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [cardColumns, setCardColumns] = useState(4)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isFamilyDialogOpen, setIsFamilyDialogOpen] = useState(false)
 
   // Use allBrands if provided, otherwise fallback to filtered brands (though suboptimal for editing)
   const editingBrands = allBrands.length > 0 ? allBrands : brands
 
   // Selection state
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
+  const selectionAnchorRef = useRef<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
@@ -77,6 +83,7 @@ export default function ProductList({
   useEffect(() => {
     setProducts(initialData)
     setSelectedProductIds([])
+    selectionAnchorRef.current = null
   }, [initialData, routeKey])
 
   // Load view mode from localStorage
@@ -85,11 +92,20 @@ export default function ProductList({
     if (saved === 'grid' || saved === 'list') {
       setViewMode(saved)
     }
+    const savedColumns = Number(localStorage.getItem('productCardColumns'))
+    if (savedColumns >= 4 && savedColumns <= 10) {
+      setCardColumns(savedColumns)
+    }
   }, [])
 
   const handleViewModeChange = (mode: 'grid' | 'list') => {
     setViewMode(mode)
     localStorage.setItem('productViewMode', mode)
+  }
+
+  const handleCardColumnsChange = (columns: number) => {
+    setCardColumns(columns)
+    localStorage.setItem('productCardColumns', String(columns))
   }
 
   const handleCreate = () => {
@@ -150,6 +166,25 @@ export default function ProductList({
       prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
     )
   }, [])
+
+  // Shift-click selects the whole range from the anchor card, like the exports grid.
+  const handleSelectionClick = useCallback((productId: string, shiftKey: boolean) => {
+    setSelectedProductIds(prev => {
+      const anchor = selectionAnchorRef.current
+      if (shiftKey && anchor) {
+        const anchorPosition = products.findIndex(product => product.id === anchor)
+        const currentPosition = products.findIndex(product => product.id === productId)
+        if (anchorPosition >= 0 && currentPosition >= 0) {
+          const [from, to] = anchorPosition < currentPosition
+            ? [anchorPosition, currentPosition]
+            : [currentPosition, anchorPosition]
+          return [...new Set([...prev, ...products.slice(from, to + 1).map(product => product.id)])]
+        }
+      }
+      return prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]
+    })
+    selectionAnchorRef.current = productId
+  }, [products])
 
   const handleNavigation = useCallback((url: string) => {
     setSelectedProductIds([])
@@ -261,6 +296,13 @@ export default function ProductList({
     setIsBulkDeleting(false)
   }
 
+  const handleVariantFamilyAssigned = useCallback(() => {
+    setSelectedProductIds([])
+    selectionAnchorRef.current = null
+    // Families come back expanded from Rails, so refetch the page data.
+    router.refresh()
+  }, [router])
+
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans text-slate-200">
 
@@ -293,6 +335,7 @@ export default function ProductList({
               </div>
 
               <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-3">
+                {perPageSelector && <div className="shrink-0">{perPageSelector}</div>}
                 <Button
                   type="button"
                   variant="outline"
@@ -368,6 +411,7 @@ export default function ProductList({
                       onUpdate={handleProductUpdate}
                       selected={selectedProductIds.includes(product.id)}
                       onToggleSelect={handleToggleSelect}
+                      onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
                       categories={categories}
                       subcategories={subcategories}
                       variantCount={product.color_variants?.length || 0}
@@ -383,7 +427,7 @@ export default function ProductList({
                 <div className="hidden lg:block">
                 {viewMode === 'grid' ? (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between px-1">
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-1">
                       <Button
                         type="button"
                         variant="ghost"
@@ -403,8 +447,21 @@ export default function ProductList({
                         )}
                         <span>{selectedProductIds.length === products.length ? 'Снять всё' : 'Выбрать все на странице'}</span>
                       </Button>
+                      <label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-400 xl:flex">
+                        <span className="whitespace-nowrap">В ряд: {cardColumns}</span>
+                        <input
+                          type="range"
+                          min="4"
+                          max="10"
+                          step="1"
+                          value={cardColumns}
+                          onChange={(event) => handleCardColumnsChange(Number(event.target.value))}
+                          className="h-1.5 w-24 cursor-pointer accent-indigo-500"
+                          aria-label="Количество карточек в ряду"
+                        />
+                      </label>
                     </div>
-                    <div className="mb-8 grid grid-cols-2 gap-4 xl:grid-cols-3 2xl:grid-cols-4">
+                    <div className={`mb-8 grid grid-cols-2 gap-4 ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`}>
                       {products.map(product => (
                         <ProductCard
                           key={product.id}
@@ -414,6 +471,7 @@ export default function ProductList({
                           onUpdate={handleProductUpdate}
                           selected={selectedProductIds.includes(product.id)}
                           onToggleSelect={handleToggleSelect}
+                          onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
                           categories={categories}
                           subcategories={subcategories}
                           variantCount={product.color_variants?.length || 0}
@@ -466,6 +524,15 @@ export default function ProductList({
         }}
         onSave={handleProductUpdate}
         onOpenProduct={handleOpenProduct}
+      />
+
+      {/* Variant Family Bulk Dialog */}
+      <VariantFamilyBulkDialog
+        open={isFamilyDialogOpen}
+        onClose={() => setIsFamilyDialogOpen(false)}
+        products={products}
+        selectedIds={selectedProductIds}
+        onAssigned={handleVariantFamilyAssigned}
       />
 
       {/* Bulk Action Toolbar */}
@@ -571,6 +638,19 @@ export default function ProductList({
               onChange={setSelectedMeasurementTemplate}
               disabled={isBulkUpdating || isBulkDeleting}
             />
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setIsFamilyDialogOpen(true)}
+              disabled={isBulkUpdating || isBulkDeleting}
+              className="h-9 w-9 shrink-0 border-violet-500/40 bg-transparent text-violet-300 hover:bg-violet-500/10 hover:text-violet-200"
+              aria-label="Объединить выбранные товары в цветовую семью"
+              title="В цветовую семью"
+            >
+              <Layers3 className={`h-4 w-4`} />
+            </Button>
 
             <Button
               type="button"

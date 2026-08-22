@@ -182,6 +182,7 @@ export default async function AdminPage({
         filterFacets={filterFacets}
         totalItems={totalItems}
         showCategoryBrowser={!hasActiveFilters}
+        perPageSelector={<PerPageSelector currentPerPage={perPage} />}
         pagination={
           totalItems > 0 && (
             <div className="mt-6 flex flex-col md:flex-row items-center justify-between border-t border-slate-700 bg-slate-800/50 px-4 py-4 sm:px-6 rounded-xl gap-4">
@@ -189,7 +190,6 @@ export default async function AdminPage({
                 <p className="text-sm text-slate-400">
                   Показано <span className="font-medium text-slate-200">{shownFrom}</span> - <span className="font-medium text-slate-200">{shownTo}</span> из <span className="font-medium text-slate-200">{totalItems}</span>
                 </p>
-                <PerPageSelector currentPerPage={perPage} />
               </div>
 
               {totalPages > 1 && (
