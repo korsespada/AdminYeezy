@@ -877,6 +877,27 @@ describe('rails admin product adapter', () => {
     expect(patchBody.product).toMatchObject({ variant_group_key: familyKey })
   })
 
+  it('passes background media uploads through a narrow Rails product patch', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ product: { id: 'product-id', external_id: 'ext-1' } }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await patchRailsAdminProduct('product-id', {
+      videoUrl: 'https://static.yeezyunique.ru/videos/video.mp4',
+      videoPosterUrl: 'https://static.yeezyunique.ru/videos/video-poster.webp',
+      media: [{ original_url: 'https://static.yeezyunique.ru/products/media/photo.webp' }],
+    })
+
+    const patchBody = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(patchBody.product).toMatchObject({
+      video_url: 'https://static.yeezyunique.ru/videos/video.mp4',
+      video_poster_url: 'https://static.yeezyunique.ru/videos/video-poster.webp',
+      media: [{ original_url: 'https://static.yeezyunique.ru/products/media/photo.webp', sort_order: 0 }],
+    })
+  })
+
   it('keeps archived status and uses subcategory as Rails category id', () => {
     const formData = new FormData()
     formData.append('status', 'archived')

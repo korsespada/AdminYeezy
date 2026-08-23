@@ -31,6 +31,13 @@ import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import { applyMeasurementTableAttributes } from '@/lib/measurement-templates'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 
+interface PendingPhotoUpload {
+  id: string
+  previewUrl: string
+  url?: string
+  file?: File
+}
+
 interface ProductFormProps {
   product?: Product | null
   brands: Brand[]
@@ -99,6 +106,13 @@ export default function ProductForm({
   const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
+  const [pendingPhotoUploads, setPendingPhotoUploads] = useState<PendingPhotoUpload[]>([])
+  const [pendingVideoFile, setPendingVideoFile] = useState<File | null>(null)
+  const [videoFilePreviewUrl, setVideoFilePreviewUrl] = useState('')
+  const [isVideoDragActive, setIsVideoDragActive] = useState(false)
+  const photoFileInputRef = useRef<HTMLInputElement>(null)
+  const videoFileInputRef = useRef<HTMLInputElement>(null)
+  const wasOpenRef = useRef(false)
   const [videoUrl, setVideoUrl] = useState('')
   const [videoPosterUrl, setVideoPosterUrl] = useState('')
   const [isRehostingVideo, setIsRehostingVideo] = useState(false)
@@ -165,8 +179,80 @@ export default function ProductForm({
     }
   }
 
+  const clearPendingMedia = () => {
+    setPendingPhotoUploads((prev) => {
+      prev.forEach((item) => {
+        if (item.file) URL.revokeObjectURL(item.previewUrl)
+      })
+      return []
+    })
+    setPendingVideoFile(null)
+    setVideoFilePreviewUrl((previous) => {
+      if (previous) URL.revokeObjectURL(previous)
+      return ''
+    })
+  }
+
+  const addPhotoFiles = (files: File[]) => {
+    const validFiles = files.filter((file) => file.type.startsWith('image/'))
+    if (validFiles.length !== files.length) setError('Можно добавлять только файлы изображений')
+    setPendingPhotoUploads((previous) => [
+      ...previous,
+      ...validFiles.map((file) => ({
+        id: createManualProductId(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      })),
+    ])
+  }
+
+  const handlePhotoFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    addPhotoFiles(Array.from(event.target.files || []))
+    event.target.value = ''
+  }
+
+  const addVideoFile = (file: File) => {
+    if (!file.type.startsWith('video/')) {
+      setError('Можно добавлять только видеофайлы')
+      return
+    }
+    setPendingVideoFile(file)
+    setVideoUrl('')
+    setVideoPosterUrl('')
+    setVideoFilePreviewUrl((previous) => {
+      if (previous) URL.revokeObjectURL(previous)
+      return URL.createObjectURL(file)
+    })
+    setVideoRehostError('')
+    setVideoRehostNote('Видео будет загружено в S3 после сохранения товара')
+  }
+
+  const handleVideoFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) addVideoFile(file)
+    event.target.value = ''
+  }
+
+  const removePendingPhoto = (id: string) => {
+    setPendingPhotoUploads((previous) => {
+      const item = previous.find((candidate) => candidate.id === id)
+      if (item?.file) URL.revokeObjectURL(item.previewUrl)
+      return previous.filter((candidate) => candidate.id !== id)
+    })
+  }
+
+  const removePendingVideo = () => {
+    setPendingVideoFile(null)
+    setVideoFilePreviewUrl((previous) => {
+      if (previous) URL.revokeObjectURL(previous)
+      return ''
+    })
+  }
+
   useEffect(() => {
     if (isOpen) {
+      if (!wasOpenRef.current) clearPendingMedia()
+      wasOpenRef.current = true
       if (product) {
         setProductId(product.productId || '')
         setSku(product.sku && product.sku !== product.productId ? product.sku : '')
@@ -292,6 +378,8 @@ export default function ProductForm({
       setIsRehostingVideo(false)
       lastVideoRehostRef.current = ''
       videoRehostTokenRef.current += 1
+    } else {
+      wasOpenRef.current = false
     }
   }, [isOpen, product, brands, categories, chromoffListing])
 
@@ -302,7 +390,10 @@ export default function ProductForm({
       .filter(url => url.length > 0)
 
     if (urls.length > 0) {
-      setExistingPhotos(prev => [...prev, ...urls])
+      setPendingPhotoUploads((previous) => [
+        ...previous,
+        ...urls.map((url) => ({ id: createManualProductId(), url, previewUrl: url })),
+      ])
       setPhotoUrlsToAdd('')
       setIsPhotoModalOpen(false)
     }
@@ -368,16 +459,43 @@ export default function ProductForm({
     })
   }
 
+  const queueBackgroundMediaUpload = (
+    savedProductId: string,
+    photos: PendingPhotoUpload[],
+    videoFile: File | null,
+    sourceVideoUrl: string,
+    sourceVideoPosterUrl: string,
+  ) => {
+    const photoUrls = photos.map((item) => item.url).filter((url): url is string => Boolean(url))
+    const photoFiles = photos.map((item) => item.file).filter((file): file is File => Boolean(file))
+    const shouldUploadVideoUrl = Boolean(sourceVideoUrl.trim()) && !/^https?:\/\/static\.yeezyunique\.ru\//i.test(sourceVideoUrl.trim())
+    if (photoUrls.length === 0 && photoFiles.length === 0 && !videoFile && !shouldUploadVideoUrl) return
+
+    const uploadData = new FormData()
+    uploadData.append('product_id', savedProductId)
+    photoUrls.forEach((url) => uploadData.append('photo_url', url))
+    photoFiles.forEach((file) => uploadData.append('photo_file', file))
+    if (videoFile) uploadData.append('video_file', videoFile)
+    if (shouldUploadVideoUrl) uploadData.append('video_url', sourceVideoUrl.trim())
+    if (sourceVideoPosterUrl.trim()) uploadData.append('video_poster_url', sourceVideoPosterUrl.trim())
+
+    void fetch('/api/admin/products/media-upload', {
+      method: 'POST',
+      body: uploadData,
+      credentials: 'same-origin',
+    }).then(async (response) => {
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        console.error('Product media upload was not queued', payload?.error || response.status)
+      }
+    }).catch((uploadError) => {
+      console.error('Product media upload request failed', uploadError)
+    })
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-
-    // Пока видео перезаливается в S3, сохранение заблокировано, чтобы в каталог
-    // не ушла внешняя ссылка вместо ссылки на наш бакет.
-    if (isRehostingVideo) {
-      setError('Дождитесь окончания заливки видео в наш S3')
-      return
-    }
 
     // Validation
     if (!productId.trim()) {
@@ -421,7 +539,7 @@ export default function ProductForm({
     formData.append('seo_title', seoTitle.trim())
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
-    formData.append('video_url', videoUrl.trim())
+    formData.append('video_url', pendingVideoFile ? '' : videoUrl.trim())
     formData.append('video_poster_url', videoPosterUrl.trim())
     const normalizedCatalogAttributes = normalizeCatalogAttributes(catalogAttributes, {
       categoryName: selectedCategoryName,
@@ -446,6 +564,10 @@ export default function ProductForm({
     // Always send media, including an empty array when all photos were removed.
     const mediaPayload = buildMediaPayload()
     formData.append('media', JSON.stringify(mediaPayload))
+    const pendingPhotosSnapshot = pendingPhotoUploads
+    const pendingVideoSnapshot = pendingVideoFile
+    const videoUrlSnapshot = videoUrl
+    const videoPosterUrlSnapshot = videoPosterUrl
 
     if (product) {
       const chromoffFormData = chromoffListing ? new FormData() : null
@@ -502,6 +624,11 @@ export default function ProductForm({
       const chromoffPromise = chromoffFormData
         ? updateChromoffListingAction(chromoffFormData)
         : Promise.resolve({ success: true, message: '' })
+      productPromise.then((productResult) => {
+        if (productResult.success) {
+          queueBackgroundMediaUpload(product.id, pendingPhotosSnapshot, pendingVideoSnapshot, videoUrlSnapshot, videoPosterUrlSnapshot)
+        }
+      }).catch(() => undefined)
       Promise.all([productPromise, chromoffPromise])
         .then(([productResult, chromoffResult]) => {
           if (!productResult.success) {
@@ -521,6 +648,8 @@ export default function ProductForm({
 
         if (result.success) {
           onClose()
+          const savedProductId = String(result.data?.id || '')
+          if (savedProductId) queueBackgroundMediaUpload(savedProductId, pendingPhotosSnapshot, pendingVideoSnapshot, videoUrlSnapshot, videoPosterUrlSnapshot)
           // Только при создании нового товара нужен рефреш (чтобы новый появился в списке)
           router.refresh()
         } else {
@@ -622,6 +751,25 @@ export default function ProductForm({
                     <Upload size={16} />
                     Добавить фото
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => photoFileInputRef.current?.click()}
+                    className="h-fit border-emerald-800/50 bg-emerald-900/20 text-emerald-400 hover:bg-emerald-900/30"
+                    disabled={isPending}
+                  >
+                    <CloudUpload size={16} />
+                    Из файла
+                  </Button>
+                  <input
+                    ref={photoFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handlePhotoFilesChange}
+                  />
                 </div>
               </div>
 
@@ -638,16 +786,33 @@ export default function ProductForm({
                 </div>
               )}
 
-              {/* New Photos (Removed, as we now use URL input directly to existing photos list) */}
+              {pendingPhotoUploads.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {pendingPhotoUploads.map((item) => (
+                    <div key={item.id} className="relative aspect-square overflow-hidden rounded-md border border-emerald-700/60 bg-slate-950">
+                      <img src={item.previewUrl} alt="Новое фото" className="h-full w-full object-cover" />
+                      <span className="absolute bottom-1 left-1 rounded bg-emerald-950/90 px-1.5 py-0.5 text-[10px] text-emerald-300">В S3 после сохранения</span>
+                      <button
+                        type="button"
+                        onClick={() => removePendingPhoto(item.id)}
+                        className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white hover:bg-red-700"
+                        aria-label="Удалить новое фото"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Video */}
             <div className="space-y-3 rounded-lg border border-slate-700 bg-slate-900/35 p-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Видео товара</label>
-                <p className="mt-1 text-xs text-gray-500">Видео хранится отдельно от фотографий и показывается последней миниатюрой на сайте. Ссылка не с нашего S3 автоматически перезаливается в наш бакет с конвертацией и постером.</p>
+                <p className="mt-1 text-xs text-gray-500">Видео хранится отдельно от фотографий и показывается последней миниатюрой на сайте. Ссылки и файлы загружаются в S3 после сохранения карточки.</p>
               </div>
-              {videoUrl && (
+              {(videoUrl || videoFilePreviewUrl) && (
                 <video
                   controls
                   playsInline
@@ -655,7 +820,7 @@ export default function ProductForm({
                   poster={videoPosterUrl || existingPhotos[0] || undefined}
                   className="max-h-64 w-full rounded-md bg-black object-contain"
                 >
-                  <source src={videoUrl} type="video/mp4" />
+                  <source src={videoFilePreviewUrl || videoUrl} type={pendingVideoFile?.type || 'video/mp4'} />
                 </video>
               )}
               <div className="flex gap-2">
@@ -663,10 +828,9 @@ export default function ProductForm({
                   type="url"
                   value={videoUrl}
                   onChange={(e) => setVideoUrl(e.target.value)}
-                  onBlur={() => rehostVideo()}
                   className="w-full rounded-lg border border-gray-600 bg-gray-700 px-3 py-2 text-sm text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500"
                   placeholder="https://.../video.mp4"
-                  disabled={isPending || isRehostingVideo}
+                  disabled={isPending || isRehostingVideo || Boolean(pendingVideoFile)}
                 />
                 {videoUrl && (
                   <Button
@@ -682,6 +846,36 @@ export default function ProductForm({
                     Перезалить
                   </Button>
                 )}
+              </div>
+              <input
+                ref={videoFileInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={handleVideoFileChange}
+              />
+              <div
+                onDragOver={(event) => { event.preventDefault(); setIsVideoDragActive(true) }}
+                onDragLeave={() => setIsVideoDragActive(false)}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  setIsVideoDragActive(false)
+                  const file = event.dataTransfer.files[0]
+                  if (file) addVideoFile(file)
+                }}
+                className={`rounded-lg border border-dashed px-3 py-4 text-center text-xs transition-colors ${isVideoDragActive ? 'border-blue-400 bg-blue-900/30 text-blue-200' : 'border-slate-600 bg-slate-950/40 text-slate-400'}`}
+              >
+                <p>Перетащите видео сюда</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => videoFileInputRef.current?.click()}
+                  className="mt-2 border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                  disabled={isPending || isRehostingVideo}
+                >
+                  Выбрать видеофайл
+                </Button>
               </div>
               {isRehostingVideo && (
                 <p className="text-xs text-blue-400">Видео скачивается, конвертируется через ffmpeg и заливается в наш S3…</p>
@@ -701,8 +895,13 @@ export default function ProductForm({
                 disabled={isPending || isRehostingVideo}
               />
               {(videoUrl || videoPosterUrl) && (
-                <Button type="button" variant="outline" size="sm" onClick={() => { setVideoUrl(''); setVideoPosterUrl(''); setVideoRehostError(''); setVideoRehostNote(''); lastVideoRehostRef.current = '' }} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending || isRehostingVideo}>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setVideoUrl(''); setVideoPosterUrl(''); setVideoRehostError(''); setVideoRehostNote(''); lastVideoRehostRef.current = ''; removePendingVideo() }} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending || isRehostingVideo}>
                   Удалить видео
+                </Button>
+              )}
+              {pendingVideoFile && (
+                <Button type="button" variant="outline" size="sm" onClick={removePendingVideo} className="w-fit border-red-800/50 bg-red-900/20 text-red-400 hover:bg-red-900/30" disabled={isPending || isRehostingVideo}>
+                  Удалить выбранный файл
                 </Button>
               )}
             </div>

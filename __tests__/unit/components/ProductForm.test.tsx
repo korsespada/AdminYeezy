@@ -72,6 +72,8 @@ describe('ProductForm save shortcut', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(updateProductAction).mockResolvedValue({ success: true })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, queued: true }), { status: 202 })))
+    vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:preview'), revokeObjectURL: vi.fn() })
   })
 
   it('saves with Ctrl+S and closes the editor', async () => {
@@ -133,5 +135,38 @@ describe('ProductForm save shortcut', () => {
     const articleInput = await screen.findByLabelText('Артикул')
     expect(articleInput).toHaveValue('GOY-48225')
     expect(articleInput).toHaveAttribute('readonly')
+  })
+
+  it('queues selected photo and video files after saving without waiting for S3', async () => {
+    const onClose = vi.fn()
+    render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={onClose}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: 'Изменить товар' })
+    const fileInputs = document.querySelectorAll('input[type="file"]')
+    const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' })
+    const video = new File(['video'], 'video.mp4', { type: 'video/mp4' })
+    fireEvent.change(fileInputs[0], { target: { files: [photo] } })
+    fireEvent.change(fileInputs[1], { target: { files: [video] } })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(updateProductAction).toHaveBeenCalledOnce())
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      '/api/admin/products/media-upload',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    ))
+    const uploadFormData = vi.mocked(fetch).mock.calls[0][1]?.body as FormData
+    expect(uploadFormData.get('product_id')).toBe(product.id)
+    expect(uploadFormData.getAll('photo_file')).toHaveLength(1)
+    expect(uploadFormData.get('video_file')).toBe(video)
+    expect(onClose).toHaveBeenCalledOnce()
   })
 })

@@ -2541,6 +2541,25 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
     const attributes = data.catalog_attributes ?? data.attributes
     product.catalog_attributes = attributes && typeof attributes === 'object' ? attributes : {}
   }
+  if (data.videoUrl !== undefined) product.video_url = String(data.videoUrl || '').trim() || null
+  if (data.videoPosterUrl !== undefined) product.video_poster_url = String(data.videoPosterUrl || '').trim() || null
+  if (data.media !== undefined) {
+    product.media = Array.isArray(data.media)
+      ? data.media
+        .filter((item: any) => item && (item.original_url || item.preview_url || item.thumb_url))
+        .map((item: any, index: number) => ({
+          original_url: String(item.original_url || item.preview_url || item.thumb_url || ''),
+          thumb_url: String(item.thumb_url || item.preview_url || item.original_url || ''),
+          preview_url: String(item.preview_url || item.original_url || item.thumb_url || ''),
+          og_image_url: String(item.og_image_url || item.preview_url || item.original_url || ''),
+          alt_text: String(item.alt_text || ''),
+          sort_order: index,
+          processing_status: ['pending', 'processed', 'failed'].includes(String(item.processing_status))
+            ? String(item.processing_status)
+            : 'processed',
+        }))
+      : []
+  }
   if (data.price !== undefined) {
     const metadata = product.metadata && typeof product.metadata === 'object'
       ? { ...product.metadata }
