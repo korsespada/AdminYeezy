@@ -5,6 +5,7 @@ import { connection } from 'next/server'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
+import { getProductSupplierOptionsAction } from '@/actions/suppliers'
 
 const PRODUCT_PAGE_SIZES = [40, 100, 500]
 const PRODUCT_STATUSES = ['active', 'hidden', 'draft', 'archived'] as const
@@ -121,7 +122,7 @@ export default async function AdminPage({
       attributeValue: attributeValueFilter,
     }
 
-    const [productPage, filterFacets, attributeDefinitions] = await Promise.all([
+    const [productPage, filterFacets, attributeDefinitions, supplierOptionsResult] = await Promise.all([
       hasActiveFilters
         ? listRailsAdminProducts(productFilters)
         : Promise.resolve({ products: [], totalItems: 0, totalPages: 0 }),
@@ -144,7 +145,10 @@ export default async function AdminPage({
         attributeValue: attributeValueFilter,
       }),
       getCatalogAttributeDefinitions(),
+      getProductSupplierOptionsAction(),
     ])
+
+    const supplierOptions = supplierOptionsResult.success ? supplierOptionsResult.data || [] : []
 
     const products = productPage.products
     const catalogTotal = filterFacets.categoryFacets.reduce((sum, facet) => sum + Number(facet.count || 0), 0)
@@ -178,6 +182,7 @@ export default async function AdminPage({
         categories={categories}
         subcategories={subcategories}
         attributeDefinitions={attributeDefinitions}
+        supplierOptions={supplierOptions}
         activeSubcategoryIds={[]}
         filterFacets={filterFacets}
         totalItems={totalItems}

@@ -120,6 +120,29 @@ describe('ProductForm save shortcut', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
+  it('submits the selected source supplier and album id', async () => {
+    render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        supplierOptions={[{ id: 'album-1', name: 'CH Одежда', source_id: 'album-1' }]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const supplierSelect = await screen.findByLabelText('Поставщик')
+    fireEvent.change(supplierSelect, { target: { value: 'album-1' } })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+
+    await waitFor(() => expect(updateProductAction).toHaveBeenCalledOnce())
+    const submittedFormData = vi.mocked(updateProductAction).mock.calls[0][1] as FormData
+    expect(submittedFormData.get('supplier_name')).toBe('CH Одежда')
+    expect(submittedFormData.get('supplier_source_id')).toBe('album-1')
+  })
+
   it('shows the SEO article as read-only technical data', async () => {
     render(
       <ProductForm

@@ -12,6 +12,8 @@ const CHROMOFF_AUTO_SUPPLIER_IDS = [
   '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ',
 ]
 const CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS = [
+  { id: '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', name: 'CH Одежда', count: 0 },
+  { id: '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', name: 'CH Одежда, обувь, ремни', count: 0 },
   { id: '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ', name: 'CH Ювелирка, сумки, ремни', count: 0 },
 ]
 
@@ -110,7 +112,7 @@ export default async function ChromoffPage({
         catalogSubcategories={lookups.subcategories}
         brands={lookups.brands}
         suppliers={[
-          ...Array.from(listings.supplierOptions
+          ...Array.from([...CHROMOFF_ASSIGNABLE_SOURCE_SUPPLIERS, ...listings.supplierOptions]
             .filter((item) => item.id)
             .reduce((map, item) => {
               const key = supplierOptionKey(item.name, item.id)

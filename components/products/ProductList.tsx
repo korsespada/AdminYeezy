@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets } from '@/lib/types'
+import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets, type ProductSupplierOption } from '@/lib/types'
 import { deleteProductAction, getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
@@ -28,6 +28,7 @@ interface ProductListProps {
   categories: Category[]
   subcategories: Subcategory[]
   attributeDefinitions?: CatalogAttributeDefinition[]
+  supplierOptions?: ProductSupplierOption[]
   activeSubcategoryIds?: string[]
   filterFacets?: ProductFilterFacets
   totalItems: number
@@ -43,6 +44,7 @@ export default function ProductList({
   categories,
   subcategories,
   attributeDefinitions,
+  supplierOptions = [],
   activeSubcategoryIds = [],
   filterFacets,
   totalItems,
@@ -517,6 +519,7 @@ export default function ProductList({
         categories={categories}
         subcategories={subcategories}
         attributeDefinitions={attributeDefinitions}
+        supplierOptions={supplierOptions}
         isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false)

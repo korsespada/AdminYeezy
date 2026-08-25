@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react'
 import { CheckSquare, Filter, FolderTree, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import type { Brand, Category, Product, Subcategory } from '@/lib/types'
+import type { Brand, Category, Product, ProductSupplierOption, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { getProductAction } from '@/actions/products'
@@ -192,8 +192,21 @@ export default function ChromoffCatalog({
   }
 
   const updateListingFromProduct = (updatedProduct: Product) => {
+    const sourceSupplierId = String(updatedProduct.metadata?.source_supplier_id || '').trim() || null
     setListings((current) => current.map((listing) => listingProductId(listing) === updatedProduct.id
-      ? { ...listing, name: updatedProduct.name, description: updatedProduct.description, price_cents: Math.round(updatedProduct.price * 100), status: updatedProduct.status, gender: updatedProduct.gender, category: listing.category }
+      ? {
+          ...listing,
+          name: updatedProduct.name,
+          description: updatedProduct.description,
+          price_cents: Math.round(updatedProduct.price * 100),
+          status: updatedProduct.status,
+          gender: updatedProduct.gender,
+          category: listing.category,
+          supplier: updatedProduct.supplier,
+          source_supplier_id: sourceSupplierId,
+          source_supplier_name: updatedProduct.supplier?.name || null,
+          sync_mode: sourceSupplierId && ['_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ'].includes(sourceSupplierId) ? 'auto' : 'manual',
+        }
       : listing))
   }
 
@@ -384,7 +397,7 @@ export default function ChromoffCatalog({
         </div>
       </main>
 
-      <ProductForm product={editingProduct} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} isOpen={Boolean(editingProduct && editingListing)} chromoffListing={editingListing} chromoffCategories={categories} onClose={() => { setEditingListing(null); setEditingProduct(null) }} onSave={updateListingFromProduct} />
+      <ProductForm product={editingProduct} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} supplierOptions={assignableSuppliers.map((item): ProductSupplierOption => ({ id: item.id, name: item.name, source_id: item.id.startsWith('_') ? item.id : null, rails_id: item.id.startsWith('_') ? null : item.id }))} isOpen={Boolean(editingProduct && editingListing)} chromoffListing={editingListing} chromoffCategories={categories} onClose={() => { setEditingListing(null); setEditingProduct(null) }} onSave={updateListingFromProduct} />
 
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">

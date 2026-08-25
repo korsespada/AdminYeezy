@@ -2430,6 +2430,15 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
     } else if (formData.has('price_on_request')) {
       metadata.price_on_request = formBoolean(formData.get('price_on_request'))
     }
+    if (formData.has('supplier_name')) {
+      const supplierName = String(formData.get('supplier_name') || '').trim()
+      product.primary_supplier_name = supplierName || null
+      product.primary_supplier_avatar = String(formData.get('supplier_avatar') || '').trim() || null
+      if (formData.has('supplier_id')) product.primary_supplier_id = String(formData.get('supplier_id') || '').trim() || null
+      const sourceSupplierId = String(formData.get('supplier_source_id') || '').trim()
+      if (sourceSupplierId) metadata.source_supplier_id = sourceSupplierId
+      else delete metadata.source_supplier_id
+    }
     product.metadata = metadata
   }
 

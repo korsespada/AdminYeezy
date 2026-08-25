@@ -114,6 +114,29 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
   }
 }
 
+export async function getProductSupplierOptionsAction(): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const result = await scrapingQuery(`
+      SELECT id, name, album_id, avatar_url
+      FROM suppliers
+      ORDER BY name ASC, id ASC
+    `)
+
+    return {
+      success: true,
+      data: result.rows.map((row) => ({
+        id: String(row.album_id || `scraping:${row.id}`),
+        name: String(row.name || '').trim(),
+        avatar_url: row.avatar_url || null,
+        source_id: row.album_id ? String(row.album_id) : null,
+      })).filter((row) => row.name),
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось загрузить поставщиков' }
+  }
+}
+
 export async function getSupplierCatalogLookupsAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()

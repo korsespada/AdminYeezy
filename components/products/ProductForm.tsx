@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
 import Image from 'next/image'
-import { type Product, type ProductMedia, type Brand, type Category, type Subcategory } from '@/lib/types'
+import { type Product, type ProductMedia, type Brand, type Category, type Subcategory, type ProductSupplierOption } from '@/lib/types'
 import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { createProductAction, rehostProductVideoAction, updateProductAction } from '@/actions/products'
 import { updateChromoffListingAction } from '@/actions/chromoff'
@@ -38,12 +38,15 @@ interface PendingPhotoUpload {
   file?: File
 }
 
+const EMPTY_SUPPLIER_OPTIONS: ProductSupplierOption[] = []
+
 interface ProductFormProps {
   product?: Product | null
   brands: Brand[]
   categories: Category[]
   subcategories: Subcategory[]
   attributeDefinitions?: CatalogAttributeDefinition[]
+  supplierOptions?: ProductSupplierOption[]
   isOpen: boolean
   onClose: () => void
   onSave?: (updatedProduct: Product) => void
@@ -72,6 +75,7 @@ export default function ProductForm({
   onClose,
   onSave,
   onOpenProduct,
+  supplierOptions = EMPTY_SUPPLIER_OPTIONS,
   chromoffListing = null,
   chromoffCategories = [],
 }: ProductFormProps) {
@@ -101,6 +105,7 @@ export default function ProductForm({
   const [category, setCategory] = useState('')
   const [subcategory, setSubcategory] = useState('')
   const [gender, setGender] = useState('')
+  const [supplierSelection, setSupplierSelection] = useState('')
   const [photoUrlsToAdd, setPhotoUrlsToAdd] = useState('')
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
@@ -140,6 +145,34 @@ export default function ProductForm({
     const parsed = Number(sourceId)
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null
   }, [product?.metadata?.source_supplier_id, product?.supplier?.id])
+  const currentSupplierId = product?.supplier?.id || ''
+  const currentSupplierName = product?.supplier?.name || ''
+  const currentSupplierAvatar = product?.supplier?.avatar_url || null
+  const currentSourceSupplierId = String(product?.metadata?.source_supplier_id || '').trim()
+  const productSupplierOptions = useMemo(() => {
+    const options = [...supplierOptions]
+    if (currentSourceSupplierId && !options.some((item) => item.source_id === currentSourceSupplierId)) {
+      options.unshift({
+        id: currentSourceSupplierId,
+        name: currentSupplierName || currentSourceSupplierId,
+        avatar_url: currentSupplierAvatar,
+        source_id: currentSourceSupplierId,
+      })
+    }
+    if (currentSupplierId && !options.some((item) => item.rails_id === currentSupplierId || item.id === currentSupplierId)) {
+      options.unshift({
+        id: `rails:${currentSupplierId}`,
+        name: currentSupplierName,
+        avatar_url: currentSupplierAvatar,
+        rails_id: currentSupplierId,
+      })
+    }
+    return options
+  }, [currentSourceSupplierId, currentSupplierAvatar, currentSupplierId, currentSupplierName, supplierOptions])
+  const selectedSupplier = useMemo(
+    () => productSupplierOptions.find((item) => item.id === supplierSelection) || null,
+    [productSupplierOptions, supplierSelection],
+  )
 
   const handleDownload = async (url: string, index: number) => {
     try {
@@ -293,6 +326,12 @@ export default function ProductForm({
         setCategory(product.category || product.expand?.category?.id || '')
         setSubcategory(product.subcategory || product.expand?.subcategory?.id || '')
         setGender(product.gender || '')
+        const sourceSupplierId = String(product.metadata?.source_supplier_id || '').trim()
+        const matchingSupplier = productSupplierOptions.find((item) =>
+          (sourceSupplierId && item.source_id === sourceSupplierId)
+          || (!sourceSupplierId && product.supplier?.name && item.name === product.supplier.name),
+        )
+        setSupplierSelection(matchingSupplier?.id || (product.supplier?.id ? `rails:${product.supplier.id}` : ''))
         setPhotoUrlsToAdd('')
         setVideoUrl(product.video_url || '')
         setVideoPosterUrl(product.video_poster_url || '')
@@ -360,6 +399,7 @@ export default function ProductForm({
         setCategory(categories[0]?.id || '')
         setSubcategory('')
         setGender('')
+        setSupplierSelection('')
         setPhotoUrlsToAdd('')
         setVideoUrl('')
         setVideoPosterUrl('')
@@ -381,7 +421,7 @@ export default function ProductForm({
     } else {
       wasOpenRef.current = false
     }
-  }, [isOpen, product, brands, categories, chromoffListing])
+  }, [isOpen, product, brands, categories, chromoffListing, productSupplierOptions])
 
   const handleAddUrls = () => {
     const urls = photoUrlsToAdd
@@ -550,7 +590,14 @@ export default function ProductForm({
     formData.append('catalog_attributes', JSON.stringify(normalizedCatalogAttributes))
     const priceOnRequest = isPriceOnRequest(priceNum)
     formData.append('price_on_request', priceOnRequest ? 'true' : 'false')
-    formData.append('productMetadata', JSON.stringify(product?.metadata || {}))
+    const optimisticMetadata: Record<string, any> = {
+      ...(product?.metadata || {}),
+      gender,
+      price_on_request: priceOnRequest,
+    }
+    if (selectedSupplier?.source_id) optimisticMetadata.source_supplier_id = selectedSupplier.source_id
+    else delete optimisticMetadata.source_supplier_id
+    formData.append('productMetadata', JSON.stringify(optimisticMetadata))
 
     // Append each brand ID
     brandIds.forEach(id => {
@@ -560,6 +607,10 @@ export default function ProductForm({
     formData.append('category', category)
     formData.append('subcategory', subcategory)
     formData.append('gender', gender)
+    formData.append('supplier_name', selectedSupplier?.name || '')
+    formData.append('supplier_id', selectedSupplier?.rails_id || '')
+    formData.append('supplier_source_id', selectedSupplier?.source_id || '')
+    formData.append('supplier_avatar', selectedSupplier?.avatar_url || '')
 
     // Always send media, including an empty array when all photos were removed.
     const mediaPayload = buildMediaPayload()
@@ -604,12 +655,13 @@ export default function ProductForm({
           catalog_attributes: normalizedCatalogAttributes,
           attributes: normalizedCatalogAttributes,
           price_on_request: priceOnRequest,
-          metadata: {
-            ...(product.metadata || {}),
-            gender,
-            price_on_request: priceOnRequest,
-          },
+          metadata: optimisticMetadata,
           gender,
+          supplier: selectedSupplier ? {
+            id: selectedSupplier.rails_id || product.supplier?.id || selectedSupplier.id,
+            name: selectedSupplier.name,
+            avatar_url: selectedSupplier.avatar_url || null,
+          } : null,
           category,
           subcategory,
           photos: existingPhotos,
@@ -1000,6 +1052,25 @@ export default function ProductForm({
                     ))}
                 </select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Поставщик
+              </label>
+              <select
+                value={supplierSelection}
+                onChange={(event) => setSupplierSelection(event.target.value)}
+                aria-label="Поставщик"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                disabled={isPending}
+              >
+                <option value="">Без поставщика</option>
+                {productSupplierOptions.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500">Для source-поставщиков сохраняется album ID, поэтому выгрузка Chrome Hearts сможет автоматически создать Chromoff listing.</p>
             </div>
 
             {/* Gender & Price Row */}

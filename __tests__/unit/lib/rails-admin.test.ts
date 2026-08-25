@@ -877,6 +877,23 @@ describe('rails admin product adapter', () => {
     expect(patchBody.product).toMatchObject({ variant_group_key: familyKey })
   })
 
+  it('maps supplier assignment to Rails supplier fields and source metadata', () => {
+    const formData = new FormData()
+    formData.append('supplier_name', 'CH Одежда')
+    formData.append('supplier_avatar', 'https://example.com/ch.jpg')
+    formData.append('supplier_source_id', '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I')
+    formData.append('productMetadata', JSON.stringify({ source: 'admin' }))
+
+    expect(productFormDataToRailsPayload(formData, { applyDefaults: false }).product).toMatchObject({
+      primary_supplier_name: 'CH Одежда',
+      primary_supplier_avatar: 'https://example.com/ch.jpg',
+      metadata: {
+        source: 'admin',
+        source_supplier_id: '_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I',
+      },
+    })
+  })
+
   it('passes background media uploads through a narrow Rails product patch', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,

@@ -90,6 +90,16 @@ export interface ProductSupplier {
   avatar_url?: string | null
 }
 
+/** Supplier choices used when assigning a catalog product. The source id is
+ * the supplier album id used by the scraping and Chromoff pipelines. */
+export interface ProductSupplierOption {
+  id: string
+  name: string
+  avatar_url?: string | null
+  source_id?: string | null
+  rails_id?: string | null
+}
+
 /**
  * Product type used by the admin UI. It preserves legacy field names consumed
  * by existing components while exposing Rails CRM fields used by edit forms.
