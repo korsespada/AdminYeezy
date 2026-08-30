@@ -27,6 +27,7 @@ import MeasurementTemplatePicker from '@/components/import/MeasurementTemplatePi
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
 import MeasurementImageRecognizer from '@/components/catalog-attributes/MeasurementImageRecognizer'
+import ProductSizeRecommendationPreview from '@/components/products/ProductSizeRecommendationPreview'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import { applyMeasurementTableAttributes } from '@/lib/measurement-templates'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
@@ -1140,6 +1141,7 @@ export default function ProductForm({
                 subcategoryName={selectedSubcategoryName}
                 registryDefinitions={attributeDefinitions}
               />
+              <ProductSizeRecommendationPreview value={catalogAttributes.size_recommendation} />
             </div>
 
             {product?.color_variants && product.color_variants.length > 1 && (

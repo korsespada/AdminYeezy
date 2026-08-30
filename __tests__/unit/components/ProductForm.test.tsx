@@ -160,6 +160,34 @@ describe('ProductForm save shortcut', () => {
     expect(articleInput).toHaveAttribute('readonly')
   })
 
+  it('shows size recommendations in the open product view', async () => {
+    render(
+      <ProductForm
+        product={{
+          ...product,
+          catalog_attributes: {
+            size_recommendation: {
+              columns: [
+                { key: 'height', label: 'Рост (см)' },
+                { key: 'weight', label: 'Вес (кг)' },
+                { key: 'recommended_size', label: 'Рекомендуемый размер' },
+              ],
+              rows: [{ values: { height: '160-165', weight: '55-60', recommended_size: 'S' } }],
+            },
+          },
+        }}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Рекомендации размера на сайте' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '160-165' })).toBeInTheDocument()
+  })
+
   it('queues selected photo and video files after saving without waiting for S3', async () => {
     const onClose = vi.fn()
     render(
