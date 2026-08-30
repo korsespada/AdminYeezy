@@ -84,10 +84,11 @@ import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
 import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
-import { MeasurementsField } from "@/components/catalog-attributes/CatalogAttributeFields";
+import { MeasurementsField, SizeRecommendationField } from "@/components/catalog-attributes/CatalogAttributeFields";
 import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
 import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
+import { formatImportAttributeValue, isGenericImportAttribute } from "@/lib/catalog-attribute-display";
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from "@/lib/supplier-publication";
 
 const DEFAULT_PRODUCT_COLUMNS = [
@@ -3651,7 +3652,7 @@ function CsvProductDrawer({
   };
 
   const attributes = local.attributes || {};
-  const publicAttributes = Object.entries(attributes).filter(([key]) => key !== "measurements" && !isTechnicalAttribute(key));
+  const publicAttributes = Object.entries(attributes).filter(([key]) => isGenericImportAttribute(key, isTechnicalAttribute(key)));
   const technicalAttributes = Object.entries(attributes).filter(([key]) => isTechnicalAttribute(key));
   const supplierPublishedOn = normalizeSupplierPublishedOn(local.supplier_published_on)
     || supplierPublishedOnFromAttributes(attributes);
@@ -3689,6 +3690,13 @@ function CsvProductDrawer({
     const next = { ...attributes };
     if (value === undefined || value === null || value === "") delete next.measurements;
     else Object.assign(next, applyMeasurementTableAttributes(attributes, value));
+    change("attributes", next);
+  };
+
+  const updateSizeRecommendation = (value: unknown) => {
+    const next = { ...attributes };
+    if (value === undefined || value === null || value === "") delete next.size_recommendation;
+    else next.size_recommendation = value as any;
     change("attributes", next);
   };
 
@@ -4033,6 +4041,12 @@ function CsvProductDrawer({
                     onChange={updateMeasurements}
                     shoe={isShoe}
                   />
+                  {isClothing && (
+                    <SizeRecommendationField
+                      value={attributes.size_recommendation}
+                      onChange={updateSizeRecommendation}
+                    />
+                  )}
                 </div>}
                 <div className="flex items-center justify-between">
                   <div>
@@ -4057,12 +4071,12 @@ function CsvProductDrawer({
                       <div key={key} className="flex items-center gap-2">
                         <input
                           value={key}
-                          onChange={(event) => updateAttribute(key, event.target.value, String(value ?? ""))}
+                          onChange={(event) => updateAttribute(key, event.target.value, formatImportAttributeValue(value))}
                           placeholder="Ключ"
                           className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
                         />
                         <input
-                          value={Array.isArray(value) ? value.join(", ") : String(value ?? "")}
+                          value={formatImportAttributeValue(value)}
                           onChange={(event) => updateAttribute(key, key, event.target.value)}
                           placeholder="Значение"
                           className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
