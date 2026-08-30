@@ -7,12 +7,20 @@ import {
 } from '@/lib/product-media-seo'
 
 describe('product media SEO helpers', () => {
-  it('builds a temporary readable product slug without external ID', () => {
+  it('appends the model to a temporary slug when the product name does not contain it', () => {
+    expect(buildProductSeoSlug({
+      name: 'Мужские кроссовки',
+      external_id: 'A-42',
+      attributes: { model_name: 'Dunk Low', colors: ['черный'] },
+    }, 'Nike')).toBe('nike-muzhskie-krossovki-dunk-low')
+  })
+
+  it('does not duplicate the model when the product name already contains it', () => {
     expect(buildProductSeoSlug({
       name: 'Nike Dunk Low',
       external_id: 'A-42',
       attributes: { model_name: 'Dunk Low', colors: ['черный'] },
-    }, 'Nike')).toBe('nike-dunk-low-chernyi')
+    }, 'Nike')).toBe('nike-dunk-low')
   })
 
   it('keeps alt text within the hard limit', () => {

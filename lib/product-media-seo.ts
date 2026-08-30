@@ -38,9 +38,12 @@ function modelWithoutBrand(model: string, brandName: string) {
 
 export function buildProductSeoSlug(product: Record<string, any>, brandName: string) {
   const attributes = product.attributes && typeof product.attributes === 'object' ? product.attributes : {}
-  const model = modelWithoutBrand(firstValue(attributes.model_name) || String(product.name || '').trim(), brandName)
-  const color = firstValue(attributes.colors ?? attributes.color)
-  return seoSlug([brandName, model, color].filter(Boolean).join(' '), 'product')
+  const name = modelWithoutBrand(String(product.name || '').trim(), brandName)
+  const model = modelWithoutBrand(firstValue(attributes.model_name), brandName)
+  const nameSlug = seoSlug(name, '')
+  const modelSlug = seoSlug(model, '')
+  const nameIncludesModel = modelSlug && (`-${nameSlug}-`).includes(`-${modelSlug}-`)
+  return seoSlug([brandName, name, nameIncludesModel ? '' : model].filter(Boolean).join(' '), 'product')
 }
 
 export function normalizePhotoAlt(value: unknown, fallback: string) {
