@@ -26,6 +26,14 @@ export type ProductMeasurements = MeasurementTable | {
   tabs: MeasurementTab[]
 }
 
+/** Таблица подбора размера по параметрам человека, не размерный ряд товара. */
+export type SizeRecommendationRow = { values: Record<string, string> }
+export type SizeRecommendationTable = {
+  columns: MeasurementColumn[]
+  rows: SizeRecommendationRow[]
+  note?: string
+}
+
 export type MeasurementTemplate = {
   id: number
   supplierId: number
@@ -279,6 +287,72 @@ export function normalizeProductMeasurements(value: unknown): ProductMeasurement
     return { unit: tab.unit, columns: tab.columns, rows: tab.rows, note: tab.note }
   }
   return { tabs }
+}
+
+/**
+ * Normalizes a supplier's height/weight recommendation table separately from
+ * garment measurements. Its rows intentionally have no `size` field, so the
+ * recommendation ranges can never become product variants.
+ */
+export function normalizeSizeRecommendation(value: unknown): SizeRecommendationTable | null {
+  const parsed = parseMeasurementValue(value)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const source = parsed as Record<string, unknown>
+  if (!Array.isArray(source.columns) || !Array.isArray(source.rows)) return null
+
+  const usedKeys = new Set<string>()
+  const sourceKeys = new Map<string, string>()
+  const canonicalKeys = new Map<string, string>()
+  const columns = source.columns.slice(0, 12).flatMap((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const item = entry as Record<string, unknown>
+    const label = shortText(item.label || item.key, 80)
+    if (!label) return []
+    const canonicalKey = canonicalRecommendationKey(item.key, item.label)
+    const key = normalizedKey(canonicalKey, `recommendation_${index + 1}`, usedKeys)
+    for (const alias of [item.key, item.label, canonicalKey].map(measurementToken).filter(Boolean)) {
+      if (!sourceKeys.has(alias)) sourceKeys.set(alias, key)
+    }
+    if (!canonicalKeys.has(canonicalKey)) canonicalKeys.set(canonicalKey, key)
+    return [{ key, label }]
+  })
+  if (!columns.length) return null
+
+  const allowedKeys = new Set(columns.map((column) => column.key))
+  const rows = source.rows.slice(0, 40).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const item = entry as Record<string, unknown>
+    const nestedValues = item.values && typeof item.values === 'object' && !Array.isArray(item.values)
+      ? item.values as Record<string, unknown>
+      : null
+    const rawValues = nestedValues || Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'size' && key !== 'note'))
+    if (!nestedValues && item.size !== undefined && rawValues.recommended_size === undefined) {
+      rawValues.recommended_size = item.size
+    }
+    const values = Object.fromEntries(Object.entries(rawValues).flatMap(([key, cell]) => {
+      const token = measurementToken(key)
+      const outputKey = sourceKeys.get(token)
+        || canonicalKeys.get(canonicalRecommendationKey(key, ''))
+        || (allowedKeys.has(key) ? key : '')
+      return outputKey ? [[outputKey, shortText(cell, 80)]] : []
+    }).filter(([, cell]) => Boolean(cell)))
+    return Object.keys(values).length ? [{ values }] : []
+  })
+  if (!rows.length) return null
+
+  return {
+    columns,
+    rows,
+    ...(source.note !== undefined ? { note: shortText(source.note, 1000) } : {}),
+  }
+}
+
+function canonicalRecommendationKey(key: unknown, label: unknown) {
+  const text = shortText(`${String(key || '')} ${String(label || '')}`, 160).toLocaleLowerCase('ru-RU')
+  if (/(height|рост|身高)/iu.test(text)) return 'height'
+  if (/(weight|вес|体重)/iu.test(text)) return 'weight'
+  if (/(recommend|рекоменд|подход|size|размер|尺码|建议|推荐)/iu.test(text)) return 'recommended_size'
+  return measurementToken(key) || measurementToken(label)
 }
 
 function normalizedMeasurementTabLabel(value: unknown) {

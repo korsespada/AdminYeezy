@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -146,6 +146,13 @@ describe('batch AI normalization', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('не относится ни к основному товару, ни к подтверждённой части комплекта')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('measurements.tabs')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('одно русское слово')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('size_recommendation')
+  })
+
+  it('finds a chart image from its alt text so the original can be requested', () => {
+    expect(batchAiMeasurementPhotoIndexes({
+      photo_alts: ['', '', 'Таблица размеров и рекомендаций по подбору размера футболки'],
+    }, ['1.jpg', '2.jpg', '3.jpg'])).toEqual([3])
   })
 
   it('prioritizes visible clothing type over loose set wording', () => {
@@ -362,7 +369,7 @@ describe('batch AI normalization', () => {
     expect(result.suggestions).toEqual([])
   })
 
-  it('keeps a size-chart photo when the AI did not return readable measurements', () => {
+  it('removes a size-chart photo even when the AI did not return readable measurements', () => {
     const result = normalizeBatchAiOutput({
       product: { name: 'Футболка' },
       media: { discard_indexes: [2], size_chart_indexes: [2] },
@@ -371,8 +378,8 @@ describe('batch AI normalization', () => {
       brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
     })
 
-    expect(result.product.photos).toEqual(['product.jpg', 'size-chart.jpg'])
-    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [] })
+    expect(result.product.photos).toEqual(['product.jpg'])
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [2] })
   })
 
   it('removes a size-chart photo after readable measurements are normalized', () => {
@@ -395,6 +402,86 @@ describe('batch AI normalization', () => {
 
     expect(result.product.photos).toEqual(['product.jpg'])
     expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [2] })
+  })
+
+  it('keeps the garment size table separate from size recommendations', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Футболка',
+        catalog_attributes: {
+          measurements: {
+            unit: 'см',
+            columns: [
+              { key: 'shoulder_width', label: 'Плечи' },
+              { key: 'chest', label: 'Грудь' },
+            ],
+            rows: [{ size: 'S', values: { shoulder_width: '47', chest: '106' } }],
+          },
+          size_recommendation: {
+            columns: [
+              { key: 'height', label: 'Рост (см)' },
+              { key: 'weight', label: 'Вес (кг)' },
+              { key: 'recommended_size', label: 'Рекомендуемый размер' },
+            ],
+            rows: [{ values: { height: '160-165', weight: '55-60', recommended_size: 'S' } }],
+          },
+        },
+      },
+      photo_alts: ['', '', 'Таблица размеров и рекомендаций'],
+      media: { discard_indexes: [3] },
+    }, {
+      product: { category: 'clothing', photos: ['product.jpg', 'detail.jpg', 'size-chart.jpg'], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      categoryNames: new Map([['clothing', 'Одежда']]),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes', 'size_system', 'measurements', 'size_recommendation']),
+      measurementPhotoIndexes: [3],
+    })
+
+    expect(result.product.attributes.measurements).toEqual({
+      unit: 'см',
+      columns: [
+        { key: 'shoulders', label: 'Плечи' },
+        { key: 'chest', label: 'Грудь' },
+      ],
+      rows: [{ size: 'S', values: { shoulders: '47', chest: '106' } }],
+    })
+    expect(result.product.attributes.size_recommendation).toEqual({
+      columns: [
+        { key: 'height', label: 'Рост (см)' },
+        { key: 'weight', label: 'Вес (кг)' },
+        { key: 'recommended_size', label: 'Рекомендуемый размер' },
+      ],
+      rows: [{ values: { height: '160-165', weight: '55-60', recommended_size: 'S' } }],
+    })
+    expect(result.product.attributes.sizes).toEqual(['S'])
+    expect(result.product.photos).toEqual(['product.jpg', 'detail.jpg'])
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [3] })
+  })
+
+  it('removes a detected chart when the required second table is missing', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Футболка',
+        catalog_attributes: {
+          measurements: {
+            unit: 'см',
+            columns: [{ key: 'length', label: 'Длина' }],
+            rows: [{ size: 'S', values: { length: '69' } }],
+          },
+        },
+      },
+      media: { discard_indexes: [3] },
+    }, {
+      product: { name: '', photos: ['product.jpg', 'detail.jpg', 'size-chart.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(),
+      attributeCodes: new Set(['measurements', 'size_recommendation']),
+      measurementPhotoIndexes: [3],
+    })
+
+    expect(result.product.photos).toEqual(['product.jpg', 'detail.jpg'])
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [3] })
   })
 
   it('chooses the most specific price rule and normalizes common attribute aliases', () => {

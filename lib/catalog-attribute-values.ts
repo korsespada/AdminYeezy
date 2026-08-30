@@ -3,7 +3,7 @@ import {
   resolveCatalogAttributeCode,
   type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
-import { normalizeProductMeasurements } from '@/lib/measurement-templates'
+import { normalizeProductMeasurements, normalizeSizeRecommendation } from '@/lib/measurement-templates'
 
 const COLOR_VALUES: Record<string, string> = {
   black: 'Чёрный', 'черный': 'Чёрный', 'чёрный': 'Чёрный', noir: 'Чёрный',
@@ -140,6 +140,7 @@ function applyDictionaryValue(
 export function normalizeAttributeValue(code: string, value: unknown): unknown {
   if (value === null || value === undefined) return undefined
   if (code === 'measurements') return normalizeMeasurements(value)
+  if (code === 'size_recommendation') return normalizeSizeRecommendation(value) || undefined
   if (code === 'sizes' || code === 'jewelry_size') return normalizeStructuredSizes(value)
   const structured = structuredAttributeValue(value)
   if (structured !== undefined) value = structured

@@ -25,14 +25,14 @@ describe('catalog attribute schema', () => {
   })
   it('combines common and category-specific attributes', () => {
     const clothing = getCatalogAttributeDefinitionsForCategory('Одежда').map((item) => item.code)
-    expect(clothing).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'materials', 'fit']))
+    expect(clothing).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'materials', 'fit', 'size_recommendation']))
     expect(clothing).not.toContain('season')
     expect(clothing).not.toContain('country_of_origin')
   })
 
   it('keeps size attributes available when a mixed supplier has no category', () => {
     const unclassified = getCatalogAttributeDefinitionsForCategory().map((item) => item.code)
-    expect(unclassified).toEqual(expect.arrayContaining(['colors', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements']))
+    expect(unclassified).toEqual(expect.arrayContaining(['colors', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements', 'size_recommendation']))
   })
 
   it('adds subcategory attributes without making sizes mandatory', () => {

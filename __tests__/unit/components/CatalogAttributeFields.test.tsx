@@ -84,6 +84,40 @@ describe('CatalogAttributeFields', () => {
     })
   })
 
+  it('edits size recommendations without treating height ranges as product sizes', () => {
+    const onChange = vi.fn()
+    render(
+      <CatalogAttributeFields
+        value={{
+          size_recommendation: {
+            columns: [
+              { key: 'height', label: 'Рост (см)' },
+              { key: 'weight', label: 'Вес (кг)' },
+              { key: 'recommended_size', label: 'Рекомендуемый размер' },
+            ],
+            rows: [{ values: { height: '160-165', weight: '55-60', recommended_size: 'S' } }],
+          },
+        }}
+        onChange={onChange}
+        categoryName="Одежда"
+      />,
+    )
+
+    expect(screen.getByText('Рекомендации размера')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Рост (см), строка 1'), { target: { value: '161-165' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      size_recommendation: {
+        columns: [
+          { key: 'height', label: 'Рост (см)' },
+          { key: 'weight', label: 'Вес (кг)' },
+          { key: 'recommended_size', label: 'Рекомендуемый размер' },
+        ],
+        rows: [{ values: { height: '161-165', weight: '55-60', recommended_size: 'S' } }],
+      },
+    })
+  })
+
   it('renders an encoded measurement table as an editable table', () => {
     const onChange = vi.fn()
     render(

@@ -18,7 +18,7 @@ import {
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
-import { normalizeMeasurementTable, normalizeProductMeasurements, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
+import { normalizeMeasurementTable, normalizeProductMeasurements, normalizeSizeRecommendation, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
@@ -236,7 +236,7 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
 - Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
-- Исключай только рекламные, нерелевантные, дублирующиеся кадры и фото таблиц размеров/замеров. Если основной товар лежит рядом с упаковкой или другим товаром, но сам хорошо виден и остаётся главным объектом кадра, не исключай его. Исключай упаковку или другой товар только когда они доминируют в кадре либо делают продаваемый товар неясным. Исключай кадры с крупным наложенным текстом поверх фото: цена, акция, призыв, рекламная надпись на китайском, английском или любом другом языке; мелкий логотип товара или ненавязчивый водяной знак не исключай. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры в sizes, а замеры изделия — в measurements.
+- Исключай только рекламные, нерелевантные, дублирующиеся кадры и фото таблиц размеров/замеров. Если основной товар лежит рядом с упаковкой или другим товаром, но сам хорошо виден и остаётся главным объектом кадра, не исключай его. Исключай упаковку или другой товар только когда они доминируют в кадре либо делают продаваемый товар неясным. Исключай кадры с крупным наложенным текстом поверх фото: цена, акция, призыв, рекламная надпись на китайском, английском или любом другом языке; мелкий логотип товара или ненавязчивый водяной знак не исключай. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры товара в sizes, замеры изделия — в measurements, а таблицу подбора по росту/весу — отдельно в size_recommendation.
 - measurements заполняй только по явно читаемой таблице или тексту и только объектом {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. В columns оставляй только реально указанные параметры: для одежды length/Длина, chest/Обхват груди, shoulders/Плечи, sleeve/Рукав, waist/Талия, hips/Бёдра, rise/Посадка, inseam/Шаговый шов; для обуви insole_length/Длина стельки, foot_length/Длина стопы, width/Ширина, instep/Подъём, shaft_height/Высота голенища. Не смешивай таблицы разных товаров, не достраивай отсутствующие размеры и не пересчитывай значения.
 - Для цветового семейства group_signature описывает неизменяемую основу товара и НИКОГДА не содержит цвет.
 - В group_signature обязательно включи бренд, точную модель/конструкцию, размер самого товара, материал и фурнитуру. Цвет верни только в отдельном поле color.
@@ -272,6 +272,7 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Не смешивай признаки разных товаров. Если основной товар лежит рядом с упаковкой или другим товаром, но явно является главным объектом, оставь кадр и описывай только его. Исключи кадр через media.discard_indexes, только если другой товар, упаковка или реклама доминируют и делают основной товар неясным; также исключай изображения с крупным наложенным рекламным/информационным текстом, ценой, акцией или призывом на любом языке. Не исключай из-за небольшого логотипа или водяного знака.
 - Сначала сопоставь каждую таблицу замеров с видимым товаром. Если таблица не относится ни к основному товару, ни к подтверждённой части комплекта, добавь её фото в media.discard_indexes: не записывай её в sizes или measurements и не добавляй в media.size_chart_indexes.
 - Для одного товара сохраняй только одну наиболее подходящую читаемую таблицу в catalog_attributes.measurements как {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. Одна строка соответствует одному размеру; один параметр — одной колонке. Если в альбоме несколько таблиц, но это не подтверждённый комплект с разными вещами, выбери только таблицу основного товара; остальные неподходящие таблицы исключи через media.discard_indexes.
+- Если на одном фото есть одновременно «尺码表 / Size Chart» и «尺码推荐 / Size Recommendation», сохрани первую таблицу в measurements, вторую — в size_recommendation как {columns:[{key,label}],rows:[{values:{key:value}}],note:""}. Таблица рекомендаций не является замерами изделия: её ростовые и весовые диапазоны никогда не записывай в sizes. Если таблица плохо читается, не угадывай значения, но всё равно пометь фото как таблицу для удаления из публичной галереи.
 - Только для подтверждённого комплекта из двух или более разных вещей, когда для каждой вещи есть явно соответствующая ей читаемая таблица, верни measurements.tabs: [{label:"Майка",unit:"см",columns:[...],rows:[...],note:""},{label:"Джемпер",unit:"см",columns:[...],rows:[...],note:""}]. label — точное название вещи, одно русское слово, без цвета, размера, цифр и повторов. Не возвращай measurements.tabs, если подходящая таблица только одна.
 - При противоречии текста и фотографий или плохо читаемой таблице запроси через inspect_full_size_indexes до трёх наиболее информативных оригиналов, если они помогут уточнить модель, логотип, конструкцию или замеры.`
 
@@ -423,7 +424,7 @@ export function buildBatchAiUserPrompt(input: {
       product: {
         name: '', description: '',
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
-        gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '' }, price_rule_key: '', price: null, confidence: 0,
+        gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '', measurements: null, size_recommendation: null }, price_rule_key: '', price: null, confidence: 0,
       },
       chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
       photo_alts: [],
@@ -437,7 +438,7 @@ export function buildBatchAiUserPrompt(input: {
       },
     }),
     'Индексы фотографий начинаются с 1 и подписаны на contact sheet.',
-    'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, логотипа, таблицы замеров или конфликта между исходным текстом и фотографиями.',
+    'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, обеих таблиц размера или конфликта между исходным текстом и фотографиями.',
     'До заполнения product сначала внутренне проверь согласованность текста и всей серии фотографий. Исходный текст может принадлежать другой карточке; противоречащие фотографиям сведения не используй.',
     buildBatchAiDescriptionEvidencePrompt(product),
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
@@ -805,6 +806,25 @@ export async function runBatchAiOpenRouter(input: {
   return parseBatchAiJson(text)
 }
 
+const SIZE_RECOMMENDATION_EVIDENCE_RE = /(?:size\s*(?:chart|recommend)|таблиц[ауыы]?\s*(?:размер|замер)|размерн\w*\s*таблиц|рекоменд\w*\s*размер|尺码表|尺码推荐)/iu
+
+/**
+ * The contact sheet is intentionally small. If AI calls a tile a chart, use
+ * that evidence to request the original even when deep-search is disabled and
+ * even when the model forgot to fill media.size_chart_indexes.
+ */
+export function batchAiMeasurementPhotoIndexes(raw: any, photoUrls: unknown[]): number[] {
+  const explicit = Array.isArray(raw?.media?.size_chart_indexes) ? raw.media.size_chart_indexes : []
+  const alts = Array.isArray(raw?.photo_alts) ? raw.photo_alts : []
+  const fromAlts = alts.flatMap((alt: unknown, index: number) => (
+    SIZE_RECOMMENDATION_EVIDENCE_RE.test(String(alt || '')) ? [index + 1] : []
+  ))
+  return [...new Set([...explicit, ...fromAlts].map(Number).filter((index) => (
+    Number.isInteger(index) && index > 0 && index <= photoUrls.length
+  )))]
+    .slice(0, 3)
+}
+
 function allowedOriginalPhotoUrls(photoUrls: unknown[], indexes: unknown[]) {
   const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const selected = [...new Set(indexes.map(Number).filter((value) => Number.isInteger(value) && value > 0 && value <= photoUrls.length))].slice(0, 3)
@@ -826,12 +846,13 @@ export async function runBatchAiOpenRouterRefinement(input: {
   previousOutput: unknown
   photoUrls: unknown[]
   indexes: unknown[]
+  measurementFocus?: boolean
 }) {
   const originals = allowedOriginalPhotoUrls(input.photoUrls, input.indexes)
   if (!originals.length) return input.previousOutput
   const content: any[] = [{
     type: 'text',
-    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями. Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
+    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
   }]
   originals.forEach(({ index, url }) => {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
@@ -1094,6 +1115,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
   modelReferences?: BatchAiModelReference[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
+  /** Chart indexes inferred from the contact-sheet response, not just media.size_chart_indexes. */
+  measurementPhotoIndexes?: number[]
   processingOptions?: BatchAiProcessingOptions
 }) {
   const processingOptions = normalizeBatchAiProcessingOptions(input.processingOptions)
@@ -1190,12 +1213,16 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
-  const normalizedProductMeasurements = attributes.measurements !== undefined
-    ? normalizeProductMeasurements(attributes.measurements)
-    : null
   if (attributes.measurements !== undefined) {
     const normalizedMeasurements = normalizeMeasurementTable(attributes.measurements)
     attributes.measurements = normalizeMeasurementRowSizes(normalizedMeasurements || attributes.measurements)
+  }
+  const normalizedSizeRecommendation = attributes.size_recommendation !== undefined
+    ? normalizeSizeRecommendation(attributes.size_recommendation)
+    : null
+  if (attributes.size_recommendation !== undefined) {
+    if (normalizedSizeRecommendation) attributes.size_recommendation = normalizedSizeRecommendation
+    else delete attributes.size_recommendation
   }
   if (input.attributeCodes.has('sizes')) {
     const sizeSourceText = [original.description, proposed.description].filter(Boolean).join('\n')
@@ -1276,13 +1303,15 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   const rawDiscard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
   const rawSizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
-  // Never lose the only evidence needed for manual recovery. A chart may be
-  // excluded from the public gallery only after a valid structured table was
-  // actually normalized from the AI response.
-  const sizeCharts = normalizedProductMeasurements ? rawSizeCharts : new Set<number>()
-  const discard = normalizedProductMeasurements
-    ? rawDiscard
-    : new Set([...rawDiscard].filter((index) => !rawSizeCharts.has(index)))
+  const measurementPhotoIndexes = new Set<number>((input.measurementPhotoIndexes || [])
+    .map(Number)
+    .filter((value) => Number.isInteger(value) && value > 0))
+  // A chart is never a customer-facing product photo. Remove every chart
+  // identified by AI even when structured extraction is incomplete; source
+  // photos remain available when the operator explicitly reruns AI from the
+  // original batch.
+  const sizeCharts = new Set([...rawSizeCharts, ...measurementPhotoIndexes])
+  const discard = new Set([...rawDiscard].filter((index) => !sizeCharts.has(index)))
   const originalPhotos = Array.isArray(original.photos) ? original.photos : []
   const retainedIndexes = originalPhotos
     .map((_: string, index: number) => index + 1)
@@ -1901,6 +1930,8 @@ const ATTRIBUTE_CODE_ALIASES: Record<string, string> = {
   bag_height: 'bag_height_cm',
   hardware: 'hardware_color',
   hardware_colour: 'hardware_color',
+  size_recommendations: 'size_recommendation',
+  size_recommendation_table: 'size_recommendation',
 }
 
 export function canonicalBatchSuggestionKey(value: unknown, kind = 'attribute') {

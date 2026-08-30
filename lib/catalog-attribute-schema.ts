@@ -36,7 +36,7 @@ type CategoryRule = {
 // Unclassified supplier products still need enough schema for AI to preserve
 // size information before it chooses the final category. These attributes are
 // safe fallbacks for mixed supplier albums such as clothing + footwear.
-const COMMON_ATTRIBUTE_CODES = ['colors', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements']
+const COMMON_ATTRIBUTE_CODES = ['colors', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements', 'size_recommendation']
 
 export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   definition('colors', 'Цвет', 'Все категории', 'multi_enum', 10, {
@@ -77,6 +77,12 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     rules: [
       'Таблица замеров по размерам: для одежды — длина, обхват груди, плечи, рукав; для обуви — длина стельки, длина стопы, ширина или другие явно указанные параметры',
       'Не смешивать замеры разных товаров и не вычислять отсутствующие значения',
+    ],
+  }),
+  definition('size_recommendation', 'Рекомендации размера', 'Одежда', 'text', 75, {
+    aliases: ['size_recommendations', 'size recommendation', 'рекомендации размера', 'подбор размера'],
+    rules: [
+      'Отдельная таблица подбора по росту и весу: columns/rows без поля size; не использовать её строки как размеры товара',
     ],
   }),
   definition('upper_material', 'Материал верха', 'Обувь', 'multi_enum', 80, {
@@ -218,7 +224,7 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
 export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   {
     category: 'Одежда',
-    attributes: ['sizes', 'size_system', 'materials', 'fit', 'measurements'],
+    attributes: ['sizes', 'size_system', 'materials', 'fit', 'measurements', 'size_recommendation'],
   },
   {
     category: 'Обувь',

@@ -9,10 +9,13 @@ import {
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import {
   normalizeProductMeasurements,
+  normalizeSizeRecommendation,
   type MeasurementColumn,
   type MeasurementRow,
   type MeasurementTable,
   type MeasurementTab,
+  type SizeRecommendationRow,
+  type SizeRecommendationTable,
 } from '@/lib/measurement-templates'
 
 export default function CatalogAttributeFields({
@@ -132,6 +135,9 @@ function AttributeField({
 
   if (definition.code === 'measurements') {
     return <MeasurementsField value={value} onChange={onChange} shoe={shoeMeasurements} />
+  }
+  if (definition.code === 'size_recommendation') {
+    return <SizeRecommendationField value={value} onChange={onChange} />
   }
 
   const isList = definition.value_type === 'size' || definition.value_type === 'multi_enum'
@@ -266,6 +272,148 @@ export function MeasurementsField({ value, onChange, shoe = false }: { value: un
   }
 
   return <MeasurementTableEditor table={measurements} onChange={onChange} />
+}
+
+export function SizeRecommendationField({ value, onChange }: { value: unknown; onChange: (value: unknown) => void }) {
+  const recommendation = normalizeSizeRecommendation(value)
+  const legacyText = typeof value === 'string' ? value.trim() : ''
+
+  if (!recommendation) {
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
+        <div className="text-[11px] font-semibold text-slate-300">Рекомендации размера</div>
+        {legacyText && <p className="mt-2 whitespace-pre-wrap text-xs text-slate-400">{legacyText}</p>}
+        <button
+          type="button"
+          onClick={() => onChange(defaultSizeRecommendationTable())}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-indigo-200 hover:bg-indigo-500/20"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {legacyText ? 'Преобразовать в таблицу' : 'Добавить рекомендации размера'}
+        </button>
+      </div>
+    )
+  }
+
+  return <SizeRecommendationEditor table={recommendation} onChange={onChange} />
+}
+
+function SizeRecommendationEditor({
+  table,
+  onChange,
+}: {
+  table: SizeRecommendationTable
+  onChange: (value: SizeRecommendationTable | undefined) => void
+}) {
+  const update = (next: Partial<SizeRecommendationTable>) => onChange({ ...table, ...next })
+  const updateColumn = (index: number, label: string) => update({
+    columns: table.columns.map((column, columnIndex) => columnIndex === index ? { ...column, label } : column),
+  })
+  const addColumn = () => {
+    const key = nextRecommendationKey(table.columns)
+    update({
+      columns: [...table.columns, { key, label: 'Параметр' }],
+      rows: table.rows.map((row) => ({ ...row, values: { ...row.values, [key]: '' } })),
+    })
+  }
+  const removeColumn = (key: string) => update({
+    columns: table.columns.filter((column) => column.key !== key),
+    rows: table.rows.map((row) => ({
+      ...row,
+      values: Object.fromEntries(Object.entries(row.values).filter(([valueKey]) => valueKey !== key)),
+    })),
+  })
+  const updateRow = (index: number, nextRow: SizeRecommendationRow) => update({
+    rows: table.rows.map((row, rowIndex) => rowIndex === index ? nextRow : row),
+  })
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-2.5 md:col-span-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <span className="text-[11px] font-semibold text-slate-300">Рекомендации размера</span>
+          <p className="mt-0.5 text-[10px] text-slate-500">Рост и вес не становятся размерами товара.</p>
+        </div>
+        <button type="button" onClick={() => onChange(undefined)} title="Удалить рекомендации размера" className="text-slate-500 hover:text-red-400">
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="mt-2 overflow-x-auto rounded-lg border border-slate-800">
+        <table className="min-w-full border-collapse text-xs">
+          <thead className="bg-slate-900 text-slate-300">
+            <tr>
+              {table.columns.map((column, index) => (
+                <th key={column.key} className="min-w-32 border-r border-slate-800 p-1.5 last:border-r-0">
+                  <div className="flex items-center gap-1">
+                    <input
+                      value={column.label}
+                      onChange={(event) => updateColumn(index, event.target.value)}
+                      aria-label={`Название колонки рекомендации ${index + 1}`}
+                      className="h-8 min-w-0 flex-1 rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    />
+                    <button type="button" onClick={() => removeColumn(column.key)} title="Удалить колонку" className="text-slate-600 hover:text-red-400">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </th>
+              ))}
+              <th className="w-10 p-1.5">
+                <button type="button" onClick={addColumn} title="Добавить колонку" className="text-indigo-300 hover:text-indigo-200">
+                  <Plus className="h-4 w-4" />
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800">
+            {table.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {table.columns.map((column) => (
+                  <td key={column.key} className="border-r border-slate-800 p-1.5 last:border-r-0">
+                    <input
+                      value={row.values[column.key] || ''}
+                      onChange={(event) => updateRow(rowIndex, {
+                        ...row,
+                        values: { ...row.values, [column.key]: event.target.value },
+                      })}
+                      placeholder="—"
+                      aria-label={`${column.label}, строка ${rowIndex + 1}`}
+                      className="h-8 w-full rounded border border-slate-700 bg-slate-950 px-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+                    />
+                  </td>
+                ))}
+                <td className="p-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => update({ rows: table.rows.filter((_, index) => index !== rowIndex) })}
+                    title="Удалить строку"
+                    className="text-slate-600 hover:text-red-400"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => update({ rows: [...table.rows, { values: {} }] })}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1.5 text-[11px] font-semibold text-slate-300 hover:border-indigo-500"
+        >
+          <Plus className="h-3.5 w-3.5" /> Строка рекомендации
+        </button>
+      </div>
+      <textarea
+        value={table.note || ''}
+        onChange={(event) => update({ note: event.target.value })}
+        rows={2}
+        placeholder="Примечание к рекомендациям (необязательно)"
+        className="mt-2 w-full resize-y rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-indigo-500"
+      />
+    </div>
+  )
 }
 
 function MeasurementTabsField({ tabs, onChange }: { tabs: MeasurementTab[]; onChange: (value: unknown) => void }) {
@@ -495,6 +643,23 @@ function nextMeasurementKey(columns: MeasurementColumn[]) {
   let index = columns.length + 1
   while (columns.some((column) => column.key === `measurement_${index}`)) index += 1
   return `measurement_${index}`
+}
+
+function nextRecommendationKey(columns: MeasurementColumn[]) {
+  let index = columns.length + 1
+  while (columns.some((column) => column.key === `recommendation_${index}`)) index += 1
+  return `recommendation_${index}`
+}
+
+function defaultSizeRecommendationTable(): SizeRecommendationTable {
+  return {
+    columns: [
+      { key: 'height', label: 'Рост (см)' },
+      { key: 'weight', label: 'Вес (кг)' },
+      { key: 'recommended_size', label: 'Рекомендуемый размер' },
+    ],
+    rows: [{ values: {} }],
+  }
 }
 
 function formatAttributePart(definition: CatalogAttributeDefinition, value: unknown): string {

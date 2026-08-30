@@ -21,6 +21,7 @@ import {
   buildBatchAiShadePrompt,
   buildBatchAiVisualFamilyPrompt,
   buildBatchAiVisualSetCorrectionPrompt,
+  batchAiMeasurementPhotoIndexes,
   calculatePriceRulePrice,
   matchingPriceRule,
   normalizePriceRulesCatalogReferences,
@@ -1357,7 +1358,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           : buildBatchAiUserPrompt({
           product: promptProduct,
           supplierInstructions: mode === 'recover_measurements'
-            ? `${supplierInstructions}\nРЕЖИМ ВОССТАНОВЛЕНИЯ ЗАМЕРОВ: на приложенных фото находится таблица размеров именно для этого товара. Распознай её и заполни catalog_attributes.measurements. Не меняй название, описание, цену, классификацию, цвет, материалы и публичную галерею.`.trim()
+            ? `${supplierInstructions}\nРЕЖИМ ВОССТАНОВЛЕНИЯ ЗАМЕРОВ: на приложенных фото находится таблица размеров именно для этого товара. Распознай таблицу замеров в catalog_attributes.measurements и, если на этом же фото есть таблица подбора по росту/весу, сохрани её отдельно в catalog_attributes.size_recommendation. Не меняй название, описание, цену, классификацию, цвет, материалы и публичную галерею.`.trim()
             : supplierInstructions,
           brands: context.brands,
           categories: context.categories,
@@ -1671,17 +1672,30 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
     })
     rawOutput = raw
-    if (input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes) && raw.inspect_full_size_indexes.length) {
+    const initialMeasurementPhotoIndexes = batchAiMeasurementPhotoIndexes(raw, input.photoUrls || [])
+    const requestedInspectionIndexes = input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes)
+      ? raw.inspect_full_size_indexes
+      : []
+    const refinementIndexes = [...new Set([
+      ...initialMeasurementPhotoIndexes,
+      ...requestedInspectionIndexes,
+    ].map(Number).filter((index) => Number.isInteger(index) && index > 0))].slice(0, 3)
+    if (refinementIndexes.length) {
       raw = await runBatchAiOpenRouterRefinement({
         settings,
         systemPrompt: input.systemPrompt,
         userPrompt: input.userPrompt,
         previousOutput: raw,
         photoUrls: input.photoUrls || [],
-        indexes: raw.inspect_full_size_indexes,
+        indexes: refinementIndexes,
+        measurementFocus: initialMeasurementPhotoIndexes.length > 0,
       })
       rawOutput = raw
     }
+    const measurementPhotoIndexes = [...new Set([
+      ...initialMeasurementPhotoIndexes,
+      ...batchAiMeasurementPhotoIndexes(raw, input.photoUrls || []),
+    ])]
     if (shouldRunBatchAiVisualSetCorrection(raw, input.photoUrls || [])) {
       raw = await runBatchAiOpenRouter({
         settings,
@@ -1701,7 +1715,10 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       ? normalizeColorSplitOutput(raw, input, context)
       : input.variantScanOnly
       ? variantScanResult(raw, input)
-      : normalizeBatchAiOutput(raw, batchAiNormalizationOptions(input, context))
+      : normalizeBatchAiOutput(raw, {
+          ...batchAiNormalizationOptions(input, context),
+          measurementPhotoIndexes,
+        })
     if (input.shadeFamilyScan && shadeScanHasColorConflicts(normalized.shadeVariants)) {
       const repairedRaw = await runBatchAiOpenRouter({
         settings,
@@ -2038,6 +2055,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   const product = normalized.product
   const measurementRecoveryOnly = item.input_snapshot?.measurementRecoveryOnly === true
   const recoveredMeasurements = product?.attributes?.measurements
+  const recoveredSizeRecommendation = product?.attributes?.size_recommendation
   if (measurementRecoveryOnly && (!recoveredMeasurements || typeof recoveredMeasurements !== 'object')) {
     throw new Error('ИИ не распознал таблицу замеров')
   }
@@ -2111,12 +2129,14 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
         .map(Number)
         .filter(Number.isInteger))]
       if (targetIds.length === 0) throw new Error('Не найдены товары для привязки таблицы замеров')
+      const recoveredAttributes = applyMeasurementTableAttributes(null, recoveredMeasurements)
+      if (recoveredSizeRecommendation) recoveredAttributes.size_recommendation = recoveredSizeRecommendation
       await client.query(`
         UPDATE products SET
           attributes=COALESCE(attributes,'{}'::jsonb) || $2::jsonb,
           updated_at=NOW()
         WHERE batch_id=$1 AND id=ANY($3::int[])
-      `, [context.batch.id, JSON.stringify(applyMeasurementTableAttributes(null, recoveredMeasurements)), targetIds])
+      `, [context.batch.id, JSON.stringify(recoveredAttributes), targetIds])
       await client.query(`
         UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
         WHERE id=$1
