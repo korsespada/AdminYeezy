@@ -2698,6 +2698,7 @@ module.exports = {
   existingRailsExternalIds,
   existingRailsProducts,
   existingRailsPhotoMap,
+  deleteRailsProductsByExternalIds,
   getBatch,
   getBatchProducts,
   getLatestBatches,
