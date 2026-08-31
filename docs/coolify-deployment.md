@@ -75,8 +75,12 @@ CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yeez
 Чтобы это не повторялось, на сервере стоит ежедневная проверка: cron
 (`30 5 * * *`) запускает `/opt/adminyeezy-runtime/ensure-runtime-image.sh`
 (каноничная копия — `scripts/ensure-runtime-image.sh`). Скрипт проверяет наличие
-тега `adminyeezy-runtime:python311-ffmpeg` и при отсутствии пересобирает образ
-через builder `coolify-safe`; слои кэшируются, восстановление занимает секунды.
+тега `adminyeezy-runtime:python311-ffmpeg`, при отсутствии пересобирает образ
+через builder `coolify-safe` и поддерживает минимальный контейнер
+`adminyeezy-runtime-keepalive`. Контейнер запускает только `sleep infinity` без
+сети, файловой записи и Linux capabilities, но его ссылка не позволяет очистке
+Coolify удалить runtime-образ непосредственно перед сборкой. Слои кэшируются,
+поэтому восстановление занимает секунды.
 Рядом лежат `Dockerfile.runtime` и `requirements.txt`, лог —
 `/var/log/adminyeezy-runtime-guard.log`.
 
