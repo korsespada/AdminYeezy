@@ -144,6 +144,26 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(result.map((item: any) => item.external_id)).toEqual(['a', 'b'])
   })
 
+  it('does not leave a singleton BV family after exact-gallery deduplication', () => {
+    const result = workflow.finalizeBvPostProcess([
+      {
+        external_id: 'old-copy', source_position: 10,
+        photos: ['https://cdn.example/bv.jpg'],
+        variant_group_key: '0123456789abcdef0123456789abcdef',
+        variant_group_name: 'Bottega Veneta 6608 32x24x12', attributes: {},
+      },
+      {
+        external_id: 'latest-copy', source_position: 20,
+        photos: ['https://cdn.example/bv.jpg?repost=1'],
+        variant_group_key: '0123456789abcdef0123456789abcdef',
+        variant_group_name: 'Bottega Veneta 6608 32x24x12', attributes: {},
+      },
+    ])
+
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ variant_group_key: null, variant_group_name: null })
+  })
+
   it('uses one stable S3 key for the same source video URL', () => {
     expect(workflow.videoStorageKeys(' https://supplier.example/video.mp4 '))
       .toEqual(workflow.videoStorageKeys('https://supplier.example/video.mp4'))

@@ -1089,19 +1089,35 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
     if (sourceProducts.length === 0) throw new Error("В партии нет товаров");
 
     const { runSupplierJsonProcess } = require('../scripts/lib/supplier-json-process');
+    const workflow = require('../scripts/batch-workflow');
+    let protectedExternalIds = new Set<string>();
+    let scriptInputProducts = sourceProducts;
+    if (Number(supplierId) === 35) {
+      const existing = await workflow.existingRailsProducts(
+        sourceProducts.map((product: any) => product.external_id),
+        { includeDetails: false },
+      );
+      protectedExternalIds = new Set(existing.keys());
+      scriptInputProducts = sourceProducts.map((product: any) => (
+        protectedExternalIds.has(String(product.external_id || '').trim())
+          ? { ...product, _bv_force_keep: true }
+          : product
+      ));
+    }
     const processedProducts = await runSupplierJsonProcess(
       storedScript
         ? { name: `${storedScript.name}.py`, source: storedScript.source }
         : supplierData.post_process_script,
-      sourceProducts,
+      scriptInputProducts,
     );
     if (!Array.isArray(processedProducts)) {
       throw new Error("Скрипт вернул пустой массив товаров");
     }
 
     let finalProducts = processedProducts;
-    if (Number(supplierId) === 37) {
-      const workflow = require('../scripts/batch-workflow');
+    if (Number(supplierId) === 35) {
+      finalProducts = workflow.finalizeBvPostProcess(processedProducts, protectedExternalIds);
+    } else if (Number(supplierId) === 37) {
       const burberry = require('../scripts/lib/burberry-post-process');
       const existing = await workflow.existingRailsProducts(
         sourceProducts.map((product: any) => product.external_id),

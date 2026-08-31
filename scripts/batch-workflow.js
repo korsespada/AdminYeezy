@@ -168,6 +168,23 @@ function deduplicatePostProcessedProducts(products, protectedExternalIds = new S
   return result.sort((left, right) => Number(left.source_position ?? 0) - Number(right.source_position ?? 0));
 }
 
+function finalizeBvPostProcess(products, protectedExternalIds = new Set()) {
+  const result = deduplicatePostProcessedProducts(products, protectedExternalIds);
+  const familyCounts = new Map();
+  for (const product of result) {
+    const key = String(product.variant_group_key || '').trim();
+    if (key) familyCounts.set(key, (familyCounts.get(key) || 0) + 1);
+  }
+  for (const product of result) {
+    const key = String(product.variant_group_key || '').trim();
+    if (key && familyCounts.get(key) < 2) {
+      product.variant_group_key = null;
+      product.variant_group_name = null;
+    }
+  }
+  return result;
+}
+
 function normalizeBrand(value) {
   if (Array.isArray(value)) return value.filter(Boolean)[0] ? String(value.filter(Boolean)[0]) : '';
   if (value === undefined || value === null) return '';
@@ -1143,12 +1160,21 @@ async function saveBatchProducts(batchId, products, options = {}) {
           INSERT INTO batch_snapshots(id,batch_id,stage,label,products,settings_snapshot)
           SELECT $1,$2,$3,$4,payload,'{}'::jsonb
           FROM (
-            SELECT COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb) AS payload
+            SELECT
+              COALESCE(jsonb_agg(to_jsonb(p) ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb) AS payload,
+              COALESCE(jsonb_agg((to_jsonb(p) - 'created_at' - 'updated_at') ORDER BY p.source_position NULLS LAST,p.id),'[]'::jsonb) AS stable_payload
             FROM products p WHERE p.batch_id=$2
           ) current
           WHERE NOT EXISTS (
             SELECT 1 FROM batch_snapshots s
-            WHERE s.batch_id=$2 AND s.stage=$3 AND s.label=$4 AND s.products=current.payload
+            WHERE s.batch_id=$2 AND s.stage=$3 AND s.label=$4
+              AND (
+                s.products=current.payload
+                OR (
+                  SELECT COALESCE(jsonb_agg(item.value - 'created_at' - 'updated_at' ORDER BY item.ordinality),'[]'::jsonb)
+                  FROM jsonb_array_elements(s.products) WITH ORDINALITY AS item(value,ordinality)
+                )=current.stable_payload
+              )
           )
         `, [crypto.randomUUID(), batchId, options.finalizeStage, options.snapshotLabel]);
       }
@@ -1509,16 +1535,34 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   const sourceProducts = Array.isArray(snapshotResult.rows[0]?.products)
     ? snapshotResult.rows[0].products
     : products;
-  const processedProducts = await runSupplierJsonProcess(
-    storedScript ? { name: `${storedScript.name}.py`, source: storedScript.source } : supplier.post_process_script,
-    sourceProducts,
-  );
-  const deduplicateForSupplier = Number(supplier.id) === 44 || Number(supplier.id) === 37;
+  const supplierId = Number(supplier.id);
+  const deduplicateForSupplier = [35, 37, 44].includes(supplierId);
   let protectedExternalIds = new Set();
-  if (deduplicateForSupplier) {
+  let scriptInputProducts = sourceProducts;
+  if (supplierId === 35) {
     try {
       const existingRails = await existingRailsProducts(
-        Number(supplier.id) === 37
+        sourceProducts.map((product) => product.external_id),
+        { includeDetails: false },
+      );
+      protectedExternalIds = new Set(existingRails.keys());
+      scriptInputProducts = sourceProducts.map((product) => (
+        protectedExternalIds.has(String(product.external_id || '').trim())
+          ? { ...product, _bv_force_keep: true }
+          : product
+      ));
+    } catch (error) {
+      throw new Error(`Постобработка остановлена: не удалось проверить существующие external_id в каталоге (${error.message})`);
+    }
+  }
+  const processedProducts = await runSupplierJsonProcess(
+    storedScript ? { name: `${storedScript.name}.py`, source: storedScript.source } : supplier.post_process_script,
+    scriptInputProducts,
+  );
+  if (deduplicateForSupplier && supplierId !== 35) {
+    try {
+      const existingRails = await existingRailsProducts(
+        supplierId === 37
           ? sourceProducts.map((product) => product.external_id)
           : processedProducts.map((product) => product.external_id),
         { includeDetails: false },
@@ -1528,11 +1572,13 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       throw new Error(`Постобработка остановлена: не удалось проверить существующие external_id в каталоге (${error.message})`);
     }
   }
-  const deduplicatedProducts = Number(supplier.id) === 37
+  const deduplicatedProducts = supplierId === 37
     ? finalizeBurberryPostProcess(
       restoreProtectedProducts(processedProducts, sourceProducts, protectedExternalIds),
       protectedExternalIds,
     )
+    : supplierId === 35
+      ? finalizeBvPostProcess(processedProducts, protectedExternalIds)
     : deduplicateForSupplier
       ? deduplicatePostProcessedProducts(processedProducts, protectedExternalIds)
       : processedProducts;
@@ -2451,6 +2497,7 @@ module.exports = {
   PRODUCT_COLUMNS,
   closePools,
   deduplicatePostProcessedProducts,
+  finalizeBvPostProcess,
   existingRailsExternalIds,
   existingRailsProducts,
   existingRailsPhotoMap,

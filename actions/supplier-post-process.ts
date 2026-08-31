@@ -153,22 +153,40 @@ export async function previewSupplierPostProcessVersionAction(supplierId: number
     `, [batchId])
     const products = source.rows[0]?.products
     if (!Array.isArray(products) || !products.length) throw new Error('У выгрузки нет исходного снимка')
-    const output = await runner().runSupplierJsonProcess({ name: `${version.name}.py`, source: version.source }, products)
     const workflow = require('../scripts/batch-workflow')
     const burberry = require('../scripts/lib/burberry-post-process')
-    const existing = supplierId === 44 || supplierId === 37
-      ? await workflow.existingRailsProducts(
+    let protectedExternalIds = new Set<string>()
+    let scriptInputProducts = products
+    let existing = new Map()
+    if (supplierId === 35) {
+      existing = await workflow.existingRailsProducts(
+        products.map((item: any) => item.external_id),
+        { includeDetails: false },
+      )
+      protectedExternalIds = new Set(existing.keys())
+      scriptInputProducts = products.map((item: any) => (
+        protectedExternalIds.has(String(item.external_id || '').trim())
+          ? { ...item, _bv_force_keep: true }
+          : item
+      ))
+    }
+    const output = await runner().runSupplierJsonProcess({ name: `${version.name}.py`, source: version.source }, scriptInputProducts)
+    if (supplierId === 44 || supplierId === 37) {
+      existing = await workflow.existingRailsProducts(
         (supplierId === 37 ? products : output).map((item: any) => item.external_id),
         { includeDetails: false },
       )
-      : new Map()
+      protectedExternalIds = new Set(existing.keys())
+    }
     const postProcessedOutput = supplierId === 37
       ? burberry.finalizeBurberryPostProcess(
-        burberry.restoreProtectedProducts(output, products, new Set(existing.keys())),
-        new Set(existing.keys()),
+        burberry.restoreProtectedProducts(output, products, protectedExternalIds),
+        protectedExternalIds,
       )
-      : supplierId === 44
-        ? workflow.deduplicatePostProcessedProducts(output, new Set(existing.keys()))
+      : supplierId === 35 || supplierId === 44
+        ? supplierId === 35
+          ? workflow.finalizeBvPostProcess(output, protectedExternalIds)
+          : workflow.deduplicatePostProcessedProducts(output, protectedExternalIds)
         : output
     const before = new Map(products.map((item: any) => [String(item.external_id), item]))
     const changed = postProcessedOutput.filter((item: any) => JSON.stringify(before.get(String(item.external_id))) !== JSON.stringify(item)).length
