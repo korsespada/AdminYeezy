@@ -1095,7 +1095,25 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         : supplierData.post_process_script,
       sourceProducts,
     );
-    if (!Array.isArray(processedProducts) || processedProducts.length === 0) {
+    if (!Array.isArray(processedProducts)) {
+      throw new Error("Скрипт вернул пустой массив товаров");
+    }
+
+    let finalProducts = processedProducts;
+    if (Number(supplierId) === 37) {
+      const workflow = require('../scripts/batch-workflow');
+      const burberry = require('../scripts/lib/burberry-post-process');
+      const existing = await workflow.existingRailsProducts(
+        sourceProducts.map((product: any) => product.external_id),
+        { includeDetails: false },
+      );
+      const protectedExternalIds = new Set(existing.keys());
+      finalProducts = burberry.finalizeBurberryPostProcess(
+        burberry.restoreProtectedProducts(processedProducts, sourceProducts, protectedExternalIds),
+        protectedExternalIds,
+      );
+    }
+    if (finalProducts.length === 0) {
       throw new Error("Скрипт вернул пустой массив товаров");
     }
 
@@ -1105,8 +1123,8 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         { ...product, source_position: product.source_position ?? position },
       ]),
     );
-    for (let position = 0; position < processedProducts.length; position++) {
-      const processedProduct = processedProducts[position];
+    for (let position = 0; position < finalProducts.length; position++) {
+      const processedProduct = finalProducts[position];
       const original: any = originalByExternalId.get(String(processedProduct.external_id));
       if (Object.keys(processedProduct.attributes || {}).length === 0 && original?.attributes) {
         processedProduct.attributes = original.attributes;
@@ -1117,7 +1135,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         : (original?.price_source || 'default');
     }
 
-    const saveRes = await saveBatchProductsAction(batchId, processedProducts, operationOwnerId, { supplierId });
+    const saveRes = await saveBatchProductsAction(batchId, finalProducts, operationOwnerId, { supplierId });
     if (!saveRes.success) throw new Error(saveRes.error);
 
     revalidatePath('/admin/scraping');
@@ -1126,7 +1144,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
       success: true,
       path: `db://batch/${batchId}/script`,
       taskId: saveRes.data?.taskId,
-      count: processedProducts.length,
+      count: finalProducts.length,
     };
   } catch (err: any) {
     return { success: false, error: err.message };

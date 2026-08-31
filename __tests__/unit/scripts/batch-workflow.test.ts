@@ -104,6 +104,46 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('deduplicates identical supplier galleries while protecting an existing external id', () => {
+    const products = [
+      {
+        external_id: 'new-copy', source_position: 20,
+        description: 'короткое описание', photos: ['https://cdn.example/a.jpg', 'https://cdn.example/b.jpg'],
+        attributes: {},
+      },
+      {
+        external_id: 'existing-product', source_position: 10,
+        description: 'полное описание товара', photos: ['https://cdn.example/b.jpg?x=1', 'https://cdn.example/a.jpg'],
+        attributes: { szwego_video_url: 'https://cdn.example/video.mp4' },
+      },
+      {
+        external_id: 'different-color', source_position: 30,
+        description: 'другой цвет', photos: ['https://cdn.example/c.jpg', 'https://cdn.example/d.jpg'],
+        attributes: {},
+      },
+    ]
+
+    const result = workflow.deduplicatePostProcessedProducts(products, new Set(['existing-product']))
+
+    expect(result.map((item: any) => item.external_id)).toEqual(['existing-product', 'different-color'])
+    expect(result[0]).toMatchObject({
+      description: 'полное описание товара',
+      attributes: { szwego_video_url: 'https://cdn.example/video.mp4' },
+    })
+  })
+
+  it('keeps every protected external id in one identical-gallery group', () => {
+    const products = [
+      { external_id: 'a', source_position: 200, description: 'a', photos: ['https://cdn.example/a.jpg'], attributes: {} },
+      { external_id: 'b', source_position: 300, description: 'b', photos: ['https://cdn.example/a.jpg?x=1'], attributes: {} },
+      { external_id: 'new', source_position: 3, description: 'new', photos: ['https://cdn.example/a.jpg'], attributes: {} },
+    ]
+
+    const result = workflow.deduplicatePostProcessedProducts(products, new Set(['a', 'b']))
+
+    expect(result.map((item: any) => item.external_id)).toEqual(['a', 'b'])
+  })
+
   it('uses one stable S3 key for the same source video URL', () => {
     expect(workflow.videoStorageKeys(' https://supplier.example/video.mp4 '))
       .toEqual(workflow.videoStorageKeys('https://supplier.example/video.mp4'))

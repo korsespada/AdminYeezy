@@ -7,6 +7,10 @@ const crypto = require('crypto');
 const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const { runSupplierJsonProcess } = require('./lib/supplier-json-process');
+const {
+  finalizeBurberryPostProcess,
+  restoreProtectedProducts,
+} = require('./lib/burberry-post-process');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -98,6 +102,70 @@ function normalizePhotos(value) {
     }
   }
   return [];
+}
+
+function postProcessPhotoFingerprint(product) {
+  const photos = [...new Set(normalizePhotos(product?.photos)
+    .map((value) => String(value).trim()
+      .split('?', 1)[0]
+      .split('#', 1)[0]
+      .replace(/\/+$/, ''))
+    .filter(Boolean))].sort();
+  if (photos.length === 0) return null;
+  return crypto.createHash('sha256').update(JSON.stringify(photos)).digest('hex');
+}
+
+function mergePostProcessDuplicateFields(keeper, duplicate) {
+  const keeperAttributes = normalizeAttributes(keeper.attributes);
+  const duplicateAttributes = normalizeAttributes(duplicate.attributes);
+  for (const [key, value] of Object.entries(duplicateAttributes)) {
+    if (!(key in keeperAttributes) && value !== null && value !== '' && value !== undefined) {
+      keeperAttributes[key] = value;
+    }
+  }
+  if (!sourceVideo(keeper) && sourceVideo(duplicate)) keeperAttributes.szwego_video_url = sourceVideo(duplicate);
+  if (!keeperAttributes.szwego_video_poster_url && duplicateAttributes.szwego_video_poster_url) {
+    keeperAttributes.szwego_video_poster_url = duplicateAttributes.szwego_video_poster_url;
+  }
+  keeper.attributes = keeperAttributes;
+  if (String(duplicate.description || '').trim().length > String(keeper.description || '').trim().length) {
+    keeper.description = duplicate.description;
+  }
+}
+
+function deduplicatePostProcessedProducts(products, protectedExternalIds = new Set()) {
+  const groups = new Map();
+  const passthrough = [];
+  for (const product of products) {
+    const fingerprint = postProcessPhotoFingerprint(product);
+    if (!fingerprint) {
+      passthrough.push(product);
+      continue;
+    }
+    if (!groups.has(fingerprint)) groups.set(fingerprint, []);
+    groups.get(fingerprint).push(product);
+  }
+
+  const result = [...passthrough];
+  for (const members of groups.values()) {
+    const protectedMembers = members.filter((product) => protectedExternalIds.has(String(product.external_id || '').trim()));
+    const keepers = protectedMembers.length > 0
+      ? protectedMembers
+      : [members.sort((left, right) => {
+        const leftPosition = Number(left.source_position ?? 0);
+        const rightPosition = Number(right.source_position ?? 0);
+        return rightPosition - leftPosition;
+      })[0]];
+    const keeper = keepers[0];
+    for (const duplicate of members) {
+      if (!protectedExternalIds.has(String(duplicate.external_id || '').trim()) && duplicate !== keeper) {
+        mergePostProcessDuplicateFields(keeper, duplicate);
+      }
+    }
+    result.push(...keepers);
+  }
+
+  return result.sort((left, right) => Number(left.source_position ?? 0) - Number(right.source_position ?? 0));
 }
 
 function normalizeBrand(value) {
@@ -1445,14 +1513,38 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
     storedScript ? { name: `${storedScript.name}.py`, source: storedScript.source } : supplier.post_process_script,
     sourceProducts,
   );
-  if (processedProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
+  const deduplicateForSupplier = Number(supplier.id) === 44 || Number(supplier.id) === 37;
+  let protectedExternalIds = new Set();
+  if (deduplicateForSupplier) {
+    try {
+      const existingRails = await existingRailsProducts(
+        Number(supplier.id) === 37
+          ? sourceProducts.map((product) => product.external_id)
+          : processedProducts.map((product) => product.external_id),
+        { includeDetails: false },
+      );
+      protectedExternalIds = new Set(existingRails.keys());
+    } catch (error) {
+      throw new Error(`Постобработка остановлена: не удалось проверить существующие external_id в каталоге (${error.message})`);
+    }
+  }
+  const deduplicatedProducts = Number(supplier.id) === 37
+    ? finalizeBurberryPostProcess(
+      restoreProtectedProducts(processedProducts, sourceProducts, protectedExternalIds),
+      protectedExternalIds,
+    )
+    : deduplicateForSupplier
+      ? deduplicatePostProcessedProducts(processedProducts, protectedExternalIds)
+      : processedProducts;
+
+  if (deduplicatedProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
 
   const originalByExternalId = new Map(sourceProducts.map((product, position) => [
     String(product.external_id),
     { ...product, source_position: product.source_position ?? position },
   ]));
-  for (let position = 0; position < processedProducts.length; position++) {
-    const processedProduct = processedProducts[position];
+  for (let position = 0; position < deduplicatedProducts.length; position++) {
+    const processedProduct = deduplicatedProducts[position];
     const original = originalByExternalId.get(String(processedProduct.external_id));
     if (Object.keys(processedProduct.attributes || {}).length === 0) {
       if (original?.attributes) processedProduct.attributes = original.attributes;
@@ -1463,7 +1555,7 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       : (original?.price_source || 'default');
   }
 
-  await saveBatchProducts(batchId, processedProducts, {
+  await saveBatchProducts(batchId, deduplicatedProducts, {
     finalizeStage: 'SCRIPT_PROCESSED',
     snapshotLabel: 'Обработан скриптом',
     supplierId: batch.supplier_id,
@@ -1471,7 +1563,12 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
     resultPath: `db://batch/${batchId}/script`,
   });
 
-    return { processed: processedProducts.length, path: `db://batch/${batchId}/script` };
+    return {
+      processed: deduplicatedProducts.length,
+      removedDuplicates: processedProducts.length - deduplicatedProducts.length,
+      protectedExistingExternalIds: protectedExternalIds.size,
+      path: `db://batch/${batchId}/script`,
+    };
   } finally {
     await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
   }
@@ -2353,6 +2450,7 @@ async function closePools() {
 module.exports = {
   PRODUCT_COLUMNS,
   closePools,
+  deduplicatePostProcessedProducts,
   existingRailsExternalIds,
   existingRailsProducts,
   existingRailsPhotoMap,

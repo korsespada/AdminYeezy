@@ -5,7 +5,6 @@ import { revalidatePath } from 'next/cache'
 import { requireAdmin } from '@/lib/admin-session'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 import { activeBatchOperation } from '@/lib/batch-operation-lock'
-import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
 
 type ScriptVersion = {
   id: string
@@ -155,14 +154,30 @@ export async function previewSupplierPostProcessVersionAction(supplierId: number
     const products = source.rows[0]?.products
     if (!Array.isArray(products) || !products.length) throw new Error('У выгрузки нет исходного снимка')
     const output = await runner().runSupplierJsonProcess({ name: `${version.name}.py`, source: version.source }, products)
+    const workflow = require('../scripts/batch-workflow')
+    const burberry = require('../scripts/lib/burberry-post-process')
+    const existing = supplierId === 44 || supplierId === 37
+      ? await workflow.existingRailsProducts(
+        (supplierId === 37 ? products : output).map((item: any) => item.external_id),
+        { includeDetails: false },
+      )
+      : new Map()
+    const postProcessedOutput = supplierId === 37
+      ? burberry.finalizeBurberryPostProcess(
+        burberry.restoreProtectedProducts(output, products, new Set(existing.keys())),
+        new Set(existing.keys()),
+      )
+      : supplierId === 44
+        ? workflow.deduplicatePostProcessedProducts(output, new Set(existing.keys()))
+        : output
     const before = new Map(products.map((item: any) => [String(item.external_id), item]))
-    const changed = output.filter((item: any) => JSON.stringify(before.get(String(item.external_id))) !== JSON.stringify(item)).length
+    const changed = postProcessedOutput.filter((item: any) => JSON.stringify(before.get(String(item.external_id))) !== JSON.stringify(item)).length
     return {
       success: true,
       data: {
         inputCount: products.length,
-        outputCount: output.length,
-        removedCount: Math.max(0, products.length - output.length),
+        outputCount: postProcessedOutput.length,
+        removedCount: Math.max(0, products.length - postProcessedOutput.length),
         changedCount: changed,
       },
     }
