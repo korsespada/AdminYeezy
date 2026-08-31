@@ -185,7 +185,7 @@ export async function previewSupplierPostProcessVersionAction(supplierId: number
       )
       : supplierId === 35 || supplierId === 44
         ? supplierId === 35
-          ? workflow.finalizeBvPostProcess(output, protectedExternalIds)
+          ? (await workflow.finalizeBvPostProcessRemote(output, protectedExternalIds)).products
           : workflow.deduplicatePostProcessedProducts(output, protectedExternalIds)
         : output
     const before = new Map(products.map((item: any) => [String(item.external_id), item]))

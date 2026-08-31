@@ -1116,7 +1116,7 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
 
     let finalProducts = processedProducts;
     if (Number(supplierId) === 35) {
-      finalProducts = workflow.finalizeBvPostProcess(processedProducts, protectedExternalIds);
+      finalProducts = (await workflow.finalizeBvPostProcessRemote(processedProducts, protectedExternalIds)).products;
     } else if (Number(supplierId) === 37) {
       const burberry = require('../scripts/lib/burberry-post-process');
       const existing = await workflow.existingRailsProducts(

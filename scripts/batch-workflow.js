@@ -168,21 +168,207 @@ function deduplicatePostProcessedProducts(products, protectedExternalIds = new S
   return result.sort((left, right) => Number(left.source_position ?? 0) - Number(right.source_position ?? 0));
 }
 
-function finalizeBvPostProcess(products, protectedExternalIds = new Set()) {
-  const result = deduplicatePostProcessedProducts(products, protectedExternalIds);
+function canonicalPhotoUrl(value) {
+  return String(value || '').trim()
+    .split('?', 1)[0]
+    .split('#', 1)[0]
+    .replace(/\/+$/, '');
+}
+
+function remotePhotoFingerprint(url, etag) {
+  const normalizedEtag = String(etag || '').trim();
+  if (!normalizedEtag) return null;
+  try {
+    return `${new URL(url).origin}|${normalizedEtag}`;
+  } catch {
+    return null;
+  }
+}
+
+function deduplicateBvByContentFingerprints(products, photoFingerprints, protectedExternalIds = new Set()) {
+  const candidatesByFamily = new Map();
+  for (const product of products) {
+    const familyKey = String(product.variant_group_key || '').trim();
+    const externalId = String(product.external_id || '').trim();
+    if (!familyKey || !externalId) continue;
+    const urls = [...new Set(normalizePhotos(product.photos).map(canonicalPhotoUrl).filter(Boolean))];
+    const fingerprints = new Set(urls.map((url) => remotePhotoFingerprint(url, photoFingerprints.get(url))).filter(Boolean));
+    if (fingerprints.size < 3) continue;
+    if (!candidatesByFamily.has(familyKey)) candidatesByFamily.set(familyKey, []);
+    candidatesByFamily.get(familyKey).push({ product, urls, fingerprints });
+  }
+
+  const edges = [];
+  for (const familyMembers of candidatesByFamily.values()) {
+    for (let leftIndex = 0; leftIndex < familyMembers.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < familyMembers.length; rightIndex += 1) {
+        const left = familyMembers[leftIndex];
+        const right = familyMembers[rightIndex];
+        const shared = [...left.fingerprints].filter((fingerprint) => right.fingerprints.has(fingerprint)).length;
+        const smallestGallery = Math.min(left.urls.length, right.urls.length);
+        if (shared < 3 || smallestGallery < 6 || shared / smallestGallery < 0.3) continue;
+        edges.push({ left: left.product, right: right.product, shared });
+      }
+    }
+  }
+
+  const graph = new Map();
+  const addEdge = (left, right) => {
+    const leftId = String(left.external_id || '').trim();
+    const rightId = String(right.external_id || '').trim();
+    if (!graph.has(leftId)) graph.set(leftId, new Set());
+    if (!graph.has(rightId)) graph.set(rightId, new Set());
+    graph.get(leftId).add(rightId);
+    graph.get(rightId).add(leftId);
+  };
+  for (const edge of edges) addEdge(edge.left, edge.right);
+
+  const productsByExternalId = new Map(products.map((product) => [String(product.external_id || '').trim(), product]));
+  const visited = new Set();
+  const components = [];
+  for (const externalId of graph.keys()) {
+    if (visited.has(externalId)) continue;
+    const componentIds = [];
+    const queue = [externalId];
+    visited.add(externalId);
+    while (queue.length) {
+      const current = queue.shift();
+      componentIds.push(current);
+      for (const neighbor of graph.get(current) || []) {
+        if (visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+    components.push(componentIds.map((id) => productsByExternalId.get(id)).filter(Boolean));
+  }
+
+  const removedExternalIds = new Set();
+  const unresolvedProtectedGroups = [];
+  for (const members of components) {
+    const protectedMembers = members.filter((product) => protectedExternalIds.has(String(product.external_id || '').trim()));
+    const keepers = protectedMembers.length > 0
+      ? protectedMembers
+      : [members.slice().sort((left, right) => Number(right.source_position ?? 0) - Number(left.source_position ?? 0))[0]];
+    const keeper = keepers[0];
+    for (const product of members) {
+      if (keepers.includes(product)) continue;
+      if (protectedExternalIds.has(String(product.external_id || '').trim())) continue;
+      mergePostProcessDuplicateFields(keeper, product);
+      removedExternalIds.add(String(product.external_id || '').trim());
+    }
+    if (protectedMembers.length > 1) {
+      unresolvedProtectedGroups.push({
+        externalIds: protectedMembers.map((product) => String(product.external_id || '').trim()),
+        sourcePositions: protectedMembers.map((product) => Number(product.source_position ?? 0)),
+      });
+    }
+  }
+
+  return {
+    products: products
+      .filter((product) => !removedExternalIds.has(String(product.external_id || '').trim()))
+      .sort((left, right) => Number(left.source_position ?? 0) - Number(right.source_position ?? 0)),
+    report: {
+      candidateGroups: components.length,
+      candidateEdges: edges.length,
+      removedProducts: removedExternalIds.size,
+      unresolvedProtectedGroups,
+    },
+  };
+}
+
+async function loadBvPhotoFingerprints(products, supplierId = 35) {
+  const urls = [...new Set(products
+    .flatMap((product) => normalizePhotos(product.photos))
+    .map(canonicalPhotoUrl)
+    .filter((url) => /^https?:\/\//i.test(url)))];
+  if (!urls.length) return { fingerprints: new Map(), scannedUrls: 0, cachedUrls: 0, fetchedUrls: 0, failedUrls: 0 };
+
+  const cachedResult = await scrapingPool.query(`
+    SELECT url, etag
+    FROM supplier_photo_fingerprints
+    WHERE supplier_id=$1 AND url=ANY($2::text[])
+  `, [supplierId, urls]);
+  const fingerprints = new Map(cachedResult.rows.map((row) => [canonicalPhotoUrl(row.url), row.etag]));
+  const missingUrls = urls.filter((url) => !fingerprints.has(url));
+  const fetched = [];
+  let cursor = 0;
+  async function fetchOne() {
+    while (cursor < missingUrls.length) {
+      const url = missingUrls[cursor++];
+      let etag = null;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000);
+        const response = await fetch(url, {
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: { 'user-agent': 'AdminYeezy supplier duplicate audit' },
+        });
+        clearTimeout(timer);
+        if (response.ok) etag = String(response.headers.get('etag') || '').trim() || null;
+      } catch {
+        // A failed metadata request is never positive duplicate evidence.
+      }
+      fingerprints.set(url, etag);
+      fetched.push({ url, etag });
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(16, missingUrls.length) }, () => fetchOne()));
+
+  for (let index = 0; index < fetched.length; index += 500) {
+    const chunk = fetched.slice(index, index + 500);
+    await scrapingPool.query(`
+      INSERT INTO supplier_photo_fingerprints(supplier_id,url,etag,checked_at)
+      SELECT $1, item.url, item.etag, NOW()
+      FROM unnest($2::text[], $3::text[]) AS item(url,etag)
+      ON CONFLICT (supplier_id,url) DO UPDATE
+      SET etag=EXCLUDED.etag, checked_at=EXCLUDED.checked_at
+    `, [supplierId, chunk.map((item) => item.url), chunk.map((item) => item.etag)]);
+  }
+
+  return {
+    fingerprints,
+    scannedUrls: urls.length,
+    cachedUrls: cachedResult.rows.length,
+    fetchedUrls: fetched.length,
+    failedUrls: fetched.filter((item) => !item.etag).length,
+  };
+}
+
+function clearSingletonBvFamilies(products) {
   const familyCounts = new Map();
-  for (const product of result) {
+  for (const product of products) {
     const key = String(product.variant_group_key || '').trim();
     if (key) familyCounts.set(key, (familyCounts.get(key) || 0) + 1);
   }
-  for (const product of result) {
+  for (const product of products) {
     const key = String(product.variant_group_key || '').trim();
     if (key && familyCounts.get(key) < 2) {
       product.variant_group_key = null;
       product.variant_group_name = null;
     }
   }
-  return result;
+  return products;
+}
+
+function finalizeBvPostProcess(products, protectedExternalIds = new Set()) {
+  return clearSingletonBvFamilies(deduplicatePostProcessedProducts(products, protectedExternalIds));
+}
+
+async function finalizeBvPostProcessRemote(products, protectedExternalIds = new Set()) {
+  const exactResult = deduplicatePostProcessedProducts(products, protectedExternalIds);
+  const fingerprints = await loadBvPhotoFingerprints(exactResult);
+  const remoteResult = deduplicateBvByContentFingerprints(
+    exactResult,
+    fingerprints.fingerprints,
+    protectedExternalIds,
+  );
+  return {
+    products: clearSingletonBvFamilies(remoteResult.products),
+    report: { ...fingerprints, ...remoteResult.report },
+  };
 }
 
 function normalizeBrand(value) {
@@ -1572,25 +1758,30 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       throw new Error(`Постобработка остановлена: не удалось проверить существующие external_id в каталоге (${error.message})`);
     }
   }
-  const deduplicatedProducts = supplierId === 37
-    ? finalizeBurberryPostProcess(
+  let bvRemoteReport = null;
+  let finalProducts;
+  if (supplierId === 35) {
+    const remoteFinalization = await finalizeBvPostProcessRemote(processedProducts, protectedExternalIds);
+    finalProducts = remoteFinalization.products;
+    bvRemoteReport = remoteFinalization.report;
+  } else if (supplierId === 37) {
+    finalProducts = finalizeBurberryPostProcess(
       restoreProtectedProducts(processedProducts, sourceProducts, protectedExternalIds),
       protectedExternalIds,
-    )
-    : supplierId === 35
-      ? finalizeBvPostProcess(processedProducts, protectedExternalIds)
-    : deduplicateForSupplier
+    );
+  } else {
+    finalProducts = deduplicateForSupplier
       ? deduplicatePostProcessedProducts(processedProducts, protectedExternalIds)
       : processedProducts;
-
-  if (deduplicatedProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
+  }
+  if (finalProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
 
   const originalByExternalId = new Map(sourceProducts.map((product, position) => [
     String(product.external_id),
     { ...product, source_position: product.source_position ?? position },
   ]));
-  for (let position = 0; position < deduplicatedProducts.length; position++) {
-    const processedProduct = deduplicatedProducts[position];
+  for (let position = 0; position < finalProducts.length; position++) {
+    const processedProduct = finalProducts[position];
     const original = originalByExternalId.get(String(processedProduct.external_id));
     if (Object.keys(processedProduct.attributes || {}).length === 0) {
       if (original?.attributes) processedProduct.attributes = original.attributes;
@@ -1601,7 +1792,7 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       : (original?.price_source || 'default');
   }
 
-  await saveBatchProducts(batchId, deduplicatedProducts, {
+  await saveBatchProducts(batchId, finalProducts, {
     finalizeStage: 'SCRIPT_PROCESSED',
     snapshotLabel: 'Обработан скриптом',
     supplierId: batch.supplier_id,
@@ -1610,9 +1801,13 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
   });
 
     return {
-      processed: deduplicatedProducts.length,
-      removedDuplicates: processedProducts.length - deduplicatedProducts.length,
+      processed: finalProducts.length,
+      removedDuplicates: processedProducts.length - finalProducts.length,
       protectedExistingExternalIds: protectedExternalIds.size,
+      remoteContentDuplicateGroups: bvRemoteReport?.candidateGroups || 0,
+      remoteContentDuplicateEdges: bvRemoteReport?.candidateEdges || 0,
+      remoteContentRemovedProducts: bvRemoteReport?.removedProducts || 0,
+      remoteContentUnresolvedProtectedGroups: bvRemoteReport?.unresolvedProtectedGroups?.length || 0,
       path: `db://batch/${batchId}/script`,
     };
   } finally {
@@ -2497,7 +2692,9 @@ module.exports = {
   PRODUCT_COLUMNS,
   closePools,
   deduplicatePostProcessedProducts,
+  deduplicateBvByContentFingerprints,
   finalizeBvPostProcess,
+  finalizeBvPostProcessRemote,
   existingRailsExternalIds,
   existingRailsProducts,
   existingRailsPhotoMap,
