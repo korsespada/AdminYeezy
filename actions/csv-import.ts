@@ -3,6 +3,7 @@
 import crypto from 'node:crypto'
 import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { after } from 'next/server'
 import { uploadToS3 } from '@/lib/s3'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
 import { requireAdmin } from '@/lib/admin-session'
@@ -14,7 +15,7 @@ import {
   type ProductAttributes,
 } from '@/lib/product-attributes'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
-import { activeBatchOperation, claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
+import { activeBatchOperation, claimBatchOperation, releaseBatchOperation, updateBatchOperation } from '@/lib/batch-operation-lock'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
@@ -1052,69 +1053,66 @@ export async function getSupplierDataAction(supplierId: number) {
     }
 }
 
-export async function runCustomSupplierScriptAction(inputPath: string | null, supplierId: number, batchId?: string | null): Promise<any> {
-  let operationOwnerId: string | null = null
-  try {
-    await requireAdmin()
+type SupplierScriptRunOptions = { background?: boolean }
 
-    const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
-    if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
-    const supplierData = supplierRes.rows[0];
-    const storedScript = await getActiveSupplierPostProcess(supplierId)
-    supplierData.post_process_script = String(supplierData.post_process_script || '').trim();
+async function executeCustomSupplierScript(
+  supplierId: number,
+  batchId: string,
+  supplierData: any,
+  storedScript: any,
+  operationOwnerId: string,
+) {
+  await updateBatchOperation(batchId, operationOwnerId, 'script|prepare|0|1')
+  const currentRes = await getBatchProductsAction(batchId);
+  if (!currentRes.success || !currentRes.data) {
+    throw new Error(currentRes.error || "Не удалось загрузить товары партии");
+  }
 
-    if (!storedScript && !supplierData.post_process_script) {
-        throw new Error("Скрипт не назначен для этого поставщика");
-    }
-    if (!batchId) throw new Error("Для JSON-обработки требуется batchId");
-    operationOwnerId = await claimBatchOperation(batchId, 'script')
-    if (!operationOwnerId) throw new Error('Выгрузка уже обрабатывается другим процессом')
+  const rawSnapshot = await scrapingQuery(`
+    SELECT products
+    FROM batch_snapshots
+    WHERE batch_id=$1 AND stage='SCRAPED'
+    ORDER BY created_at ASC
+    LIMIT 1
+  `, [batchId]);
+  const currentProducts = currentRes.data.products || [];
+  const sourceProducts = Array.isArray(rawSnapshot.rows[0]?.products)
+    ? rawSnapshot.rows[0].products
+    : currentProducts;
+  if (sourceProducts.length === 0) throw new Error("В партии нет товаров");
 
-    const currentRes = await getBatchProductsAction(batchId);
-    if (!currentRes.success || !currentRes.data) {
-      throw new Error(currentRes.error || "Не удалось загрузить товары партии");
-    }
-
-    const rawSnapshot = await scrapingQuery(`
-      SELECT products
-      FROM batch_snapshots
-      WHERE batch_id=$1 AND stage='SCRAPED'
-      ORDER BY created_at ASC
-      LIMIT 1
-    `, [batchId]);
-    const currentProducts = currentRes.data.products || [];
-    const sourceProducts = Array.isArray(rawSnapshot.rows[0]?.products)
-      ? rawSnapshot.rows[0].products
-      : currentProducts;
-    if (sourceProducts.length === 0) throw new Error("В партии нет товаров");
-
-    const { runSupplierJsonProcess } = require('../scripts/lib/supplier-json-process');
-    const workflow = require('../scripts/batch-workflow');
-    let protectedExternalIds = new Set<string>();
-    let scriptInputProducts = sourceProducts;
-    if (Number(supplierId) === 35) {
-      const existing = await workflow.existingRailsProducts(
-        sourceProducts.map((product: any) => product.external_id),
-        { includeDetails: false },
-      );
-      protectedExternalIds = new Set(existing.keys());
-      scriptInputProducts = sourceProducts.map((product: any) => (
-        protectedExternalIds.has(String(product.external_id || '').trim())
-          ? { ...product, _bv_force_keep: true }
-          : product
-      ));
-    }
-    const processedProducts = await runSupplierJsonProcess(
-      storedScript
-        ? { name: `${storedScript.name}.py`, source: storedScript.source }
-        : supplierData.post_process_script,
-      scriptInputProducts,
+  const { runSupplierJsonProcess } = require('../scripts/lib/supplier-json-process');
+  const workflow = require('../scripts/batch-workflow');
+  let protectedExternalIds = new Set<string>();
+  let scriptInputProducts = sourceProducts;
+  if (Number(supplierId) === 35) {
+    const existing = await workflow.existingRailsProducts(
+      sourceProducts.map((product: any) => product.external_id),
+      { includeDetails: false },
     );
-    if (!Array.isArray(processedProducts)) {
-      throw new Error("Скрипт вернул пустой массив товаров");
-    }
+    protectedExternalIds = new Set(existing.keys());
+    scriptInputProducts = sourceProducts.map((product: any) => (
+      protectedExternalIds.has(String(product.external_id || '').trim())
+        ? { ...product, _bv_force_keep: true }
+        : product
+    ));
+  }
+  const processedProducts = await runSupplierJsonProcess(
+    storedScript
+      ? { name: `${storedScript.name}.py`, source: storedScript.source }
+      : supplierData.post_process_script,
+    scriptInputProducts,
+  );
+  if (!Array.isArray(processedProducts)) {
+    throw new Error("Скрипт вернул пустой массив товаров");
+  }
 
-    let finalProducts = processedProducts;
+  await updateBatchOperation(batchId, operationOwnerId, 'script|visual|0|1')
+  const heartbeat = setInterval(() => {
+    void updateBatchOperation(batchId, operationOwnerId, 'script|visual|0|1').catch(() => undefined)
+  }, 15000)
+  let finalProducts = processedProducts;
+  try {
     if (Number(supplierId) === 35) {
       finalProducts = (await workflow.finalizeBvPostProcessRemote(processedProducts, protectedExternalIds)).products;
     } else if (Number(supplierId) === 37) {
@@ -1129,39 +1127,93 @@ export async function runCustomSupplierScriptAction(inputPath: string | null, su
         protectedExternalIds,
       );
     }
-    if (finalProducts.length === 0) {
-      throw new Error("Скрипт вернул пустой массив товаров");
-    }
+  } finally {
+    clearInterval(heartbeat)
+  }
+  if (finalProducts.length === 0) {
+    throw new Error("Скрипт вернул пустой массив товаров");
+  }
 
-    const originalByExternalId = new Map(
-      sourceProducts.map((product: any, position: number) => [
-        String(product.external_id),
-        { ...product, source_position: product.source_position ?? position },
-      ]),
-    );
-    for (let position = 0; position < finalProducts.length; position++) {
-      const processedProduct = finalProducts[position];
-      const original: any = originalByExternalId.get(String(processedProduct.external_id));
-      if (Object.keys(processedProduct.attributes || {}).length === 0 && original?.attributes) {
-        processedProduct.attributes = original.attributes;
+  const originalByExternalId = new Map(
+    sourceProducts.map((product: any, position: number) => [
+      String(product.external_id),
+      { ...product, source_position: product.source_position ?? position },
+    ]),
+  );
+  for (let position = 0; position < finalProducts.length; position++) {
+    const processedProduct = finalProducts[position];
+    const original: any = originalByExternalId.get(String(processedProduct.external_id));
+    if (Object.keys(processedProduct.attributes || {}).length === 0 && original?.attributes) {
+      processedProduct.attributes = original.attributes;
+    }
+    processedProduct.source_position = original?.source_position ?? position;
+    processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
+      ? 'script'
+      : (original?.price_source || 'default');
+  }
+
+  await updateBatchOperation(batchId, operationOwnerId, 'script|saving|0|1')
+  const saveRes = await saveBatchProductsAction(batchId, finalProducts, operationOwnerId, { supplierId });
+  if (!saveRes.success) throw new Error(saveRes.error);
+
+  revalidatePath('/admin/scraping');
+  revalidatePath('/admin/batches');
+  return {
+    path: `db://batch/${batchId}/script`,
+    taskId: saveRes.data?.taskId,
+    count: finalProducts.length,
+  };
+}
+
+export async function runCustomSupplierScriptAction(
+  _inputPath: string | null,
+  supplierId: number,
+  batchId?: string | null,
+  options: SupplierScriptRunOptions = {},
+): Promise<any> {
+  let operationOwnerId: string | null = null
+  try {
+    await requireAdmin()
+
+    const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
+    if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
+    const supplierData = supplierRes.rows[0];
+    const storedScript = await getActiveSupplierPostProcess(supplierId)
+    supplierData.post_process_script = String(supplierData.post_process_script || '').trim();
+
+    if (!storedScript && !supplierData.post_process_script) {
+      throw new Error("Скрипт не назначен для этого поставщика");
+    }
+    if (!batchId) throw new Error("Для JSON-обработки требуется batchId");
+    operationOwnerId = await claimBatchOperation(batchId, 'script')
+    if (!operationOwnerId) throw new Error('Выгрузка уже обрабатывается другим процессом')
+
+    if (options.background) {
+      const backgroundOwnerId = operationOwnerId
+      after(async () => {
+        try {
+          await executeCustomSupplierScript(supplierId, batchId, supplierData, storedScript, backgroundOwnerId)
+        } catch (error: any) {
+          const message = String(error?.message || error).slice(0, 4000)
+          await scrapingQuery(`
+            INSERT INTO scraping_tasks(supplier_id,batch_id,status,result_path,items_count,error_message,end_date,updated_at)
+            VALUES($1,$2,'Ошибка пост-обработки',$3,0,$4,NOW(),NOW())
+          `, [supplierId, batchId, `db://batch/${batchId}/script`, message]).catch(() => undefined)
+          console.error(`[Supplier script ${batchId}] failed:`, message)
+        } finally {
+          await releaseBatchOperation(batchId, backgroundOwnerId).catch(() => undefined)
+        }
+      })
+      operationOwnerId = null
+      return {
+        success: true,
+        pending: true,
+        path: `db://batch/${batchId}/script`,
       }
-      processedProduct.source_position = original?.source_position ?? position;
-      processedProduct.price_source = original && Number(processedProduct.price) !== Number(original.price)
-        ? 'script'
-        : (original?.price_source || 'default');
     }
 
-    const saveRes = await saveBatchProductsAction(batchId, finalProducts, operationOwnerId, { supplierId });
-    if (!saveRes.success) throw new Error(saveRes.error);
-
-    revalidatePath('/admin/scraping');
-    revalidatePath('/admin/batches');
-    return {
-      success: true,
-      path: `db://batch/${batchId}/script`,
-      taskId: saveRes.data?.taskId,
-      count: finalProducts.length,
-    };
+    const runResult = await executeCustomSupplierScript(supplierId, batchId, supplierData, storedScript, operationOwnerId)
+    return { success: true, ...runResult }
   } catch (err: any) {
     return { success: false, error: err.message };
   } finally {

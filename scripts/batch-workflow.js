@@ -185,32 +185,222 @@ function remotePhotoFingerprint(url, etag) {
   }
 }
 
-function deduplicateBvByContentFingerprints(products, photoFingerprints, protectedExternalIds = new Set()) {
+function hammingHexDistance(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''), 'hex');
+  const rightBuffer = Buffer.from(String(right || ''), 'hex');
+  if (!leftBuffer.length || leftBuffer.length !== rightBuffer.length) return null;
+  let distance = 0;
+  for (let index = 0; index < leftBuffer.length; index += 1) {
+    let value = leftBuffer[index] ^ rightBuffer[index];
+    while (value) {
+      distance += value & 1;
+      value >>>= 1;
+    }
+  }
+  return distance;
+}
+
+function visualPhotoDistance(left, right) {
+  if (!left?.hash || !left?.pixels || !right?.hash || !right?.pixels) return null;
+  const hashDistance = hammingHexDistance(left.hash, right.hash);
+  const leftPixels = Buffer.from(left.pixels, 'base64');
+  const rightPixels = Buffer.from(right.pixels, 'base64');
+  if (hashDistance === null || leftPixels.length !== rightPixels.length) return null;
+  let absoluteError = 0;
+  for (let index = 0; index < leftPixels.length; index += 1) {
+    absoluteError += Math.abs(leftPixels[index] - rightPixels[index]);
+  }
+  return {
+    hashDistance,
+    pixelMae: absoluteError / leftPixels.length,
+  };
+}
+
+function isVisualPhotoMatch(left, right) {
+  const distance = visualPhotoDistance(left, right);
+  // Re-encoding can change the dHash more than expected, while a normalized
+  // RGB sample with MAE <= 3 is still strong evidence of the same photo. Keep
+  // both checks so visually similar bags with different colors do not merge.
+  return Boolean(distance && distance.hashDistance <= 32 && distance.pixelMae <= 3);
+}
+
+function dHashFromGrayscale(grayscale) {
+  const hash = Buffer.alloc(32);
+  for (let y = 0; y < 16; y += 1) {
+    for (let x = 0; x < 16; x += 1) {
+      if (grayscale[y * 17 + x] > grayscale[y * 17 + x + 1]) {
+        const bit = y * 16 + x;
+        hash[bit >> 3] |= 1 << (bit & 7);
+      }
+    }
+  }
+  return hash.toString('hex');
+}
+
+async function buildVisualPhotoFingerprint(buffer) {
+  const pixels = await sharp(buffer)
+    .resize(16, 16, { fit: 'fill' })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+  const grayscale = await sharp(buffer)
+    .resize(17, 16, { fit: 'fill' })
+    .greyscale()
+    .raw()
+    .toBuffer();
+  return { hash: dHashFromGrayscale(grayscale), pixels: pixels.toString('base64') };
+}
+
+function normalizeBvDimensions(value) {
+  const text = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/,/g, '.')
+    .replace(/[×✕х*]/g, 'x')
+  const match = text.match(/\d+(?:\.\d+)?\s*(?:x\s*\d+(?:\.\d+)?\s*){1,2}/);
+  if (!match) return '';
+  return match[0].replace(/\s+/g, '').split('x').map((part) => {
+    const number = Number(part);
+    return Number.isFinite(number) ? String(number) : part;
+  }).join('x');
+}
+
+function inferBvModelCode(product, attributes, familyName = '') {
+  const explicit = String(attributes.model_code || '').trim();
+  if (explicit) return explicit.toLowerCase();
+
+  const text = `${product.name || ''} ${product.description || ''} ${familyName}`;
+  const candidates = [...text.matchAll(/(?:^|\D)(\d{3,5})(?=\D|$)/g)]
+    .map((match) => match[1])
+    .filter((candidate) => !/^20\d{2}$/.test(candidate) && !/^19\d{2}$/.test(candidate));
+  return candidates[0] ? candidates[0].toLowerCase() : '';
+}
+
+function bvContentDuplicateScopeKey(product) {
+  const familyKey = String(product.variant_group_key || '').trim();
+  const attributes = normalizeAttributes(product.attributes);
+  const familyName = String(product.variant_group_name || '').trim();
+  const modelCode = inferBvModelCode(product, attributes, familyName);
+  const dimensions = normalizeBvDimensions(attributes.dimensions || familyName || product.description || '');
+  if (modelCode && dimensions) return `model:${modelCode}|dimensions:${dimensions}`;
+  return familyKey ? `family:${familyKey}` : '';
+}
+
+function matchBvPhotoEvidence(leftPhotos, rightPhotos) {
+  const candidates = leftPhotos.map((left) => rightPhotos.map((right, index) => ({
+    index,
+    exact: Boolean(left.etag && right.etag && left.etag === right.etag),
+    visual: isVisualPhotoMatch(left.visual, right.visual),
+  })).filter((match) => match.exact || match.visual).sort((left, right) => Number(right.exact) - Number(left.exact)));
+  const owner = Array(rightPhotos.length).fill(-1);
+  const tryMatch = (leftIndex, visited) => {
+    for (const candidate of candidates[leftIndex]) {
+      if (visited.has(candidate.index)) continue;
+      visited.add(candidate.index);
+      if (owner[candidate.index] === -1 || tryMatch(owner[candidate.index], visited)) {
+        owner[candidate.index] = leftIndex;
+        return true;
+      }
+    }
+    return false;
+  };
+  const order = candidates
+    .map((matches, index) => ({ index, count: matches.length }))
+    .sort((left, right) => left.count - right.count);
+  let matched = 0;
+  for (const { index } of order) {
+    if (tryMatch(index, new Set())) matched += 1;
+  }
+  return matched;
+}
+
+function deduplicateBvByContentFingerprints(
+  products,
+  photoFingerprints,
+  protectedExternalIds = new Set(),
+  visualFingerprints = new Map(),
+) {
   const candidatesByFamily = new Map();
   for (const product of products) {
-    const familyKey = String(product.variant_group_key || '').trim();
+    const familyKey = bvContentDuplicateScopeKey(product);
     const externalId = String(product.external_id || '').trim();
     if (!familyKey || !externalId) continue;
     const urls = [...new Set(normalizePhotos(product.photos).map(canonicalPhotoUrl).filter(Boolean))];
-    const fingerprints = new Set(urls.map((url) => remotePhotoFingerprint(url, photoFingerprints.get(url))).filter(Boolean));
-    if (fingerprints.size < 3) continue;
+    const photoEvidence = urls.map((url) => ({
+      url,
+      etag: remotePhotoFingerprint(url, photoFingerprints.get(url)),
+      visual: visualFingerprints.get(url) || null,
+    }));
+    if (!photoEvidence.some((photo) => photo.etag || photo.visual)) continue;
     if (!candidatesByFamily.has(familyKey)) candidatesByFamily.set(familyKey, []);
-    candidatesByFamily.get(familyKey).push({ product, urls, fingerprints });
+    candidatesByFamily.get(familyKey).push({
+      product,
+      urls,
+      photoEvidence,
+      evidenceCount: photoEvidence.filter((photo) => photo.etag || photo.visual).length,
+    });
   }
 
   const edges = [];
+  const shortGalleryMatches = new Map();
   for (const familyMembers of candidatesByFamily.values()) {
     for (let leftIndex = 0; leftIndex < familyMembers.length; leftIndex += 1) {
       for (let rightIndex = leftIndex + 1; rightIndex < familyMembers.length; rightIndex += 1) {
         const left = familyMembers[leftIndex];
         const right = familyMembers[rightIndex];
-        const shared = [...left.fingerprints].filter((fingerprint) => right.fingerprints.has(fingerprint)).length;
+        const shared = matchBvPhotoEvidence(left.photoEvidence, right.photoEvidence);
         const smallestGallery = Math.min(left.urls.length, right.urls.length);
-        if (shared < 3 || smallestGallery < 6 || shared / smallestGallery < 0.3) continue;
-        edges.push({ left: left.product, right: right.product, shared });
+        const leftGalleryComplete = left.evidenceCount === left.urls.length;
+        const rightGalleryComplete = right.evidenceCount === right.urls.length;
+        const sameFullGallery = shared > 0
+          && leftGalleryComplete
+          && rightGalleryComplete
+          && shared === left.urls.length
+          && shared === right.urls.length;
+        const shortGallery = smallestGallery <= 2
+          && shared === smallestGallery
+          && (left.urls.length <= right.urls.length ? leftGalleryComplete : rightGalleryComplete)
+          && (left.urls.length <= right.urls.length ? left.evidenceCount : right.evidenceCount) === smallestGallery;
+        const partialGallery = shared >= 3
+          && smallestGallery >= 6
+          && shared / smallestGallery >= 0.3;
+        if (!sameFullGallery && !shortGallery && !partialGallery) continue;
+
+        const kind = sameFullGallery
+          ? 'exact_gallery'
+          : (shortGallery ? 'short_gallery_contained' : 'partial_content');
+        const edge = {
+          left: left.product,
+          right: right.product,
+          shared,
+          kind,
+          leftGallerySize: left.urls.length,
+          rightGallerySize: right.urls.length,
+        };
+        edges.push(edge);
+        if (kind === 'short_gallery_contained' && !sameFullGallery) {
+          const short = left.urls.length <= right.urls.length ? left : right;
+          const shortId = String(short.product.external_id || '').trim();
+          shortGalleryMatches.set(shortId, (shortGalleryMatches.get(shortId) || 0) + 1);
+        }
       }
     }
   }
+
+  // Partial overlap is useful audit evidence, but it is not enough to remove a
+  // product: the same campaign/cover photo can legitimately appear in several
+  // color variants. Only a complete gallery (or a fully contained short
+  // gallery) is allowed to form an automatic deduplication component.
+  const acceptedEdges = edges.filter((edge) => {
+    if (edge.kind === 'partial_content') return false;
+    if (edge.kind !== 'short_gallery_contained') return true;
+    const shortId = String(
+      edge.leftGallerySize <= edge.rightGallerySize
+        ? edge.left.external_id
+        : edge.right.external_id,
+    ).trim();
+    return (shortGalleryMatches.get(shortId) || 0) === 1;
+  });
 
   const graph = new Map();
   const addEdge = (left, right) => {
@@ -221,7 +411,7 @@ function deduplicateBvByContentFingerprints(products, photoFingerprints, protect
     graph.get(leftId).add(rightId);
     graph.get(rightId).add(leftId);
   };
-  for (const edge of edges) addEdge(edge.left, edge.right);
+  for (const edge of acceptedEdges) addEdge(edge.left, edge.right);
 
   const productsByExternalId = new Map(products.map((product) => [String(product.external_id || '').trim(), product]));
   const visited = new Set();
@@ -245,12 +435,38 @@ function deduplicateBvByContentFingerprints(products, photoFingerprints, protect
 
   const removedExternalIds = new Set();
   const unresolvedProtectedGroups = [];
+  const duplicateGroups = [];
   for (const members of components) {
     const protectedMembers = members.filter((product) => protectedExternalIds.has(String(product.external_id || '').trim()));
+    const memberIds = new Set(members.map((product) => String(product.external_id || '').trim()));
+    const hasShortGalleryEvidence = acceptedEdges.some((edge) => (
+      edge.kind === 'short_gallery_contained'
+      && memberIds.has(String(edge.left.external_id || '').trim())
+      && memberIds.has(String(edge.right.external_id || '').trim())
+    ));
     const keepers = protectedMembers.length > 0
       ? protectedMembers
-      : [members.slice().sort((left, right) => Number(right.source_position ?? 0) - Number(left.source_position ?? 0))[0]];
+      : [members.slice().sort((left, right) => {
+        if (hasShortGalleryEvidence) {
+          const leftPhotoCount = normalizePhotos(left.photos).length;
+          const rightPhotoCount = normalizePhotos(right.photos).length;
+          if (leftPhotoCount !== rightPhotoCount) return rightPhotoCount - leftPhotoCount;
+        }
+        return Number(right.source_position ?? 0) - Number(left.source_position ?? 0);
+      })[0]];
     const keeper = keepers[0];
+    duplicateGroups.push({
+      externalIds: members.map((product) => String(product.external_id || '').trim()),
+      sourcePositions: members.map((product) => Number(product.source_position ?? 0)),
+      photoCounts: members.map((product) => normalizePhotos(product.photos).length),
+      evidenceKinds: [...new Set(acceptedEdges
+        .filter((edge) => {
+          const leftId = String(edge.left.external_id || '').trim();
+          const rightId = String(edge.right.external_id || '').trim();
+          return memberIds.has(leftId) && memberIds.has(rightId);
+        })
+        .map((edge) => edge.kind))],
+    });
     for (const product of members) {
       if (keepers.includes(product)) continue;
       if (protectedExternalIds.has(String(product.external_id || '').trim())) continue;
@@ -271,9 +487,13 @@ function deduplicateBvByContentFingerprints(products, photoFingerprints, protect
       .sort((left, right) => Number(left.source_position ?? 0) - Number(right.source_position ?? 0)),
     report: {
       candidateGroups: components.length,
-      candidateEdges: edges.length,
+      candidateEdges: acceptedEdges.length,
+      exactGalleryEdges: acceptedEdges.filter((edge) => edge.kind === 'exact_gallery').length,
+      shortGalleryEdges: acceptedEdges.filter((edge) => edge.kind === 'short_gallery_contained').length,
+      partialContentEdges: edges.filter((edge) => edge.kind === 'partial_content').length,
       removedProducts: removedExternalIds.size,
       unresolvedProtectedGroups,
+      duplicateGroups,
     },
   };
 }
@@ -337,6 +557,145 @@ async function loadBvPhotoFingerprints(products, supplierId = 35) {
   };
 }
 
+async function loadVisualFingerprintsForUrls(urls, photoFingerprints, supplierId = 35) {
+  const normalizedUrls = [...new Set(urls.map(canonicalPhotoUrl).filter((url) => /^https?:\/\//i.test(url)))];
+  if (!normalizedUrls.length) {
+    return { fingerprints: new Map(), scannedUrls: 0, cachedUrls: 0, fetchedUrls: 0, failedUrls: 0 };
+  }
+
+  const cachedResult = await scrapingPool.query(`
+    SELECT url, etag, visual_etag, visual_hash, visual_pixels
+    FROM supplier_photo_fingerprints
+    WHERE supplier_id=$1 AND url=ANY($2::text[])
+  `, [supplierId, normalizedUrls]);
+  const cachedByUrl = new Map(cachedResult.rows.map((row) => [canonicalPhotoUrl(row.url), row]));
+  const etags = photoFingerprints || new Map();
+  const fingerprints = new Map();
+  const missingUrls = [];
+  for (const url of normalizedUrls) {
+    const row = cachedByUrl.get(url);
+    const expectedEtag = String(etags.get(url) || row?.etag || '').trim();
+    const cachedEtag = String(row?.visual_etag || '').trim();
+    if (row?.visual_hash && row?.visual_pixels && cachedEtag === expectedEtag) {
+      fingerprints.set(url, { hash: row.visual_hash, pixels: row.visual_pixels });
+    } else {
+      missingUrls.push({ url, expectedEtag });
+    }
+  }
+
+  const fetched = [];
+  let cursor = 0;
+  async function fetchOne() {
+    while (cursor < missingUrls.length) {
+      const { url, expectedEtag } = missingUrls[cursor++];
+      let timer;
+      try {
+        const controller = new AbortController();
+        timer = setTimeout(() => controller.abort(), 12000);
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { 'user-agent': 'AdminYeezy supplier visual duplicate audit' },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const signature = await buildVisualPhotoFingerprint(Buffer.from(await response.arrayBuffer()));
+        const actualEtag = String(response.headers.get('etag') || expectedEtag || '').trim() || null;
+        fingerprints.set(url, signature);
+        fetched.push({ url, etag: actualEtag, visualEtag: actualEtag, ...signature });
+      } catch {
+        fingerprints.delete(url);
+        fetched.push({ url, etag: expectedEtag || null, visualEtag: null, hash: null, pixels: null });
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(12, missingUrls.length) }, () => fetchOne()));
+
+  for (let index = 0; index < fetched.length; index += 250) {
+    const chunk = fetched.slice(index, index + 250);
+    await scrapingPool.query(`
+      INSERT INTO supplier_photo_fingerprints(supplier_id,url,etag,visual_etag,visual_hash,visual_pixels,checked_at)
+      SELECT $1, item.url, item.etag, item.visual_etag, item.visual_hash, item.visual_pixels, NOW()
+      FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+        AS item(url,etag,visual_etag,visual_hash,visual_pixels)
+      ON CONFLICT (supplier_id,url) DO UPDATE
+      SET etag=COALESCE(EXCLUDED.etag, supplier_photo_fingerprints.etag),
+          visual_etag=EXCLUDED.visual_etag,
+          visual_hash=EXCLUDED.visual_hash,
+          visual_pixels=EXCLUDED.visual_pixels,
+          checked_at=EXCLUDED.checked_at
+    `, [
+      supplierId,
+      chunk.map((item) => item.url),
+      chunk.map((item) => item.etag),
+      chunk.map((item) => item.visualEtag),
+      chunk.map((item) => item.hash),
+      chunk.map((item) => item.pixels),
+    ]);
+  }
+
+  return {
+    fingerprints,
+    scannedUrls: normalizedUrls.length,
+    cachedUrls: fingerprints.size - fetched.filter((item) => item.hash).length,
+    fetchedUrls: fetched.length,
+    failedUrls: fetched.filter((item) => !item.hash).length,
+  };
+}
+
+async function loadBvVisualFingerprints(products, photoFingerprints, supplierId = 35) {
+  const productProbes = products.map((product) => {
+    const urls = [...new Set(normalizePhotos(product.photos).map(canonicalPhotoUrl).filter(Boolean))];
+    return { product, urls: urls.slice(0, 3) };
+  });
+  const probeResult = await loadVisualFingerprintsForUrls(
+    productProbes.flatMap((item) => item.urls),
+    photoFingerprints,
+    supplierId,
+  );
+  const productsByScope = new Map();
+  for (const item of productProbes) {
+    const scope = bvContentDuplicateScopeKey(item.product);
+    if (!scope) continue;
+    if (!productsByScope.has(scope)) productsByScope.set(scope, []);
+    productsByScope.get(scope).push(item);
+  }
+
+  const candidateProducts = new Set();
+  let candidatePairs = 0;
+  for (const members of productsByScope.values()) {
+    for (let leftIndex = 0; leftIndex < members.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < members.length; rightIndex += 1) {
+        const left = members[leftIndex];
+        const right = members[rightIndex];
+        const hasMatchingProbe = left.urls.some((leftUrl) => right.urls.some((rightUrl) => (
+          isVisualPhotoMatch(probeResult.fingerprints.get(leftUrl), probeResult.fingerprints.get(rightUrl))
+        )));
+        if (!hasMatchingProbe) continue;
+        candidatePairs += 1;
+        candidateProducts.add(left.product);
+        candidateProducts.add(right.product);
+      }
+    }
+  }
+
+  const detailResult = await loadVisualFingerprintsForUrls(
+    [...candidateProducts].flatMap((product) => normalizePhotos(product.photos)),
+    photoFingerprints,
+    supplierId,
+  );
+  const fingerprints = new Map([...probeResult.fingerprints, ...detailResult.fingerprints]);
+  return {
+    fingerprints,
+    scannedUrls: probeResult.scannedUrls + detailResult.scannedUrls,
+    cachedUrls: probeResult.cachedUrls + detailResult.cachedUrls,
+    fetchedUrls: probeResult.fetchedUrls + detailResult.fetchedUrls,
+    failedUrls: probeResult.failedUrls + detailResult.failedUrls,
+    candidatePairs,
+    candidateProducts: candidateProducts.size,
+  };
+}
+
 function clearSingletonBvFamilies(products) {
   const familyCounts = new Map();
   for (const product of products) {
@@ -360,14 +719,19 @@ function finalizeBvPostProcess(products, protectedExternalIds = new Set()) {
 async function finalizeBvPostProcessRemote(products, protectedExternalIds = new Set()) {
   const exactResult = deduplicatePostProcessedProducts(products, protectedExternalIds);
   const fingerprints = await loadBvPhotoFingerprints(exactResult);
+  const visualFingerprints = await loadBvVisualFingerprints(
+    exactResult,
+    fingerprints.fingerprints,
+  );
   const remoteResult = deduplicateBvByContentFingerprints(
     exactResult,
     fingerprints.fingerprints,
     protectedExternalIds,
+    visualFingerprints.fingerprints,
   );
   return {
     products: clearSingletonBvFamilies(remoteResult.products),
-    report: { ...fingerprints, ...remoteResult.report },
+    report: { ...fingerprints, ...visualFingerprints, ...remoteResult.report },
   };
 }
 
@@ -1806,8 +2170,15 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
       protectedExistingExternalIds: protectedExternalIds.size,
       remoteContentDuplicateGroups: bvRemoteReport?.candidateGroups || 0,
       remoteContentDuplicateEdges: bvRemoteReport?.candidateEdges || 0,
+      remoteContentExactGalleryEdges: bvRemoteReport?.exactGalleryEdges || 0,
+      remoteContentShortGalleryEdges: bvRemoteReport?.shortGalleryEdges || 0,
+      remoteContentPartialEdges: bvRemoteReport?.partialContentEdges || 0,
       remoteContentRemovedProducts: bvRemoteReport?.removedProducts || 0,
       remoteContentUnresolvedProtectedGroups: bvRemoteReport?.unresolvedProtectedGroups?.length || 0,
+      visualDuplicateCandidatePairs: bvRemoteReport?.candidatePairs || 0,
+      visualDuplicateCandidateProducts: bvRemoteReport?.candidateProducts || 0,
+      visualFingerprintsFetched: bvRemoteReport?.fetchedUrls || 0,
+      visualFingerprintsFailed: bvRemoteReport?.failedUrls || 0,
       path: `db://batch/${batchId}/script`,
     };
   } finally {

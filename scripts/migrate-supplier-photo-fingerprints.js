@@ -18,10 +18,16 @@ async function migrate() {
         supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
         url TEXT NOT NULL,
         etag TEXT,
+        visual_etag TEXT,
+        visual_hash TEXT,
+        visual_pixels TEXT,
         checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (supplier_id, url)
       )
     `)
+    await client.query('ALTER TABLE supplier_photo_fingerprints ADD COLUMN IF NOT EXISTS visual_etag TEXT')
+    await client.query('ALTER TABLE supplier_photo_fingerprints ADD COLUMN IF NOT EXISTS visual_hash TEXT')
+    await client.query('ALTER TABLE supplier_photo_fingerprints ADD COLUMN IF NOT EXISTS visual_pixels TEXT')
     await client.query(`
       CREATE INDEX IF NOT EXISTS supplier_photo_fingerprints_supplier_checked_idx
       ON supplier_photo_fingerprints(supplier_id, checked_at DESC)

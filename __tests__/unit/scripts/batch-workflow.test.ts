@@ -144,7 +144,7 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(result.map((item: any) => item.external_id)).toEqual(['a', 'b'])
   })
 
-  it('removes remote-content duplicates only with three matching photos in one BV family', () => {
+  it('removes remote-content duplicates only when the full gallery matches', () => {
     const family = '0123456789abcdef0123456789abcdef'
     const oldCopy = {
       external_id: 'old-copy', source_position: 10, variant_group_key: family,
@@ -165,9 +165,15 @@ describe('batch workflow CSV compatibility adapter', () => {
       ['https://cdn.example/a-1.jpg', 'etag-1'],
       ['https://cdn.example/a-2.jpg', 'etag-2'],
       ['https://cdn.example/a-3.jpg', 'etag-3'],
+      ['https://cdn.example/a-4.jpg', 'etag-4'],
+      ['https://cdn.example/a-5.jpg', 'etag-5'],
+      ['https://cdn.example/a-6.jpg', 'etag-6'],
       ['https://cdn.example/b-1.jpg', 'etag-1'],
       ['https://cdn.example/b-2.jpg', 'etag-2'],
       ['https://cdn.example/b-3.jpg', 'etag-3'],
+      ['https://cdn.example/b-4.jpg', 'etag-4'],
+      ['https://cdn.example/b-5.jpg', 'etag-5'],
+      ['https://cdn.example/b-6.jpg', 'etag-6'],
       ['https://cdn.example/c-1.jpg', 'etag-1'],
     ])
 
@@ -178,6 +184,38 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(result.products.map((item: any) => item.external_id)).toEqual(['latest-copy', 'different-color'])
     expect(result.report.removedProducts).toBe(1)
     expect(result.report.candidateEdges).toBe(1)
+    expect(result.report.exactGalleryEdges).toBe(1)
+  })
+
+  it('reports partial remote-content overlap without removing either BV product', () => {
+    const family = 'abcdef0123456789abcdef0123456789'
+    const products = [
+      {
+        external_id: 'partial-old', source_position: 10, variant_group_key: family,
+        photos: Array.from({ length: 6 }, (_, index) => `https://cdn.example/partial-a-${index}.jpg`),
+        attributes: {},
+      },
+      {
+        external_id: 'partial-new', source_position: 20, variant_group_key: family,
+        photos: Array.from({ length: 6 }, (_, index) => `https://cdn.example/partial-b-${index}.jpg`),
+        attributes: {},
+      },
+    ]
+    const fingerprints = new Map([
+      ['https://cdn.example/partial-a-0.jpg', 'shared-1'],
+      ['https://cdn.example/partial-a-1.jpg', 'shared-2'],
+      ['https://cdn.example/partial-a-2.jpg', 'shared-3'],
+      ['https://cdn.example/partial-b-0.jpg', 'shared-1'],
+      ['https://cdn.example/partial-b-1.jpg', 'shared-2'],
+      ['https://cdn.example/partial-b-2.jpg', 'shared-3'],
+    ])
+
+    const result = workflow.deduplicateBvByContentFingerprints(products, fingerprints)
+
+    expect(result.products.map((item: any) => item.external_id)).toEqual(['partial-old', 'partial-new'])
+    expect(result.report.candidateEdges).toBe(0)
+    expect(result.report.partialContentEdges).toBe(1)
+    expect(result.report.removedProducts).toBe(0)
   })
 
   it('does not treat one shared BV photo as a duplicate', () => {
@@ -196,6 +234,96 @@ describe('batch workflow CSV compatibility adapter', () => {
 
     expect(result.products).toHaveLength(2)
     expect(result.report.candidateEdges).toBe(0)
+  })
+
+  it('deduplicates a complete short gallery without a preassigned family key', () => {
+    const products = [
+      {
+        external_id: 'short-old', source_position: 10,
+        description: '6608 Andiamo 32*24*12',
+        photos: ['https://cdn.example/old-a.jpg', 'https://cdn.example/old-b.jpg'],
+        attributes: {},
+      },
+      {
+        external_id: 'short-latest', source_position: 20,
+        description: '6608 Andiamo 32*24*12',
+        photos: ['https://cdn.example/new-a.jpg', 'https://cdn.example/new-b.jpg'],
+        attributes: {},
+      },
+    ]
+    const fingerprints = new Map([
+      ['https://cdn.example/old-a.jpg', 'same-a'],
+      ['https://cdn.example/old-b.jpg', 'same-b'],
+      ['https://cdn.example/new-a.jpg', 'same-a'],
+      ['https://cdn.example/new-b.jpg', 'same-b'],
+    ])
+
+    const result = workflow.deduplicateBvByContentFingerprints(products, fingerprints)
+
+    expect(result.products.map((item: any) => item.external_id)).toEqual(['short-latest'])
+    expect(result.report.exactGalleryEdges).toBe(1)
+    expect(result.report.removedProducts).toBe(1)
+  })
+
+  it('removes an unambiguous one-photo repost contained in one long BV gallery', () => {
+    const family = '0123456789abcdef0123456789abcdef'
+    const products = [
+      {
+        external_id: 'album', source_position: 10, variant_group_key: family,
+        variant_group_name: 'Bottega Veneta 6608 32x24x12',
+        photos: Array.from({ length: 6 }, (_, index) => `https://cdn.example/album-${index}.jpg`),
+        attributes: {},
+      },
+      {
+        external_id: 'cover-copy', source_position: 20,
+        description: '6608 Andiamo 32*24*12',
+        photos: ['https://cdn.example/cover.jpg'],
+        attributes: {},
+      },
+    ]
+    const fingerprints = new Map([
+      ['https://cdn.example/album-0.jpg', 'cover'],
+      ['https://cdn.example/cover.jpg', 'cover'],
+    ])
+
+    const result = workflow.deduplicateBvByContentFingerprints(products, fingerprints)
+
+    expect(result.products.map((item: any) => item.external_id)).toEqual(['album'])
+    expect(result.report.shortGalleryEdges).toBe(1)
+  })
+
+  it('deduplicates visually identical re-encoded galleries when ETags differ', () => {
+    const products = [
+      {
+        external_id: 'visual-old', source_position: 10,
+        description: '6608 Andiamo 32*24*12',
+        photos: ['https://cdn.example/old-a.jpg', 'https://cdn.example/old-b.jpg'],
+        attributes: {},
+      },
+      {
+        external_id: 'visual-latest', source_position: 20,
+        description: '6608 Andiamo 32*24*12',
+        photos: ['https://cdn.example/new-a.jpg', 'https://cdn.example/new-b.jpg'],
+        attributes: {},
+      },
+    ]
+    const pixels = (value: number) => Buffer.alloc(16 * 16 * 3, value).toString('base64')
+    const visualFingerprints = new Map([
+      ['https://cdn.example/old-a.jpg', { hash: '00'.repeat(32), pixels: pixels(80) }],
+      ['https://cdn.example/old-b.jpg', { hash: 'ff'.repeat(32), pixels: pixels(160) }],
+      ['https://cdn.example/new-a.jpg', { hash: '00'.repeat(29) + 'ffffff', pixels: pixels(80) }],
+      ['https://cdn.example/new-b.jpg', { hash: 'ff'.repeat(32), pixels: pixels(160) }],
+    ])
+
+    const result = workflow.deduplicateBvByContentFingerprints(
+      products,
+      new Map(),
+      new Set(),
+      visualFingerprints,
+    )
+
+    expect(result.products.map((item: any) => item.external_id)).toEqual(['visual-latest'])
+    expect(result.report.exactGalleryEdges).toBe(1)
   })
 
   it('does not leave a singleton BV family after exact-gallery deduplication', () => {

@@ -23,6 +23,13 @@ export async function touchBatchOperation(batchId: string, ownerId: string) {
   await scrapingQuery('UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2', [batchId, ownerId])
 }
 
+export async function updateBatchOperation(batchId: string, ownerId: string, operation: string) {
+  await scrapingQuery(
+    'UPDATE batch_operation_locks SET operation=$3,updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
+    [batchId, ownerId, operation],
+  )
+}
+
 export async function activeBatchOperation(batchId: string) {
   const result = await scrapingQuery('SELECT operation FROM batch_operation_locks WHERE batch_id=$1', [batchId])
   return result.rows[0]?.operation || null

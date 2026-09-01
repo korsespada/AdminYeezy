@@ -63,6 +63,7 @@ import {
 } from "@/actions/csv-import";
 import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
+import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
 import {
   getBatchAiRunAction,
@@ -656,6 +657,7 @@ export default function CsvImportApp({
   const [isLoadingAiLogs, setIsLoadingAiLogs] = useState(false);
   const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
+  const [scriptProgress, setScriptProgress] = useState<BatchScriptProgress | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -1041,6 +1043,50 @@ export default function CsvImportApp({
   };
 
   useEffect(() => {
+    const progressBatchId = batchId || initialBatchId;
+    if (!progressBatchId || isSnapshotSource) return;
+    let cancelled = false;
+    let requestInFlight = false;
+    const poll = async () => {
+      if (requestInFlight || document.hidden) return;
+      requestInFlight = true;
+      try {
+        const response = await fetch(`/api/batches/script-progress?batchId=${encodeURIComponent(progressBatchId)}`, {
+          cache: "no-store",
+        }).then((result) => result.ok ? result.json() : null).catch(() => null);
+        if (cancelled || !response?.success) return;
+        const next = response.data as BatchScriptProgress;
+        setScriptProgress(next);
+        if (next.running) {
+          setIsRunningCustomScript(true);
+          return;
+        }
+        if (!isRunningCustomScript) return;
+        setIsRunningCustomScript(false);
+        if (next.completed) {
+          await handleLoadBatch(progressBatchId);
+          if (!cancelled) setSaveMsg("✓ Скрипт успешно отработал!");
+        } else if (next.failed) {
+          setSaveMsg(`Ошибка пост-обработки: ${next.error || "неизвестная ошибка"}`);
+        } else if (next.stale) {
+          setSaveMsg("Ошибка пост-обработки: операция перестала обновляться");
+        }
+      } finally {
+        requestInFlight = false;
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  // handleLoadBatch is an instance-local loader; the batch identifiers and
+  // running flag are the state that intentionally control this poller.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId, initialBatchId, isSnapshotSource, isRunningCustomScript]);
+
+  useEffect(() => {
     if (!batchId || isSnapshotSource) return;
     let requestInFlight = false;
     const refreshDynamicState = async () => {
@@ -1393,22 +1439,32 @@ export default function CsvImportApp({
   const handleCustomScriptProcess = async () => {
     if (!supplierId || !scriptBatchId) return;
     setIsRunningCustomScript(true);
+    setScriptProgress(null);
     setSaveMsg("Запуск скрипта...");
-    
-    const res = await runCustomSupplierScriptAction(localPath || null, supplierId, scriptBatchId);
-    
-    if (res.success && res.path) {
+
+    try {
+      const res = await runCustomSupplierScriptAction(localPath || null, supplierId, scriptBatchId, { background: true });
+      if (res.success && res.pending) {
+        setBatchId(scriptBatchId);
+        setActiveSnapshotId(null);
+        setSaveMsg("Пост-обработка запущена. Проверяем фотографии в фоне...");
+      } else if (res.success && res.path) {
         setBatchId(scriptBatchId);
         setActiveSnapshotId(null);
         await handleLoadBatch(scriptBatchId);
+        setIsRunningCustomScript(false);
         setSaveMsg("✓ Скрипт успешно отработал!");
         setTimeout(() => setSaveMsg(null), 5000);
-    } else {
-        alert("Ошибка выполнения скрипта: " + res.error);
+      } else {
+        setIsRunningCustomScript(false);
         setSaveMsg(null);
+        alert("Ошибка выполнения скрипта: " + res.error);
+      }
+    } catch (error: any) {
+      setIsRunningCustomScript(false);
+      setSaveMsg(null);
+      alert("Ошибка выполнения скрипта: " + (error?.message || error));
     }
-    
-    setIsRunningCustomScript(false);
   };
 
   const updateProduct = useCallback(
@@ -1833,6 +1889,24 @@ export default function CsvImportApp({
                 {isStoppingPublish ? "Подождите…" : publishOperation.stale ? "Сбросить операцию" : publishOperation.cancelling ? "Остановка…" : "Остановить"}
               </button>
             </div>
+          </div>
+        )}
+
+        {isRunningCustomScript && scriptProgress?.running && (
+          <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-950/25 p-4">
+            <div className="flex items-center gap-2 font-bold text-amber-100">
+              <RefreshCw className="h-5 w-5 animate-spin text-amber-300" />
+              <span>
+                {scriptProgress.phase === "prepare"
+                  ? "Подготавливаем пост-обработку"
+                  : scriptProgress.phase === "saving"
+                    ? "Сохраняем результат пост-обработки"
+                    : "Проверяем фотографии на дубли"}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-amber-200/70">
+              Уже проверенные фотографии берутся из кэша; скачиваются только новые пробники и подтверждающие фото кандидатов.
+            </p>
           </div>
         )}
         
