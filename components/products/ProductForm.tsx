@@ -174,6 +174,42 @@ export default function ProductForm({
     () => productSupplierOptions.find((item) => item.id === supplierSelection) || null,
     [productSupplierOptions, supplierSelection],
   )
+  const supplierAlbumId = useMemo(() => {
+    if (selectedSupplier?.source_id) {
+      return selectedSupplier.source_id.trim()
+    }
+    const metaSourceId = String(product?.metadata?.source_supplier_id || '').trim()
+    if (metaSourceId) {
+      return metaSourceId
+    }
+    const supplierName = selectedSupplier?.name || product?.supplier?.name
+    const supplierId = selectedSupplier?.rails_id || product?.supplier?.id
+    if (supplierName || supplierId) {
+      const found = supplierOptions.find((opt) =>
+        (supplierId && (opt.rails_id === supplierId || opt.id === supplierId)) ||
+        (supplierName && opt.name.toLowerCase() === supplierName.toLowerCase()),
+      )
+      if (found?.source_id) {
+        return found.source_id.trim()
+      }
+    }
+    return ''
+  }, [selectedSupplier, product?.metadata?.source_supplier_id, product?.supplier, supplierOptions])
+
+  const productExternalId = useMemo(() => {
+    const direct = String(product?.external_id || '').trim()
+    if (direct) return direct
+    const meta = String(product?.metadata?.external_id || '').trim()
+    if (meta) return meta
+    const fromId = String(productId || product?.productId || '').trim()
+    if (fromId.startsWith('_')) return fromId
+    return ''
+  }, [product?.external_id, product?.metadata?.external_id, product?.productId, productId])
+
+  const supplierUrl = useMemo(() => {
+    if (!supplierAlbumId || !productExternalId) return null
+    return `https://www.szwego.com/static/index.html?#/theme_detail/${supplierAlbumId}/${productExternalId}?needback=0`
+  }, [supplierAlbumId, productExternalId])
 
   const handleDownload = async (url: string, index: number) => {
     try {
@@ -1353,25 +1389,57 @@ export default function ProductForm({
           </form>
 
           {/* Footer */}
-          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-700 bg-gray-900 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row sm:justify-end sm:space-x-3 sm:px-5 sm:pb-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              disabled={isPending}
-              className="w-full border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white sm:w-auto"
-            >
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              onClick={() => formRef.current?.requestSubmit()}
-              disabled={isPending}
-              title="Сохранить (Ctrl+S)"
-              className="w-full sm:w-auto"
-            >
-              {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
-            </Button>
+          <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-700 bg-gray-900 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:pb-3">
+            <div className="w-full sm:w-auto">
+              {supplierUrl ? (
+                <Button
+                  asChild
+                  type="button"
+                  variant="outline"
+                  className="w-full border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white sm:w-auto"
+                >
+                  <a
+                    href={supplierUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Открыть у поставщика
+                  </a>
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled
+                  title="У товара не указан external_id или поставщик Szwego"
+                  className="w-full border-slate-700 bg-slate-800/50 text-slate-500 sm:w-auto"
+                >
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Открыть у поставщика
+                </Button>
+              )}
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:space-x-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onClose}
+                disabled={isPending}
+                className="w-full border-gray-600 bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white sm:w-auto"
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                onClick={() => formRef.current?.requestSubmit()}
+                disabled={isPending}
+                title="Сохранить (Ctrl+S)"
+                className="w-full sm:w-auto"
+              >
+                {isPending ? 'Сохранение...' : product ? 'Обновить' : 'Создать'}
+              </Button>
+            </div>
           </div>
       </SheetContent>
 

@@ -220,4 +220,84 @@ describe('ProductForm save shortcut', () => {
     expect(uploadFormData.get('video_file')).toBe(video)
     expect(onClose).toHaveBeenCalledOnce()
   })
+
+  it('renders active "Открыть у поставщика" link when supplier album_id and external_id exist', async () => {
+    const productWithSupplier: Product = {
+      ...product,
+      external_id: '_dmwrSYPCVgdwOuaoRk5ZYA8l5B-GYW55105ubtA',
+      metadata: {
+        source_supplier_id: '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ',
+      },
+    }
+
+    render(
+      <ProductForm
+        product={productWithSupplier}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const link = await screen.findByRole('link', { name: /Открыть у поставщика/i })
+    expect(link).toHaveAttribute(
+      'href',
+      'https://www.szwego.com/static/index.html?#/theme_detail/_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ/_dmwrSYPCVgdwOuaoRk5ZYA8l5B-GYW55105ubtA?needback=0',
+    )
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('dynamically updates "Открыть у поставщика" link when changing supplier in select', async () => {
+    const productWithExternalId: Product = {
+      ...product,
+      external_id: '_dmwrSYPCVgdwOuaoRk5ZYA8l5B-GYW55105ubtA',
+      metadata: {},
+    }
+
+    render(
+      <ProductForm
+        product={productWithExternalId}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        supplierOptions={[
+          { id: '_newAlbum123', name: 'Новый Поставщик', source_id: '_newAlbum123' },
+        ]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const initialButton = await screen.findByRole('button', { name: /Открыть у поставщика/i })
+    expect(initialButton).toBeDisabled()
+
+    const supplierSelect = screen.getByLabelText('Поставщик')
+    fireEvent.change(supplierSelect, { target: { value: '_newAlbum123' } })
+
+    const updatedLink = await screen.findByRole('link', { name: /Открыть у поставщика/i })
+    expect(updatedLink).toHaveAttribute(
+      'href',
+      'https://www.szwego.com/static/index.html?#/theme_detail/_newAlbum123/_dmwrSYPCVgdwOuaoRk5ZYA8l5B-GYW55105ubtA?needback=0',
+    )
+  })
+
+  it('renders disabled "Открыть у поставщика" button when supplier or external_id is missing', async () => {
+    render(
+      <ProductForm
+        product={{ ...product, external_id: '' }}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const button = await screen.findByRole('button', { name: /Открыть у поставщика/i })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('title', 'У товара не указан external_id или поставщик Szwego')
+  })
 })
