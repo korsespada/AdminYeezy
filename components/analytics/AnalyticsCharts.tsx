@@ -51,6 +51,8 @@ const colors = {
 }
 
 const formatDate = (value: string) => {
+    if (!value) return ''
+    if (value.includes(':')) return value
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
     return date.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })
@@ -126,7 +128,7 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
         { name: 'Онлайн', value: overview.online_now, fill: colors.online },
         { name: 'Посетители', value: overview.unique_visitors, fill: colors.visitors },
         { name: 'Постоянные', value: overview.returning_profiles, fill: colors.returning },
-        { name: 'Уник. просмотры', value: overview.unique_product_views, fill: colors.views },
+        { name: 'Просмотры товаров', value: overview.unique_product_views, fill: colors.views },
         { name: 'Менеджер', value: overview.ask_manager, fill: colors.manager },
     ]
 
@@ -210,7 +212,7 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                         <BarChart data={summaryBars} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
                             <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" horizontal={false} />
                             <XAxis type="number" stroke="#64748B" fontSize={12} tickLine={false} axisLine={false} />
-                            <YAxis dataKey="name" type="category" width={112} stroke="#CBD5E1" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis dataKey="name" type="category" width={140} stroke="#CBD5E1" fontSize={12} tickLine={false} axisLine={false} />
                             <Tooltip
                                 cursor={{ fill: 'rgba(148, 163, 184, 0.05)' }}
                                 contentStyle={{

@@ -279,9 +279,12 @@ export async function GET(request: Request) {
       FROM profiles
     `;
 
+    const isSingleDay = period === "today" || period === "yesterday";
+    const dateExpr = isSingleDay ? "TO_CHAR(created_at, 'HH24:00')" : "TO_CHAR(created_at, 'YYYY-MM-DD')";
+
     const seriesSql = `
       SELECT 
-        TO_CHAR(created_at, 'YYYY-MM-DD') as date,
+        ${dateExpr} as date,
         COUNT(DISTINCT session_id) as visitors,
         COUNT(DISTINCT CONCAT(session_id, ':', "productId")) FILTER (
           WHERE event = 'product_view'
@@ -297,8 +300,8 @@ export async function GET(request: Request) {
       FROM analytics_events
       WHERE ${timeFilter}
         AND ${channelFilter}
-      GROUP BY date
-      ORDER BY date ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     const countrySql = `
@@ -340,6 +343,9 @@ export async function GET(request: Request) {
       SELECT 
         COALESCE(NULLIF("productId", ''), 'unknown') as id,
         COALESCE(NULLIF(name, ''), "productId", 'Без названия') as name,
+        MAX(COALESCE(NULLIF(meta->>'brand', ''), '')) as brand,
+        MAX(COALESCE(NULLIF(meta->>'category', ''), '')) as category,
+        MAX(price) as price,
         COUNT(*) as views,
         COUNT(DISTINCT session_id) as unique_views
       FROM analytics_events
@@ -350,13 +356,16 @@ export async function GET(request: Request) {
         AND "productId" != ''
       GROUP BY "productId", name
       ORDER BY views DESC
-      LIMIT 10
+      LIMIT 8
     `;
 
     const topCartSql = `
       SELECT 
         COALESCE(NULLIF("productId", ''), 'unknown') as id,
         COALESCE(NULLIF(name, ''), "productId", 'Без названия') as name,
+        MAX(COALESCE(NULLIF(meta->>'brand', ''), '')) as brand,
+        MAX(COALESCE(NULLIF(meta->>'category', ''), '')) as category,
+        MAX(price) as price,
         COUNT(*) as carts
       FROM analytics_events
       WHERE ${timeFilter}
@@ -366,7 +375,7 @@ export async function GET(request: Request) {
         AND "productId" != ''
       GROUP BY "productId", name
       ORDER BY carts DESC
-      LIMIT 10
+      LIMIT 8
     `;
 
     const [overviewRes, profilesRes, seriesRes, countryRes, osRes, deviceRes, topProductsRes, topCartRes] =
@@ -479,72 +488,55 @@ export async function GET(request: Request) {
       console.warn("Rails CRM orders fetch warning for analytics:", crmError?.message);
     }
 
-    // Funnel steps calculation
+    const step1 = overview.unique_visitors;
+    const step2 = overview.unique_product_viewers || overview.unique_product_views;
+    const step3 = overview.add_to_cart + overview.add_to_favorites;
+    const step4 = overview.order_submit + overview.ask_manager;
+    const step5 = financial.paid_orders || (overview.order_submit > 0 ? overview.order_submit : 0);
+
+    const calcRate = (val: number, base: number) =>
+      base > 0 ? Math.min(100, Math.round((val / base) * 1000) / 10) : 0;
+
+    const conv2 = calcRate(step2, step1);
+    const conv3 = calcRate(step3, step2);
+    const conv4 = calcRate(step4, step3);
+    const conv5 = calcRate(step5, step4);
+
     const funnel = [
       {
         step: "Визиты",
-        count: overview.unique_visitors,
+        count: step1,
         rate: 100,
+        stepConversion: 100,
+        dropOff: 0,
       },
       {
         step: "Просмотры товаров",
-        count: overview.unique_product_viewers || overview.unique_product_views,
-        rate:
-          overview.unique_visitors > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  ((overview.unique_product_viewers || overview.unique_product_views) /
-                    overview.unique_visitors) *
-                    1000,
-                ) / 10,
-              )
-            : 0,
+        count: step2,
+        rate: calcRate(step2, step1),
+        stepConversion: conv2,
+        dropOff: step1 > 0 ? Math.max(0, Math.round((100 - conv2) * 10) / 10) : 0,
       },
       {
         step: "В корзину / Избранное",
-        count: overview.add_to_cart + overview.add_to_favorites,
-        rate:
-          (overview.unique_product_viewers || overview.unique_product_views) > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  ((overview.add_to_cart + overview.add_to_favorites) /
-                    Math.max(1, overview.unique_product_viewers || overview.unique_product_views)) *
-                    1000,
-                ) / 10,
-              )
-            : 0,
+        count: step3,
+        rate: calcRate(step3, step1),
+        stepConversion: conv3,
+        dropOff: step2 > 0 ? Math.max(0, Math.round((100 - conv3) * 10) / 10) : 0,
       },
       {
         step: "Оформление / Заявка",
-        count: overview.order_submit + overview.ask_manager,
-        rate:
-          (overview.add_to_cart + overview.add_to_favorites) > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  ((overview.order_submit + overview.ask_manager) /
-                    Math.max(1, overview.add_to_cart + overview.add_to_favorites)) *
-                    1000,
-                ) / 10,
-              )
-            : 0,
+        count: step4,
+        rate: calcRate(step4, step1),
+        stepConversion: conv4,
+        dropOff: step3 > 0 ? Math.max(0, Math.round((100 - conv4) * 10) / 10) : 0,
       },
       {
         step: "Оплачено",
-        count: financial.paid_orders || (overview.order_submit > 0 ? overview.order_submit : 0),
-        rate:
-          (overview.order_submit + overview.ask_manager) > 0
-            ? Math.min(
-                100,
-                Math.round(
-                  ((financial.paid_orders || overview.order_submit) /
-                    Math.max(1, overview.order_submit + overview.ask_manager)) *
-                    1000,
-                ) / 10,
-              )
-            : 0,
+        count: step5,
+        rate: calcRate(step5, step1),
+        stepConversion: conv5,
+        dropOff: step4 > 0 ? Math.max(0, Math.round((100 - conv5) * 10) / 10) : 0,
       },
     ];
 
