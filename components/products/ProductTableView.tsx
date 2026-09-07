@@ -1,11 +1,12 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import Image from 'next/image'
-import { type Product } from '@/lib/types'
+import { type Product, type ProductSupplierOption } from '@/lib/types'
 import { ReplaceAll, RefreshCw, Copy } from 'lucide-react'
 import { bulkPatchObjectsAction } from '@/actions/bulk-update'
 import { createProductAction } from '@/actions/products'
+import { buildDuplicateProductFormData } from '@/lib/product-duplicate'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -16,12 +17,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
 import { imagePresets, productImageAlt, productImageUrl } from '@/lib/image'
-import { isPriceOnRequest } from '@/lib/product-pricing'
 import ProductGenderBadge from '@/components/products/ProductGenderBadge'
 
 interface ProductTableViewProps {
     products: Product[]
     selectedIds: string[]
+    supplierOptions?: ProductSupplierOption[]
     onToggleSelect: (id: string) => void
     onToggleSelectAll: () => void
     onUpdateProduct: (product: Product) => void
@@ -32,7 +33,7 @@ const getPhotoAlt = (product: Product) => productImageAlt(product)
 
 type FieldName = 'productId' | 'name' | 'description' | 'price'
 
-export default function ProductTableView({ products, selectedIds, onToggleSelect, onToggleSelectAll, onUpdateProduct }: ProductTableViewProps) {
+export default function ProductTableView({ products, selectedIds, supplierOptions = [], onToggleSelect, onToggleSelectAll, onUpdateProduct }: ProductTableViewProps) {
     const [findText, setFindText] = useState('')
     const [replaceText, setReplaceText] = useState('')
     const [replaceField, setReplaceField] = useState<FieldName>('name')
@@ -99,46 +100,7 @@ export default function ProductTableView({ products, selectedIds, onToggleSelect
         setIsCopying(product.id);
 
         try {
-            const newProductId = `SKU-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-            const formData = new FormData();
-            formData.append('productId', newProductId);
-            formData.append('name', `${product.name} (Копия)`);
-            formData.append('description', normalizeDescription(product.description));
-            formData.append('price', product.price.toString());
-            formData.append('status', product.status);
-            formData.append('gender', product.gender || '');
-            formData.append('productMetadata', JSON.stringify(product.metadata || {}));
-            formData.append('catalog_attributes', JSON.stringify(product.catalog_attributes || product.attributes || {}));
-            formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
-            formData.append('fulfillment_mode', 'made_to_order');
-            if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
-            if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
-
-            // Handle brands
-            const b = product.brand || product.expand?.brand;
-            if (Array.isArray(b)) {
-                b.forEach(id => {
-                    if (typeof id === 'string') formData.append('brand', id);
-                    else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
-                });
-            } else if (typeof b === 'string' && b) {
-                formData.append('brand', b);
-            } else if (b && typeof b === 'object' && 'id' in b) {
-                formData.append('brand', b.id);
-            }
-
-            formData.append('category', product.category || product.expand?.category?.id || '');
-            formData.append('subcategory', product.subcategory || product.expand?.subcategory?.id || '');
-
-            formData.append('media', JSON.stringify(product.media || product.photos.map((url, index) => ({
-                original_url: url,
-                preview_url: url,
-                thumb_url: url,
-                og_image_url: url,
-                sort_order: index,
-                processing_status: 'processed',
-            }))));
-
+            const formData = buildDuplicateProductFormData(product, supplierOptions);
             const result = await createProductAction(formData);
             if (result.success) {
                 router.refresh();

@@ -2,9 +2,10 @@
 
 import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
-import { type Brand, type Category, type Product, type Subcategory } from '@/lib/types';
+import { type Brand, type Category, type Product, type ProductSupplierOption, type Subcategory } from '@/lib/types';
 import { Trash2, Copy, Palette, Sparkles, Play } from 'lucide-react';
 import { updateProductAction, createProductAction } from '@/actions/products';
+import { buildDuplicateProductFormData } from '@/lib/product-duplicate';
 import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ interface ProductCardProps {
     categories?: Category[];
     subcategories?: Subcategory[];
     brands?: Brand[];
+    supplierOptions?: ProductSupplierOption[];
     onInlineUpdate?: (product: Product, patch: Partial<Product>) => Promise<void> | void;
     allowDuplicate?: boolean;
     aiProcessed?: boolean;
@@ -50,7 +52,7 @@ interface ProductCardProps {
     extraFooter?: React.ReactNode;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -80,6 +82,36 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             subcategory: subcategoryName,
         }
     }, [product.category, product.subcategory, product.expand?.category?.name, product.expand?.subcategory?.name, categories, subcategories])
+
+    const supplier = useMemo(() => {
+        if (product.supplier?.name) {
+            let avatar = product.supplier.avatar_url
+            if (!avatar && supplierOptions.length > 0) {
+                const opt = supplierOptions.find(o =>
+                    (product.supplier?.name && o.name.toLowerCase() === product.supplier.name.toLowerCase()) ||
+                    (product.supplier?.id && (o.rails_id === product.supplier.id || o.id === product.supplier.id))
+                )
+                avatar = opt?.avatar_url || null
+            }
+            return {
+                id: product.supplier.id,
+                name: product.supplier.name,
+                avatar_url: avatar,
+            }
+        }
+        const sourceId = product.metadata?.source_supplier_id
+        if (sourceId && supplierOptions.length > 0) {
+            const opt = supplierOptions.find(o => o.source_id === sourceId || o.id === sourceId)
+            if (opt) {
+                return {
+                    id: opt.rails_id || opt.id,
+                    name: opt.name,
+                    avatar_url: opt.avatar_url || null,
+                }
+            }
+        }
+        return null
+    }, [product.supplier, product.metadata?.source_supplier_id, supplierOptions])
 
     const startEdit = (field: 'name' | 'price', e: React.MouseEvent) => {
         e.stopPropagation();
@@ -167,47 +199,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         setIsCopying(true);
 
         try {
-            const newProductId = `SKU-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-            const formData = new FormData();
-            formData.append('productId', newProductId);
-            formData.append('name', `${product.name} (Копия)`);
-            formData.append('description', normalizeDescription(product.description));
-            formData.append('price', product.price.toString());
-            formData.append('status', product.status);
-            formData.append('gender', product.gender || '');
-            formData.append('productMetadata', JSON.stringify(product.metadata || {}));
-            formData.append('price_on_request', isPriceOnRequest(product.price) ? 'true' : 'false');
-            formData.append('video_url', product.video_url || '');
-            formData.append('video_poster_url', product.video_poster_url || '');
-            formData.append('fulfillment_mode', 'made_to_order');
-            if (product.availability_confidence) formData.append('availability_confidence', product.availability_confidence);
-            if (product.indexing_status) formData.append('indexing_status', product.indexing_status);
-
-            // Handle brands
-            const b = product.brand || product.expand?.brand;
-            if (Array.isArray(b)) {
-                b.forEach(id => {
-                    if (typeof id === 'string') formData.append('brand', id);
-                    else if (id && typeof id === 'object' && 'id' in id) formData.append('brand', id.id);
-                });
-            } else if (typeof b === 'string' && b) {
-                formData.append('brand', b);
-            } else if (b && typeof b === 'object' && 'id' in b) {
-                formData.append('brand', b.id);
-            }
-
-            formData.append('category', product.category || product.expand?.category?.id || '');
-            formData.append('subcategory', product.subcategory || product.expand?.subcategory?.id || '');
-
-            formData.append('media', JSON.stringify(product.media || product.photos.map((url, index) => ({
-                original_url: url,
-                preview_url: url,
-                thumb_url: url,
-                og_image_url: url,
-                sort_order: index,
-                processing_status: 'processed',
-            }))));
-
+            const formData = buildDuplicateProductFormData(product, supplierOptions);
             const result = await createProductAction(formData);
             if (result.success) {
                 router.refresh();
@@ -314,6 +306,24 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     <div className="truncate text-[10px] font-semibold text-indigo-400">
                         {brandLabel}
                     </div>
+                    {supplier && (
+                        <div className="flex shrink-0 items-center" title={supplier.name}>
+                            {supplier.avatar_url ? (
+                                <Image
+                                    src={supplier.avatar_url}
+                                    alt={supplier.name}
+                                    width={20}
+                                    height={20}
+                                    unoptimized
+                                    className="h-5 w-5 rounded-full border border-slate-600 object-cover"
+                                />
+                            ) : (
+                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
+                                    {supplier.name.slice(0, 1).toUpperCase()}
+                                </span>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <div className="mb-1.5">
@@ -322,8 +332,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         {categoryLabel.subcategory && ` • ${categoryLabel.subcategory}`}
                         <ProductGenderBadge gender={product.gender} className="ml-2" />
                     </div>
-                    <div className="mt-1 truncate text-[10px] text-slate-500" title={product.supplier?.name || 'Без поставщика'}>
-                        Поставщик: {product.supplier?.name || 'Без поставщика'}
+                    <div className="mt-1 truncate text-[10px] text-slate-500" title={supplier?.name || 'Без поставщика'}>
+                        Поставщик: {supplier?.name || 'Без поставщика'}
                     </div>
                 </div>
                 {extraBadges && <div className="mb-2 flex flex-wrap gap-1.5">{extraBadges}</div>}

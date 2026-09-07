@@ -117,4 +117,59 @@ describe('ProductCard grid presentation', () => {
 
     expect(screen.getByText('2 варианта')).toBeInTheDocument()
   })
+
+  it('renders supplier avatar with tooltip when product has a supplier', () => {
+    render(
+      <ProductCard
+        product={{
+          ...product,
+          supplier: {
+            id: 'sup-1',
+            name: 'Катя Поставщик',
+            avatar_url: 'https://cdn.example.test/katya.jpg',
+          },
+        }}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+
+    const matchingTitles = screen.getAllByTitle('Катя Поставщик')
+    expect(matchingTitles.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByAltText('Катя Поставщик')).toBeInTheDocument()
+    expect(screen.getByText('Поставщик: Катя Поставщик')).toBeInTheDocument()
+  })
+
+  it('resolves supplier from supplierOptions when product has source_supplier_id metadata', () => {
+    render(
+      <ProductCard
+        product={{
+          ...product,
+          supplier: null,
+          metadata: { source_supplier_id: 'album-katya-1' },
+        }}
+        supplierOptions={[
+          {
+            id: 'album-katya-1',
+            source_id: 'album-katya-1',
+            name: 'Катя Источник',
+            avatar_url: 'https://cdn.example.test/katya.jpg',
+          },
+        ]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+      />,
+    )
+
+    const matchingTitles = screen.getAllByTitle('Катя Источник')
+    expect(matchingTitles.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByAltText('Катя Источник')).toBeInTheDocument()
+    expect(screen.getByText('Поставщик: Катя Источник')).toBeInTheDocument()
+  })
 })

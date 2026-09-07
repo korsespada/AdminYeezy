@@ -314,6 +314,7 @@ export default function ProductList({
         categories={categories}
         subcategories={subcategories}
         attributeDefinitions={attributeDefinitions}
+        supplierOptions={supplierOptions}
         activeSubcategoryIds={activeSubcategoryIds}
         filterFacets={filterFacets}
         isOpen={isSidebarOpen}
@@ -416,6 +417,7 @@ export default function ProductList({
                       onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
                       categories={categories}
                       subcategories={subcategories}
+                      supplierOptions={supplierOptions}
                       variantCount={product.color_variants?.length || 0}
                       variantColors={Array.from(new Set(
                         (product.color_variants || [])
@@ -476,6 +478,7 @@ export default function ProductList({
                           onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
                           categories={categories}
                           subcategories={subcategories}
+                          supplierOptions={supplierOptions}
                           variantCount={product.color_variants?.length || 0}
                           variantColors={Array.from(new Set(
                             (product.color_variants || [])
@@ -491,6 +494,7 @@ export default function ProductList({
                   <ProductTableView
                     products={products}
                     selectedIds={selectedProductIds}
+                    supplierOptions={supplierOptions}
                     onToggleSelect={handleToggleSelect}
                     onToggleSelectAll={() => {
                       if (selectedProductIds.length === products.length) {

@@ -44,6 +44,7 @@ export interface Subcategory {
 export interface CatalogSlugFacet {
   slug: string
   name?: string
+  avatar_url?: string | null
   count: number
 }
 

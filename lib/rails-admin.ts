@@ -2412,7 +2412,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
     product.variants = variants
   }
 
-  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined) {
+  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined || formData.has('supplier_name')) {
     const metadata = parseJsonObject(formData.get('productMetadata'))
     if (formData.has('gender')) {
       const gender = String(formData.get('gender') || '')

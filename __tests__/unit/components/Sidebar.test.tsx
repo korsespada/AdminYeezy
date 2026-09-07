@@ -10,6 +10,10 @@ const navigationMock = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
 }))
 
+vi.mock('next/image', () => ({
+  default: (props: React.ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ''} />,
+}))
+
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: navigationMock.push }),
   useSearchParams: () => navigationMock.searchParams,
@@ -322,5 +326,39 @@ describe('Sidebar faceted filters', () => {
     const finalUrl = new URL(navigationMock.push.mock.calls.at(-1)?.[0], 'https://admin.example')
     expect(finalUrl.searchParams.get('attributeKey')).toBe('colors')
     expect(finalUrl.searchParams.get('attributeValue')).toBe('gray')
+  })
+  it('renders supplier options with avatars or letter badges', async () => {
+    const user = userEvent.setup()
+    const facetsWithSupplier: ProductFilterFacets = {
+      ...filterFacets,
+      supplierFacets: [
+        { slug: 'katya-slug', name: 'Катя', count: 5 },
+        { slug: 'no-avatar-slug', name: 'БезАватарки', count: 2 },
+      ],
+    }
+
+    render(
+      <Sidebar
+        brands={brands}
+        categories={categories}
+        subcategories={subcategories}
+        activeSubcategoryIds={[]}
+        filterFacets={facetsWithSupplier}
+        supplierOptions={[
+          {
+            id: 'katya-slug',
+            name: 'Катя',
+            avatar_url: 'https://cdn.example.test/katya.jpg',
+          },
+        ]}
+        isOpen={true}
+        onClose={vi.fn()}
+        count={7}
+      />
+    )
+
+    await user.click(screen.getByRole('combobox', { name: 'Поставщик' }))
+    expect(screen.getByRole('option', { name: /Катя \(5\)/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /БезАватарки \(2\)/ })).toBeInTheDocument()
   })
 })

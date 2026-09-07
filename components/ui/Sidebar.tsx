@@ -2,7 +2,8 @@
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react'
 import { X, Filter, LoaderCircle, Search, RotateCcw } from 'lucide-react'
-import { type Brand, type Category, type ProductFilterFacets, type Subcategory } from '@/lib/types'
+import Image from 'next/image'
+import { type Brand, type Category, type ProductFilterFacets, type ProductSupplierOption, type Subcategory } from '@/lib/types'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -30,6 +31,7 @@ interface SidebarProps {
     activeSubcategoryIds: string[]
     filterFacets?: ProductFilterFacets
     attributeDefinitions?: CatalogAttributeDefinition[]
+    supplierOptions?: ProductSupplierOption[]
     isOpen: boolean
     onClose: () => void
     count: number
@@ -43,6 +45,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     subcategories,
     filterFacets,
     attributeDefinitions = [],
+    supplierOptions = [],
     isOpen,
     onClose,
     count,
@@ -62,6 +65,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     const [priceMaxValue, setPriceMaxValue] = useState(searchParams.get('priceMax') || '')
     const [attributeKeyValue, setAttributeKeyValue] = useState(searchParams.get('attributeKey') || '')
     const [attributeValueValue, setAttributeValueValue] = useState(searchParams.get('attributeValue') || '')
+
+    const supplierAvatarMap = useMemo(() => {
+        const map = new Map<string, string>()
+        for (const opt of supplierOptions) {
+            if (opt.avatar_url) {
+                if (opt.name) map.set(opt.name.toLowerCase().trim(), opt.avatar_url)
+                if (opt.id) map.set(opt.id.toLowerCase().trim(), opt.avatar_url)
+                if (opt.source_id) map.set(opt.source_id.toLowerCase().trim(), opt.avatar_url)
+                if (opt.rails_id) map.set(opt.rails_id.toLowerCase().trim(), opt.avatar_url)
+            }
+        }
+        return map
+    }, [supplierOptions])
 
     const currentBrand = searchParams.get('brand') || ''
     const currentSupplier = searchParams.get('supplier') || ''
@@ -632,11 +648,35 @@ const Sidebar: React.FC<SidebarProps> = ({
                                     {(filterFacets?.supplierFacets || [])
                                         .slice()
                                         .sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug), 'ru'))
-                                        .map((supplier) => (
-                                            <SelectItem key={supplier.slug} value={supplier.slug}>
-                                                {supplier.name || supplier.slug} ({supplier.count})
-                                            </SelectItem>
-                                        ))}
+                                        .map((supplier) => {
+                                            const name = supplier.name || supplier.slug
+                                            const avatarUrl =
+                                                supplier.avatar_url ||
+                                                (supplier.name ? supplierAvatarMap.get(supplier.name.toLowerCase().trim()) : null) ||
+                                                (supplier.slug ? supplierAvatarMap.get(supplier.slug.toLowerCase().trim()) : null)
+
+                                            return (
+                                                <SelectItem key={supplier.slug} value={supplier.slug}>
+                                                    <span className="flex items-center gap-2">
+                                                        {avatarUrl ? (
+                                                            <Image
+                                                                src={avatarUrl}
+                                                                alt=""
+                                                                width={20}
+                                                                height={20}
+                                                                unoptimized
+                                                                className="h-5 w-5 rounded-full border border-slate-600 object-cover shrink-0"
+                                                            />
+                                                        ) : (
+                                                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
+                                                                {name.slice(0, 1).toUpperCase()}
+                                                            </span>
+                                                        )}
+                                                        <span className="truncate">{name} ({supplier.count})</span>
+                                                    </span>
+                                                </SelectItem>
+                                            )
+                                        })}
                                 </SelectContent>
                             </Select>
                         </div>
