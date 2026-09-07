@@ -22,6 +22,7 @@ import {
     Package,
     Receipt,
     RefreshCw,
+    Search,
     ShoppingBag,
     ShoppingCart,
     Smartphone,
@@ -106,10 +107,34 @@ interface TopProductItem {
     carts?: number
 }
 
+interface TrafficSourceItem {
+    name: string
+    visitors: number
+    views: number
+    carts: number
+    checkouts: number
+    purchases: number
+    cartRate: number
+    checkoutRate: number
+}
+
+interface SearchDemandItem {
+    query: string
+    searches: number
+    unique_users: number
+}
+
 interface ExternalIntegrations {
     yandexMetrika: {
         configured: boolean
         counterId: string | null
+        apiActive?: boolean
+        stats?: {
+            users: number
+            pageviews: number
+            bounceRate: number
+            avgDurationSeconds: number
+        } | null
     }
     yandexWebmaster?: {
         configured: boolean
@@ -213,13 +238,15 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
     const [topProducts, setTopProducts] = useState<TopProductItem[]>([])
     const [topCart, setTopCart] = useState<TopProductItem[]>([])
     const [externalIntegrations, setExternalIntegrations] = useState<ExternalIntegrations | null>(null)
+    const [trafficSources, setTrafficSources] = useState<TrafficSourceItem[]>([])
+    const [searchDemands, setSearchDemands] = useState<SearchDemandItem[]>([])
     const [updatedAt, setUpdatedAt] = useState<string | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [isResetMenuOpen, setIsResetMenuOpen] = useState(false)
     const [isResetting, setIsResetting] = useState(false)
     const [isCustomOpen, setIsCustomOpen] = useState(false)
-    const [audienceTab, setAudienceTab] = useState<'geo' | 'tech' | 'integrations'>('geo')
+    const [audienceTab, setAudienceTab] = useState<'sources' | 'demand' | 'geo' | 'tech' | 'integrations'>('sources')
 
     const data = overview || emptyOverview
 
@@ -255,6 +282,8 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
             setDeviceList(payload.deviceList || [])
             setTopProducts(payload.topProducts || [])
             setTopCart(payload.topCart || [])
+            setTrafficSources(payload.trafficSources || [])
+            setSearchDemands(payload.searchDemands || [])
             setExternalIntegrations(payload.externalIntegrations || null)
             setUpdatedAt(payload.updatedAt || new Date().toISOString())
         } catch (err: any) {
@@ -794,28 +823,160 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                     <div>
                         <CardTitle className="flex items-center gap-2 text-lg">
                             <Globe2 className="h-5 w-5 text-primary" />
-                            Аудитория и окружение
+                            Каналы трафика, спрос и окружение
                         </CardTitle>
                         <CardDescription>
-                            Географическое распределение, типы устройств и статус интеграций веб-аналитики.
+                            Эффективность внешних источников, поисковый спрос покупателей и статус 4 внешних платформ.
                         </CardDescription>
                     </div>
                     <Tabs value={audienceTab} onValueChange={(val) => setAudienceTab(val as any)}>
-                        <TabsList className="bg-muted">
+                        <TabsList className="bg-muted flex-wrap h-auto p-1">
+                            <TabsTrigger value="sources" className="gap-1.5 text-xs">
+                                <TrendingUp className="h-3.5 w-3.5 text-primary" /> Каналы ({trafficSources.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="demand" className="gap-1.5 text-xs">
+                                <Search className="h-3.5 w-3.5 text-cyan-400" /> Поисковый спрос {searchDemands.length ? `(${searchDemands.length})` : ''}
+                            </TabsTrigger>
                             <TabsTrigger value="geo" className="gap-1.5 text-xs">
                                 <Globe2 className="h-3.5 w-3.5" /> Страны {countryList.length ? `(${countryList.length})` : ''}
                             </TabsTrigger>
                             <TabsTrigger value="tech" className="gap-1.5 text-xs">
-                                <Laptop className="h-3.5 w-3.5" /> Устройства и ОС
+                                <Laptop className="h-3.5 w-3.5" /> Устройства
                             </TabsTrigger>
                             <TabsTrigger value="integrations" className="gap-1.5 text-xs">
-                                <Activity className="h-3.5 w-3.5" /> Внешние трекеры
+                                <Activity className="h-3.5 w-3.5" /> 4 платформы
                             </TabsTrigger>
                         </TabsList>
                     </Tabs>
                 </CardHeader>
                 <CardContent className="p-5 pt-2">
                     <Tabs value={audienceTab}>
+                        {/* Traffic Sources Breakdown */}
+                        <TabsContent value="sources" className="m-0 space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground pb-1">
+                                <span>Сравнительная эффективность: конверсия из первого визита в просмотры, корзину и оформленный заказ.</span>
+                                {trafficSources.length > 0 && (
+                                    <span className="font-semibold text-primary">
+                                        Активных каналов: {trafficSources.length}
+                                    </span>
+                                )}
+                            </div>
+
+                            {trafficSources.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                                    {trafficSources.map((src) => {
+                                        const isYandex = src.name.includes('Яндекс')
+                                        const isGoogle = src.name.includes('Google')
+                                        const isTg = src.name.includes('Telegram')
+                                        return (
+                                            <div
+                                                key={src.name}
+                                                className="flex flex-col justify-between rounded-xl border border-border bg-background/50 p-4 transition-colors hover:border-primary/40"
+                                            >
+                                                <div>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-semibold text-sm text-foreground truncate">{src.name}</span>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[10px] px-1.5 py-0 ${
+                                                                isYandex
+                                                                    ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
+                                                                    : isGoogle
+                                                                    ? 'border-blue-500/40 text-blue-400 bg-blue-500/10'
+                                                                    : isTg
+                                                                    ? 'border-cyan-500/40 text-cyan-400 bg-cyan-500/10'
+                                                                    : 'border-border text-muted-foreground'
+                                                            }`}
+                                                        >
+                                                            {isYandex ? 'Yandex' : isGoogle ? 'Google' : isTg ? 'Telegram' : 'Direct'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="mt-3 grid grid-cols-2 gap-2">
+                                                        <div>
+                                                            <div className="text-[11px] text-muted-foreground">Визиты</div>
+                                                            <div className="text-xl font-bold text-foreground">{formatNumber(src.visitors)}</div>
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-[11px] text-muted-foreground">Просмотры</div>
+                                                            <div className="text-xl font-bold text-foreground">{formatNumber(src.views)}</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-muted-foreground">В корзину:</span>
+                                                        <span className="font-semibold text-foreground">
+                                                            {formatNumber(src.carts)} <span className="text-primary font-normal">({src.cartRate}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-xs">
+                                                        <span className="text-muted-foreground">Заказы / Заявки:</span>
+                                                        <span className="font-semibold text-foreground">
+                                                            {formatNumber(src.checkouts)} <span className="text-emerald-400 font-normal">({src.checkoutRate}%)</span>
+                                                        </span>
+                                                    </div>
+                                                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                                        <div
+                                                            className="h-full rounded-full bg-primary"
+                                                            style={{ width: `${Math.min(100, Math.max(5, src.cartRate))}%` }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            ) : (
+                                <EmptyState text="Нет данных по источникам за выбранный период" />
+                            )}
+                        </TabsContent>
+
+                        {/* Search Demand */}
+                        <TabsContent value="demand" className="m-0 space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground pb-1">
+                                <span>Поисковый спрос покупателей: ключевые слова и модели, которые пользователи ищут на витрине.</span>
+                                <span className="text-muted-foreground">Клик по кнопке каталога открывает товары по этому запросу</span>
+                            </div>
+
+                            {searchDemands.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {searchDemands.map((item, idx) => (
+                                        <div
+                                            key={`${item.query}-${idx}`}
+                                            className="flex items-center justify-between rounded-lg border border-border bg-background/50 p-3 text-sm transition-colors hover:border-primary/40 group"
+                                        >
+                                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                                                    {idx + 1}
+                                                </span>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="font-medium text-foreground truncate">{item.query}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {formatNumber(item.unique_users)} уник. зрителей
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-4 shrink-0 pl-2">
+                                                <div className="text-right">
+                                                    <div className="font-semibold text-foreground">{formatNumber(item.searches)}</div>
+                                                    <div className="text-[11px] text-muted-foreground">поисков</div>
+                                                </div>
+                                                <Button asChild size="sm" variant="ghost" className="h-8 px-2 text-primary opacity-80 group-hover:opacity-100">
+                                                    <Link href={`/admin?search=${encodeURIComponent(item.query)}`} title="Посмотреть в каталоге">
+                                                        Каталог <ExternalLink className="h-3 w-3 ml-1" />
+                                                    </Link>
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <EmptyState text="Нет поисковых запросов за выбранный период" />
+                            )}
+                        </TabsContent>
+
+                        {/* Geography */}
                         <TabsContent value="geo" className="m-0">
                             {countryList.length ? (
                                 <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
@@ -833,6 +994,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                             )}
                         </TabsContent>
 
+                        {/* Devices & OS */}
                         <TabsContent value="tech" className="m-0">
                             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                                 <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-4">
@@ -879,7 +1041,29 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                             </div>
                         </TabsContent>
 
-                        <TabsContent value="integrations" className="m-0">
+                        {/* 4 External Platforms */}
+                        <TabsContent value="integrations" className="m-0 space-y-4">
+                            {externalIntegrations?.yandexMetrika?.apiActive && externalIntegrations?.yandexMetrika?.stats && (
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-xs">
+                                    <div>
+                                        <div className="text-muted-foreground">Посетители (Метрика)</div>
+                                        <div className="text-lg font-bold text-foreground">{formatNumber(externalIntegrations.yandexMetrika.stats.users)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted-foreground">Просмотры страниц</div>
+                                        <div className="text-lg font-bold text-foreground">{formatNumber(externalIntegrations.yandexMetrika.stats.pageviews)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted-foreground">Отказы (Bounce rate)</div>
+                                        <div className="text-lg font-bold text-foreground">{externalIntegrations.yandexMetrika.stats.bounceRate}%</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-muted-foreground">Среднее время</div>
+                                        <div className="text-lg font-bold text-foreground">{externalIntegrations.yandexMetrika.stats.avgDurationSeconds} сек</div>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                                 {/* Yandex Metrika */}
                                 <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">

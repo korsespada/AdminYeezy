@@ -99,6 +99,39 @@ describe('Analytics route unit tests', () => {
           ],
         } as any
       }
+      if (sql.includes("WHEN COALESCE(NULLIF(meta->>'channel', '')")) {
+        return {
+          rows: [
+            {
+              name: 'Telegram Mini App',
+              visitors: '40',
+              views: '120',
+              carts: '15',
+              checkouts: '5',
+              purchases: '2',
+            },
+            {
+              name: 'Яндекс (Органика)',
+              visitors: '35',
+              views: '90',
+              carts: '10',
+              checkouts: '4',
+              purchases: '1',
+            },
+          ],
+        } as any
+      }
+      if (sql.includes("event = 'search'")) {
+        return {
+          rows: [
+            {
+              query: 'yeezy 350',
+              searches: '25',
+              unique_users: '18',
+            },
+          ],
+        } as any
+      }
       return { rows: [] } as any
     })
 
@@ -143,8 +176,24 @@ describe('Analytics route unit tests', () => {
     expect(data.funnel[0].step).toBe('Визиты')
     expect(data.funnel[0].count).toBe(100)
 
+    expect(data.trafficSources).toHaveLength(2)
+    expect(data.trafficSources[0].name).toBe('Telegram Mini App')
+    expect(data.trafficSources[0].visitors).toBe(40)
+    expect(data.trafficSources[0].cartRate).toBe(37.5)
+
+    expect(data.searchDemands).toHaveLength(1)
+    expect(data.searchDemands[0].query).toBe('yeezy 350')
+    expect(data.searchDemands[0].searches).toBe(25)
+    expect(data.searchDemands[0].unique_users).toBe(18)
+
     expect(data.externalIntegrations.yandexMetrika.configured).toBe(true)
     expect(data.externalIntegrations.yandexMetrika.counterId).toBe('12345678')
+    expect(data.externalIntegrations.yandexWebmaster.configured).toBe(true)
+    expect(data.externalIntegrations.yandexWebmaster.siteUrl).toBe('https://yeezyunique.ru')
+    expect(data.externalIntegrations.googleSearchConsole.configured).toBe(true)
+    expect(data.externalIntegrations.googleSearchConsole.property).toBe('sc-domain:yeezyunique.ru')
+    expect(data.externalIntegrations.googleMerchantCenter.configured).toBe(true)
+    expect(data.externalIntegrations.googleMerchantCenter.accountId).toBe('5830671674')
     expect(data.externalIntegrations.googleAnalytics.configured).toBe(true)
     expect(data.externalIntegrations.googleAnalytics.tagId).toBe('G-ABC123XYZ')
   })

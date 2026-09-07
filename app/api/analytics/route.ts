@@ -378,17 +378,69 @@ export async function GET(request: Request) {
       LIMIT 8
     `;
 
-    const [overviewRes, profilesRes, seriesRes, countryRes, osRes, deviceRes, topProductsRes, topCartRes] =
-      await Promise.all([
-        safeAnalyticsQuery("Overview", overviewSql, [emptyOverviewRow], true),
-        safeAnalyticsQuery("Profiles", profilesSql, [emptyProfileRow]),
-        safeAnalyticsQuery("Series", seriesSql, []),
-        safeAnalyticsQuery("Country", countrySql, []),
-        safeAnalyticsQuery("OS", osSql, []),
-        safeAnalyticsQuery("Devices", deviceSql, []),
-        safeAnalyticsQuery("TopProducts", topProductsSql, []),
-        safeAnalyticsQuery("TopCart", topCartSql, []),
-      ]);
+    const sourcesSql = `
+      SELECT 
+        CASE 
+          WHEN COALESCE(NULLIF(meta->>'channel', ''), NULLIF(meta->>'source', '')) = 'telegram' 
+               OR meta->>'referrer' ILIKE '%t.me%' 
+               OR meta->>'referrer' ILIKE '%telegram%' THEN 'Telegram Mini App'
+          WHEN meta->>'referrer' ILIKE '%yandex%' OR meta->>'referrer' ILIKE '%ya.ru%' THEN 'Яндекс (Органика)'
+          WHEN meta->>'referrer' ILIKE '%google%' THEN 'Google (Поиск)'
+          WHEN meta->>'referrer' IS NOT NULL AND meta->>'referrer' != '' AND meta->>'referrer' NOT ILIKE '%yeezyunique%' THEN 'Внешние переходы'
+          ELSE 'Прямой трафик'
+        END as name,
+        COUNT(DISTINCT session_id) as visitors,
+        COUNT(*) FILTER (WHERE event = 'product_view') as views,
+        COUNT(*) FILTER (WHERE event = 'add_to_cart') as carts,
+        COUNT(*) FILTER (WHERE event = 'checkout_payment_started' OR event = 'ask_manager' OR event = 'order_submit') as checkouts,
+        COUNT(*) FILTER (WHERE event = 'purchase') as purchases
+      FROM analytics_events
+      WHERE ${timeFilter}
+      GROUP BY 1
+      ORDER BY visitors DESC
+    `;
+
+    const searchQueriesSql = `
+      SELECT 
+        LOWER(TRIM(COALESCE(NULLIF(meta->>'query', ''), NULLIF(meta->>'search', '')))) as query,
+        COUNT(*) as searches,
+        COUNT(DISTINCT session_id) as unique_users
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+        AND event = 'search'
+        AND (
+          (meta->>'query' IS NOT NULL AND TRIM(meta->>'query') != '')
+          OR (meta->>'search' IS NOT NULL AND TRIM(meta->>'search') != '')
+        )
+      GROUP BY 1
+      ORDER BY searches DESC
+      LIMIT 10
+    `;
+
+    const [
+      overviewRes,
+      profilesRes,
+      seriesRes,
+      countryRes,
+      osRes,
+      deviceRes,
+      topProductsRes,
+      topCartRes,
+      sourcesRes,
+      searchQueriesRes,
+    ] = await Promise.all([
+      safeAnalyticsQuery("Overview", overviewSql, [emptyOverviewRow], true),
+      safeAnalyticsQuery("Profiles", profilesSql, [emptyProfileRow]),
+      safeAnalyticsQuery("Series", seriesSql, []),
+      safeAnalyticsQuery("Country", countrySql, []),
+      safeAnalyticsQuery("OS", osSql, []),
+      safeAnalyticsQuery("Devices", deviceSql, []),
+      safeAnalyticsQuery("TopProducts", topProductsSql, []),
+      safeAnalyticsQuery("TopCart", topCartSql, []),
+      safeAnalyticsQuery("Sources", sourcesSql, []),
+      safeAnalyticsQuery("SearchQueries", searchQueriesSql, []),
+    ]);
 
     const row = overviewRes.rows[0] || emptyOverviewRow;
     const profileRow = profilesRes.rows[0] || emptyProfileRow;
@@ -540,6 +592,64 @@ export async function GET(request: Request) {
       },
     ];
 
+    const trafficSources = sourcesRes.rows.map((row: any) => {
+      const visitors = parseInt(row.visitors || 0);
+      const views = parseInt(row.views || 0);
+      const carts = parseInt(row.carts || 0);
+      const checkouts = parseInt(row.checkouts || 0);
+      const purchases = parseInt(row.purchases || 0);
+      return {
+        name: row.name || "Неизвестно",
+        visitors,
+        views,
+        carts,
+        checkouts,
+        purchases,
+        cartRate: visitors > 0 ? Math.round((carts / visitors) * 1000) / 10 : 0,
+        checkoutRate: visitors > 0 ? Math.round((checkouts / visitors) * 1000) / 10 : 0,
+      };
+    });
+
+    const searchDemands = searchQueriesRes.rows.map((row: any) => ({
+      query: row.query || "",
+      searches: parseInt(row.searches || 0),
+      unique_users: parseInt(row.unique_users || 0),
+    }));
+
+    let ymApiStats = null;
+    const ymToken = process.env.YANDEX_METRIKA_TOKEN || process.env.YM_API_TOKEN;
+    const ymCounterId = process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID || "100417016";
+    if (ymToken) {
+      try {
+        const ymUrl = new URL("https://api-metrika.yandex.net/stat/v1/data");
+        ymUrl.searchParams.set("ids", ymCounterId);
+        ymUrl.searchParams.set(
+          "metrics",
+          "ym:s:users,ym:s:pageviews,ym:s:bounceRate,ym:s:avgVisitDurationSeconds",
+        );
+        const dateFrom = period === "today" ? "today" : period === "yesterday" ? "yesterday" : "7daysAgo";
+        const dateTo = period === "yesterday" ? "yesterday" : "today";
+        ymUrl.searchParams.set("date1", dateFrom);
+        ymUrl.searchParams.set("date2", dateTo);
+        const ymRes = await fetch(ymUrl.toString(), {
+          headers: { Authorization: `OAuth ${ymToken}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (ymRes.ok) {
+          const ymJson = await ymRes.json();
+          const totals = ymJson.totals || [];
+          ymApiStats = {
+            users: Math.round(totals[0] || 0),
+            pageviews: Math.round(totals[1] || 0),
+            bounceRate: Math.round((totals[2] || 0) * 10) / 10,
+            avgDurationSeconds: Math.round(totals[3] || 0),
+          };
+        }
+      } catch (ymErr: any) {
+        console.warn("Yandex Metrika API note:", ymErr?.message);
+      }
+    }
+
     return NextResponse.json({
       overview,
       financial,
@@ -550,10 +660,14 @@ export async function GET(request: Request) {
       deviceList: deviceRes.rows,
       topProducts: topProductsRes.rows,
       topCart: topCartRes.rows,
+      trafficSources,
+      searchDemands,
       externalIntegrations: {
         yandexMetrika: {
           configured: true,
-          counterId: process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID || "100417016",
+          counterId: ymCounterId,
+          apiActive: Boolean(ymApiStats),
+          stats: ymApiStats,
         },
         yandexWebmaster: {
           configured: true,
