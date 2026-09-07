@@ -478,6 +478,8 @@ export async function GET(request: Request) {
       pending_orders: 0,
       cancelled_orders: 0,
       refund_orders: 0,
+      new_buyers: 0,
+      repeat_buyers: 0,
       aov: 0,
       status_counts: {
         paid: 0,
@@ -494,11 +496,25 @@ export async function GET(request: Request) {
         const crmResult = await listRailsCrmOrders({ perPage: 100 });
         const orders = crmResult?.items || [];
 
+        // Count historical orders per customer across fetched set to identify repeat buyers
+        const customerOrderCounts: Record<string, number> = {};
+        for (const order of orders) {
+          const custKey = order.customer?.id
+            ? String(order.customer.id)
+            : order.customer?.email || order.customer?.phone || (order as any).phone || (order as any).customer_id || (order.id ? `order-cust-${order.id}` : null);
+          if (custKey) {
+            customerOrderCounts[custKey] = (customerOrderCounts[custKey] || 0) + 1;
+          }
+        }
+
         let totalRevenueCents = 0;
         let paidCount = 0;
         let pendingCount = 0;
         let cancelledCount = 0;
         let refundCount = 0;
+        let newBuyers = 0;
+        let repeatBuyers = 0;
+        const countedBuyersInPeriod = new Set<string>();
 
         for (const order of orders) {
           const orderDate = order.created_at ? new Date(order.created_at) : null;
@@ -519,6 +535,18 @@ export async function GET(request: Request) {
           if (st === "paid" || st === "shipped" || st === "delivered") {
             paidCount++;
             totalRevenueCents += Number(order.total_cents || 0);
+
+            const custKey = order.customer?.id
+              ? String(order.customer.id)
+              : order.customer?.email || order.customer?.phone || (order as any).phone || (order as any).customer_id || (order.id ? `order-cust-${order.id}` : null);
+            if (custKey && !countedBuyersInPeriod.has(custKey)) {
+              countedBuyersInPeriod.add(custKey);
+              if ((customerOrderCounts[custKey] || 1) > 1) {
+                repeatBuyers++;
+              } else {
+                newBuyers++;
+              }
+            }
           } else if (st === "payment_pending") {
             pendingCount++;
           } else if (st === "cancelled") {
@@ -534,6 +562,8 @@ export async function GET(request: Request) {
         financial.pending_orders = pendingCount;
         financial.cancelled_orders = cancelledCount;
         financial.refund_orders = refundCount;
+        financial.new_buyers = newBuyers;
+        financial.repeat_buyers = repeatBuyers;
         financial.aov = paidCount > 0 ? Math.round(revenue / paidCount) : 0;
       }
     } catch (crmError: any) {

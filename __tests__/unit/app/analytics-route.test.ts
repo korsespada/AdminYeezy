@@ -171,6 +171,8 @@ describe('Analytics route unit tests', () => {
     expect(data.financial.paid_orders).toBe(1)
     expect(data.financial.pending_orders).toBe(1)
     expect(data.financial.aov).toBe(25000)
+    expect(data.financial.new_buyers).toBe(1)
+    expect(data.financial.repeat_buyers).toBe(0)
 
     expect(data.funnel).toHaveLength(5)
     expect(data.funnel[0].step).toBe('Визиты')

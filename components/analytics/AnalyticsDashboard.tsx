@@ -7,16 +7,14 @@ import {
     BarChart3,
     Calendar,
     CheckCircle2,
-    ChevronRight,
+    ChevronDown,
+    ChevronUp,
     Clock,
-    CreditCard,
     DollarSign,
     ExternalLink,
     Eye,
     Globe2,
-    Heart,
     Laptop,
-    MessageCircle,
     Monitor,
     MoreVertical,
     Package,
@@ -28,11 +26,7 @@ import {
     Smartphone,
     Trash2,
     TrendingUp,
-    UserCheck,
-    UserPlus,
     Users,
-    Wifi,
-    XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import AnalyticsCharts, { type SeriesData } from './AnalyticsCharts'
@@ -49,8 +43,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type Period = 'today' | 'yesterday' | 'week' | 'month' | 'all' | 'custom'
 type Channel = 'all' | 'site' | 'site_desktop' | 'site_mobile' | 'telegram'
@@ -70,6 +63,7 @@ interface OverviewStats {
     active_profiles: number
     returning_profiles: number
     returning_visitors: number
+    new_visitors?: number
     cart_profiles: number
     cart_items: number
     favorite_profiles: number
@@ -84,6 +78,8 @@ interface FinancialStats {
     pending_orders: number
     cancelled_orders: number
     refund_orders: number
+    new_buyers?: number
+    repeat_buyers?: number
     aov: number
     status_counts: Record<string, number>
 }
@@ -192,6 +188,7 @@ const emptyOverview: OverviewStats = {
     active_profiles: 0,
     returning_profiles: 0,
     returning_visitors: 0,
+    new_visitors: 0,
     cart_profiles: 0,
     cart_items: 0,
     favorite_profiles: 0,
@@ -206,6 +203,8 @@ const emptyFinancial: FinancialStats = {
     pending_orders: 0,
     cancelled_orders: 0,
     refund_orders: 0,
+    new_buyers: 0,
+    repeat_buyers: 0,
     aov: 0,
     status_counts: {},
 }
@@ -246,7 +245,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
     const [isResetMenuOpen, setIsResetMenuOpen] = useState(false)
     const [isResetting, setIsResetting] = useState(false)
     const [isCustomOpen, setIsCustomOpen] = useState(false)
-    const [audienceTab, setAudienceTab] = useState<'sources' | 'demand' | 'geo' | 'tech' | 'integrations'>('sources')
+    const [isDetailsOpen, setIsDetailsOpen] = useState(false)
 
     const data = overview || emptyOverview
 
@@ -336,17 +335,32 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
         ? new Date(updatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
         : 'нет данных'
 
-    const derived = useMemo(() => ({
-        returningShare: formatPercent(data.returning_profiles || data.returning_visitors, data.active_profiles || data.unique_visitors),
-        productDepth: data.unique_product_viewers ? (data.unique_product_views / data.unique_product_viewers).toFixed(1) : '0',
-        askRate: formatPercent(data.ask_manager, data.unique_product_views || data.product_views),
-        cartShare: formatPercent(data.cart_profiles, data.total_profiles),
-        favoriteShare: formatPercent(data.favorite_profiles, data.total_profiles),
-    }), [data])
-
     const activePeriodDisplay = period === 'custom' && customFrom
         ? `${customFrom}${customTo ? ` — ${customTo}` : ''}`
         : periodLabels[period]
+
+    // New vs Returning visitor percentages
+    const totalVisitorsCount = (data.new_visitors || 0) + (data.returning_visitors || 0)
+    const newVisitorsPercent = totalVisitorsCount > 0
+        ? Math.round(((data.new_visitors || 0) / totalVisitorsCount) * 100)
+        : (data.unique_visitors > 0 ? 100 : 50)
+    const returningVisitorsPercent = 100 - newVisitorsPercent
+
+    // CRM New vs Repeat buyers percentages
+    const totalBuyersCount = (financial.new_buyers || 0) + (financial.repeat_buyers || 0)
+    const newBuyersPercent = totalBuyersCount > 0
+        ? Math.round(((financial.new_buyers || 0) / totalBuyersCount) * 100)
+        : 100
+    const repeatBuyersPercent = 100 - newBuyersPercent
+
+    // Devices percentage
+    const totalDeviceVis = deviceList.reduce((acc, d) => acc + Number(d.visitors || 0), 0) || 1
+    const mobileVis = deviceList.find(d => {
+        const n = (d.name || '').toLowerCase()
+        return n.includes('моб') || n.includes('тел') || n.includes('phone') || n.includes('mobile')
+    })?.visitors || 0
+    const mobilePercent = Math.min(100, Math.round((Number(mobileVis) / totalDeviceVis) * 100))
+    const desktopPercent = 100 - mobilePercent
 
     return (
         <div className="mx-auto max-w-[1600px] space-y-6 p-4 sm:p-6">
@@ -359,12 +373,21 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                         </Link>
                     </Button>
                     <div>
-                        <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
-                            <BarChart3 className="h-6 w-6 text-primary" />
-                            Аналитика каталога и продаж
-                        </h1>
+                        <div className="flex items-center gap-3">
+                            <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
+                                <BarChart3 className="h-6 w-6 text-primary" />
+                                Аналитика каталога и продаж
+                            </h1>
+                            <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
+                                Онлайн: {data.online_now}
+                            </div>
+                        </div>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Сайт (десктоп/мобайл) и TG Mini App: трафик, конверсии, выручка CRM и воронка покупок.
+                            Сайт (десктоп/мобайл) и TG Mini App: трафик, источники, поисковый спрос и конверсии.
                         </p>
                     </div>
                 </div>
@@ -453,7 +476,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                 </div>
             </section>
 
-            {/* Custom Date Range Modal/Drawer */}
+            {/* Custom Date Range Modal */}
             {isCustomOpen && (
                 <Card className="border-primary/40 bg-card/95 shadow-xl">
                     <CardHeader className="p-4 pb-2">
@@ -498,797 +521,625 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                 </Alert>
             )}
 
-            {/* Financial & Commercial KPIs */}
-            <section className="space-y-2">
-                <div className="flex items-center justify-between">
-                    <h2 className="text-sm font-semibold tracking-wider text-muted-foreground uppercase flex items-center gap-2">
-                        <DollarSign className="h-4 w-4 text-emerald-400" />
-                        Коммерческие показатели (CRM)
-                    </h2>
-                    <span className="text-xs text-muted-foreground">
-                        {channelLabels[channel]} • {activePeriodDisplay}
-                    </span>
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                    <KpiCard
-                        icon={<CreditCard />}
-                        label="Выручка (оплачено)"
-                        valueText={formatCurrency(financial.revenue)}
-                        detail={`${formatNumber(financial.paid_orders)} оплаченных заказов`}
-                        tone="emerald"
-                        loading={loading}
-                    />
-                    <KpiCard
-                        icon={<Receipt />}
-                        label="Средний чек (AOV)"
-                        valueText={formatCurrency(financial.aov)}
-                        detail="По оплаченным заказам CRM"
-                        tone="blue"
-                        loading={loading}
-                    />
-                    <KpiCard
-                        icon={<ShoppingBag />}
-                        label="Оплаченные заказы"
-                        value={financial.paid_orders}
-                        detail="Успешно завершенные заказы"
-                        tone="emerald"
-                        loading={loading}
-                    />
-                    <KpiCard
-                        icon={<Clock />}
-                        label="Ожидают оплаты"
-                        value={financial.pending_orders}
-                        detail="Статус payment_pending"
-                        tone="amber"
-                        loading={loading}
-                    />
-                    <KpiCard
-                        icon={<XCircle />}
-                        label="Отмены и возвраты"
-                        value={financial.cancelled_orders + financial.refund_orders}
-                        detail={`Отмен: ${financial.cancelled_orders}, возвратов: ${financial.refund_orders}`}
-                        tone="rose"
-                        loading={loading}
-                    />
-                </div>
-            </section>
-
-            {/* Conversion Funnel */}
-            {funnel.length > 0 && (
-                <Card>
-                    <CardHeader className="flex flex-col gap-2 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <CardTitle className="flex items-center gap-2 text-lg">
-                                <TrendingUp className="h-5 w-5 text-primary" />
-                                Сквозная воронка конверсии
+            {/* ============================================================
+                1. TOP SECTION: 3-COLUMN HERO GRID (PULSE, SOURCES, TECH/GEO)
+               ============================================================ */}
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                {/* Column 1: Живой пульс и Аудитория */}
+                <Card className="flex flex-col justify-between border-border/80 bg-gradient-to-br from-card to-card/60 shadow-sm">
+                    <CardHeader className="p-5 pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                                <Activity className="h-4 w-4 text-emerald-400" />
+                                Пульс и Аудитория
                             </CardTitle>
-                            <CardDescription>
-                                Движение пользователей от визита до факта оплаты с отслеживанием отвалов на каждом шаге.
-                            </CardDescription>
+                            <span className="text-xs text-muted-foreground">{activePeriodDisplay}</span>
                         </div>
-                        {funnel.length > 1 && funnel[0].count > 0 && (
-                            <div className="flex w-fit items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-                                <span>Общая конверсия:</span>
-                                <span>{funnel[funnel.length - 1].rate}%</span>
-                            </div>
-                        )}
+                        <CardDescription>Посещаемость, новые и вернувшиеся пользователи</CardDescription>
                     </CardHeader>
-                    <CardContent className="p-5 pt-0">
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                            {funnel.map((item, idx) => {
-                                const isFirst = idx === 0
-                                const isLast = idx === funnel.length - 1
-                                const dropOff = Number(item.dropOff || 0)
-                                const stepConversion = Number(item.stepConversion ?? (isFirst ? 100 : item.rate))
+                    <CardContent className="p-5 pt-0 space-y-4">
+                        <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-muted/40 border border-border/50">
+                            <div>
+                                <div className="text-[11px] text-muted-foreground">Всего визитов</div>
+                                <div className="text-2xl font-bold text-foreground">{formatNumber(data.unique_visitors)}</div>
+                            </div>
+                            <div>
+                                <div className="text-[11px] text-muted-foreground">Просмотров страниц</div>
+                                <div className="text-2xl font-bold text-foreground">{formatNumber(data.page_views || data.total_events)}</div>
+                            </div>
+                        </div>
+
+                        {/* Новые vs Вернувшиеся (трафик) */}
+                        <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Users className="h-3.5 w-3.5 text-blue-400" /> Посетители витрины:
+                                </span>
+                                <span className="text-foreground font-medium text-[11px]">
+                                    Новые <strong className="text-foreground">{formatNumber(data.new_visitors || 0)}</strong> / Постоянные <strong className="text-foreground">{formatNumber(data.returning_visitors || 0)}</strong>
+                                </span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted flex">
+                                <div
+                                    className="bg-blue-500 transition-all"
+                                    style={{ width: `${newVisitorsPercent}%` }}
+                                    title={`Новые: ${newVisitorsPercent}%`}
+                                />
+                                <div
+                                    className="bg-violet-500 transition-all"
+                                    style={{ width: `${returningVisitorsPercent}%` }}
+                                    title={`Вернувшиеся: ${returningVisitorsPercent}%`}
+                                />
+                            </div>
+                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Впервые: {newVisitorsPercent}%</span>
+                                <span>Вернулись: {returningVisitorsPercent}%</span>
+                            </div>
+                        </div>
+
+                        {/* Новые vs Постоянные (CRM покупатели) */}
+                        <div className="space-y-1.5 pt-3 border-t border-border/40">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <ShoppingBag className="h-3.5 w-3.5 text-emerald-400" /> Покупатели в заказах (CRM):
+                                </span>
+                                <span className="text-foreground font-medium text-[11px]">
+                                    1-й заказ <strong className="text-emerald-400">{financial.new_buyers ?? 0}</strong> / Повторные <strong className="text-amber-400">{financial.repeat_buyers ?? 0}</strong>
+                                </span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted flex">
+                                <div
+                                    className="bg-emerald-500 transition-all"
+                                    style={{ width: `${newBuyersPercent}%` }}
+                                    title={`Первый заказ: ${newBuyersPercent}%`}
+                                />
+                                <div
+                                    className="bg-amber-500 transition-all"
+                                    style={{ width: `${repeatBuyersPercent}%` }}
+                                    title={`Повторные заказы: ${repeatBuyersPercent}%`}
+                                />
+                            </div>
+                            <div className="flex justify-between text-[10px] text-muted-foreground">
+                                <span>Новые клиенты: {newBuyersPercent}%</span>
+                                <span>Постоянные клиенты: {repeatBuyersPercent}%</span>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Column 2: Источники трафика (Яндекс, Google, TG, Direct) */}
+                <Card className="flex flex-col justify-between border-border/80 bg-gradient-to-br from-card to-card/60 shadow-sm">
+                    <CardHeader className="p-5 pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                                <TrendingUp className="h-4 w-4 text-blue-400" />
+                                Источники трафика
+                            </CardTitle>
+                            <Badge variant="outline" className="text-xs font-normal">
+                                {channelLabels[channel]}
+                            </Badge>
+                        </div>
+                        <CardDescription>Доли переходов, корзины и заказы по каналам</CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-5 pt-0 space-y-2.5">
+                        {trafficSources.length > 0 ? (
+                            trafficSources.slice(0, 4).map((src) => {
+                                const isYandex = src.name.includes('Яндекс')
+                                const isGoogle = src.name.includes('Google')
+                                const isTg = src.name.includes('Telegram')
+                                const totalVis = trafficSources.reduce((acc, s) => acc + s.visitors, 0) || 1
+                                const share = Math.round((src.visitors / totalVis) * 100)
 
                                 return (
-                                    <div key={item.step} className="relative flex flex-col">
-                                        <div className="flex h-full flex-col justify-between rounded-xl border border-border bg-background/50 p-4 transition-colors hover:border-primary/40">
-                                            <div>
-                                                <div className="flex items-center justify-between gap-2 text-xs">
-                                                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary">
-                                                        {idx + 1}
-                                                    </span>
-                                                    <span className="font-semibold text-primary">{item.rate}%</span>
-                                                </div>
-                                                <div className="mt-2.5 flex min-h-[32px] items-center text-xs font-medium text-foreground/85">
-                                                    {item.step}
-                                                </div>
-                                                <div className="mt-1 text-2xl font-bold text-foreground">
-                                                    {formatNumber(item.count)}
-                                                </div>
+                                    <div key={src.name} className="p-2.5 rounded-lg border border-border/60 bg-background/50 space-y-1.5">
+                                        <div className="flex items-center justify-between text-xs">
+                                            <div className="flex items-center gap-2 font-medium text-foreground">
+                                                <span className={`h-2 w-2 rounded-full ${isYandex ? 'bg-amber-400' : isGoogle ? 'bg-blue-400' : isTg ? 'bg-cyan-400' : 'bg-muted-foreground'}`} />
+                                                <span className="truncate max-w-[150px]">{src.name}</span>
                                             </div>
-
-                                            <div className="mt-3 space-y-1.5 border-t border-border/50 pt-2.5">
-                                                <div className="flex items-center justify-between text-[11px]">
-                                                    <span className="text-muted-foreground">
-                                                        {isFirst ? '100% вход' : `${stepConversion}% переход`}
-                                                    </span>
-                                                    {!isFirst && dropOff > 0 ? (
-                                                        <span className="font-medium text-rose-400">
-                                                            −{dropOff}% отвал
-                                                        </span>
-                                                    ) : null}
-                                                </div>
-                                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                                                    <div
-                                                        className="h-full rounded-full bg-primary transition-all duration-500"
-                                                        style={{ width: `${Math.min(100, Math.max(isFirst ? 100 : 4, item.rate))}%` }}
-                                                    />
-                                                </div>
+                                            <div className="flex items-center gap-3">
+                                                <span className="font-bold text-foreground">{formatNumber(src.visitors)}</span>
+                                                <span className="text-muted-foreground text-[11px] w-8 text-right">{share}%</span>
                                             </div>
                                         </div>
-
-                                        {!isLast && (
-                                            <div className="absolute -right-2 top-1/2 z-10 hidden -translate-y-1/2 items-center justify-center rounded-full border border-border bg-muted p-1 text-muted-foreground lg:flex">
-                                                <ChevronRight className="h-3 w-3" />
-                                            </div>
-                                        )}
+                                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-0.5">
+                                            <span>В корзину: <strong className="text-foreground">{src.carts}</strong> ({src.cartRate}%)</span>
+                                            <span>Заказы: <strong className="text-emerald-400">{src.checkouts}</strong> ({src.checkoutRate}%)</span>
+                                        </div>
+                                        <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                                            <div
+                                                className={`h-full rounded-full ${isYandex ? 'bg-amber-400' : isGoogle ? 'bg-blue-400' : isTg ? 'bg-cyan-400' : 'bg-primary'}`}
+                                                style={{ width: `${Math.min(100, Math.max(3, share))}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 )
-                            })}
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
-
-            {/* Audience & Activity KPIs */}
-            <section className="space-y-2">
-                <h2 className="text-sm font-semibold tracking-wider text-muted-foreground uppercase flex items-center gap-2">
-                    <Activity className="h-4 w-4 text-cyan-400" />
-                    Трафик и вовлеченность
-                </h2>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
-                    <KpiCard icon={<Wifi />} label="Текущий онлайн" value={data.online_now} detail="Активны за последние 5 минут" tone="emerald" loading={loading} />
-                    <KpiCard icon={<Users />} label="Уникальные пользователи" value={data.unique_visitors} detail={`${data.active_profiles ? `${formatNumber(data.active_profiles)} профилей активны` : 'По сессиям аналитики'}`} tone="blue" loading={loading} />
-                    <KpiCard icon={<ExternalLink />} label="Переходы на сайт (TG)" value={data.tg_site_clicks || data.site_clicks} detail="Клики по ссылке yeezyunique.ru" tone="cyan" loading={loading} />
-                    <KpiCard icon={<UserCheck />} label="Постоянные пользователи" value={data.returning_profiles || data.returning_visitors} detail={`${derived.returningShare} от активной базы`} tone="violet" loading={loading} />
-                    <KpiCard icon={<Eye />} label="Уникальные просмотры" value={data.unique_product_views} detail={`${formatNumber(data.viewed_products)} разных товаров`} tone="cyan" loading={loading} />
-                    <KpiCard icon={<MessageCircle />} label="Спросить у менеджера" value={data.ask_manager} detail={`${derived.askRate} от просмотров`} tone="amber" loading={loading} />
-                </div>
-            </section>
-
-            {/* Charts Section */}
-            <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-                <Card className="xl:col-span-8">
-                    <CardHeader className="flex flex-col gap-2 space-y-0 p-5 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                            <CardTitle className="text-lg">Сводка профилей за период</CardTitle>
-                            <CardDescription>Активность клиентской базы, состав корзин и избранного.</CardDescription>
-                        </div>
-                        <span className="w-fit rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                            {channelLabels[channel]} / {activePeriodDisplay}
-                        </span>
-                    </CardHeader>
-
-                    <CardContent className="grid grid-cols-1 gap-3 p-5 pt-0 sm:grid-cols-2 xl:grid-cols-4">
-                        <InsightItem label="Новые профили" value={formatNumber(data.new_profiles)} caption={`Всего профилей: ${formatNumber(data.total_profiles)}`} icon={<UserPlus className="h-4 w-4" />} />
-                        <InsightItem label="Глубина просмотра" value={derived.productDepth} caption="Уникальных товаров на зрителя" icon={<Eye className="h-4 w-4" />} />
-                        <InsightItem label="В корзине сейчас" value={formatNumber(data.cart_items)} caption={`${formatNumber(data.cart_profiles)} пользователей, ${derived.cartShare}`} icon={<ShoppingCart className="h-4 w-4" />} />
-                        <InsightItem label="В избранном сейчас" value={formatNumber(data.favorite_items)} caption={`${formatNumber(data.favorite_profiles)} пользователей, ${derived.favoriteShare}`} icon={<Heart className="h-4 w-4" />} />
-                    </CardContent>
-                </Card>
-
-                <Card className="xl:col-span-4">
-                    <CardHeader className="flex flex-row items-start justify-between space-y-0 p-5 pb-4">
-                        <div>
-                            <CardTitle className="text-lg">Пульс визитов</CardTitle>
-                            <CardDescription>Динамика за выбранный интервал.</CardDescription>
-                        </div>
-                        <RefreshCw className={`h-5 w-5 text-muted-foreground ${loading ? 'animate-spin' : ''}`} />
-                    </CardHeader>
-                    <CardContent className="h-[230px] p-5 pt-0">
-                        {seriesData.length ? (
-                            <AnalyticsCharts seriesData={seriesData} overview={data} minimal />
+                            })
                         ) : (
-                            <EmptyState text="Нет данных для графика" />
+                            <EmptyState text="Нет данных по источникам за выбранный период" />
                         )}
                     </CardContent>
                 </Card>
-            </section>
 
-            {/* Timeline Charts */}
-            <AnalyticsCharts seriesData={seriesData} overview={data} />
-
-            {/* Top Products & Top Cart Tables */}
-            <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-3">
-                        <div>
-                            <CardTitle className="flex items-center gap-2 text-base">
-                                <Eye className="h-4 w-4 text-cyan-400" />
-                                Топ просматриваемых товаров
+                {/* Column 3: Мобильность и География */}
+                <Card className="flex flex-col justify-between border-border/80 bg-gradient-to-br from-card to-card/60 shadow-sm">
+                    <CardHeader className="p-5 pb-3">
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                                <Smartphone className="h-4 w-4 text-violet-400" />
+                                Мобильность и География
                             </CardTitle>
-                            <CardDescription>По каналу {channelLabels[channel].toLowerCase()}</CardDescription>
+                            <Globe2 className="h-4 w-4 text-muted-foreground" />
                         </div>
-                        <Package className="h-5 w-5 text-muted-foreground" />
+                        <CardDescription>Устройства аудитории и ведущие локации</CardDescription>
                     </CardHeader>
-                    <CardContent className="p-5 pt-0">
-                        {topProducts.length > 0 ? (
-                            <div className="divide-y divide-border/60">
-                                {topProducts.slice(0, 8).map((prod, idx) => {
-                                    const queryTerm = prod.name && prod.name !== 'Без названия' && prod.name !== prod.id ? prod.name : prod.id
-                                    return (
-                                        <div key={`${prod.id}-${idx}`} className="group flex items-center justify-between gap-3 py-2.5 text-sm">
-                                            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                                                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                                                    {idx + 1}
-                                                </span>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex flex-wrap items-center gap-1.5">
-                                                        <span className="max-w-[280px] truncate font-medium text-foreground" title={prod.name}>
-                                                            {prod.name}
-                                                        </span>
-                                                        {prod.brand && (
-                                                            <Badge variant="outline" className="border-border/80 px-1.5 py-0 text-[10px] text-muted-foreground">
-                                                                {prod.brand}
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                                        {prod.category && <span>{prod.category}</span>}
-                                                        {prod.price ? (
-                                                            <span className="font-semibold text-foreground/80">{formatCurrency(prod.price)}</span>
-                                                        ) : null}
-                                                        <Link
-                                                            href={`/admin?search=${encodeURIComponent(queryTerm)}`}
-                                                            className="ml-auto inline-flex items-center gap-0.5 text-[11px] text-primary opacity-80 transition-opacity hover:underline group-hover:opacity-100"
-                                                            title="Найти в каталоге"
-                                                        >
-                                                            Каталог <ExternalLink className="h-3 w-3" />
-                                                        </Link>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="shrink-0 pl-2 text-right">
-                                                <div className="font-semibold text-foreground">{formatNumber(Number(prod.views || 0))}</div>
-                                                <div className="text-xs text-muted-foreground">{formatNumber(Number(prod.unique_views || 0))} уник.</div>
-                                            </div>
-                                        </div>
-                                    )
-                                })}
+                    <CardContent className="p-5 pt-0 space-y-4">
+                        {/* Device breakdown */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Smartphone className="h-3.5 w-3.5 text-primary" /> Мобильные: <strong className="text-foreground">{mobilePercent}%</strong>
+                                </span>
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Monitor className="h-3.5 w-3.5 text-muted-foreground" /> Десктоп: <strong className="text-foreground">{desktopPercent}%</strong>
+                                </span>
                             </div>
-                        ) : (
-                            <EmptyState text="Нет данных о просмотрах товаров" />
-                        )}
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-3">
-                        <div>
-                            <CardTitle className="flex items-center gap-2 text-base">
-                                <ShoppingCart className="h-4 w-4 text-amber-400" />
-                                Топ добавлений в корзину
-                            </CardTitle>
-                            <CardDescription>По каналу {channelLabels[channel].toLowerCase()}</CardDescription>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted flex">
+                                <div className="bg-primary transition-all" style={{ width: `${mobilePercent}%` }} />
+                                <div className="bg-muted-foreground/40 transition-all" style={{ width: `${desktopPercent}%` }} />
+                            </div>
                         </div>
-                        <ShoppingBag className="h-5 w-5 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent className="p-5 pt-0">
-                        {topCart.length > 0 ? (
-                            <div className="divide-y divide-border/60">
-                                {topCart.slice(0, 8).map((prod, idx) => {
-                                    const queryTerm = prod.name && prod.name !== 'Без названия' && prod.name !== prod.id ? prod.name : prod.id
-                                    return (
-                                        <div key={`${prod.id}-${idx}`} className="group flex items-center justify-between gap-3 py-2.5 text-sm">
-                                            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                                                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                                                    {idx + 1}
-                                                </span>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="flex flex-wrap items-center gap-1.5">
-                                                        <span className="max-w-[280px] truncate font-medium text-foreground" title={prod.name}>
-                                                            {prod.name}
-                                                        </span>
-                                                        {prod.brand && (
-                                                            <Badge variant="outline" className="border-border/80 px-1.5 py-0 text-[10px] text-muted-foreground">
-                                                                {prod.brand}
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                                        {prod.category && <span>{prod.category}</span>}
-                                                        {prod.price ? (
-                                                            <span className="font-semibold text-foreground/80">{formatCurrency(prod.price)}</span>
-                                                        ) : null}
-                                                        <Link
-                                                            href={`/admin?search=${encodeURIComponent(queryTerm)}`}
-                                                            className="ml-auto inline-flex items-center gap-0.5 text-[11px] text-primary opacity-80 transition-opacity hover:underline group-hover:opacity-100"
-                                                            title="Найти в каталоге"
-                                                        >
-                                                            Каталог <ExternalLink className="h-3 w-3" />
-                                                        </Link>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="shrink-0 pl-2 text-right">
-                                                <div className="font-semibold text-foreground">{formatNumber(Number(prod.carts || 0))}</div>
-                                                <div className="text-xs text-muted-foreground">в корзину</div>
-                                            </div>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        ) : (
-                            <EmptyState text="Нет данных о добавлениях в корзину" />
-                        )}
-                    </CardContent>
-                </Card>
-            </section>
 
-            {/* Audience, Devices & External Integrations Tabs */}
-            <Card>
-                <CardHeader className="flex flex-col gap-3 p-5 pb-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <CardTitle className="flex items-center gap-2 text-lg">
-                            <Globe2 className="h-5 w-5 text-primary" />
-                            Каналы трафика, спрос и окружение
-                        </CardTitle>
-                        <CardDescription>
-                            Эффективность внешних источников, поисковый спрос покупателей и статус 4 внешних платформ.
-                        </CardDescription>
-                    </div>
-                    <Tabs value={audienceTab} onValueChange={(val) => setAudienceTab(val as any)}>
-                        <TabsList className="bg-muted flex-wrap h-auto p-1">
-                            <TabsTrigger value="sources" className="gap-1.5 text-xs">
-                                <TrendingUp className="h-3.5 w-3.5 text-primary" /> Каналы ({trafficSources.length})
-                            </TabsTrigger>
-                            <TabsTrigger value="demand" className="gap-1.5 text-xs">
-                                <Search className="h-3.5 w-3.5 text-cyan-400" /> Поисковый спрос {searchDemands.length ? `(${searchDemands.length})` : ''}
-                            </TabsTrigger>
-                            <TabsTrigger value="geo" className="gap-1.5 text-xs">
-                                <Globe2 className="h-3.5 w-3.5" /> Страны {countryList.length ? `(${countryList.length})` : ''}
-                            </TabsTrigger>
-                            <TabsTrigger value="tech" className="gap-1.5 text-xs">
-                                <Laptop className="h-3.5 w-3.5" /> Устройства
-                            </TabsTrigger>
-                            <TabsTrigger value="integrations" className="gap-1.5 text-xs">
-                                <Activity className="h-3.5 w-3.5" /> 4 платформы
-                            </TabsTrigger>
-                        </TabsList>
-                    </Tabs>
-                </CardHeader>
-                <CardContent className="p-5 pt-2">
-                    <Tabs value={audienceTab}>
-                        {/* Traffic Sources Breakdown */}
-                        <TabsContent value="sources" className="m-0 space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground pb-1">
-                                <span>Сравнительная эффективность: конверсия из первого визита в просмотры, корзину и оформленный заказ.</span>
-                                {trafficSources.length > 0 && (
-                                    <span className="font-semibold text-primary">
-                                        Активных каналов: {trafficSources.length}
-                                    </span>
-                                )}
+                        {/* Top Geography */}
+                        <div className="space-y-2 pt-3 border-t border-border/40">
+                            <div className="text-xs font-medium text-muted-foreground flex items-center justify-between">
+                                <span>Топ регионов</span>
+                                <span>Визиты</span>
                             </div>
-
-                            {trafficSources.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                                    {trafficSources.map((src) => {
-                                        const isYandex = src.name.includes('Яндекс')
-                                        const isGoogle = src.name.includes('Google')
-                                        const isTg = src.name.includes('Telegram')
+                            {countryList.length > 0 ? (
+                                <div className="space-y-1.5">
+                                    {countryList.slice(0, 3).map((c, idx) => {
+                                        const totalGeo = countryList.reduce((acc, curr) => acc + Number(curr.visitors || 0), 0) || 1
+                                        const cShare = Math.round((Number(c.visitors || 0) / totalGeo) * 100)
                                         return (
-                                            <div
-                                                key={src.name}
-                                                className="flex flex-col justify-between rounded-xl border border-border bg-background/50 p-4 transition-colors hover:border-primary/40"
-                                            >
-                                                <div>
-                                                    <div className="flex items-center justify-between gap-2">
-                                                        <span className="font-semibold text-sm text-foreground truncate">{src.name}</span>
-                                                        <Badge
-                                                            variant="outline"
-                                                            className={`text-[10px] px-1.5 py-0 ${
-                                                                isYandex
-                                                                    ? 'border-amber-500/40 text-amber-400 bg-amber-500/10'
-                                                                    : isGoogle
-                                                                    ? 'border-blue-500/40 text-blue-400 bg-blue-500/10'
-                                                                    : isTg
-                                                                    ? 'border-cyan-500/40 text-cyan-400 bg-cyan-500/10'
-                                                                    : 'border-border text-muted-foreground'
-                                                            }`}
-                                                        >
-                                                            {isYandex ? 'Yandex' : isGoogle ? 'Google' : isTg ? 'Telegram' : 'Direct'}
-                                                        </Badge>
-                                                    </div>
-                                                    <div className="mt-3 grid grid-cols-2 gap-2">
-                                                        <div>
-                                                            <div className="text-[11px] text-muted-foreground">Визиты</div>
-                                                            <div className="text-xl font-bold text-foreground">{formatNumber(src.visitors)}</div>
-                                                        </div>
-                                                        <div>
-                                                            <div className="text-[11px] text-muted-foreground">Просмотры</div>
-                                                            <div className="text-xl font-bold text-foreground">{formatNumber(src.views)}</div>
-                                                        </div>
-                                                    </div>
+                                            <div key={c.name} className="flex items-center justify-between text-xs p-2 rounded-lg bg-muted/40 border border-border/30">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-semibold text-muted-foreground">{idx + 1}.</span>
+                                                    <span className="font-medium text-foreground">{getDisplayName(c.name)}</span>
                                                 </div>
-
-                                                <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                                                    <div className="flex items-center justify-between text-xs">
-                                                        <span className="text-muted-foreground">В корзину:</span>
-                                                        <span className="font-semibold text-foreground">
-                                                            {formatNumber(src.carts)} <span className="text-primary font-normal">({src.cartRate}%)</span>
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex items-center justify-between text-xs">
-                                                        <span className="text-muted-foreground">Заказы / Заявки:</span>
-                                                        <span className="font-semibold text-foreground">
-                                                            {formatNumber(src.checkouts)} <span className="text-emerald-400 font-normal">({src.checkoutRate}%)</span>
-                                                        </span>
-                                                    </div>
-                                                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                                                        <div
-                                                            className="h-full rounded-full bg-primary"
-                                                            style={{ width: `${Math.min(100, Math.max(5, src.cartRate))}%` }}
-                                                        />
-                                                    </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-semibold text-foreground">{formatNumber(c.visitors)}</span>
+                                                    <span className="text-[11px] text-muted-foreground">({cShare}%)</span>
                                                 </div>
                                             </div>
                                         )
                                     })}
                                 </div>
                             ) : (
-                                <EmptyState text="Нет данных по источникам за выбранный период" />
+                                <div className="text-xs text-muted-foreground py-2 text-center">Регионы определяются по IP посетителей</div>
                             )}
-                        </TabsContent>
+                        </div>
+                    </CardContent>
+                </Card>
+            </section>
 
-                        {/* Search Demand */}
-                        <TabsContent value="demand" className="m-0 space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground pb-1">
-                                <span>Поисковый спрос покупателей: ключевые слова и модели, которые пользователи ищут на витрине.</span>
-                                <span className="text-muted-foreground">Клик по кнопке каталога открывает товары по этому запросу</span>
+            {/* ============================================================
+                2. MIDDLE SECTION: 2-COLUMN ACTION WORKHORSE (SEARCH & FUNNEL)
+               ============================================================ */}
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                {/* Left (col-span-5): Поисковый спрос покупателей на витрине */}
+                <Card className="lg:col-span-5 flex flex-col justify-between shadow-sm">
+                    <CardHeader className="p-5 pb-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                                    <Search className="h-4 w-4 text-cyan-400" />
+                                    Поисковый спрос на витрине
+                                </CardTitle>
+                                <CardDescription>Что покупатели ищут через строку поиска</CardDescription>
                             </div>
-
-                            {searchDemands.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    {searchDemands.map((item, idx) => (
-                                        <div
-                                            key={`${item.query}-${idx}`}
-                                            className="flex items-center justify-between rounded-lg border border-border bg-background/50 p-3 text-sm transition-colors hover:border-primary/40 group"
-                                        >
-                                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                                                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-                                                    {idx + 1}
-                                                </span>
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="font-medium text-foreground truncate">{item.query}</div>
-                                                    <div className="text-xs text-muted-foreground">
-                                                        {formatNumber(item.unique_users)} уник. зрителей
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-4 shrink-0 pl-2">
-                                                <div className="text-right">
-                                                    <div className="font-semibold text-foreground">{formatNumber(item.searches)}</div>
-                                                    <div className="text-[11px] text-muted-foreground">поисков</div>
-                                                </div>
-                                                <Button asChild size="sm" variant="ghost" className="h-8 px-2 text-primary opacity-80 group-hover:opacity-100">
-                                                    <Link href={`/admin?search=${encodeURIComponent(item.query)}`} title="Посмотреть в каталоге">
-                                                        Каталог <ExternalLink className="h-3 w-3 ml-1" />
-                                                    </Link>
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <EmptyState text="Нет поисковых запросов за выбранный период" />
+                            {searchDemands.length > 0 && (
+                                <Badge variant="secondary" className="text-xs font-normal">
+                                    {searchDemands.length} запросов
+                                </Badge>
                             )}
-                        </TabsContent>
-
-                        {/* Geography */}
-                        <TabsContent value="geo" className="m-0">
-                            {countryList.length ? (
-                                <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                                    {countryList.slice(0, 10).map((item, index) => (
-                                        <ProgressRow
-                                            key={`${item.name}-${index}`}
-                                            label={getDisplayName(item.name)}
-                                            value={Number(item.visitors || 0)}
-                                            total={Math.max(1, countryList.reduce((sum, c) => sum + Number(c.visitors || 0), 0))}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <EmptyState text="Нет данных по странам" />
-                            )}
-                        </TabsContent>
-
-                        {/* Devices & OS */}
-                        <TabsContent value="tech" className="m-0">
-                            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                                <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-4">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                                        <Smartphone className="h-4 w-4 text-cyan-400" />
-                                        Типы устройств
-                                    </div>
-                                    {deviceList.length ? (
-                                        <div className="space-y-3">
-                                            {deviceList.map((item, index) => (
-                                                <ProgressRow
-                                                    key={`${item.name}-${index}`}
-                                                    label={item.name || 'Неизвестно'}
-                                                    value={Number(item.visitors || 0)}
-                                                    total={Math.max(1, deviceList.reduce((sum, d) => sum + Number(d.visitors || 0), 0))}
-                                                />
-                                            ))}
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-5 pt-0 flex-1 flex flex-col justify-between">
+                        {searchDemands.length > 0 ? (
+                            <div className="space-y-2 divide-y divide-border/40">
+                                {searchDemands.slice(0, 6).map((item, idx) => (
+                                    <div key={`${item.query}-${idx}`} className="flex items-center justify-between pt-2 first:pt-0 group">
+                                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground">
+                                                {idx + 1}
+                                            </span>
+                                            <span className="font-medium text-sm text-foreground truncate" title={item.query}>
+                                                {item.query}
+                                            </span>
                                         </div>
-                                    ) : (
-                                        <div className="text-xs text-muted-foreground">Нет данных по типам устройств</div>
-                                    )}
-                                </div>
-
-                                <div className="space-y-3 rounded-lg border border-border/60 bg-background/40 p-4">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                                        <Laptop className="h-4 w-4 text-violet-400" />
-                                        Операционные системы
-                                    </div>
-                                    {osList.length ? (
-                                        <div className="space-y-3">
-                                            {osList.slice(0, 5).map((item, index) => (
-                                                <ProgressRow
-                                                    key={`${item.name}-${index}`}
-                                                    label={item.name || 'Неизвестно'}
-                                                    value={Number(item.visitors || 0)}
-                                                    total={Math.max(1, osList.reduce((sum, o) => sum + Number(o.visitors || 0), 0))}
-                                                />
-                                            ))}
+                                        <div className="flex items-center gap-2 shrink-0 pl-2">
+                                            <div className="text-right">
+                                                <div className="font-semibold text-xs text-foreground">{formatNumber(item.searches)}</div>
+                                                <div className="text-[10px] text-muted-foreground">{item.unique_users} чел</div>
+                                            </div>
+                                            <Button asChild size="sm" variant="ghost" className="h-7 px-2 text-primary opacity-80 group-hover:opacity-100 text-xs">
+                                                <Link href={`/admin?search=${encodeURIComponent(item.query)}`} title="Посмотреть в каталоге">
+                                                    Каталог <ExternalLink className="h-3 w-3 ml-1" />
+                                                </Link>
+                                            </Button>
                                         </div>
-                                    ) : (
-                                        <div className="text-xs text-muted-foreground">Нет данных по ОС</div>
-                                    )}
-                                </div>
+                                    </div>
+                                ))}
                             </div>
-                        </TabsContent>
+                        ) : (
+                            <EmptyState text="Поисковых запросов в этом периоде пока не зафиксировано" />
+                        )}
+                    </CardContent>
+                </Card>
 
-                        {/* 4 External Platforms */}
-                        <TabsContent value="integrations" className="m-0 space-y-4">
-                            {externalIntegrations?.yandexMetrika?.apiActive && externalIntegrations?.yandexMetrika?.stats && (
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-xs">
-                                    <div>
-                                        <div className="text-muted-foreground">Посетители (Метрика)</div>
-                                        <div className="text-lg font-bold text-foreground">{formatNumber(externalIntegrations.yandexMetrika.stats.users)}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-muted-foreground">Просмотры страниц</div>
-                                        <div className="text-lg font-bold text-foreground">{formatNumber(externalIntegrations.yandexMetrika.stats.pageviews)}</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-muted-foreground">Отказы (Bounce rate)</div>
-                                        <div className="text-lg font-bold text-foreground">{externalIntegrations.yandexMetrika.stats.bounceRate}%</div>
-                                    </div>
-                                    <div>
-                                        <div className="text-muted-foreground">Среднее время</div>
-                                        <div className="text-lg font-bold text-foreground">{externalIntegrations.yandexMetrika.stats.avgDurationSeconds} сек</div>
-                                    </div>
-                                </div>
+                {/* Right (col-span-7): Сквозная конверсионная воронка */}
+                <Card className="lg:col-span-7 flex flex-col justify-between shadow-sm">
+                    <CardHeader className="p-5 pb-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <CardTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                                    <TrendingUp className="h-4 w-4 text-primary" />
+                                    Сквозная воронка конверсии
+                                </CardTitle>
+                                <CardDescription>Визиты → Просмотры → Корзина → Заказ → Оплата</CardDescription>
+                            </div>
+                            {funnel.length > 1 && funnel[0].count > 0 && (
+                                <Badge className="bg-primary/15 text-primary border-primary/20 text-xs font-semibold">
+                                    Общая: {funnel[funnel.length - 1].rate}%
+                                </Badge>
                             )}
-
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                                {/* Yandex Metrika */}
-                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm font-medium">
-                                            <span className="font-semibold text-foreground">Яндекс.Метрика</span>
-                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Активна
-                                            </span>
+                        </div>
+                    </CardHeader>
+                    <CardContent className="p-5 pt-0 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                            {funnel.map((item, idx) => {
+                                const isFirst = idx === 0
+                                const dropOff = Number(item.dropOff || 0)
+                                const stepConversion = Number(item.stepConversion ?? (isFirst ? 100 : item.rate))
+                                return (
+                                    <div key={item.step} className="p-2.5 rounded-lg border border-border/70 bg-background/50 flex flex-col justify-between space-y-2">
+                                        <div>
+                                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                                <span className="font-semibold text-primary">{idx + 1}</span>
+                                                <span className="font-semibold text-foreground">{item.rate}%</span>
+                                            </div>
+                                            <div className="text-[11px] font-medium text-foreground truncate mt-1" title={item.step}>
+                                                {item.step}
+                                            </div>
+                                            <div className="text-lg font-bold text-foreground mt-0.5">
+                                                {formatNumber(item.count)}
+                                            </div>
                                         </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Счётчик: <span className="font-mono text-foreground/90">{externalIntegrations?.yandexMetrika?.counterId || '100417016'}</span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Сбор визитов, вебвизор, карты кликов и 9 настроенных ecommerce-целей витрины.
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40 text-xs">
-                                        <a
-                                            href={`https://metrika.yandex.ru/dashboard?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Дашборд <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                        <span className="text-muted-foreground/40">•</span>
-                                        <a
-                                            href={`https://metrika.yandex.ru/stat/visor?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Вебвизор <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                        <span className="text-muted-foreground/40">•</span>
-                                        <a
-                                            href={`https://metrika.yandex.ru/stat/goals?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Цели <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                    </div>
-                                </div>
-
-                                {/* Google Search Console */}
-                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm font-medium">
-                                            <span className="font-semibold text-foreground">Google Search Console</span>
-                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подтверждён
-                                            </span>
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Ресурс: <span className="font-mono text-foreground/90">sc-domain:yeezyunique.ru</span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Органический поиск Google, позиции каталога, CTR, показы и статус sitemap.xml.
-                                        </p>
-                                    </div>
-                                    <div className="pt-1 border-t border-border/40 text-xs">
-                                        <a
-                                            href="https://search.google.com/search-console?resource_id=sc-domain:yeezyunique.ru"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Панель эффективности Google <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                    </div>
-                                </div>
-
-                                {/* Google Merchant Center */}
-                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm font-medium">
-                                            <span className="font-semibold text-foreground">Google Merchant Center</span>
-                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Активен
-                                            </span>
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Аккаунт: <span className="font-mono text-foreground/90">5830671674</span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Товарный фид каталога, проект yeezyunique-seo-ops, синхронизация цен и наличия.
-                                        </p>
-                                    </div>
-                                    <div className="pt-1 border-t border-border/40 text-xs">
-                                        <a
-                                            href="https://merchants.google.com/mc/overview?a=5830671674"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Обзор Merchant Center <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                    </div>
-                                </div>
-
-                                {/* Yandex Webmaster */}
-                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm font-medium">
-                                            <span className="font-semibold text-foreground">Яндекс.Вебмастер</span>
-                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подтверждён
-                                            </span>
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Сайт: <span className="font-mono text-foreground/90">https://yeezyunique.ru</span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Индексация страниц роботом Яндекса, региональность Москва, клики и сниппеты.
-                                        </p>
-                                    </div>
-                                    <div className="pt-1 border-t border-border/40 text-xs">
-                                        <a
-                                            href="https://webmaster.yandex.ru/site/https:yeezyunique.ru:443/"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-primary hover:underline"
-                                        >
-                                            Кабинет Вебмастера <ExternalLink className="h-3 w-3" />
-                                        </a>
-                                    </div>
-                                </div>
-
-                                {/* Google Analytics 4 */}
-                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="space-y-1.5">
-                                        <div className="flex items-center justify-between text-sm font-medium">
-                                            <span className="font-semibold text-foreground">Google Analytics (GA4)</span>
-                                            {externalIntegrations?.googleAnalytics?.configured ? (
-                                                <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                    <CheckCircle2 className="h-3.5 w-3.5" /> Подключена
-                                                </span>
-                                            ) : (
-                                                <span className="text-xs font-normal text-muted-foreground">Готова к подключению</span>
+                                        <div className="border-t border-border/50 pt-1 text-[10px]">
+                                            <span className="text-muted-foreground">{isFirst ? '100% вход' : `${stepConversion}%`}</span>
+                                            {!isFirst && dropOff > 0 && (
+                                                <span className="text-rose-400 block font-medium">−{dropOff}%</span>
                                             )}
                                         </div>
-                                        <div className="text-xs text-muted-foreground">
-                                            Тег: <span className="font-mono text-foreground/90">{externalIntegrations?.googleAnalytics?.tagId || 'Не указан'}</span>
-                                        </div>
-                                        <p className="text-xs text-muted-foreground">
-                                            Для дополнительной веб-аналитики в Google укажите NEXT_PUBLIC_GA_ID в Coolify.
-                                        </p>
                                     </div>
-                                    <div className="pt-1 border-t border-border/40 text-[11px] text-muted-foreground">
-                                        Формат: G-XXXXXXXXXX
-                                    </div>
-                                </div>
+                                )
+                            })}
+                        </div>
+
+                        {/* Financial Summary Footer */}
+                        <div className="grid grid-cols-3 gap-3 p-3 rounded-lg bg-muted/40 border border-border/60 text-xs">
+                            <div>
+                                <div className="text-muted-foreground">Выручка (CRM)</div>
+                                <div className="text-base sm:text-lg font-bold text-emerald-400">{formatCurrency(financial.revenue)}</div>
                             </div>
-                        </TabsContent>
-                    </Tabs>
+                            <div>
+                                <div className="text-muted-foreground">Оплачено заказов</div>
+                                <div className="text-base sm:text-lg font-bold text-foreground">{formatNumber(financial.paid_orders)}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground">Средний чек (AOV)</div>
+                                <div className="text-base sm:text-lg font-bold text-blue-400">{formatCurrency(financial.aov)}</div>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </section>
+
+            {/* ============================================================
+                3. 4-PLATFORM QUICK HUB BAR (METRIKA, GSC, MERCHANT, WEBMASTER)
+               ============================================================ */}
+            <Card className="border-border/80 bg-background/50 shadow-sm">
+                <CardHeader className="p-4 pb-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                        <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                            <Activity className="h-4 w-4 text-primary" />
+                            Центр 4 платформ: Яндекс & Google
+                        </CardTitle>
+                        <span className="text-xs text-muted-foreground">Прямой доступ к поисковым системам и кабинетам</span>
+                    </div>
+                </CardHeader>
+                <CardContent className="p-4 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {/* Yandex Metrika */}
+                        <div className="p-3 rounded-lg border border-border bg-card/60 flex flex-col justify-between space-y-2">
+                            <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                                    <span>Яндекс.Метрика</span>
+                                    <span className="text-emerald-400 flex items-center gap-1 font-normal text-[11px]">
+                                        <CheckCircle2 className="h-3 w-3" /> 100417016
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground mt-1">Вебвизор, цели и онлайн поведение</p>
+                            </div>
+                            <div className="pt-2 border-t border-border/40 flex items-center gap-3 text-xs">
+                                <a href="https://metrika.yandex.ru/dashboard?id=100417016" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                    Дашборд <ExternalLink className="h-3 w-3" />
+                                </a>
+                                <span className="text-muted-foreground/40">•</span>
+                                <a href="https://metrika.yandex.ru/stat/visor?id=100417016" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                    Вебвизор <ExternalLink className="h-3 w-3" />
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* Google Search Console */}
+                        <div className="p-3 rounded-lg border border-border bg-card/60 flex flex-col justify-between space-y-2">
+                            <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                                    <span>Search Console</span>
+                                    <span className="text-emerald-400 flex items-center gap-1 font-normal text-[11px]">
+                                        <CheckCircle2 className="h-3 w-3" /> sc-domain
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground mt-1">Позиции в Google, показы и CTR</p>
+                            </div>
+                            <div className="pt-2 border-t border-border/40 text-xs">
+                                <a href="https://search.google.com/search-console?resource_id=sc-domain:yeezyunique.ru" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                    Панель Google <ExternalLink className="h-3 w-3" />
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* Google Merchant Center */}
+                        <div className="p-3 rounded-lg border border-border bg-card/60 flex flex-col justify-between space-y-2">
+                            <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                                    <span>Merchant Center</span>
+                                    <span className="text-emerald-400 flex items-center gap-1 font-normal text-[11px]">
+                                        <CheckCircle2 className="h-3 w-3" /> 5830671674
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground mt-1">Товарные фиды и Google Покупки</p>
+                            </div>
+                            <div className="pt-2 border-t border-border/40 text-xs">
+                                <a href="https://merchants.google.com/mc/overview?a=5830671674" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                    Товарный фид <ExternalLink className="h-3 w-3" />
+                                </a>
+                            </div>
+                        </div>
+
+                        {/* Yandex Webmaster */}
+                        <div className="p-3 rounded-lg border border-border bg-card/60 flex flex-col justify-between space-y-2">
+                            <div>
+                                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                                    <span>Яндекс.Вебмастер</span>
+                                    <span className="text-emerald-400 flex items-center gap-1 font-normal text-[11px]">
+                                        <CheckCircle2 className="h-3 w-3" /> Подтверждён
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-muted-foreground mt-1">Индексация страниц и сниппеты Яндекса</p>
+                            </div>
+                            <div className="pt-2 border-t border-border/40 text-xs">
+                                <a href="https://webmaster.yandex.ru/site/https:yeezyunique.ru:443/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                    Кабинет Яндекса <ExternalLink className="h-3 w-3" />
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                 </CardContent>
             </Card>
+
+            {/* ============================================================
+                4. COLLAPSIBLE DEEP DIVE (TIMELINE, TOP PRODUCTS, TECH DETAILS)
+               ============================================================ */}
+            <div className="space-y-4">
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsDetailsOpen(!isDetailsOpen)}
+                    className="w-full justify-between py-6 px-4 border-dashed hover:border-primary/50 text-sm font-medium bg-card/50"
+                >
+                    <span className="flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4 text-primary" />
+                        {isDetailsOpen ? 'Скрыть расширенные графики и товары' : 'Показать расширенные графики динамики, топ товаров и технические данные'}
+                    </span>
+                    {isDetailsOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </Button>
+
+                {isDetailsOpen && (
+                    <div className="space-y-6 pt-2">
+                        {/* Timeline Chart */}
+                        <AnalyticsCharts seriesData={seriesData} overview={data} />
+
+                        {/* Top Products & Top Cart Tables */}
+                        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                            {/* Top Viewed Products */}
+                            <Card>
+                                <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-3">
+                                    <div>
+                                        <CardTitle className="flex items-center gap-2 text-base">
+                                            <Eye className="h-4 w-4 text-cyan-400" />
+                                            Топ просматриваемых товаров
+                                        </CardTitle>
+                                        <CardDescription>По каналу {channelLabels[channel].toLowerCase()}</CardDescription>
+                                    </div>
+                                    <Package className="h-5 w-5 text-muted-foreground" />
+                                </CardHeader>
+                                <CardContent className="p-5 pt-0">
+                                    {topProducts.length > 0 ? (
+                                        <div className="divide-y divide-border/60">
+                                            {topProducts.slice(0, 8).map((prod, idx) => {
+                                                const queryTerm = prod.name && prod.name !== 'Без названия' && prod.name !== prod.id ? prod.name : prod.id
+                                                return (
+                                                    <div key={`${prod.id}-${idx}`} className="group flex items-center justify-between gap-3 py-2.5 text-sm">
+                                                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                                                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                                                                {idx + 1}
+                                                            </span>
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                                    <span className="max-w-[280px] truncate font-medium text-foreground" title={prod.name}>
+                                                                        {prod.name}
+                                                                    </span>
+                                                                    {prod.brand && (
+                                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                                                            {prod.brand}
+                                                                        </Badge>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                                    {prod.price ? <span>{formatCurrency(prod.price)}</span> : null}
+                                                                    <Link
+                                                                        href={`/admin?search=${encodeURIComponent(queryTerm)}`}
+                                                                        className="inline-flex items-center gap-1 text-primary hover:underline opacity-80 group-hover:opacity-100"
+                                                                    >
+                                                                        Каталог <ExternalLink className="h-3 w-3" />
+                                                                    </Link>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="shrink-0 pl-2 text-right">
+                                                            <div className="font-semibold text-foreground">{formatNumber(Number(prod.views || 0))}</div>
+                                                            <div className="text-xs text-muted-foreground">просмотров</div>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <EmptyState text="Нет данных о просмотрах товаров" />
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            {/* Top Cart Products */}
+                            <Card>
+                                <CardHeader className="flex flex-row items-center justify-between space-y-0 p-5 pb-3">
+                                    <div>
+                                        <CardTitle className="flex items-center gap-2 text-base">
+                                            <ShoppingCart className="h-4 w-4 text-emerald-400" />
+                                            Топ товаров в корзине
+                                        </CardTitle>
+                                        <CardDescription>Чаще всего добавляют в заказ</CardDescription>
+                                    </div>
+                                    <ShoppingCart className="h-5 w-5 text-muted-foreground" />
+                                </CardHeader>
+                                <CardContent className="p-5 pt-0">
+                                    {topCart.length > 0 ? (
+                                        <div className="divide-y divide-border/60">
+                                            {topCart.slice(0, 8).map((prod, idx) => {
+                                                const queryTerm = prod.name && prod.name !== 'Без названия' && prod.name !== prod.id ? prod.name : prod.id
+                                                return (
+                                                    <div key={`${prod.id}-${idx}`} className="group flex items-center justify-between gap-3 py-2.5 text-sm">
+                                                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                                                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                                                                {idx + 1}
+                                                            </span>
+                                                            <div className="min-w-0 flex-1">
+                                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                                    <span className="max-w-[280px] truncate font-medium text-foreground" title={prod.name}>
+                                                                        {prod.name}
+                                                                    </span>
+                                                                    {prod.brand && (
+                                                                        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                                                                            {prod.brand}
+                                                                        </Badge>
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                                                    {prod.price ? <span>{formatCurrency(prod.price)}</span> : null}
+                                                                    <Link
+                                                                        href={`/admin?search=${encodeURIComponent(queryTerm)}`}
+                                                                        className="inline-flex items-center gap-1 text-primary hover:underline opacity-80 group-hover:opacity-100"
+                                                                    >
+                                                                        Каталог <ExternalLink className="h-3 w-3" />
+                                                                    </Link>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="shrink-0 pl-2 text-right">
+                                                            <div className="font-semibold text-foreground">{formatNumber(Number(prod.carts || 0))}</div>
+                                                            <div className="text-xs text-muted-foreground">в корзину</div>
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <EmptyState text="Нет данных о добавлениях в корзину" />
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </section>
+
+                        {/* OS & Tech Details */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <Card>
+                                <CardHeader className="p-4 pb-2">
+                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                        <Laptop className="h-4 w-4 text-primary" />
+                                        Операционные системы
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-4 pt-1">
+                                    {osList.length ? (
+                                        <div className="space-y-2">
+                                            {osList.map((item) => (
+                                                <ProgressRow key={item.name} label={item.name} value={Number(item.visitors || 0)} total={data.unique_visitors || 1} />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <EmptyState text="Нет данных по ОС" />
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader className="p-4 pb-2">
+                                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                                        <Monitor className="h-4 w-4 text-primary" />
+                                        Типы устройств
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="p-4 pt-1">
+                                    {deviceList.length ? (
+                                        <div className="space-y-2">
+                                            {deviceList.map((item) => (
+                                                <ProgressRow key={item.name} label={item.name} value={Number(item.visitors || 0)} total={data.unique_visitors || 1} />
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <EmptyState text="Нет данных по устройствам" />
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     )
 }
 
-function KpiCard({ icon, label, value, valueText, detail, tone, loading }: {
-    icon: React.ReactNode
-    label: string
-    value?: number
-    valueText?: string
-    detail: string
-    tone: 'emerald' | 'blue' | 'violet' | 'cyan' | 'amber' | 'rose'
-    loading?: boolean
-}) {
-    const tones = {
-        emerald: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20',
-        blue: 'bg-blue-500/10 text-blue-300 border-blue-500/20',
-        violet: 'bg-violet-500/10 text-violet-300 border-violet-500/20',
-        cyan: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
-        amber: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
-        rose: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
-    }
-
-    const displayValue = valueText !== undefined ? valueText : formatNumber(value ?? 0)
-
-    return (
-        <Card>
-            <CardContent className="p-5">
-                <div className="mb-4 flex items-center justify-between">
-                    <div className={`rounded-lg border p-2 [&_svg]:h-5 [&_svg]:w-5 ${tones[tone]}`}>
-                        {icon}
-                    </div>
-                    {loading && <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />}
-                </div>
-                {loading ? <Skeleton className="h-9 w-24" /> : <div className="text-2xl sm:text-3xl font-semibold text-foreground truncate">{displayValue}</div>}
-                <div className="mt-1 text-sm font-medium text-foreground/80">{label}</div>
-                <div className="mt-3 text-xs text-muted-foreground">{detail}</div>
-            </CardContent>
-        </Card>
-    )
-}
-
-function InsightItem({ label, value, caption, icon }: { label: string; value: string; caption: string; icon: React.ReactNode }) {
-    return (
-        <Card className="bg-background/40">
-            <CardContent className="p-4">
-                <div className="mb-3 flex items-center justify-between text-muted-foreground">
-                    <span className="text-sm">{label}</span>
-                    {icon}
-                </div>
-                <div className="text-2xl font-semibold text-foreground">{value}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{caption}</div>
-            </CardContent>
-        </Card>
-    )
-}
-
-
 function ProgressRow({ label, value, total }: { label: string; value: number; total: number }) {
     return (
         <div>
-            <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+            <div className="mb-1 flex items-center justify-between gap-3 text-xs">
                 <span className="truncate text-muted-foreground">{label}</span>
                 <span className="font-semibold text-foreground">{formatNumber(value)}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, (value / total) * 100)}%` }} />
             </div>
         </div>
@@ -1297,7 +1148,7 @@ function ProgressRow({ label, value, total }: { label: string; value: number; to
 
 function EmptyState({ text }: { text: string }) {
     return (
-        <Card className="flex h-full min-h-32 items-center justify-center border-dashed bg-background/40 p-6 text-center text-sm font-medium text-muted-foreground">
+        <Card className="flex h-full min-h-24 items-center justify-center border-dashed bg-background/40 p-4 text-center text-xs font-medium text-muted-foreground">
             {text}
         </Card>
     )
