@@ -552,8 +552,20 @@ export async function GET(request: Request) {
       topCart: topCartRes.rows,
       externalIntegrations: {
         yandexMetrika: {
-          configured: Boolean(process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID),
-          counterId: process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID || null,
+          configured: true,
+          counterId: process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID || "100417016",
+        },
+        yandexWebmaster: {
+          configured: true,
+          siteUrl: "https://yeezyunique.ru",
+        },
+        googleSearchConsole: {
+          configured: true,
+          property: "sc-domain:yeezyunique.ru",
+        },
+        googleMerchantCenter: {
+          configured: true,
+          accountId: "5830671674",
         },
         googleAnalytics: {
           configured: Boolean(

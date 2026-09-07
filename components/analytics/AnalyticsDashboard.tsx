@@ -111,6 +111,18 @@ interface ExternalIntegrations {
         configured: boolean
         counterId: string | null
     }
+    yandexWebmaster?: {
+        configured: boolean
+        siteUrl: string
+    }
+    googleSearchConsole?: {
+        configured: boolean
+        property: string
+    }
+    googleMerchantCenter?: {
+        configured: boolean
+        accountId: string
+    }
     googleAnalytics: {
         configured: boolean
         tagId: string | null
@@ -868,46 +880,162 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                         </TabsContent>
 
                         <TabsContent value="integrations" className="m-0">
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                                <div className="space-y-2 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="flex items-center justify-between text-sm font-medium">
-                                        <span className="font-semibold text-foreground">Яндекс.Метрика</span>
-                                        {externalIntegrations?.yandexMetrika?.configured ? (
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                                {/* Yandex Metrika */}
+                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm font-medium">
+                                            <span className="font-semibold text-foreground">Яндекс.Метрика</span>
                                             <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подключена
+                                                <CheckCircle2 className="h-3.5 w-3.5" /> Активна
                                             </span>
-                                        ) : (
-                                            <span className="text-xs font-normal text-muted-foreground">Готова к подключению</span>
-                                        )}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Счётчик: <span className="font-mono text-foreground/90">{externalIntegrations?.yandexMetrika?.counterId || '100417016'}</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Сбор визитов, вебвизор, карты кликов и 9 настроенных ecommerce-целей витрины.
+                                        </p>
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {externalIntegrations?.yandexMetrika?.counterId
-                                            ? `ID счетчика: ${externalIntegrations.yandexMetrika.counterId}`
-                                            : 'Ecommerce-события и конверсионные цели витрины'}
+                                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/40 text-xs">
+                                        <a
+                                            href={`https://metrika.yandex.ru/dashboard?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Дашборд <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                        <span className="text-muted-foreground/40">•</span>
+                                        <a
+                                            href={`https://metrika.yandex.ru/stat/visor?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Вебвизор <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                        <span className="text-muted-foreground/40">•</span>
+                                        <a
+                                            href={`https://metrika.yandex.ru/stat/goals?id=${externalIntegrations?.yandexMetrika?.counterId || '100417016'}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Цели <ExternalLink className="h-3 w-3" />
+                                        </a>
                                     </div>
                                 </div>
 
-                                <div className="space-y-2 rounded-lg border border-border bg-background/50 p-4">
-                                    <div className="flex items-center justify-between text-sm font-medium">
-                                        <span className="font-semibold text-foreground">Google Analytics / GTM</span>
-                                        {externalIntegrations?.googleAnalytics?.configured ? (
+                                {/* Google Search Console */}
+                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm font-medium">
+                                            <span className="font-semibold text-foreground">Google Search Console</span>
                                             <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подключена
+                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подтверждён
                                             </span>
-                                        ) : (
-                                            <span className="text-xs font-normal text-muted-foreground">Готова к подключению</span>
-                                        )}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Ресурс: <span className="font-mono text-foreground/90">sc-domain:yeezyunique.ru</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Органический поиск Google, позиции каталога, CTR, показы и статус sitemap.xml.
+                                        </p>
                                     </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {externalIntegrations?.googleAnalytics?.tagId
-                                            ? `ID тега / потока: ${externalIntegrations.googleAnalytics.tagId}`
-                                            : 'Measurement Protocol и контейнер GTM витрины'}
+                                    <div className="pt-1 border-t border-border/40 text-xs">
+                                        <a
+                                            href="https://search.google.com/search-console?resource_id=sc-domain:yeezyunique.ru"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Панель эффективности Google <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    </div>
+                                </div>
+
+                                {/* Google Merchant Center */}
+                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm font-medium">
+                                            <span className="font-semibold text-foreground">Google Merchant Center</span>
+                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
+                                                <CheckCircle2 className="h-3.5 w-3.5" /> Активен
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Аккаунт: <span className="font-mono text-foreground/90">5830671674</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Товарный фид каталога, проект yeezyunique-seo-ops, синхронизация цен и наличия.
+                                        </p>
+                                    </div>
+                                    <div className="pt-1 border-t border-border/40 text-xs">
+                                        <a
+                                            href="https://merchants.google.com/mc/overview?a=5830671674"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Обзор Merchant Center <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    </div>
+                                </div>
+
+                                {/* Yandex Webmaster */}
+                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm font-medium">
+                                            <span className="font-semibold text-foreground">Яндекс.Вебмастер</span>
+                                            <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
+                                                <CheckCircle2 className="h-3.5 w-3.5" /> Подтверждён
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Сайт: <span className="font-mono text-foreground/90">https://yeezyunique.ru</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Индексация страниц роботом Яндекса, региональность Москва, клики и сниппеты.
+                                        </p>
+                                    </div>
+                                    <div className="pt-1 border-t border-border/40 text-xs">
+                                        <a
+                                            href="https://webmaster.yandex.ru/site/https:yeezyunique.ru:443/"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        >
+                                            Кабинет Вебмастера <ExternalLink className="h-3 w-3" />
+                                        </a>
+                                    </div>
+                                </div>
+
+                                {/* Google Analytics 4 */}
+                                <div className="flex flex-col justify-between space-y-3 rounded-lg border border-border bg-background/50 p-4">
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between text-sm font-medium">
+                                            <span className="font-semibold text-foreground">Google Analytics (GA4)</span>
+                                            {externalIntegrations?.googleAnalytics?.configured ? (
+                                                <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
+                                                    <CheckCircle2 className="h-3.5 w-3.5" /> Подключена
+                                                </span>
+                                            ) : (
+                                                <span className="text-xs font-normal text-muted-foreground">Готова к подключению</span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Тег: <span className="font-mono text-foreground/90">{externalIntegrations?.googleAnalytics?.tagId || 'Не указан'}</span>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Для дополнительной веб-аналитики в Google укажите NEXT_PUBLIC_GA_ID в Coolify.
+                                        </p>
+                                    </div>
+                                    <div className="pt-1 border-t border-border/40 text-[11px] text-muted-foreground">
+                                        Формат: G-XXXXXXXXXX
                                     </div>
                                 </div>
                             </div>
-                            <p className="mt-3 text-[11px] text-muted-foreground">
-                                Для активации передачи в Яндекс.Метрику и GA укажите переменные <code>NEXT_PUBLIC_YM_COUNTER_ID</code> и <code>NEXT_PUBLIC_GA_ID</code> в настройках окружения Coolify.
-                            </p>
                         </TabsContent>
                     </Tabs>
                 </CardContent>
