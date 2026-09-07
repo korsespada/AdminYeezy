@@ -164,9 +164,10 @@ batch и сохранённым snapshot используют те же canonica
 |---|---|---|
 | `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + worker (BYESU по умолчанию, также OpenRouter/Cockpit) |
 | `/admin/ai-rules` | Глобальные настройки batch AI: OpenRouter/Cockpit, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` + Cockpit heartbeat |
-| `/admin/analytics` | Операционные метрики | AdminYeezy analytics |
+| `/admin/analytics` | Аналитика каталога, трафика и коммерческих показателей: разделение каналов (Сайт десктоп/мобайл, TG Mini App), сквозная воронка конверсии, выручка CRM, средний чек, топ товаров по просмотрам и корзинам, произвольные даты и статус внешней аналитики (Я.Метрика / GA4) | AdminYeezy `analytics_events` + Rails CRM `/admin/orders` |
 
 SEO landings, redirects, audits и AI-каталог относятся к Rails CRM/API. Production создаёт задания и хранит черновики, а локальный worker забирает их через защищённые `/api/v1/admin/seo_ai/worker/*` endpoints. Прямые записи в CRM-БД запрещены.
+В разделе `/admin/analytics` коммерческие метрики (выручка, оплаченные заказы, AOV, возвраты и отмены) агрегируются из Rails CRM API, а поведенческие метрики (сессии, воронка, онлайн, топ просмотров и корзин) — из базы аналитических событий. Поддерживается фильтрация по произвольным диапазонам дат и отдельным каналам.
 
 ## Что важно не сломать
 

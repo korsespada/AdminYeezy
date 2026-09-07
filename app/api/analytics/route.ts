@@ -1,21 +1,30 @@
 import { NextResponse } from "next/server";
 import { analyticsQuery } from "@/lib/db";
 import { isAdminAuthError, requireAdmin } from "@/lib/admin-session";
+import { listRailsCrmOrders } from "@/lib/rails-admin";
 
 export const dynamic = "force-dynamic";
 
-type AnalyticsChannel = "all" | "site" | "telegram";
+export type AnalyticsChannel = "all" | "site" | "site_desktop" | "site_mobile" | "telegram";
 
 const MAX_ANALYTICS_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_FIELD_LENGTH = 500;
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const ALLOWED_ANALYTICS_EVENTS = new Set([
   "page_view",
   "product_view",
   "add_to_cart",
+  "remove_from_cart",
   "add_to_favorites",
+  "remove_from_favorites",
+  "view_favorites",
   "order_success",
   "order_submit",
+  "checkout_payment_started",
+  "purchase",
+  "site_click",
   "ask_manager",
+  "search",
 ]);
 
 const emptyOverviewRow = {
@@ -28,6 +37,8 @@ const emptyOverviewRow = {
   add_to_favorites: "0",
   order_submit: "0",
   ask_manager: "0",
+  site_clicks: "0",
+  tg_site_clicks: "0",
   page_views: "0",
   total_events: "0",
   returning_visitors: "0",
@@ -86,24 +97,64 @@ async function safeAnalyticsQuery<T extends { rows: any[] }>(
   }
 }
 
-function getAnalyticsChannel(channel: string | null): AnalyticsChannel {
+export function getAnalyticsChannel(channel: string | null): AnalyticsChannel {
   if (channel === "telegram") return "telegram";
+  if (channel === "site_desktop") return "site_desktop";
+  if (channel === "site_mobile") return "site_mobile";
   if (channel === "site") return "site";
   return "all";
 }
 
-function getChannelSql(channel: AnalyticsChannel, alias?: string) {
-  if (channel === "all") return "1=1";
-
+export function getChannelSql(channel: AnalyticsChannel, alias?: string) {
   const prefix = alias ? `${alias}.` : "";
-  return `COALESCE(NULLIF(${prefix}meta->>'channel', ''), NULLIF(${prefix}meta->>'source', ''), 'site') = '${channel}'`;
+  const channelExpr = `COALESCE(NULLIF(${prefix}meta->>'channel', ''), NULLIF(${prefix}meta->>'source', ''), 'site')`;
+
+  if (channel === "all") return "1=1";
+  if (channel === "telegram") return `${channelExpr} = 'telegram'`;
+  if (channel === "site") return `${channelExpr} != 'telegram'`;
+  if (channel === "site_desktop") {
+    return `(${channelExpr} != 'telegram' AND (${prefix}meta->>'device' = 'desktop' OR (${prefix}meta->>'device' IS NULL AND NOT (${prefix}user_agent ILIKE '%mobile%' OR ${prefix}user_agent ILIKE '%android%' OR ${prefix}user_agent ILIKE '%iphone%'))))`;
+  }
+  if (channel === "site_mobile") {
+    return `(${channelExpr} != 'telegram' AND (${prefix}meta->>'device' = 'mobile' OR ${prefix}user_agent ILIKE '%mobile%' OR ${prefix}user_agent ILIKE '%android%' OR ${prefix}user_agent ILIKE '%iphone%'))`;
+  }
+
+  return "1=1";
 }
 
-function getPeriodSql(period: string) {
+export function getPeriodSql(period: string, from?: string | null, to?: string | null) {
+  if (from && DATE_REGEX.test(from)) {
+    const safeTo = to && DATE_REGEX.test(to) ? to : from;
+    return {
+      timeFilter: `created_at >= '${from} 00:00:00'::timestamp AND created_at <= '${safeTo} 23:59:59'::timestamp`,
+      periodStart: `'${from} 00:00:00'::timestamp`,
+      periodEnd: `'${safeTo} 23:59:59'::timestamp`,
+      fromDate: new Date(`${from}T00:00:00Z`),
+      toDate: new Date(`${safeTo}T23:59:59Z`),
+    };
+  }
+
+  const now = new Date();
+  if (period === "yesterday") {
+    const yesterdayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    yesterdayStart.setUTCHours(0, 0, 0, 0);
+    const yesterdayEnd = new Date(yesterdayStart.getTime() + 24 * 60 * 60 * 1000);
+    return {
+      timeFilter: "created_at >= (CURRENT_DATE - INTERVAL '1 day') AND created_at < CURRENT_DATE",
+      periodStart: "(CURRENT_DATE - INTERVAL '1 day')",
+      periodEnd: "CURRENT_DATE",
+      fromDate: yesterdayStart,
+      toDate: yesterdayEnd,
+    };
+  }
+
   if (period === "week") {
     return {
       timeFilter: "created_at >= NOW() - INTERVAL '7 days'",
       periodStart: "NOW() - INTERVAL '7 days'",
+      periodEnd: null,
+      fromDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      toDate: now,
     };
   }
 
@@ -111,6 +162,9 @@ function getPeriodSql(period: string) {
     return {
       timeFilter: "created_at >= NOW() - INTERVAL '30 days'",
       periodStart: "NOW() - INTERVAL '30 days'",
+      periodEnd: null,
+      fromDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+      toDate: now,
     };
   }
 
@@ -118,12 +172,21 @@ function getPeriodSql(period: string) {
     return {
       timeFilter: "1=1",
       periodStart: null,
+      periodEnd: null,
+      fromDate: null,
+      toDate: null,
     };
   }
 
+  // today default
+  const todayStart = new Date(now);
+  todayStart.setUTCHours(0, 0, 0, 0);
   return {
-    timeFilter: "created_at >= NOW() - INTERVAL '1 day'",
-    periodStart: "NOW() - INTERVAL '1 day'",
+    timeFilter: "created_at >= CURRENT_DATE",
+    periodStart: "CURRENT_DATE",
+    periodEnd: null,
+    fromDate: todayStart,
+    toDate: now,
   };
 }
 
@@ -138,13 +201,15 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const period = searchParams.get("period") || "today";
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
     const channel = getAnalyticsChannel(searchParams.get("channel"));
-    const { timeFilter, periodStart } = getPeriodSql(period);
+    const { timeFilter, periodStart, fromDate, toDate } = getPeriodSql(period, from, to);
     const channelFilter = getChannelSql(channel);
     const onlineChannelFilter = getChannelSql(channel);
 
     const returningSessionsSql =
-      period === "all"
+      periodStart === null
         ? `SELECT session_id
            FROM analytics_events
            WHERE session_id IS NOT NULL AND session_id != ''
@@ -189,8 +254,10 @@ export async function GET(request: Request) {
         COUNT(*) FILTER (WHERE pe.event = 'product_view') as product_views,
         COUNT(*) FILTER (WHERE pe.event = 'add_to_cart') as add_to_cart,
         COUNT(*) FILTER (WHERE pe.event = 'add_to_favorites') as add_to_favorites,
-        COUNT(*) FILTER (WHERE pe.event = 'order_success' OR pe.event = 'order_submit') as order_submit,
+        COUNT(*) FILTER (WHERE pe.event IN ('order_success', 'order_submit', 'purchase', 'checkout_payment_started')) as order_submit,
         COUNT(*) FILTER (WHERE pe.event = 'ask_manager') as ask_manager,
+        COUNT(*) FILTER (WHERE pe.event = 'site_click') as site_clicks,
+        COUNT(*) FILTER (WHERE pe.event = 'site_click' AND COALESCE(NULLIF(pe.meta->>'channel', ''), NULLIF(pe.meta->>'source', ''), 'site') = 'telegram') as tg_site_clicks,
         COUNT(*) FILTER (WHERE pe.event = 'page_view') as page_views,
         COUNT(*) as total_events,
         (SELECT COUNT(*) FROM returning_sessions) as returning_visitors,
@@ -202,9 +269,9 @@ export async function GET(request: Request) {
     const profilesSql = `
       SELECT
         COUNT(*) as total_profiles,
-        COUNT(*) FILTER (${period === "all" ? "WHERE TRUE" : `WHERE created_at >= ${periodStart}`}) as new_profiles,
-        COUNT(*) FILTER (${period === "all" ? "WHERE updated_at > created_at" : `WHERE created_at < ${periodStart} AND updated_at >= ${periodStart}`}) as returning_profiles,
-        COUNT(*) FILTER (${period === "all" ? "WHERE TRUE" : `WHERE updated_at >= ${periodStart}`}) as active_profiles,
+        COUNT(*) FILTER (${periodStart === null ? "WHERE TRUE" : `WHERE created_at >= ${periodStart}`}) as new_profiles,
+        COUNT(*) FILTER (${periodStart === null ? "WHERE updated_at > created_at" : `WHERE created_at < ${periodStart} AND updated_at >= ${periodStart}`}) as returning_profiles,
+        COUNT(*) FILTER (${periodStart === null ? "WHERE TRUE" : `WHERE updated_at >= ${periodStart}`}) as active_profiles,
         COUNT(*) FILTER (WHERE jsonb_typeof(cart) = 'array' AND jsonb_array_length(cart) > 0) as cart_profiles,
         COALESCE(SUM(CASE WHEN jsonb_typeof(cart) = 'array' THEN jsonb_array_length(cart) ELSE 0 END), 0) as cart_items,
         COUNT(*) FILTER (WHERE jsonb_typeof(favorites) = 'array' AND jsonb_array_length(favorites) > 0) as favorite_profiles,
@@ -225,7 +292,8 @@ export async function GET(request: Request) {
         ) as views,
         COUNT(*) FILTER (WHERE event = 'add_to_cart') as carts,
         COUNT(*) FILTER (WHERE event = 'add_to_favorites') as favorites,
-        COUNT(*) FILTER (WHERE event = 'ask_manager') as manager
+        COUNT(*) FILTER (WHERE event = 'ask_manager') as manager,
+        COUNT(*) FILTER (WHERE event IN ('order_submit', 'order_success', 'purchase', 'checkout_payment_started')) as orders
       FROM analytics_events
       WHERE ${timeFilter}
         AND ${channelFilter}
@@ -253,13 +321,65 @@ export async function GET(request: Request) {
       LIMIT 5
     `;
 
-    const [overviewRes, profilesRes, seriesRes, countryRes, osRes] = await Promise.all([
-      safeAnalyticsQuery("Overview", overviewSql, [emptyOverviewRow], true),
-      safeAnalyticsQuery("Profiles", profilesSql, [emptyProfileRow]),
-      safeAnalyticsQuery("Series", seriesSql, []),
-      safeAnalyticsQuery("Country", countrySql, []),
-      safeAnalyticsQuery("OS", osSql, []),
-    ]);
+    const deviceSql = `
+      SELECT 
+        CASE 
+          WHEN meta->>'device' = 'mobile' OR user_agent ILIKE '%mobile%' OR user_agent ILIKE '%android%' OR user_agent ILIKE '%iphone%' THEN 'Мобильные'
+          WHEN meta->>'device' = 'tablet' OR user_agent ILIKE '%ipad%' OR user_agent ILIKE '%tablet%' THEN 'Планшеты'
+          ELSE 'Десктоп'
+        END as name,
+        COUNT(DISTINCT session_id) as visitors
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+      GROUP BY 1
+      ORDER BY visitors DESC
+    `;
+
+    const topProductsSql = `
+      SELECT 
+        COALESCE(NULLIF("productId", ''), 'unknown') as id,
+        COALESCE(NULLIF(name, ''), "productId", 'Без названия') as name,
+        COUNT(*) as views,
+        COUNT(DISTINCT session_id) as unique_views
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+        AND event = 'product_view'
+        AND "productId" IS NOT NULL
+        AND "productId" != ''
+      GROUP BY "productId", name
+      ORDER BY views DESC
+      LIMIT 10
+    `;
+
+    const topCartSql = `
+      SELECT 
+        COALESCE(NULLIF("productId", ''), 'unknown') as id,
+        COALESCE(NULLIF(name, ''), "productId", 'Без названия') as name,
+        COUNT(*) as carts
+      FROM analytics_events
+      WHERE ${timeFilter}
+        AND ${channelFilter}
+        AND event = 'add_to_cart'
+        AND "productId" IS NOT NULL
+        AND "productId" != ''
+      GROUP BY "productId", name
+      ORDER BY carts DESC
+      LIMIT 10
+    `;
+
+    const [overviewRes, profilesRes, seriesRes, countryRes, osRes, deviceRes, topProductsRes, topCartRes] =
+      await Promise.all([
+        safeAnalyticsQuery("Overview", overviewSql, [emptyOverviewRow], true),
+        safeAnalyticsQuery("Profiles", profilesSql, [emptyProfileRow]),
+        safeAnalyticsQuery("Series", seriesSql, []),
+        safeAnalyticsQuery("Country", countrySql, []),
+        safeAnalyticsQuery("OS", osSql, []),
+        safeAnalyticsQuery("Devices", deviceSql, []),
+        safeAnalyticsQuery("TopProducts", topProductsSql, []),
+        safeAnalyticsQuery("TopCart", topCartSql, []),
+      ]);
 
     const row = overviewRes.rows[0] || emptyOverviewRow;
     const profileRow = profilesRes.rows[0] || emptyProfileRow;
@@ -273,6 +393,8 @@ export async function GET(request: Request) {
       add_to_favorites: parseInt(row.add_to_favorites || 0),
       order_submit: parseInt(row.order_submit || 0),
       ask_manager: parseInt(row.ask_manager || 0),
+      site_clicks: parseInt(row.site_clicks || 0),
+      tg_site_clicks: parseInt(row.tg_site_clicks || 0),
       page_views: parseInt(row.page_views || 0),
       total_events: parseInt(row.total_events || 0),
       returning_visitors: parseInt(profileRow.returning_profiles || row.returning_visitors || 0),
@@ -288,11 +410,172 @@ export async function GET(request: Request) {
       new_profiles: parseInt(profileRow.new_profiles || 0),
     };
 
+    // Aggregate CRM orders for financial & status metrics
+    const financial = {
+      revenue: 0,
+      paid_orders: 0,
+      pending_orders: 0,
+      cancelled_orders: 0,
+      refund_orders: 0,
+      aov: 0,
+      status_counts: {
+        paid: 0,
+        payment_pending: 0,
+        shipped: 0,
+        delivered: 0,
+        refund_pending: 0,
+        cancelled: 0,
+      } as Record<string, number>,
+    };
+
+    try {
+      if (process.env.RAILS_API_URL || process.env.NEXT_PUBLIC_API_URL || process.env.VITE_API_URL) {
+        const crmResult = await listRailsCrmOrders({ perPage: 100 });
+        const orders = crmResult?.items || [];
+
+        let totalRevenueCents = 0;
+        let paidCount = 0;
+        let pendingCount = 0;
+        let cancelledCount = 0;
+        let refundCount = 0;
+
+        for (const order of orders) {
+          const orderDate = order.created_at ? new Date(order.created_at) : null;
+          if (fromDate && orderDate && orderDate < fromDate) continue;
+          if (toDate && orderDate && orderDate > toDate) continue;
+
+          const orderSource = (order as any).source || order.customer?.registration_source;
+          if (channel === "telegram" && orderSource && orderSource !== "telegram" && orderSource !== "telegram_mini_app") {
+            continue;
+          }
+          if (channel.startsWith("site") && (orderSource === "telegram" || orderSource === "telegram_mini_app")) {
+            continue;
+          }
+
+          const st = order.status || "";
+          financial.status_counts[st] = (financial.status_counts[st] || 0) + 1;
+
+          if (st === "paid" || st === "shipped" || st === "delivered") {
+            paidCount++;
+            totalRevenueCents += Number(order.total_cents || 0);
+          } else if (st === "payment_pending") {
+            pendingCount++;
+          } else if (st === "cancelled") {
+            cancelledCount++;
+          } else if (st === "refund_pending") {
+            refundCount++;
+          }
+        }
+
+        const revenue = Math.round(totalRevenueCents / 100);
+        financial.revenue = revenue;
+        financial.paid_orders = paidCount;
+        financial.pending_orders = pendingCount;
+        financial.cancelled_orders = cancelledCount;
+        financial.refund_orders = refundCount;
+        financial.aov = paidCount > 0 ? Math.round(revenue / paidCount) : 0;
+      }
+    } catch (crmError: any) {
+      console.warn("Rails CRM orders fetch warning for analytics:", crmError?.message);
+    }
+
+    // Funnel steps calculation
+    const funnel = [
+      {
+        step: "Визиты",
+        count: overview.unique_visitors,
+        rate: 100,
+      },
+      {
+        step: "Просмотры товаров",
+        count: overview.unique_product_viewers || overview.unique_product_views,
+        rate:
+          overview.unique_visitors > 0
+            ? Math.min(
+                100,
+                Math.round(
+                  ((overview.unique_product_viewers || overview.unique_product_views) /
+                    overview.unique_visitors) *
+                    1000,
+                ) / 10,
+              )
+            : 0,
+      },
+      {
+        step: "В корзину / Избранное",
+        count: overview.add_to_cart + overview.add_to_favorites,
+        rate:
+          (overview.unique_product_viewers || overview.unique_product_views) > 0
+            ? Math.min(
+                100,
+                Math.round(
+                  ((overview.add_to_cart + overview.add_to_favorites) /
+                    Math.max(1, overview.unique_product_viewers || overview.unique_product_views)) *
+                    1000,
+                ) / 10,
+              )
+            : 0,
+      },
+      {
+        step: "Оформление / Заявка",
+        count: overview.order_submit + overview.ask_manager,
+        rate:
+          (overview.add_to_cart + overview.add_to_favorites) > 0
+            ? Math.min(
+                100,
+                Math.round(
+                  ((overview.order_submit + overview.ask_manager) /
+                    Math.max(1, overview.add_to_cart + overview.add_to_favorites)) *
+                    1000,
+                ) / 10,
+              )
+            : 0,
+      },
+      {
+        step: "Оплачено",
+        count: financial.paid_orders || (overview.order_submit > 0 ? overview.order_submit : 0),
+        rate:
+          (overview.order_submit + overview.ask_manager) > 0
+            ? Math.min(
+                100,
+                Math.round(
+                  ((financial.paid_orders || overview.order_submit) /
+                    Math.max(1, overview.order_submit + overview.ask_manager)) *
+                    1000,
+                ) / 10,
+              )
+            : 0,
+      },
+    ];
+
     return NextResponse.json({
       overview,
+      financial,
+      funnel,
       seriesData: seriesRes.rows,
       countryList: countryRes.rows,
       osList: osRes.rows,
+      deviceList: deviceRes.rows,
+      topProducts: topProductsRes.rows,
+      topCart: topCartRes.rows,
+      externalIntegrations: {
+        yandexMetrika: {
+          configured: Boolean(process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID),
+          counterId: process.env.NEXT_PUBLIC_YM_COUNTER_ID || process.env.YM_COUNTER_ID || null,
+        },
+        googleAnalytics: {
+          configured: Boolean(
+            process.env.NEXT_PUBLIC_GA_ID ||
+              process.env.NEXT_PUBLIC_GTM_ID ||
+              process.env.GA_MEASUREMENT_ID,
+          ),
+          tagId:
+            process.env.NEXT_PUBLIC_GA_ID ||
+            process.env.NEXT_PUBLIC_GTM_ID ||
+            process.env.GA_MEASUREMENT_ID ||
+            null,
+        },
+      },
       updatedAt: new Date().toISOString(),
     });
   } catch (error: any) {
@@ -428,14 +711,22 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get("type") || "period";
     const period = searchParams.get("period") || "today";
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
     const channel = getAnalyticsChannel(searchParams.get("channel"));
     const channelFilter = getChannelSql(channel);
 
     if (type === "all") {
-      await analyticsQuery(channel === "all" ? "DELETE FROM analytics_events" : `DELETE FROM analytics_events WHERE ${channelFilter}`);
+      await analyticsQuery(
+        channel === "all"
+          ? "DELETE FROM analytics_events"
+          : `DELETE FROM analytics_events WHERE ${channelFilter}`,
+      );
     } else {
-      const { timeFilter } = getPeriodSql(period);
-      await analyticsQuery(`DELETE FROM analytics_events WHERE ${timeFilter} AND ${channelFilter}`);
+      const { timeFilter } = getPeriodSql(period, from, to);
+      await analyticsQuery(
+        `DELETE FROM analytics_events WHERE ${timeFilter} AND ${channelFilter}`,
+      );
     }
 
     return NextResponse.json({

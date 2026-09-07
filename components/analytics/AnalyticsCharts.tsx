@@ -14,13 +14,14 @@ import {
 } from 'recharts'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-interface SeriesData {
+export interface SeriesData {
     date: string
     visitors?: number
     views: number
     carts: number
     manager: number
     favorites: number
+    orders?: number
 }
 
 interface AnalyticsChartsProps {
@@ -42,6 +43,7 @@ const colors = {
     visitors: '#60A5FA',
     views: '#22D3EE',
     manager: '#F59E0B',
+    orders: '#10B981',
     online: '#34D399',
     returning: '#A78BFA',
     cart: '#FBBF24',
@@ -62,6 +64,7 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
         visitors: Number(item.visitors || 0),
         views: Number(item.views || 0),
         manager: Number(item.manager || 0),
+        orders: Number(item.orders || 0),
         dateLabel: formatDate(item.date),
     }))
 
@@ -121,7 +124,7 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
 
     const summaryBars = [
         { name: 'Онлайн', value: overview.online_now, fill: colors.online },
-        { name: 'Пользователи', value: overview.unique_visitors, fill: colors.visitors },
+        { name: 'Посетители', value: overview.unique_visitors, fill: colors.visitors },
         { name: 'Постоянные', value: overview.returning_profiles, fill: colors.returning },
         { name: 'Уник. просмотры', value: overview.unique_product_views, fill: colors.views },
         { name: 'Менеджер', value: overview.ask_manager, fill: colors.manager },
@@ -155,8 +158,8 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
             <Card className="xl:col-span-8">
                 <CardHeader className="flex flex-col gap-1 space-y-0 p-5 sm:flex-row sm:items-end sm:justify-between sm:p-6 sm:pb-5">
                     <div>
-                        <CardTitle className="text-lg">Динамика аудитории</CardTitle>
-                        <CardDescription>Уникальные посетители, просмотры товаров и обращения к менеджеру.</CardDescription>
+                        <CardTitle className="text-lg">Динамика активности и конверсий</CardTitle>
+                        <CardDescription>Посетители, просмотры товаров, обращения и заказы во времени.</CardDescription>
                     </div>
                     <div className="text-xs font-medium text-muted-foreground">Автообновление каждые 30 секунд</div>
                 </CardHeader>
@@ -173,6 +176,10 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                                         <stop offset="5%" stopColor={colors.views} stopOpacity={0.18} />
                                         <stop offset="95%" stopColor={colors.views} stopOpacity={0} />
                                     </linearGradient>
+                                    <linearGradient id="ordersGradient" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor={colors.orders} stopOpacity={0.25} />
+                                        <stop offset="95%" stopColor={colors.orders} stopOpacity={0} />
+                                    </linearGradient>
                                 </defs>
                                 <CartesianGrid stroke="#1E293B" strokeDasharray="3 3" vertical={false} />
                                 <XAxis dataKey="dateLabel" stroke="#94A3B8" fontSize={12} tickLine={false} axisLine={{ stroke: '#334155' }} interval="preserveStartEnd" minTickGap={20} />
@@ -182,6 +189,7 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
                                 <Area type="monotone" dataKey="visitors" name="Посетители" stroke={colors.visitors} strokeWidth={3} fill="url(#visitorsGradient)" />
                                 <Area type="monotone" dataKey="views" name="Уникальные просмотры" stroke={colors.views} strokeWidth={3} fill="url(#viewsGradient)" />
                                 <Area type="monotone" dataKey="manager" name="Спросить у менеджера" stroke={colors.manager} strokeWidth={2} fill="none" />
+                                <Area type="monotone" dataKey="orders" name="Заказы / Оформления" stroke={colors.orders} strokeWidth={2.5} fill="url(#ordersGradient)" />
                             </AreaChart>
                         </ResponsiveContainer>
                     ) : (
@@ -194,8 +202,8 @@ export default function AnalyticsCharts({ seriesData, overview, minimal }: Analy
 
             <Card className="xl:col-span-4">
                 <CardHeader className="p-5 sm:p-6 sm:pb-5">
-                    <CardTitle className="text-lg">Ключевые показатели</CardTitle>
-                    <CardDescription>Сравнение самых важных счетчиков на одном графике.</CardDescription>
+                    <CardTitle className="text-lg">Ключевые счетчики</CardTitle>
+                    <CardDescription>Сравнение объемов основных событий за период.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[340px] w-full p-5 pt-0 sm:p-6 sm:pt-0">
                     <ResponsiveContainer width="100%" height="100%">
