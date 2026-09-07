@@ -2412,7 +2412,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
     product.variants = variants
   }
 
-  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined || formData.has('supplier_name')) {
+  if (formData.has('productMetadata') || formData.has('gender') || formData.has('price_on_request') || priceOnRequest !== undefined || formData.has('supplier_name') || formData.has('supplier_id')) {
     const metadata = parseJsonObject(formData.get('productMetadata'))
     if (formData.has('gender')) {
       const gender = String(formData.get('gender') || '')
@@ -2430,11 +2430,18 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
     } else if (formData.has('price_on_request')) {
       metadata.price_on_request = formBoolean(formData.get('price_on_request'))
     }
-    if (formData.has('supplier_name')) {
+    if (formData.has('supplier_name') || formData.has('supplier_id')) {
+      const rawSupplierId = String(formData.get('supplier_id') || '').trim()
       const supplierName = String(formData.get('supplier_name') || '').trim()
-      product.primary_supplier_name = supplierName || null
-      product.primary_supplier_avatar = String(formData.get('supplier_avatar') || '').trim() || null
-      if (formData.has('supplier_id')) product.primary_supplier_id = String(formData.get('supplier_id') || '').trim() || null
+      const supplierAvatar = String(formData.get('supplier_avatar') || '').trim() || null
+
+      if (rawSupplierId) {
+        product.primary_supplier_id = rawSupplierId
+      } else if (supplierName) {
+        product.primary_supplier_name = supplierName
+        if (supplierAvatar) product.primary_supplier_avatar = supplierAvatar
+      }
+
       const sourceSupplierId = String(formData.get('supplier_source_id') || '').trim()
       if (sourceSupplierId) metadata.source_supplier_id = sourceSupplierId
       else delete metadata.source_supplier_id

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useMemo } from 'react';
 import Image from 'next/image';
 import { type Product, type ProductSupplierOption } from '@/lib/types';
 import { Trash2, Copy, RefreshCw } from 'lucide-react';
@@ -28,6 +28,25 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
+
+    const supplierInfo = useMemo(() => {
+        const sourceId = String(product.metadata?.source_supplier_id || '').trim()
+        const opt = supplierOptions.find(o =>
+            (sourceId && (o.source_id === sourceId || o.id === sourceId)) ||
+            (product.supplier?.id && (o.rails_id === product.supplier.id || o.id === product.supplier.id)) ||
+            (product.supplier?.name && o.name.toLowerCase() === product.supplier.name.toLowerCase())
+        )
+        if (opt) {
+            return { name: opt.name, avatarUrl: opt.avatar_url || product.supplier?.avatar_url || null }
+        }
+        if (product.supplier?.name) {
+            return { name: product.supplier.name, avatarUrl: product.supplier.avatar_url || null }
+        }
+        if (sourceId) {
+            return { name: `Поставщик ${sourceId}`, avatarUrl: null }
+        }
+        return null
+    }, [product.supplier, product.metadata?.source_supplier_id, supplierOptions])
     const router = useRouter();
 
     const thumb = productImageUrl(product, imagePresets.productTable)
@@ -198,6 +217,25 @@ const ProductListItem: React.FC<ProductListItemProps> = memo(({ product, onEdit,
                                         return 'No Brand';
                                     })()}
                                 </p>
+                                {supplierInfo && (
+                                    <span className="flex items-center gap-1 text-[10px] text-slate-400 truncate max-w-[160px]" title={supplierInfo.name}>
+                                        {supplierInfo.avatarUrl ? (
+                                            <Image
+                                                src={supplierInfo.avatarUrl}
+                                                alt=""
+                                                width={14}
+                                                height={14}
+                                                unoptimized
+                                                className="h-3.5 w-3.5 rounded-full border border-slate-600 object-cover shrink-0"
+                                            />
+                                        ) : (
+                                            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[8px] font-bold text-slate-300">
+                                                {supplierInfo.name.slice(0, 1).toUpperCase()}
+                                            </span>
+                                        )}
+                                        <span className="truncate">{supplierInfo.name}</span>
+                                    </span>
+                                )}
                             </div>
                             <ProductAttributeSummary product={product} compact />
                         </>

@@ -77,9 +77,16 @@ export function buildDuplicateProductFormData(
     (product.supplier?.name && item.name.toLowerCase() === product.supplier.name.toLowerCase()),
   )
 
-  const supplierName = product.supplier?.name || matchingOption?.name || ''
-  const supplierAvatar = product.supplier?.avatar_url || matchingOption?.avatar_url || ''
-  const supplierId = product.supplier?.id || matchingOption?.rails_id || (matchingOption?.id && !matchingOption.id.startsWith('scraping:') ? matchingOption.id : '')
+  const supplierName = matchingOption?.name || product.supplier?.name || ''
+  const supplierAvatar = matchingOption?.avatar_url || product.supplier?.avatar_url || ''
+  const isUuid = (val?: string | null): val is string =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val))
+  const supplierId = (isUuid(product.supplier?.id) ? product.supplier.id : null) ||
+    (isUuid(matchingOption?.rails_id) ? matchingOption.rails_id : null) ||
+    (isUuid(matchingOption?.id) ? matchingOption.id : null) ||
+    product.supplier?.id ||
+    matchingOption?.rails_id ||
+    ''
   const finalSourceSupplierId = sourceSupplierId || matchingOption?.source_id || ''
 
   if (finalSourceSupplierId) {

@@ -84,30 +84,31 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     }, [product.category, product.subcategory, product.expand?.category?.name, product.expand?.subcategory?.name, categories, subcategories])
 
     const supplier = useMemo(() => {
-        if (product.supplier?.name) {
-            let avatar = product.supplier.avatar_url
-            if (!avatar && supplierOptions.length > 0) {
-                const opt = supplierOptions.find(o =>
-                    (product.supplier?.name && o.name.toLowerCase() === product.supplier.name.toLowerCase()) ||
-                    (product.supplier?.id && (o.rails_id === product.supplier.id || o.id === product.supplier.id))
-                )
-                avatar = opt?.avatar_url || null
+        const sourceId = String(product.metadata?.source_supplier_id || '').trim()
+        const opt = supplierOptions.find(o =>
+            (sourceId && (o.source_id === sourceId || o.id === sourceId)) ||
+            (product.supplier?.id && (o.rails_id === product.supplier.id || o.id === product.supplier.id)) ||
+            (product.supplier?.name && o.name.toLowerCase() === product.supplier.name.toLowerCase())
+        )
+        if (opt) {
+            return {
+                id: opt.rails_id || product.supplier?.id || opt.id,
+                name: opt.name,
+                avatar_url: opt.avatar_url || product.supplier?.avatar_url || null,
             }
+        }
+        if (product.supplier?.name) {
             return {
                 id: product.supplier.id,
                 name: product.supplier.name,
-                avatar_url: avatar,
+                avatar_url: product.supplier.avatar_url || null,
             }
         }
-        const sourceId = product.metadata?.source_supplier_id
-        if (sourceId && supplierOptions.length > 0) {
-            const opt = supplierOptions.find(o => o.source_id === sourceId || o.id === sourceId)
-            if (opt) {
-                return {
-                    id: opt.rails_id || opt.id,
-                    name: opt.name,
-                    avatar_url: opt.avatar_url || null,
-                }
+        if (sourceId) {
+            return {
+                id: sourceId,
+                name: `Поставщик ${sourceId}`,
+                avatar_url: null,
             }
         }
         return null

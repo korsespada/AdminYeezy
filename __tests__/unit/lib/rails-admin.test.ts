@@ -894,6 +894,17 @@ describe('rails admin product adapter', () => {
     })
   })
 
+  it('uses primary_supplier_id without primary_supplier_name when supplier_id is provided', () => {
+    const formData = new FormData()
+    formData.append('supplier_name', 'Valentino Сумки')
+    formData.append('supplier_id', '17e46599-b88a-43d1-823c-615437524138')
+    formData.append('supplier_source_id', 'A20180101_val')
+
+    const product = productFormDataToRailsPayload(formData, { applyDefaults: false }).product
+    expect(product.primary_supplier_id).toBe('17e46599-b88a-43d1-823c-615437524138')
+    expect(product.primary_supplier_name).toBeUndefined()
+  })
+
   it('passes background media uploads through a narrow Rails product patch', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({
       ok: true,

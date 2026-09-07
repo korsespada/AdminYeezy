@@ -81,6 +81,36 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     const currentBrand = searchParams.get('brand') || ''
     const currentSupplier = searchParams.get('supplier') || ''
+
+    const aggregatedSupplierFacets = useMemo(() => {
+        const raw = filterFacets?.supplierFacets || []
+        const map = new Map<string, { slug: string; name: string; count: number; avatar_url?: string | null; allSlugs: string[] }>()
+        for (const s of raw) {
+            const rawName = (s.name || s.slug || '').trim()
+            const key = rawName.toLowerCase()
+            const existing = map.get(key)
+            if (!existing) {
+                map.set(key, {
+                    slug: s.slug,
+                    name: rawName || s.slug,
+                    count: s.count,
+                    avatar_url: s.avatar_url || null,
+                    allSlugs: [s.slug],
+                })
+            } else {
+                existing.count += s.count
+                existing.allSlugs.push(s.slug)
+                if (!existing.avatar_url && s.avatar_url) existing.avatar_url = s.avatar_url
+            }
+        }
+        return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+    }, [filterFacets?.supplierFacets])
+
+    const selectedSupplierValue = useMemo(() => {
+        if (!currentSupplier) return '__all__'
+        const matched = aggregatedSupplierFacets.find(item => item.allSlugs.includes(currentSupplier))
+        return matched ? matched.slug : currentSupplier
+    }, [currentSupplier, aggregatedSupplierFacets])
     const currentCategory = searchParams.get('category') || ''
     const currentSubcategory = searchParams.get('subcategory') || ''
     const currentGender = searchParams.get('gender') || ''
@@ -637,7 +667,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div>
                             <Label className="mb-2 block text-slate-300">Поставщик</Label>
                             <Select
-                                value={currentSupplier || '__all__'}
+                                value={selectedSupplierValue}
                                 onValueChange={(value) => applyFilter('supplier', value === '__all__' ? null : value)}
                             >
                                 <SelectTrigger aria-label="Поставщик" className="bg-slate-700 text-slate-200">
@@ -645,38 +675,35 @@ const Sidebar: React.FC<SidebarProps> = ({
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="__all__">Все поставщики</SelectItem>
-                                    {(filterFacets?.supplierFacets || [])
-                                        .slice()
-                                        .sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug), 'ru'))
-                                        .map((supplier) => {
-                                            const name = supplier.name || supplier.slug
-                                            const avatarUrl =
-                                                supplier.avatar_url ||
-                                                (supplier.name ? supplierAvatarMap.get(supplier.name.toLowerCase().trim()) : null) ||
-                                                (supplier.slug ? supplierAvatarMap.get(supplier.slug.toLowerCase().trim()) : null)
+                                    {aggregatedSupplierFacets.map((supplier) => {
+                                        const name = supplier.name
+                                        const avatarUrl =
+                                            supplier.avatar_url ||
+                                            supplierAvatarMap.get(name.toLowerCase().trim()) ||
+                                            supplierAvatarMap.get(supplier.slug.toLowerCase().trim())
 
-                                            return (
-                                                <SelectItem key={supplier.slug} value={supplier.slug}>
-                                                    <span className="flex items-center gap-2">
-                                                        {avatarUrl ? (
-                                                            <Image
-                                                                src={avatarUrl}
-                                                                alt=""
-                                                                width={20}
-                                                                height={20}
-                                                                unoptimized
-                                                                className="h-5 w-5 rounded-full border border-slate-600 object-cover shrink-0"
-                                                            />
-                                                        ) : (
-                                                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
-                                                                {name.slice(0, 1).toUpperCase()}
-                                                            </span>
-                                                        )}
-                                                        <span className="truncate">{name} ({supplier.count})</span>
-                                                    </span>
-                                                </SelectItem>
-                                            )
-                                        })}
+                                        return (
+                                            <SelectItem key={supplier.slug} value={supplier.slug}>
+                                                <span className="flex items-center gap-2">
+                                                    {avatarUrl ? (
+                                                        <Image
+                                                            src={avatarUrl}
+                                                            alt=""
+                                                            width={20}
+                                                            height={20}
+                                                            unoptimized
+                                                            className="h-5 w-5 rounded-full border border-slate-600 object-cover shrink-0"
+                                                        />
+                                                    ) : (
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
+                                                            {name.slice(0, 1).toUpperCase()}
+                                                        </span>
+                                                    )}
+                                                    <span className="truncate">{name} ({supplier.count})</span>
+                                                </span>
+                                            </SelectItem>
+                                        )
+                                    })}
                                 </SelectContent>
                             </Select>
                         </div>

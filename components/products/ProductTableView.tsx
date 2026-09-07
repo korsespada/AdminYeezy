@@ -38,6 +38,37 @@ export default function ProductTableView({ products, selectedIds, supplierOption
     const [replaceText, setReplaceText] = useState('')
     const [replaceField, setReplaceField] = useState<FieldName>('name')
     const [isReplacing, setIsReplacing] = useState(false)
+
+    const getProductSupplierInfo = (p: Product) => {
+        const sourceId = String(p.metadata?.source_supplier_id || '').trim()
+        const opt = supplierOptions.find(o =>
+            (sourceId && (o.source_id === sourceId || o.id === sourceId)) ||
+            (p.supplier?.id && (o.rails_id === p.supplier.id || o.id === p.supplier.id)) ||
+            (p.supplier?.name && o.name.toLowerCase() === p.supplier.name.toLowerCase())
+        )
+        if (opt) {
+            return {
+                name: opt.name,
+                avatarUrl: opt.avatar_url || p.supplier?.avatar_url || null,
+            }
+        }
+        if (p.supplier?.name) {
+            return {
+                name: p.supplier.name,
+                avatarUrl: p.supplier.avatar_url || null,
+            }
+        }
+        if (sourceId) {
+            return {
+                name: `Поставщик ${sourceId}`,
+                avatarUrl: null,
+            }
+        }
+        return {
+            name: 'Без поставщика',
+            avatarUrl: null,
+        }
+    }
     const [isCopying, setIsCopying] = useState<string | null>(null)
     const router = useRouter()
 
@@ -318,9 +349,28 @@ export default function ProductTableView({ products, selectedIds, supplierOption
                                         <ProductGenderBadge gender={product.gender} />
                                     </TableCell>
                                     <TableCell className="p-3 align-top text-sm text-slate-300">
-                                        <div className="min-w-[150px] max-w-[220px] truncate" title={product.supplier?.name || 'Без поставщика'}>
-                                            {product.supplier?.name || 'Без поставщика'}
-                                        </div>
+                                        {(() => {
+                                            const supp = getProductSupplierInfo(product)
+                                            return (
+                                                <div className="flex items-center gap-2 min-w-[150px] max-w-[220px]" title={supp.name}>
+                                                    {supp.avatarUrl ? (
+                                                        <Image
+                                                            src={supp.avatarUrl}
+                                                            alt=""
+                                                            width={20}
+                                                            height={20}
+                                                            unoptimized
+                                                            className="h-5 w-5 rounded-full border border-slate-600 object-cover shrink-0"
+                                                        />
+                                                    ) : supp.name !== 'Без поставщика' ? (
+                                                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[9px] font-bold text-slate-300">
+                                                            {supp.name.slice(0, 1).toUpperCase()}
+                                                        </span>
+                                                    ) : null}
+                                                    <span className="truncate">{supp.name}</span>
+                                                </div>
+                                            )
+                                        })()}
                                     </TableCell>
                                     <TableCell className="p-2 align-top">
                                         <Textarea

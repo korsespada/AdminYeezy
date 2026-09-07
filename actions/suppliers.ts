@@ -11,7 +11,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
-import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups } from '@/lib/rails-admin'
+import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsProductFilterFacets } from '@/lib/rails-admin'
 import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { spawn } from 'child_process'
@@ -117,20 +117,55 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
 export async function getProductSupplierOptionsAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const result = await scrapingQuery(`
-      SELECT id, name, album_id, avatar_url
-      FROM suppliers
-      ORDER BY name ASC, id ASC
-    `)
+    const [result, filterFacets] = await Promise.all([
+      scrapingQuery(`
+        SELECT id, name, album_id, avatar_url
+        FROM suppliers
+        ORDER BY name ASC, id ASC
+      `),
+      getRailsProductFilterFacets({}).catch(() => null),
+    ])
+
+    const railsSuppliersByName = new Map<string, string>()
+    const seenRailsIds = new Set<string>()
+    if (filterFacets?.supplierFacets) {
+      for (const s of filterFacets.supplierFacets) {
+        if (s.name && s.slug) {
+          railsSuppliersByName.set(s.name.trim().toLowerCase(), s.slug)
+        }
+      }
+    }
+
+    const data = result.rows.map((row) => {
+      const name = String(row.name || '').trim()
+      const railsId = railsSuppliersByName.get(name.toLowerCase()) || null
+      if (railsId) seenRailsIds.add(railsId)
+      return {
+        id: String(row.album_id || `scraping:${row.id}`),
+        name,
+        avatar_url: row.avatar_url || null,
+        source_id: row.album_id ? String(row.album_id) : null,
+        rails_id: railsId,
+      }
+    }).filter((row) => row.name)
+
+    if (filterFacets?.supplierFacets) {
+      for (const s of filterFacets.supplierFacets) {
+        if (s.slug && !seenRailsIds.has(s.slug) && s.name) {
+          data.push({
+            id: `rails:${s.slug}`,
+            name: s.name.trim(),
+            avatar_url: s.avatar_url || null,
+            source_id: null,
+            rails_id: s.slug,
+          })
+        }
+      }
+    }
 
     return {
       success: true,
-      data: result.rows.map((row) => ({
-        id: String(row.album_id || `scraping:${row.id}`),
-        name: String(row.name || '').trim(),
-        avatar_url: row.avatar_url || null,
-        source_id: row.album_id ? String(row.album_id) : null,
-      })).filter((row) => row.name),
+      data,
     }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось загрузить поставщиков' }
@@ -269,6 +304,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     )
 
     revalidatePath('/admin/suppliers')
+    revalidatePath('/admin')
     return { success: true, data: res.rows[0].id }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -340,6 +376,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     )
 
     revalidatePath('/admin/suppliers')
+    revalidatePath('/admin')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -385,6 +422,7 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
           const avatarUrl = match[1].trim()
           await scrapingQuery('UPDATE suppliers SET avatar_url=$1 WHERE id=$2', [avatarUrl, supplierId])
           revalidatePath('/admin/suppliers')
+    revalidatePath('/admin')
           return resolve({ success: true, data: avatarUrl })
         } else {
           return resolve({ success: false, error: 'Avatar not found in output' })
@@ -473,6 +511,7 @@ export async function deleteSupplierAction(id: number): Promise<ActionResponse> 
     await requireAdmin()
     await scrapingQuery('DELETE FROM suppliers WHERE id=$1', [id])
     revalidatePath('/admin/suppliers')
+    revalidatePath('/admin')
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -1011,6 +1050,7 @@ export async function toggleSupplierFavoriteAction(id: number): Promise<ActionRe
       [id],
     )
     revalidatePath('/admin/suppliers')
+    revalidatePath('/admin')
     return { success: true, data: res.rows[0]?.is_favorite === true }
   } catch (err: any) {
     return { success: false, error: err.message }
