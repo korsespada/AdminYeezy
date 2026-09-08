@@ -48,4 +48,18 @@ describe('bulkUpdateProductsAction', () => {
     expect(result.success).toBe(false)
     expect(mocks.patchRailsAdminProduct).not.toHaveBeenCalled()
   })
+
+  it('updates supplier fields for every selected product', async () => {
+    const result = await bulkUpdateProductsAction(
+      ['product-1'],
+      { supplierId: '17e46599-b88a-43d1-823c-615437524138', supplierName: 'Valentino Сумки', supplierSourceId: 'album-1' },
+    )
+
+    expect(result).toEqual({ success: true, data: { updated: 1 } })
+    expect(mocks.patchRailsAdminProduct).toHaveBeenCalledWith('product-1', {
+      supplierId: '17e46599-b88a-43d1-823c-615437524138',
+      supplierName: 'Valentino Сумки',
+      supplierSourceId: 'album-1',
+    })
+  })
 })

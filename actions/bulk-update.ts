@@ -13,6 +13,10 @@ export interface BulkProductUpdates {
   price?: number
   measurementTemplate?: unknown
   catalog_attributes?: Record<string, any>
+  supplierId?: string
+  supplierName?: string
+  supplierSourceId?: string | null
+  supplierAvatar?: string | null
 }
 
 export async function bulkUpdateProductsAction(ids: string[], updates: BulkProductUpdates) {

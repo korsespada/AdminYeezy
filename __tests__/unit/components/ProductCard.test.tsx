@@ -140,7 +140,7 @@ describe('ProductCard grid presentation', () => {
     const matchingTitles = screen.getAllByTitle('Катя Поставщик')
     expect(matchingTitles.length).toBeGreaterThanOrEqual(1)
     expect(screen.getByAltText('Катя Поставщик')).toBeInTheDocument()
-    expect(screen.getByText('Поставщик: Катя Поставщик')).toBeInTheDocument()
+    expect(screen.queryByText(/Поставщик:/)).not.toBeInTheDocument()
   })
 
   it('resolves supplier from supplierOptions when product has source_supplier_id metadata', () => {
@@ -170,6 +170,6 @@ describe('ProductCard grid presentation', () => {
     const matchingTitles = screen.getAllByTitle('Катя Источник')
     expect(matchingTitles.length).toBeGreaterThanOrEqual(1)
     expect(screen.getByAltText('Катя Источник')).toBeInTheDocument()
-    expect(screen.getByText('Поставщик: Катя Источник')).toBeInTheDocument()
+    expect(screen.queryByText(/Поставщик:/)).not.toBeInTheDocument()
   })
 })

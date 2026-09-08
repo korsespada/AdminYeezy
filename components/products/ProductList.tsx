@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from 'react'
+import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets, type ProductSupplierOption } from '@/lib/types'
 import { deleteProductAction, getProductAction } from '@/actions/products'
@@ -70,6 +71,7 @@ export default function ProductList({
   // Selection state
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([])
   const selectionAnchorRef = useRef<string | null>(null)
+  const [selectedSupplier, setSelectedSupplier] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
@@ -78,6 +80,19 @@ export default function ProductList({
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isNavigationPending, startNavigationTransition] = useTransition()
+
+  const selectedSupplierOption = useMemo(
+    () => supplierOptions.find((s) => s.id === selectedSupplier),
+    [supplierOptions, selectedSupplier],
+  )
+  const selectedCategoryName = useMemo(
+    () => categories.find((c) => c.id === selectedCategory)?.name,
+    [categories, selectedCategory],
+  )
+  const selectedSubcategoryName = useMemo(
+    () => subcategories.find((s) => s.id === selectedSubcategory)?.name,
+    [subcategories, selectedSubcategory],
+  )
 
   const closeFilters = useCallback(() => setIsSidebarOpen(false), [])
 
@@ -213,7 +228,12 @@ export default function ProductList({
   }, [handleNavigation, routeKey])
 
   const hasBulkUpdates = Boolean(
-    selectedCategory || selectedSubcategory || selectedGender || selectedPrice.trim() || selectedMeasurementTemplate,
+    selectedCategory ||
+    selectedSubcategory ||
+    selectedGender ||
+    selectedSupplier ||
+    selectedPrice.trim() ||
+    selectedMeasurementTemplate,
   )
 
   const handleBulkUpdate = async () => {
@@ -234,6 +254,12 @@ export default function ProductList({
     if (selectedGender) updates.gender = selectedGender
     if (hasPriceUpdate) updates.price = price
     if (selectedMeasurementTemplate) updates.measurementTemplate = selectedMeasurementTemplate.measurements
+    if (selectedSupplier && selectedSupplierOption) {
+      updates.supplierId = selectedSupplierOption.rails_id || selectedSupplierOption.id
+      updates.supplierName = selectedSupplierOption.name
+      updates.supplierSourceId = selectedSupplierOption.source_id || null
+      updates.supplierAvatar = selectedSupplierOption.avatar_url || null
+    }
 
     const result = await bulkUpdateProductsAction(selectedProductIds, updates)
     if (!result.success) {
@@ -241,6 +267,12 @@ export default function ProductList({
       setIsBulkUpdating(false)
       return
     }
+
+    const supplierUpdate = selectedSupplierOption ? {
+      id: selectedSupplierOption.rails_id || selectedSupplierOption.id,
+      name: selectedSupplierOption.name,
+      avatar_url: selectedSupplierOption.avatar_url || null,
+    } : null
 
     setProducts((currentProducts) => currentProducts.map((product) => {
       if (!selectedProductIds.includes(product.id)) return product
@@ -254,15 +286,17 @@ export default function ProductList({
         ...(selectedCategory ? { category: selectedCategory } : {}),
         ...(selectedSubcategory ? { subcategory: selectedSubcategory === '__none__' ? '' : selectedSubcategory } : {}),
         ...(selectedGender ? { gender: selectedGender } : {}),
+        ...(supplierUpdate ? { supplier: supplierUpdate } : {}),
         ...(hasPriceUpdate ? {
           price,
           price_cents: Math.round(price * 100),
           price_on_request: priceOnRequest,
-          metadata: {
-            ...(product.metadata || {}),
-            price_on_request: priceOnRequest,
-          },
         } : {}),
+        metadata: {
+          ...(product.metadata || {}),
+          ...(hasPriceUpdate ? { price_on_request: priceOnRequest } : {}),
+          ...(supplierUpdate && selectedSupplierOption?.source_id ? { source_supplier_id: selectedSupplierOption.source_id } : {}),
+        },
         ...(selectedMeasurementTemplate ? {
           catalog_attributes: catalogAttributes,
           attributes: catalogAttributes,
@@ -276,6 +310,7 @@ export default function ProductList({
     }))
     setIsBulkUpdating(false)
     setSelectedProductIds([])
+    setSelectedSupplier('')
     setSelectedSubcategory('')
     setSelectedCategory('')
     setSelectedGender('')
@@ -543,89 +578,144 @@ export default function ProductList({
       />
 
       {/* Bulk Action Toolbar */}
-      <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform duration-300 lg:left-72 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
-        <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0">
-            <Badge>{selectedProductIds.length}</Badge>
-            <span>выбрано</span>
+      <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform duration-300 lg:left-72 ${selectedProductIds.length > 0 ? 'translate-y-0' : 'translate-y-full'}`}>
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-slate-300 shrink-0">
+            <Badge className="h-5 min-w-5 px-1.5 text-xs">{selectedProductIds.length}</Badge>
+            <span className="hidden sm:inline">выбрано</span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
               onClick={() => setSelectedProductIds([])}
-              className="h-8 w-8 text-slate-500 hover:text-slate-300"
+              className="h-7 w-7 text-slate-500 hover:text-slate-300"
               aria-label="Снять выделение"
               title="Снять выделение"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </Button>
           </div>
 
-          <div className="hidden h-7 w-px shrink-0 bg-slate-700 lg:block" />
+          <div className="hidden h-6 w-px shrink-0 bg-slate-700 xl:block" />
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:items-center lg:justify-end">
-            {/* Gender Select */}
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="text-xs text-slate-500">Пол</span>
-              <Select
-                value={selectedGender || '__unchanged__'}
-                onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
-              >
-                <SelectTrigger aria-label="Пол для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-36 lg:flex-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__unchanged__">Без изменений</SelectItem>
-                  <SelectItem value="Для мужчин">Для мужчин</SelectItem>
-                  <SelectItem value="Для женщин">Для женщин</SelectItem>
-                  <SelectItem value="Унисекс">Унисекс</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+            {/* Supplier Select */}
+            <Select
+              value={selectedSupplier || '__unchanged__'}
+              onValueChange={(value) => setSelectedSupplier(value === '__unchanged__' ? '' : value)}
+            >
+              <SelectTrigger aria-label="Поставщик для выбранных товаров" className="h-9 min-w-0 bg-slate-700 px-2 text-xs text-slate-200 w-36 sm:w-40 xl:w-44">
+                <SelectValue placeholder="Поставщик: Без изм.">
+                  {selectedSupplierOption ? (
+                    <span className="flex items-center gap-1.5 truncate">
+                      {selectedSupplierOption.avatar_url ? (
+                        <Image
+                          src={selectedSupplierOption.avatar_url}
+                          alt=""
+                          width={16}
+                          height={16}
+                          unoptimized
+                          className="h-4 w-4 rounded-full border border-slate-600 object-cover shrink-0"
+                        />
+                      ) : (
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-600 text-[8px] font-bold text-slate-200">
+                          {selectedSupplierOption.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span className="truncate">{selectedSupplierOption.name}</span>
+                    </span>
+                  ) : (
+                    'Поставщик: Без изм.'
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unchanged__">Поставщик: Без изменений</SelectItem>
+                {supplierOptions.map((supplier) => (
+                  <SelectItem key={supplier.id} value={supplier.id}>
+                    <span className="flex items-center gap-2">
+                      {supplier.avatar_url ? (
+                        <Image
+                          src={supplier.avatar_url}
+                          alt=""
+                          width={18}
+                          height={18}
+                          unoptimized
+                          className="h-4 w-4 rounded-full border border-slate-600 object-cover shrink-0"
+                        />
+                      ) : (
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[8px] font-bold text-slate-300">
+                          {supplier.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span className="truncate">{supplier.name}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             {/* Category Select */}
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="text-xs text-slate-500">Кат.</span>
-              <Select
-                value={selectedCategory || '__unchanged__'}
-                onValueChange={(value) => {
-                  setSelectedCategory(value === '__unchanged__' ? '' : value)
-                  setSelectedSubcategory('') // Reset subcategory when category changes
-                }}
-              >
-                <SelectTrigger aria-label="Категория для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-44 lg:flex-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                <SelectItem value="__unchanged__">Без изменений</SelectItem>
-                {categories.map(c => (
+            <Select
+              value={selectedCategory || '__unchanged__'}
+              onValueChange={(value) => {
+                setSelectedCategory(value === '__unchanged__' ? '' : value)
+                setSelectedSubcategory('')
+              }}
+            >
+              <SelectTrigger aria-label="Категория для выбранных товаров" className="h-9 min-w-0 bg-slate-700 px-2 text-xs text-slate-200 w-32 sm:w-36 xl:w-40">
+                <SelectValue placeholder="Кат: Без изм.">
+                  {selectedCategoryName || 'Кат: Без изм.'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unchanged__">Кат: Без изменений</SelectItem>
+                {categories.map((c) => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
-                </SelectContent>
-              </Select>
-            </div>
+              </SelectContent>
+            </Select>
 
             {/* Subcategory Select */}
-            <div className="flex min-w-0 items-center gap-1.5">
-              <span className="text-xs text-slate-500">Подкат.</span>
-              <Select
-                value={selectedSubcategory || '__unchanged__'}
-                onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
-                disabled={!selectedCategory}
-              >
-                <SelectTrigger aria-label="Подкатегория для выбранных товаров" className="h-10 min-w-0 flex-1 bg-slate-700 px-2 text-slate-200 lg:w-48 lg:flex-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                <SelectItem value="__unchanged__">Без изменений</SelectItem>
+            <Select
+              value={selectedSubcategory || '__unchanged__'}
+              onValueChange={(value) => setSelectedSubcategory(value === '__unchanged__' ? '' : value)}
+              disabled={!selectedCategory}
+            >
+              <SelectTrigger aria-label="Подкатегория для выбранных товаров" className="h-9 min-w-0 bg-slate-700 px-2 text-xs text-slate-200 w-32 sm:w-36 xl:w-40">
+                <SelectValue placeholder="Подкат: Без изм.">
+                  {selectedSubcategory === '__none__'
+                    ? 'Без подкатегории'
+                    : selectedSubcategoryName || 'Подкат: Без изм.'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unchanged__">Подкат: Без изменений</SelectItem>
                 <SelectItem value="__none__">Без подкатегории (сбросить)</SelectItem>
                 {subcategories
-                  .filter(s => s.category === selectedCategory)
-                  .map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)
+                  .filter((s) => s.category === selectedCategory)
+                  .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)
                 }
-                </SelectContent>
-              </Select>
-            </div>
+              </SelectContent>
+            </Select>
+
+            {/* Gender Select */}
+            <Select
+              value={selectedGender || '__unchanged__'}
+              onValueChange={(value) => setSelectedGender(value === '__unchanged__' ? '' : value)}
+            >
+              <SelectTrigger aria-label="Пол для выбранных товаров" className="h-9 min-w-0 bg-slate-700 px-2 text-xs text-slate-200 w-28 sm:w-32">
+                <SelectValue placeholder="Пол: Без изм.">
+                  {selectedGender || 'Пол: Без изм.'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unchanged__">Пол: Без изменений</SelectItem>
+                <SelectItem value="Для мужчин">Для мужчин</SelectItem>
+                <SelectItem value="Для женщин">Для женщин</SelectItem>
+                <SelectItem value="Унисекс">Унисекс</SelectItem>
+              </SelectContent>
+            </Select>
 
             <Input
               type="number"
@@ -636,11 +726,12 @@ export default function ProductList({
               inputMode="decimal"
               aria-label="Цена для выбранных товаров"
               placeholder="Цена, ₽"
-              className="h-10 w-full shrink-0 border-slate-600 bg-slate-700 px-2 text-sm text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none lg:w-28"
+              className="h-9 w-20 sm:w-24 shrink-0 border-slate-600 bg-slate-700 px-2 text-xs text-slate-200 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               disabled={isBulkUpdating || isBulkDeleting}
             />
 
             <MeasurementTemplateBulkPicker
+              compact
               value={selectedMeasurementTemplate}
               onChange={setSelectedMeasurementTemplate}
               disabled={isBulkUpdating || isBulkDeleting}
@@ -656,14 +747,15 @@ export default function ProductList({
               aria-label="Объединить выбранные товары в цветовую семью"
               title="В цветовую семью"
             >
-              <Layers3 className={`h-4 w-4`} />
+              <Layers3 className="h-4 w-4" />
             </Button>
 
             <Button
               type="button"
+              size="sm"
               onClick={handleBulkUpdate}
               disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting}
-              className="h-10 w-full shrink-0 whitespace-nowrap px-4 lg:w-auto"
+              className="h-9 shrink-0 whitespace-nowrap px-3 text-xs font-medium"
             >
               {isBulkUpdating ? 'Обновление...' : 'Применить'}
             </Button>

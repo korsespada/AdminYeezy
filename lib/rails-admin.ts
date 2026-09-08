@@ -2602,6 +2602,30 @@ export async function patchRailsAdminProduct(id: string, data: Record<string, an
     product.metadata = metadata
   }
 
+  if (data.supplierId !== undefined || data.supplier_id !== undefined || data.supplierName !== undefined || data.supplier_name !== undefined) {
+    const rawSupplierId = String(data.supplierId || data.supplier_id || '').trim()
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSupplierId)
+    const supplierName = String(data.supplierName || data.supplier_name || '').trim()
+    const supplierAvatar = String(data.supplierAvatar || data.supplier_avatar || '').trim() || null
+
+    if (isUuid) {
+      product.primary_supplier_id = rawSupplierId
+    } else if (supplierName) {
+      product.primary_supplier_name = supplierName
+      if (supplierAvatar) product.primary_supplier_avatar = supplierAvatar
+    }
+
+    const sourceSupplierId = String(data.supplierSourceId || data.supplier_source_id || '').trim()
+    if (sourceSupplierId) {
+      const currentMetadata = await getCurrentMetadata()
+      const metadata = product.metadata && typeof product.metadata === 'object'
+        ? { ...currentMetadata, ...product.metadata }
+        : { ...currentMetadata }
+      metadata.source_supplier_id = sourceSupplierId
+      product.metadata = metadata
+    }
+  }
+
   const result = await railsFetch<{ product: any }>(`/admin/products/${id}`, {
     method: 'PATCH',
     body: JSON.stringify({ product }),

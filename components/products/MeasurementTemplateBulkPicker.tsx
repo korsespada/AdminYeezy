@@ -9,10 +9,12 @@ export default function MeasurementTemplateBulkPicker({
   value,
   onChange,
   disabled,
+  compact = false,
 }: {
   value: MeasurementTemplate | null
   onChange: (template: MeasurementTemplate | null) => void
   disabled?: boolean
+  compact?: boolean
 }) {
   const [templates, setTemplates] = useState<MeasurementTemplate[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,20 +33,20 @@ export default function MeasurementTemplateBulkPicker({
   }, [])
 
   if (loading) return <Loader2 className="h-4 w-4 animate-spin text-slate-500" aria-label="Загрузка шаблонов размеров" />
-  if (!templates.length) return <span className="text-xs text-slate-500">Нет шаблонов размеров</span>
+  if (!templates.length) return compact ? null : <span className="text-xs text-slate-500">Нет шаблонов размеров</span>
 
   return (
     <label className="relative flex shrink-0 items-center gap-1.5">
-      <span className="text-xs text-slate-500">Размеры</span>
+      {!compact && <span className="text-xs text-slate-500">Размеры</span>}
       <span className="relative">
         <select
           value={value ? String(value.id) : ''}
           onChange={(event) => onChange(templates.find((template) => String(template.id) === event.target.value) || null)}
           disabled={disabled}
           aria-label="Шаблон размеров для выбранных товаров"
-          className="h-9 w-64 appearance-none rounded-md border border-slate-600 bg-slate-700 py-1.5 pl-2 pr-7 text-xs text-slate-200 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className={`h-9 appearance-none rounded-md border border-slate-600 bg-slate-700/90 py-1.5 pl-2 pr-7 text-xs text-slate-200 outline-none focus:border-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 ${compact ? 'w-32 sm:w-36 xl:w-40 truncate' : 'w-64'}`}
         >
-          <option value="">Без изменений</option>
+          <option value="">{compact ? 'Размеры: Без изм.' : 'Без изменений'}</option>
           {templates.map((template) => (
             <option key={template.id} value={template.id}>
               {template.supplierName || 'Без поставщика'} · {measurementTemplateGarmentLabel(template.garmentType)} · {template.name}
