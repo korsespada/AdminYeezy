@@ -50,7 +50,7 @@ interface ProductFormProps {
   supplierOptions?: ProductSupplierOption[]
   isOpen: boolean
   onClose: () => void
-  onSave?: (updatedProduct: Product) => void
+  onSave?: (updatedProduct: Product, updatedListing?: RailsChromoffListing) => void
   onOpenProduct?: (productId: string) => void
   chromoffListing?: RailsChromoffListing | null
   chromoffCategories?: RailsChromoffCategory[]
@@ -669,6 +669,20 @@ export default function ProductForm({
         chromoffFormData.append('chromoff_seo_description', chromoffSeoDescription.trim())
       }
       if (onSave) {
+        const nextListing: RailsChromoffListing | undefined = chromoffListing ? {
+          ...chromoffListing,
+          published: chromoffPublished,
+          chromoff_published: chromoffPublished,
+          chromoff_category: chromoffCategoryId
+            ? chromoffCategories?.find((c) => c.id === chromoffCategoryId) || chromoffListing.chromoff_category
+            : null,
+          chromoff_category_status: 'manual',
+          legacy_slug: chromoffLegacySlug.trim() || chromoffListing.legacy_slug,
+          h1: chromoffH1.trim(),
+          seo_title: chromoffSeoTitle.trim(),
+          seo_description: chromoffSeoDescription.trim(),
+        } : undefined
+
         // Optimistically update the list and release the editor immediately.
         onSave({
           ...product,
@@ -705,7 +719,7 @@ export default function ProductForm({
           media: mediaPayload,
           video_url: videoUrl.trim() || null,
           video_poster_url: videoPosterUrl.trim() || null,
-        })
+        }, nextListing)
       }
       onClose()
 
@@ -725,7 +739,9 @@ export default function ProductForm({
           } else if (!chromoffResult.success) {
             window.alert(chromoffResult.message || 'Не удалось сохранить настройки Chromoff')
           }
-          router.refresh()
+          if (!onSave) {
+            router.refresh()
+          }
         })
         .catch(() => window.alert('Не удалось сохранить товар'))
       return

@@ -21,6 +21,7 @@ type ChromoffSearchParams = {
   page?: string
   perPage?: string
   q?: string
+  sku?: string
   category?: string
   subcategory?: string
   minPrice?: string
@@ -61,6 +62,7 @@ export default async function ChromoffPage({
   const perPage = pageSize(params.perPage)
   const filters = {
     q: params.q?.trim() || '',
+    sku: params.sku?.trim() || '',
     category: params.category || '',
     subcategory: params.subcategory || '',
     minPrice: params.minPrice || '',
@@ -82,6 +84,7 @@ export default async function ChromoffPage({
         page,
         perPage,
         search: filters.q,
+        sku: filters.sku || undefined,
         categoryId: filters.chromoffSubcategory || filters.chromoffCategory,
         minPrice: filters.minPrice,
         maxPrice: filters.maxPrice,

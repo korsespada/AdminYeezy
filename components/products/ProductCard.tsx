@@ -50,9 +50,10 @@ interface ProductCardProps {
     sourceNumber?: number;
     extraBadges?: React.ReactNode;
     extraFooter?: React.ReactNode;
+    photosOnly?: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter, photosOnly = false }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -229,6 +230,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
             <div
                 className="relative aspect-[4/3] cursor-pointer overflow-hidden bg-slate-900"
                 onClick={() => onEdit(product)}
+                title={photosOnly ? product.name : undefined}
             >
                 {thumb ? (
                     <Image
@@ -281,12 +283,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 </div>
 
                 {/* Photo Count Tag */}
-                {product.photos && product.photos.length > 0 && (
+                {((product.photos && product.photos.length > 0) || photosOnly) && (
                     <Badge variant="outline" className="absolute bottom-2 right-2 z-10 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-300 backdrop-blur-sm">
-                        {product.photos.length} фото
+                        {product.photos?.length || 0} фото
                     </Badge>
                 )}
-                {(sourceNumber || product.video_url) && (
+                {!photosOnly && (sourceNumber || product.video_url) && (
                     <div className="absolute bottom-2 left-2 z-10 flex flex-wrap gap-1">
                         {sourceNumber && (
                             <Badge variant="outline" className="border-slate-700/50 bg-slate-900/80 px-1.5 py-0 font-mono text-[10px] text-slate-200 backdrop-blur-sm">
@@ -302,7 +304,8 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                 )}
             </div>
 
-            <CardContent className="flex flex-1 flex-col p-3">
+            {!photosOnly && (
+                <CardContent className="flex flex-1 flex-col p-3">
                 <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="truncate text-[10px] font-semibold text-indigo-400">
                         {brandLabel}
@@ -410,6 +413,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     )}
                 </div>
             </CardContent>
+            )}
         </Card>
     );
 });

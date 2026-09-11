@@ -50,6 +50,7 @@ describe('rails admin product adapter', () => {
       page: 2,
       perPage: 100,
       search: 'mules',
+      sku: 'GUCCI-SKU-123',
       name: 'Gucci mule',
       description: 'leather',
       priceMin: '0',
@@ -68,6 +69,7 @@ describe('rails admin product adapter', () => {
     expect(params.toString()).toContain('page=2')
     expect(params.toString()).toContain('per_page=100')
     expect(params.get('q')).toBe('mules')
+    expect(params.get('sku')).toBe('GUCCI-SKU-123')
     expect(params.get('name')).toBeNull()
     expect(params.get('description')).toBe('leather')
     expect(params.get('price_min')).toBe('0')

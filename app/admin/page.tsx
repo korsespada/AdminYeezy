@@ -13,6 +13,7 @@ type AdminSearchParams = {
   page?: string
   search?: string
   name?: string
+  sku?: string
   description?: string
   priceMin?: string
   priceMax?: string
@@ -40,6 +41,7 @@ export default async function AdminPage({
   const perPage = PRODUCT_PAGE_SIZES.includes(rawPerPage) ? rawPerPage : 40
   const offset = (page - 1) * perPage
   const nameSearch = params.name || params.search || ''
+  const skuSearch = params.sku || ''
   const descriptionSearch = params.description || ''
   const priceMin = params.priceMin || ''
   const priceMax = params.priceMax || ''
@@ -56,6 +58,7 @@ export default async function AdminPage({
   const attributeValueFilter = attributeKeyFilter ? params.attributeValue || '' : ''
   const hasActiveFilters = Boolean(
     nameSearch
+    || skuSearch
     || descriptionSearch
     || priceMin
     || priceMax
@@ -73,6 +76,7 @@ export default async function AdminPage({
     const params = new URLSearchParams()
     if (p !== 1) params.set('page', p.toString())
     if (nameSearch) params.set('name', nameSearch)
+    if (skuSearch) params.set('sku', skuSearch)
     if (descriptionSearch) params.set('description', descriptionSearch)
     if (priceMin) params.set('priceMin', priceMin)
     if (priceMax) params.set('priceMax', priceMax)
@@ -105,6 +109,7 @@ export default async function AdminPage({
       page,
       perPage,
       name: nameSearch,
+      sku: skuSearch || undefined,
       description: descriptionSearch,
       priceMin,
       priceMax,
@@ -128,6 +133,7 @@ export default async function AdminPage({
         : Promise.resolve({ products: [], totalItems: 0, totalPages: 0 }),
       getRailsProductFilterFacets({
         name: nameSearch,
+        sku: skuSearch || undefined,
         description: descriptionSearch,
         priceMin,
         priceMax,

@@ -217,8 +217,13 @@ YeezyUnique и одновременно иметь другое меню/SEO н�
 создаются скрытыми до ручной проверки; listings с `sync_mode=manual` не меняются.
 Если AI не выбрал категорию Chromoff, `chromoff_category_id` остаётся пустым,
 listing получает `needs_review` и назначается из `/admin/chromoff`.
-Массовая смена поставщика на `/admin/chromoff` обновляет источник listing и
-общий `Product.primary_supplier`. В ответе Chromoff API `supplier_options`
+Массовые операции на `/admin/chromoff` поддерживают публикацию, смену поставщика
+и назначение категории/подкатегории Chromoff (`PATCH /api/v1/admin/chromoff/listings/bulk_update`
+с параметром `chromoff_category_id`). Сортировка listings по умолчанию строится по
+`sort_order ASC, created_at DESC, id DESC`, чтобы сохранение карточки не приводило к
+её скачку в начало списка. Поиск по строке (`q`) и параметру `sku` в админке
+и Chromoff, и общего каталога сопоставляет товары по названию, `products.sku`,
+`products.external_id`, `product_variants.sku` и SEO-артикулу. В ответе Chromoff API `supplier_options`
 сохраняет список source-поставщиков для фильтра, а
 `assignable_supplier_options` содержит всех Rails-поставщиков для массового
 назначения; выбранная существующая Rails-запись переиспользуется без создания

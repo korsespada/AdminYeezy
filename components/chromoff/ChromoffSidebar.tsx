@@ -104,8 +104,8 @@ export default function ChromoffSidebar({
 
           <form onSubmit={submitTextAndPrice} className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="chromoff-name" className="text-slate-300">Название</Label>
-              <div className="relative"><Input id="chromoff-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название или артикул..." className="h-9 bg-slate-700 pl-9 text-sm text-slate-200 placeholder:text-slate-500" /><Search className="absolute left-3 top-2 h-4 w-4 text-slate-500" /></div>
+              <Label htmlFor="chromoff-name" className="text-slate-300">Название / SKU</Label>
+              <div className="relative"><Input id="chromoff-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Название, артикул, SKU..." className="h-9 bg-slate-700 pl-9 text-sm text-slate-200 placeholder:text-slate-500" /><Search className="absolute left-3 top-2 h-4 w-4 text-slate-500" /></div>
             </div>
             <div className="space-y-1">
               <Label htmlFor="chromoff-description" className="text-slate-300">Описание</Label>

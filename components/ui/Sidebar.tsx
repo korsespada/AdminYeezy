@@ -442,12 +442,12 @@ const Sidebar: React.FC<SidebarProps> = ({
 
                         {/* Search */}
                         <form onSubmit={handleTextSearch}>
-                            <Label htmlFor="product-name-search" className="mb-2 block text-slate-300">Название</Label>
+                            <Label htmlFor="product-name-search" className="mb-2 block text-slate-300">Название / SKU</Label>
                             <div className="relative mb-3">
                                 <Input
                                     id="product-name-search"
                                     type="text"
-                                    placeholder="Название или артикул..."
+                                    placeholder="Название, SKU, артикул..."
                                     value={nameValue}
                                     onChange={(e) => setNameValue(e.target.value)}
                                     className="bg-slate-700 pl-9 text-slate-200 placeholder:text-slate-500"

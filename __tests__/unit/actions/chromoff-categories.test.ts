@@ -4,9 +4,12 @@ const mocks = vi.hoisted(() => ({
   listRailsChromoffCategories: vi.fn(),
   runRailsChromoffImport: vi.fn(),
   revalidatePath: vi.fn(),
+  bulkUpdateRailsChromoffListingsCategory: vi.fn(),
+  updateRailsChromoffListing: vi.fn(),
 }))
 
 vi.mock('@/lib/rails-admin', () => ({
+  bulkUpdateRailsChromoffListingsCategory: mocks.bulkUpdateRailsChromoffListingsCategory,
   bulkUpdateRailsChromoffListingsPublished: vi.fn(),
   bulkUpdateRailsChromoffListingsSupplier: vi.fn(),
   createRailsChromoffListing: vi.fn(),
@@ -14,14 +17,14 @@ vi.mock('@/lib/rails-admin', () => ({
   listRailsChromoffCategories: mocks.listRailsChromoffCategories,
   runRailsChromoffImport: mocks.runRailsChromoffImport,
   updateRailsChromoffCategory: vi.fn(),
-  updateRailsChromoffListing: vi.fn(),
+  updateRailsChromoffListing: mocks.updateRailsChromoffListing,
 }))
 
 vi.mock('next/cache', () => ({
   revalidatePath: mocks.revalidatePath,
 }))
 
-import { createChromoffSubcategoryAction } from '@/actions/chromoff'
+import { createChromoffSubcategoryAction, setChromoffListingsCategoryAction } from '@/actions/chromoff'
 
 function buildFormData(overrides: Record<string, string> = {}) {
   const data = new FormData()
@@ -99,5 +102,41 @@ describe('createChromoffSubcategoryAction', () => {
 
     expect(result.success).toBe(false)
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
+  })
+})
+
+describe('setChromoffListingsCategoryAction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('updates listings through bulk endpoint', async () => {
+    mocks.bulkUpdateRailsChromoffListingsCategory.mockResolvedValue({ updated: 2, chromoff_category_id: 'cat-1' })
+    const result = await setChromoffListingsCategoryAction(['list-1', 'list-2'], 'cat-1')
+
+    expect(result.success).toBe(true)
+    expect(result.updated).toBe(2)
+    expect(mocks.bulkUpdateRailsChromoffListingsCategory).toHaveBeenCalledWith(['list-1', 'list-2'], 'cat-1')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/chromoff')
+  })
+
+  it('falls back to individual updates if bulk update throws', async () => {
+    mocks.bulkUpdateRailsChromoffListingsCategory.mockRejectedValue(new Error('Endpoint not supported'))
+    mocks.updateRailsChromoffListing.mockResolvedValue({ id: 'list-1' })
+
+    const result = await setChromoffListingsCategoryAction(['list-1'], 'cat-1')
+
+    expect(result.success).toBe(true)
+    expect(result.updated).toBe(1)
+    expect(mocks.updateRailsChromoffListing).toHaveBeenCalledWith('list-1', { chromoffCategoryId: 'cat-1' })
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/chromoff')
+  })
+
+  it('validates selected listings and category', async () => {
+    const noIds = await setChromoffListingsCategoryAction([], 'cat-1')
+    expect(noIds.success).toBe(false)
+
+    const noCat = await setChromoffListingsCategoryAction(['list-1'], '')
+    expect(noCat.success).toBe(false)
   })
 })

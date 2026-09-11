@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { buildChromoffImportPayload, buildChromoffManualSubcategoryPayload, slugify } from '@/lib/chromoff-source'
-import { bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, listRailsChromoffCategories, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
+import { bulkUpdateRailsChromoffListingsCategory, bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, listRailsChromoffCategories, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
 
 export async function deleteChromoffListingAction(id: string) {
   const listingId = String(id || '').trim()
@@ -70,6 +70,32 @@ export async function setChromoffListingsSupplierAction(listingIds: string[], so
     return { success: true, updated: result.updated, message: 'Поставщик обновлён у выбранных товаров.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить поставщика.' }
+  }
+}
+
+export async function setChromoffListingsCategoryAction(listingIds: string[], chromoffCategoryId: string) {
+  const ids = [...new Set(listingIds.map(String).map((value) => value.trim()).filter(Boolean))]
+  if (!ids.length) return { success: false, message: 'Не выбраны карточки Chromoff.' }
+  if (!chromoffCategoryId) return { success: false, message: 'Выберите категорию Chromoff.' }
+
+  try {
+    try {
+      const result = await bulkUpdateRailsChromoffListingsCategory(ids, chromoffCategoryId)
+      revalidatePath('/admin/chromoff')
+      return { success: true, updated: result.updated, message: 'Категория Chromoff обновлена у выбранных товаров.' }
+    } catch {
+      for (let index = 0; index < ids.length; index += 5) {
+        await Promise.all(
+          ids.slice(index, index + 5).map((id) =>
+            updateRailsChromoffListing(id, { chromoffCategoryId }),
+          ),
+        )
+      }
+      revalidatePath('/admin/chromoff')
+      return { success: true, updated: ids.length, message: 'Категория Chromoff обновлена у выбранных товаров.' }
+    }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось обновить категорию Chromoff.' }
   }
 }
 

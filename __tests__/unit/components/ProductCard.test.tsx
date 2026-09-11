@@ -172,4 +172,26 @@ describe('ProductCard grid presentation', () => {
     expect(screen.getByAltText('Катя Источник')).toBeInTheDocument()
     expect(screen.queryByText(/Поставщик:/)).not.toBeInTheDocument()
   })
+
+  it('renders only photo preview with count badge when photosOnly is true', () => {
+    render(
+      <ProductCard
+        product={{
+          ...product,
+          photos: ['https://cdn.example.test/photo1.jpg', 'https://cdn.example.test/photo2.jpg'],
+        }}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+        photosOnly={true}
+      />,
+    )
+
+    expect(screen.getByText('2 фото')).toBeInTheDocument()
+    expect(screen.queryByText('Компактная карточка')).not.toBeInTheDocument()
+    expect(screen.queryByText('Описание товара')).not.toBeInTheDocument()
+    expect(screen.queryByText('42 000 ₽')).not.toBeInTheDocument()
+  })
 })

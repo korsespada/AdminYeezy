@@ -843,6 +843,7 @@ export async function listRailsChromoffListings(options: {
   page?: number
   perPage?: number
   search?: string
+  sku?: string
   published?: boolean
   categoryId?: string
   minPrice?: string | number
@@ -860,6 +861,7 @@ export async function listRailsChromoffListings(options: {
   params.set('page', String(options.page || 1))
   params.set('per_page', String(options.perPage || 50))
   if (options.search?.trim()) params.set('q', options.search.trim())
+  if (options.sku?.trim()) params.set('sku', options.sku.trim())
   if (typeof options.published === 'boolean') params.set('published', String(options.published))
   if (options.categoryId) params.set('category_id', options.categoryId)
   if (options.minPrice !== undefined && String(options.minPrice).trim()) params.set('min_price', String(options.minPrice))
@@ -989,6 +991,14 @@ export async function bulkUpdateRailsChromoffListingsSupplier(listingIds: string
   return result
 }
 
+export async function bulkUpdateRailsChromoffListingsCategory(listingIds: string[], chromoffCategoryId: string | null) {
+  const result = await railsFetch<{ updated: number; chromoff_category_id?: string | null }>('/admin/chromoff/listings/bulk_update', {
+    method: 'PATCH',
+    body: JSON.stringify({ listing_ids: listingIds, chromoff_category_id: chromoffCategoryId || '__none__' }),
+  })
+  return result
+}
+
 export async function listRailsChromoffCandidates() {
   const result = await railsFetch<{ products: RailsChromoffCandidate[] }>('/admin/chromoff/listings/candidates?per_page=100')
   return result.products || []
@@ -1065,6 +1075,7 @@ export async function listRailsAdminProducts(options: {
   page: number
   perPage: number
   search?: string
+  sku?: string
   name?: string
   description?: string
   priceMin?: string | number
@@ -1106,6 +1117,7 @@ async function listRailsAdminProductsInChunks(options: {
   page: number
   perPage: number
   search?: string
+  sku?: string
   name?: string
   description?: string
   priceMin?: string | number
@@ -1926,6 +1938,7 @@ export function buildRailsAdminProductsParams(options: {
   page: number
   perPage: number
   search?: string
+  sku?: string
   name?: string
   description?: string
   priceMin?: string | number
@@ -1951,6 +1964,7 @@ export function buildRailsAdminProductsParams(options: {
   // admin UI's `name` option, but send it through the supported API parameter.
   const search = normalizeProductSearchInput(options.search || options.name)
   if (search) params.set('q', search)
+  if (options.sku?.trim()) params.set('sku', options.sku.trim())
   const description = options.description?.trim() || ''
   if (description) params.set('description', description)
   const priceMin = normalizePriceRublesFilter(options.priceMin)
@@ -2021,6 +2035,7 @@ function extractProductSlugFromPath(value: string) {
 
 type ProductFacetFilters = {
   search?: string
+  sku?: string
   name?: string
   description?: string
   priceMin?: string | number
