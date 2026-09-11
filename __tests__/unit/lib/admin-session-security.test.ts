@@ -75,4 +75,37 @@ describe('admin session security', () => {
 
     await expect(getAdminSession()).resolves.toBeNull()
   })
+
+  it('authenticates external agents via Authorization: Bearer ANALYTICS_API_KEY', async () => {
+    vi.stubEnv('ANALYTICS_API_KEY', 'secret-analytics-token-123')
+    const req = new Request('https://admin.example.com/api/analytics', {
+      headers: { Authorization: 'Bearer secret-analytics-token-123' },
+    })
+
+    await expect(requireAdmin(req)).resolves.toMatchObject({
+      role: 'agent',
+      source: 'local',
+    })
+  })
+
+  it('authenticates external agents via x-api-key header', async () => {
+    vi.stubEnv('ANALYTICS_API_KEY', 'secret-analytics-token-123')
+    const req = new Request('https://admin.example.com/api/analytics', {
+      headers: { 'x-api-key': 'secret-analytics-token-123' },
+    })
+
+    await expect(requireAdmin(req)).resolves.toMatchObject({
+      role: 'agent',
+      source: 'local',
+    })
+  })
+
+  it('rejects invalid API key when no admin session exists', async () => {
+    vi.stubEnv('ANALYTICS_API_KEY', 'secret-analytics-token-123')
+    const req = new Request('https://admin.example.com/api/analytics', {
+      headers: { Authorization: 'Bearer wrong-key' },
+    })
+
+    await expect(requireAdmin(req)).rejects.toMatchObject({ name: 'AdminAuthError' })
+  })
 })

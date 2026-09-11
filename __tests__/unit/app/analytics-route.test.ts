@@ -188,6 +188,8 @@ describe('Analytics route unit tests', () => {
     expect(data.searchDemands[0].searches).toBe(25)
     expect(data.searchDemands[0].unique_users).toBe(18)
 
+    expect(data.summary).toContain('📊 Сводка YeezyUnique')
+
     expect(data.externalIntegrations.yandexMetrika.configured).toBe(true)
     expect(data.externalIntegrations.yandexMetrika.counterId).toBe('12345678')
     expect(data.externalIntegrations.yandexWebmaster.configured).toBe(true)
@@ -198,5 +200,22 @@ describe('Analytics route unit tests', () => {
     expect(data.externalIntegrations.googleMerchantCenter.accountId).toBe('5830671674')
     expect(data.externalIntegrations.googleAnalytics.configured).toBe(true)
     expect(data.externalIntegrations.googleAnalytics.tagId).toBe('G-ABC123XYZ')
+  })
+
+  it('returns AI agent formatted summary and metrics when format=summary', async () => {
+    const response = await GET(new Request('https://admin.example.com/api/analytics?period=today&format=summary'))
+    expect(response.status).toBe(200)
+    const data = await response.json()
+    expect(data.summary).toContain('📊 Сводка YeezyUnique')
+    expect(data.metrics).toBeDefined()
+    expect(data.metrics.period).toBe('today')
+  })
+
+  it('returns plain text markdown summary when format=text', async () => {
+    const response = await GET(new Request('https://admin.example.com/api/analytics?period=today&format=text'))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toContain('text/plain')
+    const text = await response.text()
+    expect(text).toContain('📊 Сводка YeezyUnique')
   })
 })

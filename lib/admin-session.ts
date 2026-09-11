@@ -1,3 +1,5 @@
+import crypto from 'crypto'
+
 export const ADMIN_SESSION_COOKIE = 'admin_auth'
 export const ADMIN_TOKEN_COOKIE = 'admin_token'
 export const LEGACY_PB_AUTH_COOKIE = 'pb_auth'
@@ -113,7 +115,41 @@ export async function getAdminSession(): Promise<AdminSession | null> {
   return null
 }
 
-export async function requireAdmin() {
+export async function authenticateApiOrAdmin(request: Request): Promise<AdminSession> {
+  const authHeader = request.headers.get('authorization')
+  const apiKeyHeader = request.headers.get('x-api-key')
+  const token = authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7).trim()
+    : apiKeyHeader?.trim()
+
+  if (token) {
+    const configuredKeys = [
+      process.env.ANALYTICS_API_KEY,
+      process.env.ADMIN_API_KEY,
+      process.env.BATCH_AI_WORKER_TOKEN,
+      process.env.NODE_ENV !== 'production' ? 'dev-analytics-key' : undefined,
+    ].filter((k): k is string => Boolean(k && k.trim().length > 0))
+
+    for (const key of configuredKeys) {
+      if (token.length === key.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(key))) {
+        return { id: 'api-key', email: 'agent@yeezyunique.ru', role: 'agent', source: 'local' }
+      }
+    }
+
+    if (!isJwtExpired(token) && (await verifyRailsAdminToken(token))) {
+      return { id: 'rails-admin', email: '', role: 'admin', source: 'rails' }
+    }
+  }
+
+  const session = await getAdminSession()
+  if (!session) throw new AdminAuthError()
+  return session
+}
+
+export async function requireAdmin(request?: Request) {
+  if (request) {
+    return authenticateApiOrAdmin(request)
+  }
   const session = await getAdminSession()
   if (!session) throw new AdminAuthError()
   return session

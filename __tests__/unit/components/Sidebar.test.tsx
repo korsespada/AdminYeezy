@@ -212,7 +212,7 @@ describe('Sidebar faceted filters', () => {
     const user = userEvent.setup()
     renderSidebar()
 
-    await user.type(screen.getByLabelText('Название'), '  leather bag  ')
+    await user.type(screen.getByLabelText(/Название/), '  leather bag  ')
 
     expect(navigationMock.push).not.toHaveBeenCalled()
 
@@ -225,7 +225,7 @@ describe('Sidebar faceted filters', () => {
     const user = userEvent.setup()
     renderSidebar()
 
-    await user.type(screen.getByLabelText('Название'), 'sneakers{Enter}')
+    await user.type(screen.getByLabelText(/Название/), 'sneakers{Enter}')
 
     expect(navigationMock.push).toHaveBeenCalledWith('/admin?name=sneakers')
   })

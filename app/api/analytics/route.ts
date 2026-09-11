@@ -190,13 +190,80 @@ export function getPeriodSql(period: string, from?: string | null, to?: string |
   };
 }
 
+function buildAnalyticsSummary(params: {
+  period: string;
+  channel: string;
+  overview: any;
+  financial: any;
+  funnel: any[];
+  trafficSources: any[];
+  searchDemands: any[];
+  deviceList: any[];
+  countryList: any[];
+}): string {
+  const pLabels: Record<string, string> = {
+    today: "сегодня",
+    yesterday: "вчера",
+    week: "последние 7 дней",
+    month: "последние 30 дней",
+    all: "всё время",
+  };
+  const periodName = pLabels[params.period] || params.period;
+  const channelName = params.channel === "all" ? "все каналы" : params.channel;
+
+  const totalVis = params.overview.unique_visitors || 0;
+  const newVis = params.overview.new_visitors || 0;
+  const retVis = params.overview.returning_visitors || 0;
+  const rev = params.financial.revenue || 0;
+  const paidOrders = params.financial.paid_orders || 0;
+  const aov = params.financial.aov || 0;
+  const newBuyers = params.financial.new_buyers || 0;
+  const repeatBuyers = params.financial.repeat_buyers || 0;
+  const overallConv = params.funnel.length > 0 ? params.funnel[params.funnel.length - 1].rate : 0;
+
+  const lines: string[] = [];
+  lines.push(`📊 Сводка YeezyUnique за ${periodName} (${channelName})`);
+  lines.push("");
+  lines.push(`• Онлайн сейчас: ${params.overview.online_now || 0} чел.`);
+  lines.push(`• Трафик: ${totalVis.toLocaleString("ru-RU")} уник. посетителей (новых: ${newVis.toLocaleString("ru-RU")}, вернувшихся: ${retVis.toLocaleString("ru-RU")}), просмотров: ${params.overview.page_views || params.overview.total_events || 0}.`);
+  lines.push(`• Выручка CRM: ${rev.toLocaleString("ru-RU")} ₽ | Оплачено заказов: ${paidOrders} (средний чек: ${aov.toLocaleString("ru-RU")} ₽).`);
+  lines.push(`• Покупатели CRM: новые: ${newBuyers}, постоянные: ${repeatBuyers}.`);
+  lines.push(`• Сквозная конверсия в оплату: ${overallConv}%.`);
+
+  if (params.trafficSources.length > 0) {
+    lines.push("");
+    lines.push("• Источники трафика:");
+    for (const src of params.trafficSources.slice(0, 4)) {
+      lines.push(`  - ${src.name}: ${src.visitors} виз., корзин: ${src.carts} (${src.cartRate}%), заказов: ${src.checkouts} (${src.checkoutRate}%)`);
+    }
+  }
+
+  if (params.searchDemands.length > 0) {
+    const topQ = params.searchDemands.slice(0, 5).map((s: any) => `«${s.query}» (${s.searches})`).join(", ");
+    lines.push("");
+    lines.push(`• Поисковый спрос на витрине: ${topQ}`);
+  }
+
+  if (params.deviceList.length > 0) {
+    const totalD = params.deviceList.reduce((acc: number, d: any) => acc + Number(d.visitors || 0), 0) || 1;
+    const mob = params.deviceList.find((d: any) => {
+      const n = (d.name || "").toLowerCase();
+      return n.includes("моб") || n.includes("тел") || n.includes("phone") || n.includes("mobile");
+    })?.visitors || 0;
+    const mobPct = Math.round((Number(mob) / totalD) * 100);
+    lines.push(`• Устройства: Мобильные ${mobPct}%, Десктоп ${100 - mobPct}%.`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function GET(request: Request) {
   try {
-    await requireAdmin();
+    await requireAdmin(request);
 
     const configError = getAnalyticsDatabaseConfigError();
     if (configError) {
-      return NextResponse.json({ error: configError }, { status: 500 });
+      return NextResponse.json({ error: configError }, { status: 500, headers: corsHeaders() });
     }
 
     const { searchParams } = new URL(request.url);
@@ -204,6 +271,7 @@ export async function GET(request: Request) {
     const from = searchParams.get("from");
     const to = searchParams.get("to");
     const channel = getAnalyticsChannel(searchParams.get("channel"));
+    const format = searchParams.get("format")?.toLowerCase();
     const { timeFilter, periodStart, fromDate, toDate } = getPeriodSql(period, from, to);
     const channelFilter = getChannelSql(channel);
     const onlineChannelFilter = getChannelSql(channel);
@@ -680,55 +748,115 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({
+    const summary = buildAnalyticsSummary({
+      period,
+      channel,
       overview,
       financial,
       funnel,
-      seriesData: seriesRes.rows,
-      countryList: countryRes.rows,
-      osList: osRes.rows,
-      deviceList: deviceRes.rows,
-      topProducts: topProductsRes.rows,
-      topCart: topCartRes.rows,
       trafficSources,
       searchDemands,
-      externalIntegrations: {
-        yandexMetrika: {
-          configured: true,
-          counterId: ymCounterId,
-          apiActive: Boolean(ymApiStats),
-          stats: ymApiStats,
-        },
-        yandexWebmaster: {
-          configured: true,
-          siteUrl: "https://yeezyunique.ru",
-        },
-        googleSearchConsole: {
-          configured: true,
-          property: "sc-domain:yeezyunique.ru",
-        },
-        googleMerchantCenter: {
-          configured: true,
-          accountId: "5830671674",
-        },
-        googleAnalytics: {
-          configured: Boolean(
-            process.env.NEXT_PUBLIC_GA_ID ||
-              process.env.NEXT_PUBLIC_GTM_ID ||
-              process.env.GA_MEASUREMENT_ID,
-          ),
-          tagId:
-            process.env.NEXT_PUBLIC_GA_ID ||
-            process.env.NEXT_PUBLIC_GTM_ID ||
-            process.env.GA_MEASUREMENT_ID ||
-            null,
-        },
-      },
-      updatedAt: new Date().toISOString(),
+      deviceList: deviceRes.rows,
+      countryList: countryRes.rows,
     });
+
+    if (format === "text" || format === "markdown" || format === "summary_text") {
+      return new Response(summary, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          ...corsHeaders(),
+        },
+      });
+    }
+
+    if (format === "summary") {
+      return NextResponse.json(
+        {
+          summary,
+          period,
+          channel,
+          metrics: {
+            period,
+            channel,
+            online_now: overview.online_now,
+            unique_visitors: overview.unique_visitors,
+            new_visitors: overview.new_visitors,
+            returning_visitors: overview.returning_visitors,
+            page_views: overview.page_views,
+            revenue: financial.revenue,
+            paid_orders: financial.paid_orders,
+            aov: financial.aov,
+            new_buyers: financial.new_buyers,
+            repeat_buyers: financial.repeat_buyers,
+            conversion_rate: funnel.length > 0 ? funnel[funnel.length - 1].rate : 0,
+            top_sources: trafficSources.slice(0, 4).map((s: any) => ({
+              name: s.name,
+              visitors: s.visitors,
+              carts: s.carts,
+              checkouts: s.checkouts,
+            })),
+            top_search_queries: searchDemands.slice(0, 5).map((s: any) => s.query),
+          },
+          updatedAt: new Date().toISOString(),
+        },
+        { headers: corsHeaders() },
+      );
+    }
+
+    return NextResponse.json(
+      {
+        summary,
+        overview,
+        financial,
+        funnel,
+        seriesData: seriesRes.rows,
+        countryList: countryRes.rows,
+        osList: osRes.rows,
+        deviceList: deviceRes.rows,
+        topProducts: topProductsRes.rows,
+        topCart: topCartRes.rows,
+        trafficSources,
+        searchDemands,
+        externalIntegrations: {
+          yandexMetrika: {
+            configured: true,
+            counterId: ymCounterId,
+            apiActive: Boolean(ymApiStats),
+            stats: ymApiStats,
+          },
+          yandexWebmaster: {
+            configured: true,
+            siteUrl: "https://yeezyunique.ru",
+          },
+          googleSearchConsole: {
+            configured: true,
+            property: "sc-domain:yeezyunique.ru",
+          },
+          googleMerchantCenter: {
+            configured: true,
+            accountId: "5830671674",
+          },
+          googleAnalytics: {
+            configured: Boolean(
+              process.env.NEXT_PUBLIC_GA_ID ||
+                process.env.NEXT_PUBLIC_GTM_ID ||
+                process.env.GA_MEASUREMENT_ID,
+            ),
+            tagId:
+              process.env.NEXT_PUBLIC_GA_ID ||
+              process.env.NEXT_PUBLIC_GTM_ID ||
+              process.env.GA_MEASUREMENT_ID ||
+              null,
+          },
+        },
+        updatedAt: new Date().toISOString(),
+      },
+      { headers: corsHeaders() },
+    );
   } catch (error: any) {
     if (isAdminAuthError(error)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders() });
     }
 
     console.error("Analytics error:", error);
@@ -736,7 +864,7 @@ export async function GET(request: Request) {
       ? "Не удалось подключиться к базе аналитики. Проверь DATABASE_URL/ANALYTICS_DATABASE_URL и доступность Postgres из окружения админки."
       : error.message;
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500, headers: corsHeaders() });
   }
 }
 
@@ -842,18 +970,18 @@ export async function OPTIONS() {
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS, DELETE",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
   };
 }
 
 export async function DELETE(request: Request) {
   try {
-    await requireAdmin();
+    await requireAdmin(request);
 
     const configError = getAnalyticsDatabaseConfigError();
     if (configError) {
-      return NextResponse.json({ error: configError }, { status: 500 });
+      return NextResponse.json({ error: configError }, { status: 500, headers: corsHeaders() });
     }
 
     const { searchParams } = new URL(request.url);
@@ -877,16 +1005,19 @@ export async function DELETE(request: Request) {
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      message: `Статистика очищена (${type === "all" ? "все время" : period})`,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        message: `Статистика очищена (${type === "all" ? "все время" : period})`,
+      },
+      { headers: corsHeaders() },
+    );
   } catch (error: any) {
     if (isAdminAuthError(error)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders() });
     }
 
     console.error("Analytics DELETE error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500, headers: corsHeaders() });
   }
 }
