@@ -1261,6 +1261,28 @@ describe('batch AI normalization', () => {
     expect(normalizeBatchAiCategoryRules([])).toEqual([])
   })
 
+  it('preserves every supplier photo and mirrors technical facts into the description', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Подвеска',
+        description: 'Серебряная подвеска.',
+        catalog_attributes: { dimensions: '30,55 × 19,53 мм', weight: 4.6 },
+      },
+      media: { discard_indexes: [1], size_chart_indexes: [2] },
+    }, {
+      product: { name: '', photos: ['product.jpg', 'technical.jpg'], attributes: {} },
+      brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(),
+      attributeCodes: new Set(['dimensions', 'weight']),
+      processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, preserveAllPhotos: true },
+    })
+
+    expect(result.product.photos).toEqual(['product.jpg', 'technical.jpg'])
+    expect(result.product.attributes).toMatchObject({ dimensions: '30,55 × 19,53 мм', weight: 4.6 })
+    expect(result.product.description).toContain('Габариты: 30,55 × 19,53 мм')
+    expect(result.product.description).toContain('Вес: 4.6 г')
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [] })
+  })
+
   it('passes the actual price together with each supplier price rule', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { category: 'shoes' },

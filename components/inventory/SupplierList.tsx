@@ -19,6 +19,7 @@ type SupplierAiProcessingOptions = {
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
+  preserveAllPhotos: boolean
   suggestSubcategories: boolean
   suggestAttributes: boolean
 }
@@ -30,6 +31,7 @@ const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   splitAlbumColors: false,
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
+  preserveAllPhotos: false,
   suggestSubcategories: false,
   suggestAttributes: false,
 }
@@ -999,6 +1001,15 @@ export default function SupplierList({
                         className="mt-0.5 h-4 w-4 accent-violet-500"
                       />
                       <span><b className="block text-slate-100">Исключать альбом только с фото моделей</b><small className="text-xs text-slate-500">Товар убирается из текущей версии, исходник остаётся в снимке для отката.</small></span>
+                    </label>
+                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={editingSupplier?.ai_processing_options?.preserveAllPhotos || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, preserveAllPhotos: event.target.checked } })}
+                        className="mt-0.5 h-4 w-4 accent-violet-500"
+                      />
+                      <span><b className="block text-slate-100">Сохранять все фотографии и извлекать техданные</b><small className="text-xs text-slate-500">ИИ не удаляет технические фото; размеры и вес переносит в описание и характеристики.</small></span>
                     </label>
                   </div>
                   

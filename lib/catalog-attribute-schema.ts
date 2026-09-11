@@ -249,7 +249,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Бижутерия',
-    attributes: ['materials', 'jewelry_metal', 'stones', 'stone_origin', 'clasp_type'],
+    attributes: ['materials', 'jewelry_metal', 'stones', 'stone_origin', 'clasp_type', 'dimensions', 'weight'],
     subcategories: {
       Кольцо: ['jewelry_size'],
       Браслет: ['jewelry_size', 'jewelry_length'],
@@ -259,7 +259,7 @@ export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   },
   {
     category: 'Аксессуары',
-    attributes: ['materials', 'dimensions'],
+    attributes: ['materials', 'dimensions', 'weight'],
     subcategories: {
       'Головные уборы': ['sizes'],
       Перчатки: ['sizes'],

@@ -687,13 +687,19 @@ function catalogName(value: unknown, entityType: string, mappings: CatalogIdMapp
   return String(mapping?.name || raw).trim()
 }
 
-function productAttributeDefinitions(product: any, context: any) {
+function productAttributeDefinitions(product: any, context: any, processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS) {
   const mappedCategory = catalogName(product.category, 'category', context.mappings)
   const categoryName = context.categories.length === 1
     ? String(context.categories[0].name || mappedCategory)
     : mappedCategory
   const subcategoryName = catalogName(product.subcategory, 'subcategory', context.mappings)
-  return filterCatalogAttributeDefinitionsForCategory(context.definitions, categoryName, subcategoryName)
+  const definitions = filterCatalogAttributeDefinitionsForCategory(context.definitions, categoryName, subcategoryName)
+  if (!processingOptions.preserveAllPhotos) return definitions
+  const present = new Set(definitions.map((item: any) => item.code))
+  return [
+    ...definitions,
+    ...context.definitions.filter((item: any) => ['dimensions', 'weight'].includes(item.code) && !present.has(item.code)),
+  ]
 }
 
 async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: number | number[]) {
@@ -1326,7 +1332,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
               return clean
             })()
           : product
-        const attributeDefinitions = productAttributeDefinitions(product, context)
+        const attributeDefinitions = productAttributeDefinitions(product, context, normalizedProcessingOptions)
         const brandName = catalogName(product.brand, 'brand', context.mappings)
         const generatedSlug = mode === 'media_seo'
           ? String(product.slug || '').trim()

@@ -131,6 +131,23 @@ yeezy_scraping.products -> AdminYeezy publication adapter -> Rails API -> Rails 
 
 The legacy `shop` database is not the source of truth for the new storefront.
 
+## Chrome Hearts — подвески из теговой выгрузки (supplier 3)
+
+Активная DB-backed версия `CH Ювелирка, сумки, ремни — подвески с фото на
+моделях` обрабатывает выгрузки по тегу `Подвески обычные`. Она сопоставляет
+точные пары альбомов по внутреннему артикулу `Dxxx`/`Nxxx`: карточка с
+`型号` сохраняет свой `external_id` и `source_position`, а альбом с
+`上身图参考` добавляется к нему описанием и фотографиями на модели.
+
+Итоговый порядок галереи: фотографии товарного альбома со второго кадра,
+первый кадр товарного альбома — последним, затем фотографии альбома на
+модели. Технический внутренний артикул сохраняется в `attributes.model_code`.
+Для этого поставщика включён режим AI `preserveAllPhotos`: технические фото с
+габаритами и весом не удаляются, а подтверждённые значения должны попадать в
+`attributes.dimensions`/`attributes.weight` и дополнительно в описание.
+Для всех таких карточек задаются canonical category `Аксессуары`, subcategory
+`Другое` и gender `unisex`; исходный `SCRAPED` snapshot не изменяется.
+
 ## Шарфы (supplier 58)
 
 The active DB-backed version `Шарфы: длинные шарфы и головные уборы без квадратных шалей v4`

@@ -30,6 +30,7 @@ export type BatchAiProcessingOptions = {
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
+  preserveAllPhotos?: boolean
   suggestSubcategories?: boolean
   suggestAttributes?: boolean
 }
@@ -41,6 +42,7 @@ export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
   splitAlbumColors: false,
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
+  preserveAllPhotos: false,
   suggestSubcategories: false,
   suggestAttributes: false,
 }
@@ -54,6 +56,7 @@ export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProces
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
+    preserveAllPhotos: source.preserveAllPhotos === true,
     // Таксономия каталога закрыта: AI выбирает только значения из справочников.
     suggestSubcategories: false,
     suggestAttributes: false,
@@ -389,6 +392,12 @@ export function buildBatchAiUserPrompt(input: {
     ? categoryRules.map((rule) => `Автоматические правила категории «${rule.categoryName}». Они важнее особенностей поставщика:\n${rule.rules}`).join('\n\n')
     : 'Для категории товара дополнительные автоматические правила пока не заданы.'
   let referenceOffset = 0
+  const catalogAttributesShape = {
+    model_reference_key: '',
+    measurements: null,
+    size_recommendation: null,
+    ...(processingOptions.preserveAllPhotos ? { dimensions: '', weight: null } : {}),
+  }
   const priceRulePrompt = priceRules.map((rule) => {
     const references = (rule.reference_images || []).map((_, index) => referenceOffset + index + 1)
     referenceOffset += references.length
@@ -424,7 +433,7 @@ export function buildBatchAiUserPrompt(input: {
       product: {
         name: '', description: '',
         brand: 'existing-id-or-empty', category: 'existing-id', subcategory: 'existing-id-or-original',
-        gender: 'male|female|unisex|null', catalog_attributes: { model_reference_key: '', measurements: null, size_recommendation: null }, price_rule_key: '', price: null, confidence: 0,
+        gender: 'male|female|unisex|null', catalog_attributes: catalogAttributesShape, price_rule_key: '', price: null, confidence: 0,
       },
       chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
       photo_alts: [],
@@ -442,6 +451,10 @@ export function buildBatchAiUserPrompt(input: {
     'До заполнения product сначала внутренне проверь согласованность текста и всей серии фотографий. Исходный текст может принадлежать другой карточке; противоречащие фотографиям сведения не используй.',
     buildBatchAiDescriptionEvidencePrompt(product),
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
+    ...(processingOptions.preserveAllPhotos ? [
+      'Для этого поставщика запрещено удалять фотографии: не добавляй номера в media.discard_indexes или media.size_chart_indexes. Сохраняй в галерее все исходные фотографии, включая технические фото с габаритами, размерами и весом.',
+      'На каждом техническом фото обязательно распознай все подтверждённые числовые факты до заполнения description. Габариты запиши в catalog_attributes.dimensions, вес — в catalog_attributes.weight в граммах, а оба факта дополнительно включи в description в явном виде. Не округляй значения и не заменяй их догадками.',
+    ] : []),
     categoryRules.length > 1
       ? `Автоматические правила категорий. Выбери правило после определения верхней категории; эти правила важнее особенностей поставщика:\n${categoryRulePrompt}`
       : categoryRulePrompt,
@@ -1301,15 +1314,14 @@ export function normalizeBatchAiOutput(raw: any, input: {
       attributes.size_system = explicit.size_system
     }
   }
-  const rawDiscard = new Set<number>((raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
-  const rawSizeCharts = new Set<number>((raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
-  const measurementPhotoIndexes = new Set<number>((input.measurementPhotoIndexes || [])
+  const rawDiscard = new Set<number>((processingOptions.preserveAllPhotos ? [] : raw?.media?.discard_indexes || []).map(Number).filter((value: number) => value > 0))
+  const rawSizeCharts = new Set<number>((processingOptions.preserveAllPhotos ? [] : raw?.media?.size_chart_indexes || []).map(Number).filter((value: number) => value > 0))
+  const measurementPhotoIndexes = new Set<number>((processingOptions.preserveAllPhotos ? [] : input.measurementPhotoIndexes || [])
     .map(Number)
     .filter((value) => Number.isInteger(value) && value > 0))
-  // A chart is never a customer-facing product photo. Remove every chart
-  // identified by AI even when structured extraction is incomplete; source
-  // photos remain available when the operator explicitly reruns AI from the
-  // original batch.
+  // By default chart-like photos are removed even when structured extraction
+  // is incomplete. Supplier-specific preserveAllPhotos mode keeps the entire
+  // source gallery and lets the technical facts stay customer-facing.
   const sizeCharts = new Set([...rawSizeCharts, ...measurementPhotoIndexes])
   const discard = new Set([...rawDiscard].filter((index) => !sizeCharts.has(index)))
   const originalPhotos = Array.isArray(original.photos) ? original.photos : []
@@ -1580,6 +1592,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
   if (processingOptions.colorFamilyByArticle && rawColorFamily && articleKey) {
     rawColorFamily.group_signature = articleKey
   }
+
+  const technicalFactCandidates = processingOptions.preserveAllPhotos
+    ? [
+        attributes.dimensions ? `Габариты: ${String(attributes.dimensions).trim()}` : '',
+        attributes.weight !== undefined && attributes.weight !== null && String(attributes.weight).trim() !== ''
+          ? `Вес: ${String(attributes.weight).trim()} г`
+          : '',
+      ].filter(Boolean)
+    : []
+  const description = String(proposed.description || original.description || '').trim()
+  const missingTechnicalFacts = technicalFactCandidates.filter((fact) => !description.includes(fact.split(': ').slice(1).join(': ')))
+  const descriptionWithTechnicalFacts = missingTechnicalFacts.length
+    ? `${description}${description ? ' ' : ''}${missingTechnicalFacts.join('; ')}.`
+    : description
   let productName = nameWithoutLeadingBrand(
     String(proposed.name || original.name || ''),
     input.brandNames?.get(resolvedBrand),
@@ -1599,7 +1625,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       ...original,
       supplier_published_on: supplierPublishedOn,
       name: productName.slice(0, 250),
-      description: String(proposed.description || original.description || '').trim().slice(0, 8000),
+      description: descriptionWithTechnicalFacts.slice(0, 8000),
       // H1 всегда повторяет видимое имя; SEO-поля создаёт Rails из фактов товара.
       h1: productName.slice(0, 250),
       seo_title: '',
