@@ -2012,10 +2012,26 @@ export function buildRailsAdminProductsParams(options: {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
   params.set('per_page', String(options.perPage))
-  // Rails product endpoints expose text search through `q`. Keep accepting the
-  // admin UI's `name` option, but send it through the supported API parameter.
-  const search = normalizeProductSearchInput(options.search || options.name)
-  if (search) params.set('q', search)
+  // Rails ищет текст двумя способами:
+  //   `q`    — имя, external_id, sku, slug и sku вариантов;
+  //   `name` — то же самое, но БЕЗ slug.
+  // Slug в каталоге не всегда совпадает с текущим названием: у переименованных
+  // товаров в нём остаётся старое слово модели. Поэтому обычный текст ищем через
+  // `name`, иначе по запросу «kelly» в выдачу попадали товары вроде
+  // «Hermes 24/24» со старым slug `hermes-kelly-29-2`. Ссылку, slug или артикул
+  // по-прежнему отправляем в `q` — он же срабатывает на точный seo_article.
+  const explicitSearch = options.search?.trim() || ''
+  const nameQuery = options.name?.trim() || ''
+  if (explicitSearch) {
+    const search = normalizeProductSearchInput(explicitSearch)
+    if (search) params.set('q', search)
+  } else if (nameQuery) {
+    const search = normalizeProductSearchInput(nameQuery)
+    if (search) {
+      if (isIdentifierLikeSearch(nameQuery)) params.set('q', search)
+      else params.set('name', search)
+    }
+  }
   if (options.sku?.trim()) params.set('sku', options.sku.trim())
   const description = options.description?.trim() || ''
   if (description) params.set('description', description)
@@ -2064,6 +2080,23 @@ export function normalizeProductSearchInput(value?: string) {
     return extractProductSlugFromPath(url.pathname) || search
   } catch {
     return search
+  }
+}
+
+// Ссылка, путь /product/<slug>, голый slug или артикул вида `her-15129`:
+// для них нужен широкий `q`, который умеет и slug, и точный seo_article.
+const IDENTIFIER_SEARCH_PATTERN = /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$/
+
+export function isIdentifierLikeSearch(value?: string) {
+  const raw = value?.trim() || ''
+  if (!raw) return false
+  if (extractProductSlugFromPath(raw)) return true
+
+  try {
+    new URL(raw)
+    return true
+  } catch {
+    return IDENTIFIER_SEARCH_PATTERN.test(raw)
   }
 }
 

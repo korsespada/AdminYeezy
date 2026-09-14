@@ -111,15 +111,47 @@ describe('rails admin product adapter', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('maps the product name filter to the Rails text search parameter', () => {
+  it('searches a plain product name without matching slugs of renamed products', () => {
+    const params = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      name: '  kelly  ',
+    })
+
+    // Rails `q` дополнительно матчит slug, а у переименованных товаров в slug
+    // остаётся старое слово модели — по запросу «kelly» всплывал «Hermes 24/24»
+    // со slug hermes-kelly-29-2. Поэтому обычный текст идёт в `name`.
+    expect(params.get('name')).toBe('kelly')
+    expect(params.get('q')).toBeNull()
+  })
+
+  it('keeps the broad text search for a name that contains a space or apostrophe', () => {
     const params = buildRailsAdminProductsParams({
       page: 1,
       perPage: 40,
       name: "  Chaine D'Ancre To Go  ",
     })
 
-    expect(params.get('q')).toBe("Chaine D'Ancre To Go")
-    expect(params.get('name')).toBeNull()
+    expect(params.get('name')).toBe("Chaine D'Ancre To Go")
+    expect(params.get('q')).toBeNull()
+  })
+
+  it('keeps slug and article lookups on the broad text search', () => {
+    const bySlug = buildRailsAdminProductsParams({ page: 1, perPage: 40, name: 'hermes-kelly-28-her-48160' })
+    expect(bySlug.get('q')).toBe('hermes-kelly-28-her-48160')
+    expect(bySlug.get('name')).toBeNull()
+
+    const byArticle = buildRailsAdminProductsParams({ page: 1, perPage: 40, name: 'HER-15129' })
+    expect(byArticle.get('q')).toBe('HER-15129')
+    expect(byArticle.get('name')).toBeNull()
+
+    const byPastedNameLink = buildRailsAdminProductsParams({
+      page: 1,
+      perPage: 40,
+      name: 'https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share',
+    })
+    expect(byPastedNameLink.get('q')).toBe('gucci-kurtka-abc123')
+    expect(byPastedNameLink.get('name')).toBeNull()
   })
 
   it('normalizes pasted product URLs to product slugs for search', () => {
@@ -223,7 +255,7 @@ describe('rails admin product adapter', () => {
 
     const [url] = fetchMock.mock.calls[0]
     expect(String(url)).toBe(
-      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&q=bag&description=leather&price_min=0&price_max=5000000'
+      'https://rails.example.test/api/v1/admin/products?page=1&per_page=40&name=bag&description=leather&price_min=0&price_max=5000000'
     )
   })
 
