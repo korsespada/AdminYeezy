@@ -28,7 +28,12 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   try {
     await requireAdmin()
     const product = await updateRailsAdminProduct(id, formData)
-    revalidatePath('/admin')
+    // Одиночное сохранение карточки не инвалидирует /admin: список уже обновлён
+    // оптимистично, а revalidatePath заставлял Next заново рендерить страницу
+    // целиком (lookups + фасеты + список) и подменял клиентский список свежими
+    // пропсами, откатывая правки, сделанные за время этого рендера. Каталог
+    // читается с `cache: 'no-store'`, поэтому навигация всё равно получает
+    // актуальные данные.
     return { success: true, data: product }
   } catch (error: any) {
     console.error('Update product error:', error)

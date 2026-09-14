@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useTransition, useSyncExternalStore } from 'react'
 import Image from 'next/image'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { type Product, type Brand, type Category, type Subcategory, type ProductFilterFacets, type ProductSupplierOption } from '@/lib/types'
@@ -21,6 +21,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import { applyMeasurementTableAttributes, type MeasurementTemplate } from '@/lib/measurement-templates'
+
+const DESKTOP_VIEWPORT_QUERY = '(min-width: 1024px)'
+
+function subscribeToDesktopViewport(onChange: () => void) {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
+  const query = window.matchMedia(DESKTOP_VIEWPORT_QUERY)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
+}
+
+function getDesktopViewportSnapshot() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false
+  return window.matchMedia(DESKTOP_VIEWPORT_QUERY).matches
+}
 
 interface ProductListProps {
   initialData: Product[]
@@ -80,6 +94,9 @@ export default function ProductList({
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
   const [isNavigationPending, startNavigationTransition] = useTransition()
+  // Мобильная и desktop-раскладки взаимоисключающие: раньше обе ветки карточек
+  // монтировались одновременно и на странице из 500 товаров это удваивало работу.
+  const isDesktopViewport = useSyncExternalStore(subscribeToDesktopViewport, getDesktopViewportSnapshot, () => false)
 
   const selectedSupplierOption = useMemo(
     () => supplierOptions.find((s) => s.id === selectedSupplier),
@@ -176,6 +193,12 @@ export default function ProductList({
 
   const handleProductUpdate = useCallback((updatedProduct: Product) => {
     setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p))
+  }, [])
+
+  // Сохранение не прошло — возвращаем карточку к последнему известному
+  // серверному состоянию, иначе в списке останутся несохранённые данные.
+  const handleProductSaveFailed = useCallback((originalProduct: Product) => {
+    setProducts(prev => prev.map(p => p.id === originalProduct.id ? originalProduct : p))
   }, [])
 
   const handleToggleSelect = useCallback((id: string) => {
@@ -437,33 +460,8 @@ export default function ProductList({
                 <h3 className="text-lg font-medium text-slate-200">Ничего не найдено</h3>
                 <p className="text-slate-500 max-w-xs mx-auto mt-1">Попробуйте изменить параметры поиска или сбросить фильтры в боковой панели.</p>
               </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-4 lg:hidden">
-                  {products.map(product => (
-                    <ProductCard
-                      key={`mobile-${product.id}`}
-                      product={product}
-                      onEdit={handleEdit}
-                      onDelete={handleDelete}
-                      onUpdate={handleProductUpdate}
-                      selected={selectedProductIds.includes(product.id)}
-                      onToggleSelect={handleToggleSelect}
-                      onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
-                      categories={categories}
-                      subcategories={subcategories}
-                      supplierOptions={supplierOptions}
-                      variantCount={product.color_variants?.length || 0}
-                      variantColors={Array.from(new Set(
-                        (product.color_variants || [])
-                          .map((variant) => variant.color)
-                          .filter((color): color is string => Boolean(color)),
-                      ))}
-                      showAttributeSummary={false}
-                    />
-                  ))}
-                </div>
-                <div className="hidden lg:block">
+            ) : isDesktopViewport ? (
+              <div className="hidden lg:block">
                 {viewMode === 'grid' ? (
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-3 px-1">
@@ -541,8 +539,32 @@ export default function ProductList({
                     onUpdateProduct={handleProductUpdate}
                   />
                 )}
-                </div>
-              </>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 lg:hidden">
+                {products.map(product => (
+                  <ProductCard
+                    key={product.id}
+                    product={product}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onUpdate={handleProductUpdate}
+                    selected={selectedProductIds.includes(product.id)}
+                    onToggleSelect={handleToggleSelect}
+                    onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
+                    categories={categories}
+                    subcategories={subcategories}
+                    supplierOptions={supplierOptions}
+                    variantCount={product.color_variants?.length || 0}
+                    variantColors={Array.from(new Set(
+                      (product.color_variants || [])
+                        .map((variant) => variant.color)
+                        .filter((color): color is string => Boolean(color)),
+                    ))}
+                    showAttributeSummary={false}
+                  />
+                ))}
+              </div>
             )}
 
             {/* Pagination injection */}
@@ -565,6 +587,7 @@ export default function ProductList({
           setEditingProduct(null)
         }}
         onSave={handleProductUpdate}
+        onSaveFailed={handleProductSaveFailed}
         onOpenProduct={handleOpenProduct}
       />
 

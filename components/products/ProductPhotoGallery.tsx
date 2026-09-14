@@ -1,10 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Image from 'next/image'
 import { ChevronLeft, ChevronRight, Download, GripVertical, Maximize2, Trash2, X } from 'lucide-react'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
+
+type GalleryPhoto = {
+  url: string
+  /**
+   * Ключ не зависит от позиции: при перестановке React перемещает тот же DOM-узел,
+   * а не пересоздаёт его. Иначе браузер отменяет начатый drag и фото возвращается
+   * на прежнее место.
+   */
+  key: string
+}
+
+function buildGalleryPhotos(photos: string[]): GalleryPhoto[] {
+  const occurrences = new Map<string, number>()
+  return photos.map((url) => {
+    const occurrence = occurrences.get(url) || 0
+    occurrences.set(url, occurrence + 1)
+    return { url, key: `${url}#${occurrence}` }
+  })
+}
 
 export default function ProductPhotoGallery({
   photos,
@@ -24,18 +43,28 @@ export default function ProductPhotoGallery({
   emptyText?: string
 }) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const editable = Boolean(onChange || onMove)
+  const items = useMemo(() => buildGalleryPhotos(photos), [photos])
 
-  const movePhoto = (event: React.DragEvent, targetIndex: number) => {
-    event.preventDefault()
-    if ((!onChange && !onMove) || draggedIndex === null || draggedIndex === targetIndex) return
+  const finishDrag = () => {
+    setDraggedIndex(null)
+    setDropIndex(null)
+  }
+
+  // Перестановка применяется только по drop. Во время перетаскивания порядок в DOM
+  // не меняется, поэтому несколько событий dragenter подряд не могут применить
+  // взаимоисключающие перестановки из устаревшего снимка списка.
+  const commitMove = (fromIndex: number, toIndex: number) => {
+    if (!onChange && !onMove) return
+    if (fromIndex === toIndex) return
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= photos.length || toIndex >= photos.length) return
+
     const next = [...photos]
-    const [dragged] = next.splice(draggedIndex, 1)
-    next.splice(targetIndex, 0, dragged)
-    const sourceIndex = draggedIndex
-    setDraggedIndex(targetIndex)
-    if (onMove) onMove(sourceIndex, targetIndex)
+    const [dragged] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, dragged)
+    if (onMove) onMove(fromIndex, toIndex)
     else onChange?.(next)
   }
 
@@ -46,16 +75,44 @@ export default function ProductPhotoGallery({
   return (
     <>
       <div className="grid grid-cols-5 gap-2">
-        {photos.map((url, index) => {
+        {items.map((item, index) => {
+          const url = item.url
           const altText = altTexts?.[index] || `Фото товара ${index + 1}`
+          const isDragging = draggedIndex === index
+          const isDropTarget = dropIndex === index && draggedIndex !== null && draggedIndex !== index
+          const stateClass = isDragging
+            ? 'border-indigo-400 opacity-50'
+            : isDropTarget
+              ? 'border-indigo-400 ring-2 ring-indigo-400/60'
+              : 'border-slate-700 hover:border-slate-500'
           return (
             <div
-              key={`${url}-${index}`}
+              key={item.key}
               draggable={editable}
-              onDragStart={() => setDraggedIndex(index)}
-              onDragOver={(event) => movePhoto(event, index)}
-              onDragEnd={() => setDraggedIndex(null)}
-              className={`group relative aspect-square min-w-0 overflow-hidden rounded-lg border bg-slate-950 transition ${editable ? 'cursor-move' : ''} ${draggedIndex === index ? 'border-indigo-400 opacity-50' : 'border-slate-700 hover:border-slate-500'}`}
+              onDragStart={(event) => {
+                if (!editable) return
+                setDraggedIndex(index)
+                if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+              }}
+              onDragEnter={(event) => {
+                if (!editable || draggedIndex === null) return
+                event.preventDefault()
+                if (dropIndex !== index) setDropIndex(index)
+              }}
+              onDragOver={(event) => {
+                if (!editable || draggedIndex === null) return
+                event.preventDefault()
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={(event) => {
+                if (!editable || draggedIndex === null) return
+                event.preventDefault()
+                const fromIndex = draggedIndex
+                finishDrag()
+                commitMove(fromIndex, index)
+              }}
+              onDragEnd={finishDrag}
+              className={`group relative aspect-square min-w-0 overflow-hidden rounded-lg border bg-slate-950 transition ${editable ? 'cursor-move' : ''} ${stateClass}`}
               title={altText}
             >
               <Image

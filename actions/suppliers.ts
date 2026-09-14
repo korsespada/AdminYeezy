@@ -11,7 +11,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
-import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsProductFilterFacets } from '@/lib/rails-admin'
+import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsSupplierFacets, invalidateRailsCatalogCaches } from '@/lib/rails-admin'
 import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { spawn } from 'child_process'
@@ -117,22 +117,20 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
 export async function getProductSupplierOptionsAction(): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const [result, filterFacets] = await Promise.all([
+    const [result, supplierFacets] = await Promise.all([
       scrapingQuery(`
         SELECT id, name, album_id, avatar_url
         FROM suppliers
         ORDER BY name ASC, id ASC
       `),
-      getRailsProductFilterFacets({}).catch(() => null),
+      getRailsSupplierFacets().catch(() => [] as Awaited<ReturnType<typeof getRailsSupplierFacets>>),
     ])
 
     const railsSuppliersByName = new Map<string, string>()
     const seenRailsIds = new Set<string>()
-    if (filterFacets?.supplierFacets) {
-      for (const s of filterFacets.supplierFacets) {
-        if (s.name && s.slug) {
-          railsSuppliersByName.set(s.name.trim().toLowerCase(), s.slug)
-        }
+    for (const s of supplierFacets) {
+      if (s.name && s.slug) {
+        railsSuppliersByName.set(s.name.trim().toLowerCase(), s.slug)
       }
     }
 
@@ -149,17 +147,15 @@ export async function getProductSupplierOptionsAction(): Promise<ActionResponse>
       }
     }).filter((row) => row.name)
 
-    if (filterFacets?.supplierFacets) {
-      for (const s of filterFacets.supplierFacets) {
-        if (s.slug && !seenRailsIds.has(s.slug) && s.name) {
-          data.push({
-            id: `rails:${s.slug}`,
-            name: s.name.trim(),
-            avatar_url: s.avatar_url || null,
-            source_id: null,
-            rails_id: s.slug,
-          })
-        }
+    for (const s of supplierFacets) {
+      if (s.slug && !seenRailsIds.has(s.slug) && s.name) {
+        data.push({
+          id: `rails:${s.slug}`,
+          name: s.name.trim(),
+          avatar_url: s.avatar_url || null,
+          source_id: null,
+          rails_id: s.slug,
+        })
       }
     }
 
@@ -306,6 +302,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
 
     revalidatePath('/admin/suppliers')
     revalidatePath('/admin')
+    invalidateRailsCatalogCaches()
     return { success: true, data: res.rows[0].id }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -378,6 +375,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
 
     revalidatePath('/admin/suppliers')
     revalidatePath('/admin')
+    invalidateRailsCatalogCaches()
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }
@@ -424,6 +422,7 @@ export async function fetchSupplierAvatarAction(supplierId: number): Promise<Act
           await scrapingQuery('UPDATE suppliers SET avatar_url=$1 WHERE id=$2', [avatarUrl, supplierId])
           revalidatePath('/admin/suppliers')
     revalidatePath('/admin')
+          invalidateRailsCatalogCaches()
           return resolve({ success: true, data: avatarUrl })
         } else {
           return resolve({ success: false, error: 'Avatar not found in output' })
@@ -513,6 +512,7 @@ export async function deleteSupplierAction(id: number): Promise<ActionResponse> 
     await scrapingQuery('DELETE FROM suppliers WHERE id=$1', [id])
     revalidatePath('/admin/suppliers')
     revalidatePath('/admin')
+    invalidateRailsCatalogCaches()
     return { success: true }
   } catch (err: any) {
     return { success: false, error: err.message }

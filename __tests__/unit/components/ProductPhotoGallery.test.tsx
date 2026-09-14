@@ -42,9 +42,58 @@ describe('ProductPhotoGallery', () => {
       />,
     )
 
-    fireEvent.dragStart(screen.getByAltText('Первое фото').parentElement!)
-    fireEvent.dragOver(screen.getByAltText('Второе фото').parentElement!)
+    const source = screen.getByAltText('Первое фото').parentElement!
+    const target = screen.getByAltText('Второе фото').parentElement!
+    fireEvent.dragStart(source)
+    fireEvent.dragEnter(target)
+    fireEvent.dragOver(target)
+    fireEvent.drop(target)
 
     expect(onMove).toHaveBeenCalledWith(0, 1)
+  })
+
+  it('does not reorder while the photo is only dragged over another one', () => {
+    const onMove = vi.fn()
+    const onChange = vi.fn()
+    render(
+      <ProductPhotoGallery
+        photos={['https://example.com/one.jpg', 'https://example.com/two.jpg']}
+        altTexts={['Первое фото', 'Второе фото']}
+        onMove={onMove}
+        onChange={onChange}
+      />,
+    )
+
+    const source = screen.getByAltText('Первое фото').parentElement!
+    const target = screen.getByAltText('Второе фото').parentElement!
+    fireEvent.dragStart(source)
+    fireEvent.dragEnter(target)
+    fireEvent.dragOver(target)
+
+    expect(onMove).not.toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.drop(target)
+    expect(onMove).toHaveBeenCalledWith(0, 1)
+  })
+
+  it('keeps duplicate photo urls stable while reordering', () => {
+    const onChange = vi.fn()
+    render(
+      <ProductPhotoGallery
+        photos={['https://example.com/same.jpg', 'https://example.com/other.jpg', 'https://example.com/same.jpg']}
+        onChange={onChange}
+      />,
+    )
+
+    const tiles = screen.getAllByTitle(/Фото товара/)
+    fireEvent.dragStart(tiles[0])
+    fireEvent.drop(tiles[2])
+
+    expect(onChange).toHaveBeenCalledWith([
+      'https://example.com/other.jpg',
+      'https://example.com/same.jpg',
+      'https://example.com/same.jpg',
+    ])
   })
 })

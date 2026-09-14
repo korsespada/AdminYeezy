@@ -300,4 +300,64 @@ describe('ProductForm save shortcut', () => {
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', 'У товара не указан external_id или поставщик Szwego')
   })
+
+  it('keeps in-progress edits when the detail response arrives after the form is opened', async () => {
+    const { rerender } = render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const nameInput = await screen.findByPlaceholderText('например Chanel Комплект')
+    fireEvent.change(nameInput, { target: { value: 'Правка оператора' } })
+    expect(nameInput).toHaveValue('Правка оператора')
+
+    // Список открывает форму сразу, а detail-эндпоинт отвечает позже тем же товаром.
+    rerender(
+      <ProductForm
+        product={{ ...product, name: 'Серверное имя' }}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(nameInput).toHaveValue('Правка оператора')
+  })
+
+  it('applies the late detail response while the form is untouched', async () => {
+    const { rerender } = render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    const nameInput = await screen.findByPlaceholderText('например Chanel Комплект')
+    expect(nameInput).toHaveValue('Goyard Jouvence')
+
+    rerender(
+      <ProductForm
+        product={{ ...product, name: 'Полное имя из detail' }}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(nameInput).toHaveValue('Полное имя из detail'))
+  })
 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from 'react'
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory, type ProductSupplierOption } from '@/lib/types'
 import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
@@ -40,6 +40,7 @@ interface PendingPhotoUpload {
 }
 
 const EMPTY_SUPPLIER_OPTIONS: ProductSupplierOption[] = []
+const NEW_PRODUCT_FORM_KEY = 'new-product'
 
 interface ProductFormProps {
   product?: Product | null
@@ -51,6 +52,7 @@ interface ProductFormProps {
   isOpen: boolean
   onClose: () => void
   onSave?: (updatedProduct: Product, updatedListing?: RailsChromoffListing) => void
+  onSaveFailed?: (originalProduct: Product) => void
   onOpenProduct?: (productId: string) => void
   chromoffListing?: RailsChromoffListing | null
   chromoffCategories?: RailsChromoffCategory[]
@@ -75,6 +77,7 @@ export default function ProductForm({
   isOpen,
   onClose,
   onSave,
+  onSaveFailed,
   onOpenProduct,
   supplierOptions = EMPTY_SUPPLIER_OPTIONS,
   chromoffListing = null,
@@ -119,6 +122,13 @@ export default function ProductForm({
   const photoFileInputRef = useRef<HTMLInputElement>(null)
   const videoFileInputRef = useRef<HTMLInputElement>(null)
   const wasOpenRef = useRef(false)
+  // Форма открывается сразу по данным списка, а detail-ответ приходит позже.
+  // Эти два ref не дают позднему ответу затереть уже сделанные правки.
+  const initializedFormKeyRef = useRef<string | null>(null)
+  const formDirtyRef = useRef(false)
+  const markFormDirty = useCallback(() => {
+    formDirtyRef.current = true
+  }, [])
   const [videoUrl, setVideoUrl] = useState('')
   const [videoPosterUrl, setVideoPosterUrl] = useState('')
   const [isRehostingVideo, setIsRehostingVideo] = useState(false)
@@ -321,6 +331,17 @@ export default function ProductForm({
 
   useEffect(() => {
     if (isOpen) {
+      const formKey = product ? product.id : NEW_PRODUCT_FORM_KEY
+      // Detail-эндпоинт отвечает уже после открытия формы. Если оператор за это
+      // время что-то изменил (переставил фото, поправил поле), повторная
+      // инициализация откатила бы его работу — поэтому применяем её только к
+      // нетронутой форме и только пока открыт тот же товар.
+      if (product && initializedFormKeyRef.current === formKey && formDirtyRef.current) {
+        return
+      }
+      initializedFormKeyRef.current = formKey
+      formDirtyRef.current = false
+
       if (!wasOpenRef.current) clearPendingMedia()
       wasOpenRef.current = true
       if (product) {
@@ -457,6 +478,8 @@ export default function ProductForm({
       videoRehostTokenRef.current += 1
     } else {
       wasOpenRef.current = false
+      initializedFormKeyRef.current = null
+      formDirtyRef.current = false
     }
   }, [isOpen, product, brands, categories, chromoffListing, productSupplierOptions])
 
@@ -735,6 +758,9 @@ export default function ProductForm({
       Promise.all([productPromise, chromoffPromise])
         .then(([productResult, chromoffResult]) => {
           if (!productResult.success) {
+            // Список уже получил оптимистичные данные: возвращаем прежнее
+            // состояние, чтобы карточка не показывала несохранённые значения.
+            onSaveFailed?.(product)
             window.alert(productResult.error || 'Не удалось сохранить товар')
           } else if (!chromoffResult.success) {
             window.alert(chromoffResult.message || 'Не удалось сохранить настройки Chromoff')
@@ -818,7 +844,15 @@ export default function ProductForm({
           </SheetHeader>
 
           {/* Form */}
-          <form ref={formRef} onSubmit={handleSubmit} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-6 sm:p-5">
+          <form
+            ref={formRef}
+            onSubmit={handleSubmit}
+            onPointerDownCapture={markFormDirty}
+            onKeyDownCapture={markFormDirty}
+            onChangeCapture={markFormDirty}
+            onDragStartCapture={markFormDirty}
+            className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-6 sm:p-5"
+          >
             {error && (
               <Alert variant="destructive" className="border-red-800 bg-red-900/20 text-red-400">
                 <AlertDescription>{error}</AlertDescription>

@@ -21,9 +21,15 @@ import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 let pendingRailsAdminLogin: Promise<string> | null = null
 let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
+let cachedCatalogLookups: { expiresAt: number; value: { brands: Brand[]; categories: Category[]; subcategories: Subcategory[] } } | null = null
+let cachedSupplierFacets: { expiresAt: number; value: CatalogSlugFacet[] } | null = null
 // Rails accepts up to 100 products per request. Keep the chunk aligned with
 // that limit so the 500-row view does not make thirteen sequential requests.
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 100
+// Справочники каталога (бренды, категории, фасеты поставщиков) меняются редко,
+// но запрашивались на каждый рендер каталога. Короткий TTL убирает лишние
+// полные агрегации, оставаясь предсказуемым для оператора.
+const CATALOG_CACHE_TTL_MS = 60_000
 
 export interface RailsCrmCustomer {
   id?: number | string
@@ -796,17 +802,52 @@ export function mapRailsProduct(product: any): Product {
 }
 
 export async function getRailsCatalogLookups() {
+  if (cachedCatalogLookups && cachedCatalogLookups.expiresAt > Date.now()) {
+    const cached = cachedCatalogLookups.value
+    // Копии массивов: вызывающий код не должен менять закэшированный справочник.
+    return { brands: [...cached.brands], categories: [...cached.categories], subcategories: [...cached.subcategories] }
+  }
+
   const [brandsPayload, categoriesPayload] = await Promise.all([
     railsFetch<{ brands: any[] }>('/admin/catalog_taxonomy/brands'),
     railsFetch<{ categories: any[] }>('/admin/catalog_taxonomy/categories'),
   ])
   const { categories, subcategories } = flattenCategories(categoriesPayload.categories || [])
 
-  return {
+  const value = {
     brands: (brandsPayload.brands || []).map(mapBrand),
     categories,
     subcategories,
   }
+  cachedCatalogLookups = { expiresAt: Date.now() + CATALOG_CACHE_TTL_MS, value }
+  return { brands: [...value.brands], categories: [...value.categories], subcategories: [...value.subcategories] }
+}
+
+/**
+ * Фасеты поставщиков по всему каталогу нужны только для селектора поставщика.
+ * Раньше они считались отдельной полной агрегацией на каждый рендер каталога;
+ * список поставщиков меняется редко, поэтому держим короткий процессный кэш.
+ */
+export async function getRailsSupplierFacets(): Promise<CatalogSlugFacet[]> {
+  if (cachedSupplierFacets && cachedSupplierFacets.expiresAt > Date.now()) {
+    return [...cachedSupplierFacets.value]
+  }
+
+  const facets = await getRailsProductFilterFacets({})
+  const supplierFacets = facets.supplierFacets || []
+  cachedSupplierFacets = { expiresAt: Date.now() + CATALOG_CACHE_TTL_MS, value: supplierFacets }
+  return [...supplierFacets]
+}
+
+/**
+ * Сбрасывает процессные кэши справочников каталога. Вызывается из писателей
+ * (поставщики в AdminYeezy, таксономия в Rails-каталоге), чтобы правка была
+ * видна сразу, а не через TTL.
+ */
+export function invalidateRailsCatalogCaches() {
+  cachedCatalogLookups = null
+  cachedSupplierFacets = null
+  cachedCategorySlugs = null
 }
 
 export async function listRailsChromoffCategories(): Promise<RailsChromoffCategory[]> {
@@ -1138,27 +1179,35 @@ async function listRailsAdminProductsInChunks(options: {
   const requestedOffset = (options.page - 1) * options.perPage
   const firstSourcePage = Math.floor(requestedOffset / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) + 1
   const firstPageSkip = requestedOffset % ADMIN_PRODUCTS_PAGE_CHUNK_SIZE
-  const products: Product[] = []
-  let sourcePage = firstSourcePage
-  let sourcePages = firstSourcePage
-  let totalItems = 0
 
-  while (sourcePage <= sourcePages && products.length < options.perPage) {
+  const fetchSourcePage = (sourcePage: number) => {
     const params = buildRailsAdminProductsParams({
       ...options,
       page: sourcePage,
       perPage: ADMIN_PRODUCTS_PAGE_CHUNK_SIZE,
     })
-    const payload = await railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
+    return railsFetch<{ products: any[]; meta: { total: number; pages: number } }>(`/admin/products?${params}`)
+  }
 
-    if (sourcePage === firstSourcePage) {
-      totalItems = Number(payload.meta?.total || 0)
-      sourcePages = Number(payload.meta?.pages || Math.ceil(totalItems / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) || firstSourcePage)
+  // Первый чанк сообщает общее количество, после чего остальные нужные страницы
+  // качаются параллельно: последовательный цикл делал выборку 500 товаров в
+  // пять раз длиннее по времени ожидания.
+  const firstPayload = await fetchSourcePage(firstSourcePage)
+  const totalItems = Number(firstPayload.meta?.total || 0)
+  const sourcePages = Number(firstPayload.meta?.pages || Math.ceil(totalItems / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) || firstSourcePage)
+  const products: Product[] = (firstPayload.products || []).map(mapRailsProduct).slice(firstPageSkip)
+
+  const lastNeededSourcePage = firstSourcePage + Math.ceil((firstPageSkip + options.perPage) / ADMIN_PRODUCTS_PAGE_CHUNK_SIZE) - 1
+  const remainingSourcePages: number[] = []
+  for (let sourcePage = firstSourcePage + 1; sourcePage <= Math.min(sourcePages, lastNeededSourcePage); sourcePage += 1) {
+    remainingSourcePages.push(sourcePage)
+  }
+
+  if (remainingSourcePages.length > 0) {
+    const remainingPayloads = await Promise.all(remainingSourcePages.map((sourcePage) => fetchSourcePage(sourcePage)))
+    for (const payload of remainingPayloads) {
+      products.push(...(payload.products || []).map(mapRailsProduct))
     }
-
-    const pageProducts = (payload.products || []).map(mapRailsProduct)
-    products.push(...(sourcePage === firstSourcePage ? pageProducts.slice(firstPageSkip) : pageProducts))
-    sourcePage += 1
   }
 
   const visibleProducts = products
@@ -1822,6 +1871,7 @@ export async function createRailsCatalogSubcategory(input: { name: string; paren
     method: 'POST',
     body: JSON.stringify({ subcategory: input }),
   })
+  invalidateRailsCatalogCaches()
   return result.category
 }
 
@@ -1830,6 +1880,7 @@ export async function createRailsCatalogCategory(input: { name: string }) {
     method: 'POST',
     body: JSON.stringify({ category: input }),
   })
+  invalidateRailsCatalogCaches()
   return result.category
 }
 
@@ -1841,6 +1892,7 @@ export async function updateRailsCatalogSubcategory(id: string, name: string) {
       body: JSON.stringify({ subcategory: { name } }),
     },
   )
+  invalidateRailsCatalogCaches()
   return result.category
 }
 
