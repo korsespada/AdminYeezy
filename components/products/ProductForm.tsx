@@ -706,6 +706,17 @@ export default function ProductForm({
           seo_description: chromoffSeoDescription.trim(),
         } : undefined
 
+        // Превью карточки берётся из `thumb` (первое фото по порядку), а имена
+        // бренда и категории — сначала из `expand`. Оптимистичная карточка
+        // обязана повторить эти производные поля, иначе после сохранения она
+        // останется со старым превью и старыми названиями: отдельного
+        // обновления страницы после сохранения больше нет.
+        const expandedBrand = Array.isArray(product.expand?.brand) ? product.expand?.brand[0] : product.expand?.brand
+        const currentBrandId = String(Array.isArray(product.brand) ? product.brand[0] || '' : product.brand || expandedBrand?.id || '')
+        const nextBrandId = String(brandIds[0] || '')
+        const currentCategoryId = String(product.category || product.expand?.category?.id || '')
+        const currentSubcategoryId = String(product.subcategory || product.expand?.subcategory?.id || '')
+
         // Optimistically update the list and release the editor immediately.
         onSave({
           ...product,
@@ -738,8 +749,15 @@ export default function ProductForm({
           } : null,
           category,
           subcategory,
+          thumb: existingPhotos[0] || '',
           photos: existingPhotos,
           media: mediaPayload,
+          expand: {
+            ...product.expand,
+            ...(nextBrandId !== currentBrandId ? { brand: brands.find((item) => item.id === nextBrandId) } : {}),
+            ...(category !== currentCategoryId ? { category: categories.find((item) => item.id === category) } : {}),
+            ...(subcategory !== currentSubcategoryId ? { subcategory: subcategories.find((item) => item.id === subcategory) } : {}),
+          },
           video_url: videoUrl.trim() || null,
           video_poster_url: videoPosterUrl.trim() || null,
         }, nextListing)

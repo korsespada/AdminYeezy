@@ -360,4 +360,72 @@ describe('ProductForm save shortcut', () => {
 
     await waitFor(() => expect(nameInput).toHaveValue('Полное имя из detail'))
   })
+
+  it('moves the grid preview thumb to the new first photo after reordering', async () => {
+    const onSave = vi.fn()
+    const media = [
+      { original_url: 'https://cdn.example/one.webp', preview_url: 'https://cdn.example/one.webp', thumb_url: 'https://cdn.example/one.webp', og_image_url: 'https://cdn.example/one.webp', alt_text: '', sort_order: 0, processing_status: 'processed' as const },
+      { original_url: 'https://cdn.example/two.webp', preview_url: 'https://cdn.example/two.webp', thumb_url: 'https://cdn.example/two.webp', og_image_url: 'https://cdn.example/two.webp', alt_text: '', sort_order: 1, processing_status: 'processed' as const },
+    ]
+
+    render(
+      <ProductForm
+        product={{
+          ...product,
+          photos: ['https://cdn.example/one.webp', 'https://cdn.example/two.webp'],
+          media,
+          thumb: 'https://cdn.example/one.webp',
+        }}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: 'Изменить товар' })
+    const tiles = screen.getAllByTitle(/Фото товара/)
+    fireEvent.dragStart(tiles[0])
+    fireEvent.dragEnter(tiles[1])
+    fireEvent.dragOver(tiles[1])
+    fireEvent.drop(tiles[1])
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+
+    const saved = onSave.mock.calls[0][0] as Product
+    expect(saved.photos).toEqual(['https://cdn.example/two.webp', 'https://cdn.example/one.webp'])
+    expect(saved.thumb).toBe('https://cdn.example/two.webp')
+  })
+
+  it('refreshes the expanded category name when the category changes', async () => {
+    const onSave = vi.fn()
+    const otherCategory: Category = { ...category, id: 'category-2', name: 'Обувь', slug: 'shoes' }
+    const expandedCategory: Category = { ...category, name: 'Сумки' }
+
+    render(
+      <ProductForm
+        product={{ ...product, category: category.id, expand: { category: expandedCategory } }}
+        brands={[brand]}
+        categories={[category, otherCategory]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+      />,
+    )
+
+    const categoryOption = await screen.findByRole('option', { name: 'Обувь' })
+    const categorySelect = categoryOption.closest('select') as HTMLSelectElement
+    fireEvent.change(categorySelect, { target: { value: otherCategory.id } })
+
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+
+    const saved = onSave.mock.calls[0][0] as Product
+    expect(saved.category).toBe(otherCategory.id)
+    expect(saved.expand?.category?.name).toBe('Обувь')
+  })
 })

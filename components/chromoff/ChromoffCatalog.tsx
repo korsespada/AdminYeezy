@@ -236,6 +236,10 @@ export default function ChromoffCatalog({
         supplier: updatedProduct.supplier,
         source_supplier_id: sourceSupplierId,
         source_supplier_name: updatedProduct.supplier?.name || null,
+        // Карточка Chromoff берёт превью и счётчик фото из listing.images,
+        // поэтому новый порядок фото нужно перенести и сюда.
+        images: updatedProduct.photos || [],
+        image_url: updatedProduct.photos?.[0] || null,
         sync_mode: sourceSupplierId && ['_Z4krSCEyDqn5hvTYMJDEp4rykS4WwC0I', '_d_MrS1r4uCqp1cjuoVnfj6jJ42_p9R9NgeH-vag', '_Z6wrSBWbbi48HUyk59lk5c4PXN9NKqUQ'].includes(sourceSupplierId) ? 'auto' : 'manual',
       }
     }))
