@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { CheckSquare, Filter, FolderTree, Images, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
+import { CheckSquare, Filter, FolderTree, Gem, Images, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Brand, Category, Product, ProductSupplierOption, Subcategory } from '@/lib/types'
@@ -422,6 +422,7 @@ export default function ChromoffCatalog({
               <Button type="button" variant="outline" onClick={() => setIsImportOpen(true)} className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Upload className="h-4 w-4" />Импорт</Button>
               <Button asChild type="button" variant="outline" className="h-11 border-emerald-700/60 bg-emerald-950/30 text-emerald-200"><Link href="/admin/chromoff/ai-seo">AI SEO</Link></Button>
               <Button asChild type="button" variant="outline" className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Link href="/admin/chromoff/categories"><FolderTree className="h-4 w-4" />Категории</Link></Button>
+              <Button asChild type="button" variant="outline" className="h-11 border-violet-700/60 bg-violet-950/30 text-violet-200"><Link href="/admin/chromoff/david-studio"><Gem className="h-4 w-4" />David Studio</Link></Button>
               <Button type="button" onClick={() => setIsAddOpen(true)} className="h-11"><Plus className="h-4 w-4" />Добавить</Button>
             </div>
           </header>
