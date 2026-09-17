@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { ArrowLeft, FileWarning, RefreshCw } from 'lucide-react'
 import DavidStudioCatalog from '@/components/chromoff/DavidStudioCatalog'
+import { scrapingQuery } from '@/lib/db'
+import { DAVID_SUPPLIER_NAME } from '@/lib/david-studio-import'
 import { DAVID_STUDIO_CATALOG_FILE, loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 import {
   buildDavidStudioFacets,
@@ -87,6 +89,7 @@ export default async function DavidStudioPage({
   const filtered = filterDavidStudioProducts(catalog.products, filters)
   const facets = buildDavidStudioFacets(catalog.products, { category: filters.category })
   const { items, total, totalPages, page } = paginate(filtered, Number(params.page) || 1, perPage)
+  const cleanUrls = await loadDavidCleanPhotoUrls()
 
   return (
     <DavidStudioCatalog
@@ -100,8 +103,25 @@ export default async function DavidStudioPage({
       perPage={perPage}
       total={total}
       totalPages={totalPages}
+      cleanUrls={cleanUrls}
     />
   )
+}
+
+/** Очищенные от вотермарки фото: ключ источника → адрес в S3 (для переключателя «оригинал»). */
+async function loadDavidCleanPhotoUrls(): Promise<Record<string, string>> {
+  try {
+    const result = await scrapingQuery(
+      `SELECT source_key, s3_clean_url FROM photo_clean_jobs
+        WHERE supplier = $1 AND status = 'done' AND s3_clean_url IS NOT NULL`,
+      [DAVID_SUPPLIER_NAME],
+    )
+    return Object.fromEntries(
+      result.rows.map((row: any) => [String(row.source_key), String(row.s3_clean_url)]),
+    )
+  } catch {
+    return {}
+  }
 }
 
 /** Общая рамка для состояний, когда каталог показать нельзя. */

@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { CheckCircle2, ExternalLink, ImageOff, Loader2, RotateCcw, Search, XCircle } from 'lucide-react'
+import Link from 'next/link'
+import { CheckCircle2, ExternalLink, ImageOff, Loader2, RotateCcw, Search, Upload, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,6 +39,8 @@ export interface DavidStudioCatalogProps {
   perPage: number
   total: number
   totalPages: number
+  /** Ключ источника (url без query) → очищенное от вотермарки фото в S3. */
+  cleanUrls?: Record<string, string>
 }
 
 export default function DavidStudioCatalog({
@@ -51,12 +54,18 @@ export default function DavidStudioCatalog({
   perPage,
   total,
   totalPages,
+  cleanUrls = {},
 }: DavidStudioCatalogProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [search, setSearch] = useState(filters.q)
   const [active, setActive] = useState<DavidStudioProduct | null>(null)
   const [activeImage, setActiveImage] = useState(0)
+  const [showOriginal, setShowOriginal] = useState(false)
+
+  /** По умолчанию показываем очищенное фото, переключателем можно вернуть оригинал поставщика. */
+  const displaySrc = (src: string) => (showOriginal ? src : cleanUrls[src.split('?')[0]] || src)
+  const cleanedCount = Object.keys(cleanUrls).length
 
   // Строка поиска живёт локально, поэтому синхронизируем её с URL
   // после перехода (например, при сбросе фильтров).
@@ -233,6 +242,17 @@ export default function DavidStudioCatalog({
                   Сбросить фильтры
                 </Button>
               )}
+              {cleanedCount > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowOriginal((value) => !value)}
+                  className="border-slate-600 bg-slate-700 text-slate-200"
+                  title="Переключить между очищенными фото и оригиналами поставщика"
+                >
+                  {showOriginal ? 'Показывать очищенные' : `Показывать оригиналы (${cleanedCount})`}
+                </Button>
+              )}
               <label className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-2 text-xs text-slate-400">
                 <span className="whitespace-nowrap">На странице</span>
                 <select
@@ -263,7 +283,7 @@ export default function DavidStudioCatalog({
                   <div className="relative aspect-square w-full overflow-hidden bg-slate-900">
                     {product.images[0] ? (
                       <Image
-                        src={product.images[0].src}
+                        src={displaySrc(product.images[0].src)}
                         alt={product.title}
                         fill
                         sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
@@ -373,7 +393,7 @@ export default function DavidStudioCatalog({
                     <div className="relative aspect-square w-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
                       {active.images[activeImage] ? (
                         <Image
-                          src={active.images[activeImage].src}
+                          src={displaySrc(active.images[activeImage].src)}
                           alt={`${active.title} — фото ${activeImage + 1}`}
                           fill
                           sizes="(max-width: 1024px) 100vw, 50vw"
@@ -395,7 +415,7 @@ export default function DavidStudioCatalog({
                             className={`relative h-16 w-16 overflow-hidden rounded-md border ${index === activeImage ? 'border-violet-400' : 'border-slate-700'} bg-slate-900`}
                             aria-label={`Фото ${index + 1}`}
                           >
-                            <Image src={image.src} alt="" fill sizes="64px" className="object-cover" />
+                            <Image src={displaySrc(image.src)} alt="" fill sizes="64px" className="object-cover" />
                           </button>
                         ))}
                       </div>
@@ -470,12 +490,20 @@ export default function DavidStudioCatalog({
                       ))}
                     </div>
 
-                    <Button asChild variant="outline" className="border-slate-600 bg-slate-700 text-slate-200">
-                      <a href={active.url} target="_blank" rel="noreferrer">
-                        <ExternalLink className="h-4 w-4" />
-                        Открыть на david-studio.com
-                      </a>
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button asChild className="bg-violet-600 text-white hover:bg-violet-500">
+                        <Link href={`/admin/chromoff/david-studio/import/${active.handle}`}>
+                          <Upload className="h-4 w-4" />
+                          Импорт в Chromoff
+                        </Link>
+                      </Button>
+                      <Button asChild variant="outline" className="border-slate-600 bg-slate-700 text-slate-200">
+                        <a href={active.url} target="_blank" rel="noreferrer">
+                          <ExternalLink className="h-4 w-4" />
+                          Открыть на david-studio.com
+                        </a>
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </ScrollArea>
