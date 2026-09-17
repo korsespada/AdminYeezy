@@ -31,6 +31,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/scripts ./scripts
+# Выгрузки поставщиков читает страница /admin/chromoff/david-studio прямо с диска,
+# поэтому data/ обязан попасть в финальный образ, а не только в builder.
+COPY --from=builder /app/data ./data
 COPY --from=builder /app/universal_ai_process.py ./universal_ai_process.py
 COPY --from=builder /app/next.config.js ./next.config.js
 
