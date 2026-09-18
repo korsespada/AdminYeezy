@@ -59,7 +59,9 @@ export async function loadDavidProductsStatus(
       draftError: draft?.error || null,
       railsProductId: draft?.rails_product_id || null,
       chromoffListingId: draft?.chromoff_listing_id || null,
-      publishedInChromoff: Boolean(draft?.rails_product_id) && String(draft?.status || '') === 'created',
+      // Признак публикации — созданный товар, а не статус черновика: повторный
+      // расчёт ИИ переводит черновик в ai_ready, но товар остаётся созданным.
+      publishedInChromoff: Boolean(draft?.rails_product_id),
       photosExpected: expected.get(handle) || 0,
       photosDone: 0,
       photosPending: 0,
