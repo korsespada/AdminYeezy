@@ -22,12 +22,18 @@ import {
 } from '@/lib/david-studio-import'
 import {
   ensureDavidDraft,
+  davidReadyPhotos,
   getDavidCatalogProduct,
   getDavidDraft,
   markDavidDraftError,
   prepareDavidDraft,
   writeDavidDraftFromRaw,
 } from '@/lib/david-studio-ai'
+import {
+  excludeDavidPhoto,
+  listDavidPhotoExclusions,
+  restoreDavidPhoto,
+} from '@/lib/david-photo-exclusions'
 
 /**
  * Экшены импорта David Studio.
@@ -102,6 +108,38 @@ export interface DavidBatchCleaningResult {
   created: number
   existing: number
   photos: number
+}
+
+/**
+ * Убирает очищенный кадр из импорта: он не попадёт ни в промпт ИИ, ни в товар.
+ * Сам файл в S3 и задание чистки не трогаем — кадр можно вернуть.
+ */
+export async function excludeDavidPhotoAction(handle: string, sourceKey: string) {
+  const key = String(sourceKey || '').trim()
+  if (!key) return { success: false as const, error: 'Не указан кадр' }
+  const excluded = await excludeDavidPhoto(handle, key)
+  revalidatePath('/admin/chromoff/david-studio')
+  return {
+    success: true as const,
+    data: { excluded, message: excluded ? 'Кадр убран из импорта' : 'Кадр уже был убран' },
+  }
+}
+
+/** Возвращает убранный кадр обратно в импорт. */
+export async function restoreDavidPhotoAction(handle: string, sourceKey: string) {
+  const key = String(sourceKey || '').trim()
+  if (!key) return { success: false as const, error: 'Не указан кадр' }
+  const restored = await restoreDavidPhoto(handle, key)
+  revalidatePath('/admin/chromoff/david-studio')
+  return {
+    success: true as const,
+    data: { restored, message: restored ? 'Кадр возвращён в импорт' : 'Кадр не был убран' },
+  }
+}
+
+/** Список убранных кадров товара — для блока «убранные» на экране ревью. */
+export async function listDavidPhotoExclusionsAction(handle: string) {
+  return { success: true as const, data: await listDavidPhotoExclusions(handle) }
 }
 
 /** Массовая постановка фото выбранных товаров: чистка идёт в фоне у воркера. */
@@ -229,11 +267,13 @@ export async function createDavidChromoffProductAction(input: {
   )
   if (!brand) return { success: false as const, error: `В справочнике нет бренда «${DAVID_BRAND_NAME}»` }
 
-  const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: input.handle, limit: 200 })
-  const ready = photos
-    .filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
-    .map((photo) => ({ url: photo.s3CleanUrl as string, position: photo.sourcePosition }))
-  if (!ready.length) return { success: false as const, error: 'Нет очищенных фото для товара' }
+  const ready = await davidReadyPhotos(input.handle)
+  if (!ready.length) {
+    return {
+      success: false as const,
+      error: 'Нет очищенных фото для товара: возможно, все кадры убраны вручную',
+    }
+  }
 
   const variantAttributes = davidProductVariantAttributes(product)
   const attributes: Record<string, unknown> = {
@@ -304,11 +344,13 @@ export async function attachDavidPhotosAction(input: {
   const product = await getDavidCatalogProduct(input.handle)
   if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
 
-  const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: input.handle, limit: 200 })
-  const ready = photos
-    .filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
-    .map((photo) => ({ url: photo.s3CleanUrl as string, position: photo.sourcePosition }))
-  if (!ready.length) return { success: false as const, error: 'Нет очищенных фото для товара' }
+  const ready = await davidReadyPhotos(input.handle)
+  if (!ready.length) {
+    return {
+      success: false as const,
+      error: 'Нет очищенных фото для товара: возможно, все кадры убраны вручную',
+    }
+  }
 
   const current = await railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(input.productId)}`)
   const target = current.product

@@ -3,18 +3,22 @@
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { AlertTriangle, CheckCircle2, ImageOff, Loader2, RefreshCw, Search, Sparkles, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Eye, ImageOff, Loader2, RefreshCw, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react'
 import {
   attachDavidPhotosAction,
   createDavidChromoffProductAction,
+  excludeDavidPhotoAction,
   generateDavidDraftAction,
+  restoreDavidPhotoAction,
   searchChromoffProductsAction,
   startDavidPhotoCleaningAction,
 } from '@/actions/david-studio'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { MeasurementTable } from '@/lib/measurement-templates'
 
 type Photo = {
   id: string
+  sourceKey: string
   sourcePosition: number | null
   status: string
   cleanStatus: string | null
@@ -87,6 +91,7 @@ export default function DavidImportPanel({
   variantNotSizes,
   categories,
   chromoffCategories,
+  excluded = [],
 }: {
   handle: string
   title: string
@@ -99,11 +104,15 @@ export default function DavidImportPanel({
   variantNotSizes: string[]
   categories: Option[]
   chromoffCategories: Option[]
+  /** Кадры, убранные из импорта вручную (ключ источника). */
+  excluded?: string[]
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [tab, setTab] = useState<'new' | 'existing'>('new')
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [viewer, setViewer] = useState<Photo | null>(null)
+  const [viewOriginal, setViewOriginal] = useState(false)
 
   const ai = draft?.ai_output || {}
   const [name, setName] = useState<string>(ai.name || title)
@@ -135,11 +144,14 @@ export default function DavidImportPanel({
     return () => clearInterval(timer)
   }, [busy, router])
 
-  const readyPhotos = photos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
   const attributes = reviewableAttributes(ai.attributes)
   const measurements = measurementRows(variantMeasurements)
   const targetProduct = found.find((item) => item.id === targetId) || null
-  const targetIsDavid = Boolean(targetProduct?.externalId?.startsWith('david-studio-'))
+
+  const excludedSet = useMemo(() => new Set(excluded), [excluded])
+  const visiblePhotos = photos.filter((photo) => !excludedSet.has(photo.sourceKey))
+  const removedPhotos = photos.filter((photo) => excludedSet.has(photo.sourceKey))
+  const readyPhotos = visiblePhotos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
 
   function run(action: () => Promise<any>, okText: string) {
     setMessage(null)
@@ -248,39 +260,169 @@ export default function DavidImportPanel({
           <p className={`mt-3 text-sm ${message.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}>{message.text}</p>
         )}
 
-        {readyPhotos.length > 0 && (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {readyPhotos.map((photo) => (
-              <div key={photo.id} className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>кадр {photo.sourcePosition ?? '—'}</span>
-                  <span className={photo.cleanStatus === 'ok' ? 'text-emerald-300' : photo.cleanStatus === 'miss' ? 'text-slate-400' : 'text-amber-300'}>
-                    {photo.cleanStatus ? VERDICT_LABEL[photo.cleanStatus] || photo.cleanStatus : ''}
-                  </span>
+        {visiblePhotos.length > 0 && (
+          <>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+              <span>
+                Очищенные кадры: <b className="text-slate-200">{visiblePhotos.length}</b> из {photos.length}
+                {removedPhotos.length > 0 ? ` · убрано ${removedPhotos.length}` : ''}
+              </span>
+              <span className="text-slate-500">нажмите на кадр, чтобы открыть в полном размере</span>
+            </div>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visiblePhotos.map((photo) => (
+                <div key={photo.id} className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+                  <div className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                    <span>кадр {photo.sourcePosition ?? '—'}</span>
+                    <span className="flex items-center gap-2">
+                      <span className={photo.cleanStatus === 'ok' ? 'text-emerald-300' : photo.cleanStatus === 'miss' ? 'text-slate-400' : 'text-amber-300'}>
+                        {photo.cleanStatus ? VERDICT_LABEL[photo.cleanStatus] || photo.cleanStatus : ''}
+                      </span>
+                      <button
+                        type="button"
+                        title="Убрать кадр из импорта"
+                        disabled={pending}
+                        onClick={() => run(() => excludeDavidPhotoAction(handle, photo.sourceKey), 'Кадр убран')}
+                        className="rounded border border-slate-600 p-1 text-slate-300 hover:border-rose-500/60 hover:text-rose-300 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setViewer(photo); setViewOriginal(false) }}
+                    className="mt-2 block w-full space-y-2 text-left"
+                    title="Открыть кадр в полном размере"
+                  >
+                    <figure>
+                      <figcaption className="flex items-center gap-1 text-[11px] text-slate-500">
+                        <Eye className="h-3 w-3" /> до
+                      </figcaption>
+                      {photo.s3BeforeUrl ? (
+                        <Image src={photo.s3BeforeUrl} alt="до" width={420} height={140} unoptimized className="w-full rounded" />
+                      ) : (
+                        <div className="flex h-16 items-center justify-center text-slate-600"><ImageOff className="h-5 w-5" /></div>
+                      )}
+                    </figure>
+                    <figure>
+                      <figcaption className="text-[11px] text-slate-500">после</figcaption>
+                      {photo.s3AfterUrl ? (
+                        <Image src={photo.s3AfterUrl} alt="после" width={420} height={140} unoptimized className="w-full rounded" />
+                      ) : (
+                        <div className="flex h-16 items-center justify-center text-slate-600"><ImageOff className="h-5 w-5" /></div>
+                      )}
+                    </figure>
+                  </button>
                 </div>
-                <div className="mt-2 space-y-2">
-                  <figure>
-                    <figcaption className="text-[11px] text-slate-500">до</figcaption>
-                    {photo.s3BeforeUrl ? (
-                      <Image src={photo.s3BeforeUrl} alt="до" width={420} height={140} unoptimized className="w-full rounded" />
-                    ) : (
-                      <div className="flex h-16 items-center justify-center text-slate-600"><ImageOff className="h-5 w-5" /></div>
-                    )}
-                  </figure>
-                  <figure>
-                    <figcaption className="text-[11px] text-slate-500">после</figcaption>
-                    {photo.s3AfterUrl ? (
-                      <Image src={photo.s3AfterUrl} alt="после" width={420} height={140} unoptimized className="w-full rounded" />
-                    ) : (
-                      <div className="flex h-16 items-center justify-center text-slate-600"><ImageOff className="h-5 w-5" /></div>
-                    )}
-                  </figure>
+              ))}
+            </div>
+          </>
+        )}
+
+        {removedPhotos.length > 0 && (
+          <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Убрано из импорта ({removedPhotos.length})
+            </h3>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {removedPhotos.map((photo) => (
+                <div key={photo.id} className="flex items-center gap-2 rounded border border-slate-700 bg-slate-800/60 px-2 py-1 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => { setViewer(photo); setViewOriginal(false) }}
+                    className="text-slate-300 hover:text-violet-300"
+                    title="Посмотреть кадр"
+                  >
+                    кадр {photo.sourcePosition ?? '—'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => run(() => restoreDavidPhotoAction(handle, photo.sourceKey), 'Кадр возвращён')}
+                    className="inline-flex items-center gap-1 rounded border border-slate-600 px-1.5 py-0.5 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300 disabled:opacity-50"
+                  >
+                    <RotateCcw className="h-3 w-3" /> вернуть
+                  </button>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>
+
+      <Dialog open={Boolean(viewer)} onOpenChange={(open) => { if (!open) setViewer(null) }}>
+        <DialogContent className="max-h-[92dvh] max-w-4xl overflow-y-auto border-slate-700 bg-slate-900 text-slate-100">
+          <DialogHeader>
+            <DialogTitle className="pr-8 text-base">
+              Кадр {viewer?.sourcePosition ?? '—'}
+              {viewer?.cleanStatus ? ` · ${VERDICT_LABEL[viewer.cleanStatus] || viewer.cleanStatus}` : ''}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Полный размер: очищенный кадр из S3 или оригинал поставщика.
+            </DialogDescription>
+          </DialogHeader>
+          {viewer && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewOriginal(false)}
+                  className={`rounded border px-2 py-1 ${viewOriginal ? 'border-slate-600 text-slate-300' : 'border-violet-500/60 bg-violet-500/10 text-violet-200'}`}
+                >
+                  Очищенный
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewOriginal(true)}
+                  className={`rounded border px-2 py-1 ${viewOriginal ? 'border-violet-500/60 bg-violet-500/10 text-violet-200' : 'border-slate-600 text-slate-300'}`}
+                >
+                  Оригинал поставщика
+                </button>
+                <a
+                  href={viewOriginal ? viewer.sourceKey : viewer.s3CleanUrl || viewer.sourceKey}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border border-slate-600 px-2 py-1 text-slate-300 hover:text-violet-300"
+                >
+                  Открыть в новой вкладке
+                </a>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => run(
+                    () => (excludedSet.has(viewer.sourceKey)
+                      ? restoreDavidPhotoAction(handle, viewer.sourceKey)
+                      : excludeDavidPhotoAction(handle, viewer.sourceKey)),
+                    excludedSet.has(viewer.sourceKey) ? 'Кадр возвращён' : 'Кадр убран',
+                  )}
+                  className="rounded border border-slate-600 px-2 py-1 text-slate-300 hover:border-rose-500/60 hover:text-rose-300 disabled:opacity-50"
+                >
+                  {excludedSet.has(viewer.sourceKey) ? 'Вернуть в импорт' : 'Убрать из импорта'}
+                </button>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element -- в модалке нужен кадр целиком без оптимизации next/image */}
+              <img
+                src={(viewOriginal ? viewer.sourceKey : viewer.s3CleanUrl || viewer.sourceKey) || ''}
+                alt={`кадр ${viewer.sourcePosition ?? ''}`}
+                className="max-h-[70dvh] w-full rounded object-contain"
+              />
+              <div className="flex flex-wrap gap-4 text-xs text-slate-400">
+                {viewer.s3BeforeUrl && (
+                  <a href={viewer.s3BeforeUrl} target="_blank" rel="noreferrer" className="hover:text-violet-300">
+                    кроп «до»
+                  </a>
+                )}
+                {viewer.s3AfterUrl && (
+                  <a href={viewer.s3AfterUrl} target="_blank" rel="noreferrer" className="hover:text-violet-300">
+                    кроп «после»
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
         <h2 className="text-sm font-semibold text-slate-100">Размеры и замеры из вариантов David</h2>

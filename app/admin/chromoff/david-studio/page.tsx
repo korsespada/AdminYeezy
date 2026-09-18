@@ -24,6 +24,7 @@ type DavidStudioSearchParams = {
   subcategory?: string
   productType?: string
   availability?: string
+  state?: string
   sort?: string
 }
 
@@ -87,13 +88,17 @@ export default async function DavidStudioPage({
 
   const filters = normalizeFilters(params)
   const perPage = normalizePageSize(params.perPage)
-  const filtered = filterDavidStudioProducts(catalog.products, filters)
-  const facets = buildDavidStudioFacets(catalog.products, { category: filters.category })
+  // Состояние товара живёт в базе, поэтому статусы нужны по всему каталогу:
+  // иначе фильтр «необработанное / обработанное / опубликованное» видел бы
+  // только текущую страницу.
+  const allStatuses = await loadDavidProductsStatus(
+    catalog.products.map((product) => ({ handle: product.handle, photos: product.images.length })),
+  )
+  const filtered = filterDavidStudioProducts(catalog.products, filters, allStatuses)
+  const facets = buildDavidStudioFacets(catalog.products, { category: filters.category }, allStatuses)
   const { items, total, totalPages, page } = paginate(filtered, Number(params.page) || 1, perPage)
-  const [cleanUrls, statuses] = await Promise.all([
-    loadDavidCleanPhotoUrls(),
-    loadDavidProductsStatus(items.map((product) => ({ handle: product.handle, photos: product.images.length }))),
-  ])
+  const cleanUrls = await loadDavidCleanPhotoUrls()
+  const statuses = Object.fromEntries(items.map((product) => [product.handle, allStatuses[product.handle]]))
 
   return (
     <DavidStudioCatalog

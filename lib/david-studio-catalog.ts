@@ -66,19 +66,52 @@ export interface FacetOption {
 export type DavidStudioAvailability = 'all' | 'available' | 'out'
 export type DavidStudioSort = 'default' | 'price-asc' | 'price-desc' | 'title'
 
+/**
+ * Состояние товара в импорте. Состояния взаимоисключающие, чтобы фильтр не
+ * показывал один товар в двух вкладках: опубликованное важнее обработанного.
+ */
+export type DavidStudioState = 'all' | 'unprocessed' | 'processed' | 'published'
+
+export const DAVID_STUDIO_STATES: ReadonlyArray<{ value: Exclude<DavidStudioState, 'all'>; label: string }> = [
+  { value: 'unprocessed', label: 'Необработанное' },
+  { value: 'processed', label: 'Обработанное' },
+  { value: 'published', label: 'Опубликованное' },
+]
+
 export interface DavidStudioFilters {
   q: string
   category: string
   subcategory: string
   productType: string
   availability: DavidStudioAvailability
+  state: DavidStudioState
   sort: DavidStudioSort
+}
+
+/** Состояние товара для фильтра: считается по черновику и очереди чистки. */
+export interface DavidStudioStatus {
+  publishedInChromoff: boolean
+  photosCleaned: boolean
+  photosExpected: number
+  photosDone: number
+  photosPending: number
+  photosFailed: number
+}
+
+export type DavidStudioStatusLookup = Record<string, DavidStudioStatus | undefined>
+
+export function davidStudioStateOf(status?: DavidStudioStatus | null): Exclude<DavidStudioState, 'all'> {
+  if (!status) return 'unprocessed'
+  if (status.publishedInChromoff) return 'published'
+  if (status.photosCleaned) return 'processed'
+  return 'unprocessed'
 }
 
 export interface DavidStudioFacets {
   categories: FacetOption[]
   subcategories: FacetOption[]
   productTypes: FacetOption[]
+  states: FacetOption[]
 }
 
 export const DAVID_STUDIO_PAGE_SIZES = [24, 48, 96] as const
@@ -116,6 +149,7 @@ export function normalizeFilters(input: {
   subcategory?: string
   productType?: string
   availability?: string
+  state?: string
   sort?: string
 }): DavidStudioFilters {
   return {
@@ -124,6 +158,9 @@ export function normalizeFilters(input: {
     subcategory: input.subcategory || '',
     productType: input.productType || '',
     availability: (['available', 'out'].includes(input.availability || '') ? input.availability : 'all') as DavidStudioAvailability,
+    state: (DAVID_STUDIO_STATES.map((item) => item.value) as string[]).includes(input.state || '')
+      ? input.state as DavidStudioState
+      : 'all',
     sort: (['price-asc', 'price-desc', 'title'].includes(input.sort || '') ? input.sort : 'default') as DavidStudioSort,
   }
 }
@@ -131,13 +168,14 @@ export function normalizeFilters(input: {
 export function hasActiveFilters(filters: DavidStudioFilters): boolean {
   return Boolean(
     filters.q || filters.category || filters.subcategory || filters.productType ||
-    filters.availability !== 'all' || filters.sort !== 'default',
+    filters.availability !== 'all' || filters.state !== 'all' || filters.sort !== 'default',
   )
 }
 
 export function filterDavidStudioProducts(
   products: DavidStudioProduct[],
   filters: DavidStudioFilters,
+  statuses: DavidStudioStatusLookup = {},
 ): DavidStudioProduct[] {
   const needle = filters.q.toLocaleLowerCase('ru-RU')
 
@@ -154,6 +192,7 @@ export function filterDavidStudioProducts(
     if (filters.productType && (product.product_type || '') !== filters.productType) return false
     if (filters.availability === 'available' && !product.available) return false
     if (filters.availability === 'out' && product.available) return false
+    if (filters.state !== 'all' && davidStudioStateOf(statuses[product.handle]) !== filters.state) return false
 
     if (!needle) return true
     const haystack = [
@@ -192,10 +231,12 @@ export function filterDavidStudioProducts(
 export function buildDavidStudioFacets(
   products: DavidStudioProduct[],
   filters?: Partial<Pick<DavidStudioFilters, 'category'>>,
+  statuses: DavidStudioStatusLookup = {},
 ): DavidStudioFacets {
   const categories = new Map<string, number>()
   const subcategories = new Map<string, number>()
   const productTypes = new Map<string, number>()
+  const states = new Map<string, number>()
 
   for (const product of products) {
     if (product.category) categories.set(product.category, (categories.get(product.category) || 0) + 1)
@@ -208,6 +249,11 @@ export function buildDavidStudioFacets(
       if (collection === product.category) continue
       subcategories.set(collection, (subcategories.get(collection) || 0) + 1)
     }
+
+    // Состояния считаем в той же выборке, что и подразделы: выбранный раздел
+    // уже сузил каталог, и счётчик отвечает на вопрос «сколько таких здесь».
+    const state = davidStudioStateOf(statuses[product.handle])
+    states.set(state, (states.get(state) || 0) + 1)
   }
 
   const toOptions = (map: Map<string, number>, labelize: boolean): FacetOption[] =>
@@ -219,6 +265,9 @@ export function buildDavidStudioFacets(
     categories: toOptions(categories, true),
     subcategories: toOptions(subcategories, true),
     productTypes: toOptions(productTypes, false),
+    states: DAVID_STUDIO_STATES
+      .map((item) => ({ value: item.value, label: item.label, count: states.get(item.value) || 0 }))
+      .filter((option) => option.count > 0),
   }
 }
 

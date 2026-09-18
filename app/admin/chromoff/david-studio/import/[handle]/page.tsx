@@ -5,6 +5,7 @@ import DavidImportPanel from '@/components/chromoff/DavidImportPanel'
 import { scrapingQuery } from '@/lib/db'
 import { getRailsCatalogLookups, listRailsChromoffCategories } from '@/lib/rails-admin'
 import { listPhotoCleanJobs } from '@/lib/photo-clean-jobs'
+import { listDavidPhotoExclusions } from '@/lib/david-photo-exclusions'
 import { DAVID_SUPPLIER_NAME, davidPriceRange, davidProductVariantAttributes, type DavidCatalogProduct } from '@/lib/david-studio-import'
 import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 
@@ -18,11 +19,12 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
   const product = (catalog.products as DavidCatalogProduct[]).find((item) => item.handle === handle)
   if (!product) notFound()
 
-  const [draftResult, photos, lookups, chromoffCategories] = await Promise.all([
+  const [draftResult, photos, lookups, chromoffCategories, excluded] = await Promise.all([
     scrapingQuery('SELECT status, ai_output, error, price_rub, rails_product_id, chromoff_listing_id FROM david_import_drafts WHERE handle=$1', [handle]),
     listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
     getRailsCatalogLookups(),
     listRailsChromoffCategories(),
+    listDavidPhotoExclusions(handle).catch(() => [] as string[]),
   ])
 
   const categoryNames = new Map<string, string>()
@@ -52,6 +54,7 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
           priceLabel={davidPriceRange(product).label}
           photos={photos.map((photo) => ({
             id: photo.id,
+            sourceKey: photo.sourceKey,
             sourcePosition: photo.sourcePosition,
             status: photo.status,
             cleanStatus: photo.cleanStatus,
@@ -61,6 +64,7 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
             error: photo.error,
           }))}
           draft={draftResult.rows[0] || null}
+          excluded={excluded}
           variantSizes={variantAttributes.sizes}
           variantMeasurements={variantAttributes.measurements}
           variantNotSizes={variantAttributes.notSizes}

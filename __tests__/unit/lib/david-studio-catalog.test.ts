@@ -130,6 +130,49 @@ describe('david studio filters', () => {
     expect(found.map((item) => item.product_id)).toEqual([1])
   })
 
+  it('фильтрует по состоянию импорта: необработанное, обработанное, опубликованное', () => {
+    const statuses = {
+      [CATALOG[0].handle]: {
+        publishedInChromoff: true, photosCleaned: true, photosExpected: 2, photosDone: 2, photosPending: 0, photosFailed: 0,
+      },
+      [CATALOG[1].handle]: {
+        publishedInChromoff: false, photosCleaned: true, photosExpected: 1, photosDone: 1, photosPending: 0, photosFailed: 0,
+      },
+      // Третий товар намеренно без статуса: он необработан.
+    }
+
+    const unprocessed = filterDavidStudioProducts(CATALOG, normalizeFilters({ state: 'unprocessed' }), statuses)
+    expect(unprocessed.map((item) => item.product_id)).toEqual([3])
+
+    const processed = filterDavidStudioProducts(CATALOG, normalizeFilters({ state: 'processed' }), statuses)
+    expect(processed.map((item) => item.product_id)).toEqual([2])
+
+    const published = filterDavidStudioProducts(CATALOG, normalizeFilters({ state: 'published' }), statuses)
+    expect(published.map((item) => item.product_id)).toEqual([1])
+
+    // Без статусов всё считается необработанным.
+    expect(filterDavidStudioProducts(CATALOG, normalizeFilters({ state: 'unprocessed' })).map((item) => item.product_id))
+      .toEqual([1, 2, 3])
+    expect(hasActiveFilters(normalizeFilters({ state: 'processed' }))).toBe(true)
+    expect(normalizeFilters({ state: 'broken' }).state).toBe('all')
+  })
+
+  it('считает фасет состояний по той же выборке, что и подразделы', () => {
+    const statuses = {
+      [CATALOG[0].handle]: {
+        publishedInChromoff: false, photosCleaned: true, photosExpected: 2, photosDone: 2, photosPending: 0, photosFailed: 0,
+      },
+    }
+    const facets = buildDavidStudioFacets(CATALOG, {}, statuses)
+    expect(facets.states).toEqual([
+      { value: 'unprocessed', label: 'Необработанное', count: 2 },
+      { value: 'processed', label: 'Обработанное', count: 1 },
+    ])
+
+    const scoped = buildDavidStudioFacets(CATALOG, { category: 'pendants' }, statuses)
+    expect(scoped.states).toEqual([{ value: 'unprocessed', label: 'Необработанное', count: 1 }])
+  })
+
   it('searches description text and variant titles, not just the title', () => {
     // «74mm» есть только в описании, «US9» — только в варианте.
     expect(filterDavidStudioProducts(CATALOG, normalizeFilters({ q: '74mm' })).map((item) => item.product_id)).toEqual([1])

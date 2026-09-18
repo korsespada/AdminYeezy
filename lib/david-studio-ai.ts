@@ -3,6 +3,7 @@ import { scrapingQuery } from '@/lib/db'
 import { getRailsCatalogLookups, listRailsChromoffCategories } from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions, filterCatalogAttributeDefinitionsForCategory } from '@/lib/catalog-attribute-registry'
 import { listPhotoCleanJobs } from '@/lib/photo-clean-jobs'
+import { listDavidPhotoExclusions } from '@/lib/david-photo-exclusions'
 import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 import {
   DAVID_SUPPLIER_NAME,
@@ -83,13 +84,30 @@ export async function getDavidCatalogProduct(handle: string): Promise<DavidCatal
   return (catalog.products as DavidCatalogProduct[]).find((item) => item.handle === handle) || null
 }
 
-/** Очищенные фото товара по порядку — единственный источник картинок для ИИ. */
-export async function davidReadyPhotoUrls(handle: string): Promise<string[]> {
-  const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 })
+/** Очищенные фото товара по порядку, без удалённых оператором — источник для ИИ. */
+export async function davidReadyPhotos(handle: string): Promise<Array<{
+  url: string
+  position: number | null
+  sourceKey: string
+}>> {
+  const [photos, excluded] = await Promise.all([
+    listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
+    listDavidPhotoExclusions(handle).catch(() => [] as string[]),
+  ])
+  const excludedKeys = new Set(excluded)
   return photos
-    .filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
+    .filter((photo) => photo.status === 'done' && photo.s3CleanUrl && !excludedKeys.has(photo.sourceKey))
     .sort((left, right) => (left.sourcePosition || 0) - (right.sourcePosition || 0))
-    .map((photo) => photo.s3CleanUrl as string)
+    .map((photo) => ({
+      url: photo.s3CleanUrl as string,
+      position: photo.sourcePosition,
+      sourceKey: photo.sourceKey,
+    }))
+}
+
+/** Адреса очищенных фото для промпта и payload. */
+export async function davidReadyPhotoUrls(handle: string): Promise<string[]> {
+  return (await davidReadyPhotos(handle)).map((photo) => photo.url)
 }
 
 /**

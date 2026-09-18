@@ -27,6 +27,7 @@ import type {
 } from '@/lib/david-studio-catalog'
 import type { DavidProductStatus } from '@/lib/david-studio-status'
 import { startDavidPhotoCleaningBatchAction } from '@/actions/david-studio'
+import DavidPhotoQueueDialog from '@/components/chromoff/DavidPhotoQueueDialog'
 
 const BASE_PATH = '/admin/chromoff/david-studio'
 
@@ -69,6 +70,7 @@ export default function DavidStudioCatalog({
   const [showOriginal, setShowOriginal] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+  const [queueOpen, setQueueOpen] = useState(false)
 
   const statusOf = (handle: string): DavidProductStatus | undefined => statuses[handle]
   const cleaningAnywhere = Object.values(statuses).some((status) => status.cleaning)
@@ -126,6 +128,7 @@ export default function DavidStudioCatalog({
       subcategory: filters.subcategory || undefined,
       productType: filters.productType || undefined,
       availability: filters.availability !== 'all' ? filters.availability : undefined,
+      state: filters.state !== 'all' ? filters.state : undefined,
       sort: filters.sort !== 'default' ? filters.sort : undefined,
       perPage: perPage !== DAVID_STUDIO_DEFAULT_PAGE_SIZE ? perPage : undefined,
       ...overrides,
@@ -140,7 +143,7 @@ export default function DavidStudioCatalog({
     })
   }
 
-  const changeFilter = (key: 'category' | 'subcategory' | 'productType' | 'availability' | 'sort', value: string) => {
+  const changeFilter = (key: 'category' | 'subcategory' | 'productType' | 'availability' | 'state' | 'sort', value: string) => {
     // Смена раздела сбрасывает подраздел: он относится к прежнему разделу.
     if (key === 'category') navigate({ category: value || undefined, subcategory: undefined })
     else navigate({ [key]: value === 'all' ? undefined : value || undefined })
@@ -214,6 +217,12 @@ export default function DavidStudioCatalog({
             options={[{ value: 'available', label: 'В наличии' }, { value: 'out', label: 'Нет в наличии' }]}
           />
           <FilterSelect
+            label="Состояние"
+            value={filters.state === 'all' ? '' : filters.state}
+            onChange={(value) => changeFilter('state', value)}
+            options={(facets.states || []).map((option) => ({ value: option.value, label: `${option.label} · ${option.count}` }))}
+          />
+          <FilterSelect
             label="Сортировка"
             value={filters.sort === 'default' ? '' : filters.sort}
             onChange={(value) => changeFilter('sort', value)}
@@ -269,6 +278,15 @@ export default function DavidStudioCatalog({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setQueueOpen(true)}
+                className="h-10 border-slate-700 bg-slate-800 text-slate-200"
+                title="Сколько кадров в очереди чистки и где осталось"
+              >
+                Очередь фото
+              </Button>
               {hasActiveFilters(filters) && (
                 <Button
                   type="button"
@@ -280,6 +298,7 @@ export default function DavidStudioCatalog({
                     subcategory: undefined,
                     productType: undefined,
                     availability: undefined,
+                    state: undefined,
                     sort: undefined,
                   })}
                 >
@@ -487,6 +506,8 @@ export default function DavidStudioCatalog({
           )}
         </div>
       </main>
+
+      <DavidPhotoQueueDialog open={queueOpen} onOpenChange={setQueueOpen} />
 
       <Dialog open={Boolean(active)} onOpenChange={(open) => { if (!open) setActive(null) }}>
         <DialogContent className="max-h-[92dvh] max-w-5xl overflow-hidden border-slate-700 bg-slate-800 p-0 text-slate-100">
