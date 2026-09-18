@@ -35,6 +35,8 @@ export async function POST(request: NextRequest) {
           source_product: job.sourceProduct,
           source_position: job.sourcePosition,
           attempts: job.attempts,
+          // Рамка, отмеченная оператором: чистка идёт по ней без автоопределения.
+          manual_box: job.manualBox,
         })),
       })
     }

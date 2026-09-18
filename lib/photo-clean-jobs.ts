@@ -32,6 +32,16 @@ export interface PhotoCleanJob {
   quality: Record<string, unknown>
   seconds: number | null
   error: string | null
+  priority: number
+  /** Рамка вотермарки, отмеченная оператором вручную (доли 0..1 от кадра). */
+  manualBox: PhotoCleanManualBox | null
+}
+
+export interface PhotoCleanManualBox {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
 }
 
 const LEASE_MINUTES = 30
@@ -57,6 +67,15 @@ function mapJob(row: any): PhotoCleanJob {
     quality: row.quality && typeof row.quality === 'object' ? row.quality : {},
     seconds: row.seconds === null ? null : Number(row.seconds),
     error: row.error || null,
+    priority: Number(row.priority || 0),
+    manualBox: row.manual_box && typeof row.manual_box === 'object'
+      ? {
+          x1: Number(row.manual_box.x1),
+          y1: Number(row.manual_box.y1),
+          x2: Number(row.manual_box.x2),
+          y2: Number(row.manual_box.y2),
+        }
+      : null,
   }
 }
 
@@ -98,7 +117,7 @@ export async function claimPhotoCleanJobs(workerId: string, limit = 3): Promise<
      ), picked AS (
        SELECT id FROM photo_clean_jobs
         WHERE status = 'pending'
-        ORDER BY created_at
+        ORDER BY priority DESC, created_at
         LIMIT $1
         FOR UPDATE SKIP LOCKED
      )
@@ -273,4 +292,54 @@ export async function countProblemPhotoCleanJobs(filter: {
     [filter.supplier || '', filter.sourceProduct || ''],
   )
   return Number(result.rows[0]?.count || 0)
+}
+
+/**
+ * Оператор сам обвёл вотермарку: задание возвращается в очередь с приоритетом,
+ * чтобы воркер взял его раньше остальных, и чистка пойдёт по этой рамке.
+ */
+export async function markPhotoCleanManualBox(input: {
+  sourceKey: string
+  box: PhotoCleanManualBox
+}): Promise<boolean> {
+  const box = input.box
+  const normalized: PhotoCleanManualBox = {
+    x1: Math.min(Math.max(box.x1, 0), 1),
+    y1: Math.min(Math.max(box.y1, 0), 1),
+    x2: Math.min(Math.max(box.x2, 0), 1),
+    y2: Math.min(Math.max(box.y2, 0), 1),
+  }
+  const updated = await scrapingQuery(
+    `UPDATE photo_clean_jobs
+        SET status='pending',
+            priority=10,
+            manual_box=$2::jsonb,
+            clean_status=NULL,
+            lease_token=NULL,
+            lease_expires_at=NULL,
+            worker_id=NULL,
+            z_after=NULL,
+            mask_px=NULL,
+            passes=NULL,
+            quality='{}'::jsonb,
+            seconds=NULL,
+            error=NULL,
+            updated_at=NOW()
+      WHERE source_key=$1
+      RETURNING id`,
+    [input.sourceKey, JSON.stringify(normalized)],
+  )
+  return Boolean(updated.rowCount)
+}
+
+/** Снимает ручную пометку: кадр снова обрабатывается автоопределением. */
+export async function clearPhotoCleanManualBox(sourceKey: string): Promise<boolean> {
+  const updated = await scrapingQuery(
+    `UPDATE photo_clean_jobs
+        SET manual_box=NULL, priority=0, updated_at=NOW()
+      WHERE source_key=$1
+      RETURNING id`,
+    [sourceKey],
+  )
+  return Boolean(updated.rowCount)
 }

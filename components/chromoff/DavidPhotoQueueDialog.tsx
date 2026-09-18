@@ -52,9 +52,12 @@ function percent(done: number, total: number) {
 export default function DavidPhotoQueueDialog({
   open,
   onOpenChange,
+  filters = '',
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Текущие фильтры выгрузки: возвращаемся к ним из карточки товара. */
+  filters?: string
 }) {
   const [data, setData] = useState<QueuePayload | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -183,7 +186,7 @@ export default function DavidPhotoQueueDialog({
               {active.map((product) => (
                 <div key={product.handle} className="flex flex-wrap items-center justify-between gap-2 bg-slate-800/40 px-3 py-2 text-sm">
                   <Link
-                    href={`/admin/chromoff/david-studio/import/${product.handle}`}
+                    href={`/admin/chromoff/david-studio/import/${product.handle}${filters ? `?from=${encodeURIComponent(filters)}` : ''}`}
                     className="min-w-0 flex-1 truncate text-slate-100 hover:text-violet-300"
                     title={product.title}
                   >

@@ -12,8 +12,17 @@ import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 export const dynamic = 'force-dynamic'
 
 /** Рабочий экран товара David: чистка фото, ИИ-черновик, создание или привязка к товару Chromoff. */
-export default async function DavidImportPage({ params }: { params: Promise<{ handle: string }> }) {
+export default async function DavidImportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ handle: string }>
+  searchParams: Promise<{ from?: string }>
+}) {
   const { handle } = await params
+  const { from } = await searchParams
+  // «Назад» возвращает к выгрузке с теми же фильтрами, что были включены.
+  const backHref = from ? `/admin/chromoff/david-studio?${from}` : '/admin/chromoff/david-studio'
   const catalog = loadDavidStudioCatalog()
   if (!catalog) notFound()
   const product = (catalog.products as DavidCatalogProduct[]).find((item) => item.handle === handle)
@@ -41,7 +50,7 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
   return (
     <main className="min-h-full bg-slate-900 p-4 text-slate-100 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-4">
-        <Link href="/admin/chromoff/david-studio"
+        <Link href={backHref}
               className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm text-slate-200 hover:bg-slate-700">
           <ArrowLeft className="h-4 w-4" />
           К выгрузке David Studio
@@ -62,6 +71,7 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
             s3BeforeUrl: photo.s3BeforeUrl,
             s3AfterUrl: photo.s3AfterUrl,
             error: photo.error,
+            manualBox: photo.manualBox,
           }))}
           draft={draftResult.rows[0] || null}
           excluded={excluded}

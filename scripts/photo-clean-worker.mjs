@@ -122,11 +122,16 @@ async function processJob(job) {
     const cropAfter = join(dir, 'after.png')
 
     const bytes = await download(job.source_url, input)
-    log(`скачано ${Math.round(bytes / 1024)} КБ, чищу ${job.source_product} #${job.source_position}`)
+    // Рамку оператора передаём как есть: чистка пойдёт по ней без автоопределения.
+    const manualBox = job.manual_box && typeof job.manual_box === 'object'
+      ? [job.manual_box.x1, job.manual_box.y1, job.manual_box.x2, job.manual_box.y2].join(',')
+      : ''
+    log(`скачано ${Math.round(bytes / 1024)} КБ, чищу ${job.source_product} #${job.source_position}${manualBox ? ' (рамка оператора)' : ''}`)
     await runPython([
       '--in', input, '--out', cleaned, '--report', reportPath,
       '--crop-before', cropBefore, '--crop-after', cropAfter,
       '--templates', TEMPLATES, '--model', MODEL,
+      ...(manualBox ? ['--box', manualBox] : []),
     ])
     const report = JSON.parse(readFileSync(reportPath, 'utf8'))
     log(`  ${report.status} score=${report.score} z_after=${report.z_after} mask=${report.mask_px} ${report.seconds}с`)

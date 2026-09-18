@@ -10,6 +10,8 @@ import {
   excludeDavidPhotoAction,
   generateDavidDraftAction,
   requeueDavidProblemPhotosAction,
+  markDavidWatermarkAction,
+  clearDavidWatermarkMarkAction,
   restoreDavidPhotoAction,
   searchChromoffProductsAction,
   startDavidPhotoCleaningAction,
@@ -27,6 +29,8 @@ type Photo = {
   s3BeforeUrl: string | null
   s3AfterUrl: string | null
   error: string | null
+  /** Рамка, отмеченная оператором вручную (доли кадра), если она есть. */
+  manualBox?: { x1: number; y1: number; x2: number; y2: number } | null
 }
 
 type Draft = {
@@ -38,7 +42,7 @@ type Draft = {
 } | null
 
 type Option = { id: string; name: string; parent_id?: string | null }
-type FoundProduct = { id: string; name: string; photos: number; category: string; price: number; externalId: string; attributes: Record<string, unknown> }
+type FoundProduct = { id: string; name: string; photos: number; photo: string; category: string; price: number; externalId: string; attributes: Record<string, unknown> }
 
 const VERDICT_LABEL: Record<string, string> = {
   ok: 'вотермарка убрана',
@@ -114,6 +118,10 @@ export default function DavidImportPanel({
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [viewer, setViewer] = useState<Photo | null>(null)
   const [viewOriginal, setViewOriginal] = useState(false)
+  // Ручная пометка вотермарки: оператор обводит надпись рамкой на кадре.
+  const [markMode, setMarkMode] = useState(false)
+  const [box, setBox] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null)
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
 
   const ai = draft?.ai_output || {}
   const [name, setName] = useState<string>(ai.name || title)
@@ -124,7 +132,6 @@ export default function DavidImportPanel({
   const [chromoffCategoryId, setChromoffCategoryId] = useState<string>(ai.chromoffCategory?.id || '')
   const [gender, setGender] = useState<string>(ai.gender || '')
   const [publish, setPublish] = useState(true)
-  const [alts, setAlts] = useState<string[]>(Array.isArray(ai.photoAlts) ? ai.photoAlts : [])
 
   const [query, setQuery] = useState('')
   const [found, setFound] = useState<FoundProduct[]>([])
@@ -179,16 +186,9 @@ export default function DavidImportPanel({
     })
   }
 
-  function onAltChange(index: number, value: string) {
-    setAlts((current) => {
-      const next = [...current]
-      next[index] = value
-      return next
-    })
-  }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 pb-28">
       <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -209,18 +209,6 @@ export default function DavidImportPanel({
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Очистить фото ({photos.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => run(
-                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
-                'Черновик посчитан',
-              )}
-              disabled={pending || !readyPhotos.length}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
-            >
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {pending ? 'Считаю черновик…' : 'Сделать черновик ИИ'}
             </button>
           </div>
         </div>
@@ -417,13 +405,90 @@ export default function DavidImportPanel({
                 >
                   {excludedSet.has(viewer.sourceKey) ? 'Вернуть в импорт' : 'Убрать из импорта'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setMarkMode((value) => !value); setBox(null) }}
+                  className={`rounded border px-2 py-1 ${markMode ? 'border-amber-500/60 bg-amber-500/10 text-amber-200' : 'border-slate-600 text-slate-300 hover:text-amber-200'}`}
+                  title="Если вотермарку не нашли — обведите её сами, и кадр уйдёт на чистку вне очереди"
+                >
+                  {markMode ? 'Отменить пометку' : 'Отметить вотермарку'}
+                </button>
+                {markMode && (
+                  <button
+                    type="button"
+                    disabled={pending || !box}
+                    onClick={() => {
+                      if (!box) return
+                      run(
+                        () => markDavidWatermarkAction(handle, viewer.sourceKey, box),
+                        'Кадр отправлен на чистку по вашей рамке',
+                      )
+                      setBox(null)
+                      setMarkMode(false)
+                    }}
+                    className="rounded border border-amber-500/60 bg-amber-500/10 px-2 py-1 text-amber-200 disabled:opacity-40"
+                  >
+                    Очистить по рамке вне очереди
+                  </button>
+                )}
+                {viewer.manualBox && (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => run(() => clearDavidWatermarkMarkAction(handle, viewer.sourceKey), 'Пометка снята')}
+                    className="rounded border border-slate-600 px-2 py-1 text-slate-400 hover:text-amber-200 disabled:opacity-50"
+                    title="Кадр снова пойдёт через автоопределение"
+                  >
+                    Снять пометку
+                  </button>
+                )}
               </div>
-              {/* eslint-disable-next-line @next/next/no-img-element -- в модалке нужен кадр целиком без оптимизации next/image */}
-              <img
-                src={(viewOriginal ? viewer.sourceKey : viewer.s3CleanUrl || viewer.sourceKey) || ''}
-                alt={`кадр ${viewer.sourcePosition ?? ''}`}
-                className="max-h-[70dvh] w-full rounded object-contain"
-              />
+              {markMode && (
+                <p className="text-xs text-amber-200">
+                  Обведите надпись мышью — затирается ровно эта рамка. Обводите только вотермарку, не захватывая изделие.
+                </p>
+              )}
+              <div
+                className={`relative select-none ${markMode ? 'cursor-crosshair' : ''}`}
+                onPointerDown={(event) => {
+                  if (!markMode) return
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  const point = {
+                    x: Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1),
+                    y: Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1),
+                  }
+                  setDragStart(point)
+                  setBox({ x1: point.x, y1: point.y, x2: point.x, y2: point.y })
+                  event.currentTarget.setPointerCapture(event.pointerId)
+                }}
+                onPointerMove={(event) => {
+                  if (!markMode || !dragStart) return
+                  const rect = event.currentTarget.getBoundingClientRect()
+                  const x = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
+                  const y = Math.min(Math.max((event.clientY - rect.top) / rect.height, 0), 1)
+                  setBox({ x1: dragStart.x, y1: dragStart.y, x2: x, y2: y })
+                }}
+                onPointerUp={() => setDragStart(null)}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- в модалке нужен кадр целиком без оптимизации next/image */}
+                <img
+                  src={(viewOriginal ? viewer.sourceKey : viewer.s3CleanUrl || viewer.sourceKey) || ''}
+                  alt={`кадр ${viewer.sourcePosition ?? ''}`}
+                  className="w-full rounded"
+                  draggable={false}
+                />
+                {box && (
+                  <div
+                    className="pointer-events-none absolute border-2 border-amber-400 bg-amber-400/20"
+                    style={{
+                      left: `${Math.min(box.x1, box.x2) * 100}%`,
+                      top: `${Math.min(box.y1, box.y2) * 100}%`,
+                      width: `${Math.abs(box.x1 - box.x2) * 100}%`,
+                      height: `${Math.abs(box.y1 - box.y2) * 100}%`,
+                    }}
+                  />
+                )}
+              </div>
               <div className="flex flex-wrap gap-4 text-xs text-slate-400">
                 {viewer.s3BeforeUrl && (
                   <a href={viewer.s3BeforeUrl} target="_blank" rel="noreferrer" className="hover:text-violet-300">
@@ -595,42 +660,6 @@ export default function DavidImportPanel({
             )}
           </div>
 
-          {alts.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-sm text-slate-300">Альты фотографий</p>
-              {alts.map((alt, index) => (
-                <input key={index} value={alt} onChange={(event) => onAltChange(index, event.target.value)}
-                       className="h-10 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-sm text-slate-100" />
-              ))}
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={pending || !name || !categoryId || !chromoffCategoryId}
-              onClick={() => run(() => createDavidChromoffProductAction({
-                handle,
-                name,
-                description,
-                categoryId,
-                chromoffCategoryId,
-                gender: gender || null,
-                attributes: ai.attributes || {},
-                photoAlts: alts,
-                seoDescription: ai.seoDescription || '',
-                published: publish,
-              }), 'Товар создан в Chromoff')}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Создать товар только для Chromoff
-            </button>
-            <label className="flex items-center gap-2 self-center text-sm text-slate-300">
-              <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} />
-              публиковать в Chromoff
-            </label>
-          </div>
         </div>
       ) : (
         <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-800/60 p-5">
@@ -655,7 +684,7 @@ export default function DavidImportPanel({
             <div className="divide-y divide-slate-700 overflow-hidden rounded-lg border border-slate-700">
               {found.map((item) => (
                 <label key={item.id} className="flex cursor-pointer items-center justify-between gap-3 bg-slate-900/60 px-3 py-2 text-sm">
-                  <span className="flex items-center gap-3">
+                  <span className="flex min-w-0 items-center gap-3">
                     <input
                       type="radio"
                       name="target"
@@ -669,7 +698,21 @@ export default function DavidImportPanel({
                         setPublishTarget(isDavid)
                       }}
                     />
-                    <span className="text-slate-100">{item.name}</span>
+                    {item.photo ? (
+                      <Image
+                        src={item.photo}
+                        alt={item.name}
+                        width={48}
+                        height={48}
+                        unoptimized
+                        className="h-12 w-12 shrink-0 rounded border border-slate-700 object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-slate-700 text-slate-600">
+                        <ImageOff className="h-4 w-4" />
+                      </span>
+                    )}
+                    <span className="min-w-0 truncate text-slate-100">{item.name}</span>
                     {item.externalId.startsWith('david-studio-') && (
                       <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] text-violet-200">товар David</span>
                     )}
@@ -700,30 +743,84 @@ export default function DavidImportPanel({
             сделать товар активным (скрытый товар не виден и в Chromoff)
           </label>
 
-          <button
-            type="button"
-            disabled={pending || !targetId || !readyPhotos.length}
-            onClick={() => run(
-              () => attachDavidPhotosAction({
-                handle,
-                productId: targetId,
-                photoAlts: alts,
-                attributes: ai.attributes || {},
-                zeroPrice,
-                publish: publishTarget,
-              }),
-              'Записано в товар',
-            )}
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Добавить фото, характеристики и замеры ({readyPhotos.length})
-          </button>
           <p className="text-xs text-slate-400">
             Фото, характеристики и замеры, которые уже есть у товара, не перетираются.
           </p>
         </div>
       )}
+
+      {/* Главные действия всегда на виду: длинные формы не заставляют искать кнопку. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-700 bg-slate-900/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="min-w-0 text-xs text-slate-400">
+            <span className="text-slate-300">{tab === 'new' ? 'Новый товар в Chromoff' : 'Привязка к существующему'}</span>
+            {tab === 'existing' && targetProduct ? <span> · {targetProduct.name}</span> : null}
+            <span className="ml-2 text-slate-500">кадров к импорту: {readyPhotos.length}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => run(
+                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
+                'Черновик посчитан',
+              )}
+              disabled={pending || !readyPhotos.length}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              Сделать черновик ИИ
+            </button>
+            {tab === 'new' ? (
+              <>
+                <label className="flex items-center gap-2 text-sm text-slate-300">
+                  <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} />
+                  публиковать
+                </label>
+                <button
+                  type="button"
+                  disabled={pending || !name || !categoryId || !chromoffCategoryId}
+                  onClick={() => run(() => createDavidChromoffProductAction({
+                    handle,
+                    name,
+                    description,
+                    categoryId,
+                    chromoffCategoryId,
+                    gender: gender || null,
+                    attributes: ai.attributes || {},
+                    photoAlts: Array.isArray(ai.photoAlts) ? ai.photoAlts : [],
+                    seoDescription: ai.seoDescription || '',
+                    published: publish,
+                  }), 'Товар создан в Chromoff')}
+                  className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Создать товар только для Chromoff
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={pending || !targetId || !readyPhotos.length}
+                onClick={() => run(
+                  () => attachDavidPhotosAction({
+                    handle,
+                    productId: targetId,
+                    photoAlts: Array.isArray(ai.photoAlts) ? ai.photoAlts : [],
+                    attributes: ai.attributes || {},
+                    zeroPrice,
+                    publish: publishTarget,
+                  }),
+                  'Записано в товар',
+                )}
+                className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Присоединить к существующему ({readyPhotos.length})
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -8,7 +8,15 @@ import {
   listRailsChromoffListings,
   railsFetch,
 } from '@/lib/rails-admin'
-import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats, requeueProblemPhotoCleanJobs, countProblemPhotoCleanJobs } from '@/lib/photo-clean-jobs'
+import {
+  enqueuePhotoCleanJobs,
+  listPhotoCleanJobs,
+  photoCleanStats,
+  requeueProblemPhotoCleanJobs,
+  countProblemPhotoCleanJobs,
+  markPhotoCleanManualBox,
+  clearPhotoCleanManualBox,
+} from '@/lib/photo-clean-jobs'
 import { buildBatchAiContactSheets, runBatchAiOpenRouter, GLOBAL_BATCH_AI_CATALOG_RULES } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
@@ -100,19 +108,28 @@ export async function searchChromoffProductsAction(query: string) {
   const result = await listRailsChromoffListings({ search: query.trim(), perPage: 20, page: 1, published: true })
   return {
     success: true as const,
-    data: result.items.map((listing: any) => ({
-      id: String(listing.product_id || listing.product?.id || ''),
-      listingId: String(listing.id || ''),
-      name: String(listing.product?.name || listing.name || ''),
-      photos: Array.isArray(listing.media) ? listing.media.length : Array.isArray(listing.product?.media) ? listing.product.media.length : 0,
-      category: String(listing.chromoff_category?.name || ''),
-      price: Number(listing.product?.price || 0),
-      // Признак нашего товара: по нему ревью понимает, что цена должна стать 0.
-      externalId: String(listing.product?.external_id || ''),
-      attributes: listing.product?.catalog_attributes && typeof listing.product.catalog_attributes === 'object'
-        ? listing.product.catalog_attributes
-        : {},
-    })).filter((item: any) => item.id),
+    data: result.items.map((listing: any) => {
+      const media = Array.isArray(listing.media) && listing.media.length
+        ? listing.media
+        : Array.isArray(listing.product?.media) ? listing.product.media : []
+      const photo = media
+        .map((medium: any) => String(medium?.original_url || medium?.preview_url || medium?.thumb_url || ''))
+        .find(Boolean) || ''
+      return {
+        id: String(listing.product_id || listing.product?.id || ''),
+        listingId: String(listing.id || ''),
+        name: String(listing.product?.name || listing.name || ''),
+        photos: media.length,
+        photo,
+        category: String(listing.chromoff_category?.name || ''),
+        price: Number(listing.product?.price || 0),
+        // Признак нашего товара: по нему ревью понимает, что цена должна стать 0.
+        externalId: String(listing.product?.external_id || ''),
+        attributes: listing.product?.catalog_attributes && typeof listing.product.catalog_attributes === 'object'
+          ? listing.product.catalog_attributes
+          : {},
+      }
+    }).filter((item: any) => item.id),
   }
 }
 
@@ -170,6 +187,49 @@ export async function restoreDavidPhotoAction(handle: string, sourceKey: string)
 /** Список убранных кадров товара — для блока «убранные» на экране ревью. */
 export async function listDavidPhotoExclusionsAction(handle: string) {
   return { success: true as const, data: await listDavidPhotoExclusions(handle) }
+}
+
+/**
+ * Оператор сам обвёл вотермарку на кадре, который детектор не нашёл.
+ * Задание возвращается в очередь с приоритетом: воркер берёт его раньше
+ * остальных, а чистка идёт ровно по отмеченной рамке.
+ */
+export async function markDavidWatermarkAction(handle: string, sourceKey: string, box: {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}) {
+  const key = String(sourceKey || '').trim()
+  if (!key) return { success: false as const, error: 'Не указан кадр' }
+  const width = Math.abs(Number(box.x1) - Number(box.x2))
+  const height = Math.abs(Number(box.y1) - Number(box.y2))
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 0.02 || height < 0.01) {
+    return { success: false as const, error: 'Обведите надпись рамкой' }
+  }
+  const marked = await markPhotoCleanManualBox({
+    sourceKey: key,
+    box: { x1: Number(box.x1), y1: Number(box.y1), x2: Number(box.x2), y2: Number(box.y2) },
+  })
+  if (!marked) return { success: false as const, error: 'Кадр не найден в очереди чистки' }
+  revalidatePath('/admin/chromoff/david-studio')
+  return {
+    success: true as const,
+    data: {
+      marked: true,
+      handle,
+      message: 'Кадр в очереди вне очереди: воркер затирает отмеченную рамку',
+    },
+  }
+}
+
+/** Снимает ручную пометку: кадр снова пойдёт через автоопределение. */
+export async function clearDavidWatermarkMarkAction(handle: string, sourceKey: string) {
+  const key = String(sourceKey || '').trim()
+  if (!key) return { success: false as const, error: 'Не указан кадр' }
+  await clearPhotoCleanManualBox(key)
+  revalidatePath('/admin/chromoff/david-studio')
+  return { success: true as const, data: { message: 'Пометка снята' } }
 }
 
 /** Массовая постановка фото выбранных товаров: чистка идёт в фоне у воркера. */

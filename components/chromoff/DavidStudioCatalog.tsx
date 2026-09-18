@@ -149,6 +149,28 @@ export default function DavidStudioCatalog({
     else navigate({ [key]: value === 'all' ? undefined : value || undefined })
   }
 
+  /** Текущие фильтры строкой: их же вернёт кнопка «назад» на экране товара. */
+  const filtersQuery = (() => {
+    const params = new URLSearchParams()
+    const values: Record<string, string | undefined> = {
+      q: filters.q || undefined,
+      category: filters.category || undefined,
+      subcategory: filters.subcategory || undefined,
+      productType: filters.productType || undefined,
+      availability: filters.availability !== 'all' ? filters.availability : undefined,
+      state: filters.state !== 'all' ? filters.state : undefined,
+      sort: filters.sort !== 'default' ? filters.sort : undefined,
+      page: page > 1 ? String(page) : undefined,
+      perPage: perPage !== DAVID_STUDIO_DEFAULT_PAGE_SIZE ? String(perPage) : undefined,
+    }
+    for (const [key, value] of Object.entries(values)) {
+      if (value) params.set(key, value)
+    }
+    return params.toString()
+  })()
+
+  const importHref = (handle: string) => `/admin/chromoff/david-studio/import/${handle}${filtersQuery ? `?from=${encodeURIComponent(filtersQuery)}` : ''}`
+
   const openProduct = (product: DavidStudioProduct) => {
     setActive(product)
     setActiveImage(0)
@@ -507,7 +529,7 @@ export default function DavidStudioCatalog({
         </div>
       </main>
 
-      <DavidPhotoQueueDialog open={queueOpen} onOpenChange={setQueueOpen} />
+      <DavidPhotoQueueDialog open={queueOpen} onOpenChange={setQueueOpen} filters={filtersQuery} />
 
       <Dialog open={Boolean(active)} onOpenChange={(open) => { if (!open) setActive(null) }}>
         <DialogContent className="max-h-[92dvh] max-w-5xl overflow-hidden border-slate-700 bg-slate-800 p-0 text-slate-100">
@@ -627,7 +649,7 @@ export default function DavidStudioCatalog({
 
                     <div className="flex flex-wrap gap-2">
                       <Button asChild className="bg-violet-600 text-white hover:bg-violet-500">
-                        <Link href={`/admin/chromoff/david-studio/import/${active.handle}`}>
+                        <Link href={importHref(active.handle)}>
                           <Upload className="h-4 w-4" />
                           Импорт в Chromoff
                         </Link>
