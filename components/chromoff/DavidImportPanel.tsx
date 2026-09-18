@@ -32,13 +32,6 @@ type Draft = {
   chromoff_listing_id: string | null
 } | null
 
-type AiJob = {
-  status: string
-  attempts: number
-  error: string | null
-  updatedAt: string | null
-} | null
-
 type Option = { id: string; name: string; parent_id?: string | null }
 type FoundProduct = { id: string; name: string; photos: number; category: string; price: number; externalId: string; attributes: Record<string, unknown> }
 
@@ -48,11 +41,11 @@ const VERDICT_LABEL: Record<string, string> = {
   miss: 'не найдена',
 }
 
-const JOB_LABEL: Record<string, string> = {
-  pending: 'задание ждёт локальный воркер',
-  claimed: 'воркер обрабатывает фото и вызывает модель',
-  done: 'модель ответила, черновик записан',
-  failed: 'ошибка выполнения',
+const DRAFT_LABEL: Record<string, string> = {
+  draft: 'не запускался',
+  ai_ready: 'готов',
+  ai_error: 'ошибка',
+  created: 'товар создан',
 }
 
 const HIDDEN_ATTRIBUTE_CODES = new Set([
@@ -89,7 +82,6 @@ export default function DavidImportPanel({
   priceLabel,
   photos,
   draft,
-  job,
   variantSizes,
   variantMeasurements,
   variantNotSizes,
@@ -102,7 +94,6 @@ export default function DavidImportPanel({
   priceLabel: string
   photos: Photo[]
   draft: Draft
-  job: AiJob
   variantSizes: string[]
   variantMeasurements: MeasurementTable | null
   variantNotSizes: string[]
@@ -138,12 +129,11 @@ export default function DavidImportPanel({
   }, [photos])
 
   const busy = counts.pending > 0 || counts.claimed > 0
-  const aiBusy = job?.status === 'pending' || job?.status === 'claimed'
   useEffect(() => {
-    if (!busy && !aiBusy) return
+    if (!busy) return
     const timer = setInterval(() => router.refresh(), 5000)
     return () => clearInterval(timer)
-  }, [busy, aiBusy, router])
+  }, [busy, router])
 
   const readyPhotos = photos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
   const attributes = reviewableAttributes(ai.attributes)
@@ -206,13 +196,13 @@ export default function DavidImportPanel({
               type="button"
               onClick={() => run(
                 () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
-                'Задание ИИ в очереди',
+                'Черновик посчитан',
               )}
-              disabled={pending || aiBusy || !readyPhotos.length}
+              disabled={pending || !readyPhotos.length}
               className="inline-flex h-10 items-center gap-2 rounded-md bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
             >
-              {pending || aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {aiBusy ? 'ИИ работает…' : 'Поставить задание ИИ'}
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {pending ? 'Считаю черновик…' : 'Сделать черновик ИИ'}
             </button>
           </div>
         </div>
@@ -229,25 +219,27 @@ export default function DavidImportPanel({
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-400">Черновик ИИ:</span>
             <b className={draft?.status === 'created' ? 'text-emerald-300' : draft?.status === 'ai_error' ? 'text-rose-300' : 'text-slate-100'}>
-              {draft?.status === 'ai_ready' ? 'готов' : draft?.status === 'ai_queued' ? 'в очереди' : draft?.status === 'created' ? 'товар создан' : draft?.status === 'ai_error' ? 'ошибка' : draft?.status || 'не запускался'}
+              {DRAFT_LABEL[draft?.status || 'draft'] || draft?.status}
             </b>
-            {job && <span className="text-slate-400">задание: {JOB_LABEL[job.status] || job.status} (попыток {job.attempts})</span>}
-            {aiBusy && <span className="text-violet-300">модель вызывает локальный воркер Cockpit</span>}
+            <span className="text-slate-500">модель из «Выгрузок» → «Настройки ИИ»</span>
           </div>
-          {(job?.error || draft?.error) && (
+          {draft?.error && (
             <p className="mt-2 flex items-start gap-2 text-rose-300">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{job?.error || draft?.error}</span>
+              <span>{draft.error}</span>
             </p>
           )}
-          {job?.status === 'failed' && (
+          {draft?.status === 'ai_error' && (
             <button
               type="button"
-              onClick={() => run(() => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null), 'Задание ИИ в очереди')}
+              onClick={() => run(
+                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
+                'Черновик посчитан',
+              )}
               disabled={pending}
               className="mt-2 inline-flex h-8 items-center gap-2 rounded-md border border-slate-600 bg-slate-700 px-3 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
             >
-              <RefreshCw className="h-3 w-3" /> Повторить задание
+              <RefreshCw className="h-3 w-3" /> Повторить расчёт
             </button>
           )}
         </div>

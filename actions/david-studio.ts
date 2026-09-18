@@ -9,6 +9,8 @@ import {
   railsFetch,
 } from '@/lib/rails-admin'
 import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats } from '@/lib/photo-clean-jobs'
+import { buildBatchAiContactSheets, runBatchAiOpenRouter } from '@/lib/batch-ai'
+import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
   DAVID_BRAND_NAME,
   DAVID_SUPPLIER_NAME,
@@ -20,36 +22,37 @@ import {
 } from '@/lib/david-studio-import'
 import {
   ensureDavidDraft,
-  enqueueDavidDraftJob,
-  getDavidAiJobState,
   getDavidCatalogProduct,
   getDavidDraft,
+  markDavidDraftError,
+  prepareDavidDraft,
+  writeDavidDraftFromRaw,
 } from '@/lib/david-studio-ai'
 
 /**
  * Экшены импорта David Studio.
  *
- * Модель здесь не вызывается: экшен кладёт ИИ-задание в очередь, а его забирает
- * локальный воркер. Так на проде не нужны ни модель, ни ключи к ней.
+ * Черновик считает модель, выбранная в «Выгрузках» → «Настройки ИИ» (сейчас это
+ * BYESU). Вызов идёт с сервера: провайдер BYESU — публичный API, ключи к нему
+ * уже настроены в окружении прода.
  */
 
 export async function getDavidProductAction(handle: string) {
   const product = await getDavidCatalogProduct(handle)
   if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
-  const [draft, photos, job] = await Promise.all([
+  const [draft, photos] = await Promise.all([
     getDavidDraft(handle),
     listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
-    getDavidAiJobState(handle),
   ])
   return {
     success: true as const,
-    data: { product, draft, photos, job, price: davidPriceRange(product) },
+    data: { product, draft, photos, price: davidPriceRange(product) },
   }
 }
 
 export async function getDavidDraftAction(handle: string) {
-  const [draft, job] = await Promise.all([getDavidDraft(handle), getDavidAiJobState(handle)])
-  return { success: true as const, data: { draft, job } }
+  const draft = await getDavidDraft(handle)
+  return { success: true as const, data: { draft } }
 }
 
 export async function getDavidQueueStatsAction() {
@@ -134,20 +137,67 @@ export async function startDavidPhotoCleaningBatchAction(handles: string[]): Pro
 }
 
 /**
- * Кладёт ИИ-задание в очередь. Ответ модели придёт от локального воркера,
- * сервер его нормализует и запишет в черновик.
+ * Считает черновик моделью из «Выгрузок» → «Настройки ИИ» (сейчас BYESU).
+ *
+ * Вызов серверный: BYESU — публичный API, ключи к нему настроены в окружении
+ * прода. Провайдер Cockpit доступен только с локального воркера, поэтому при
+ * нём возвращаем понятную ошибку, а не непонятный таймаут.
  */
 export async function generateDavidDraftAction(handle: string, targetProductId: string | null = null) {
-  const result = await enqueueDavidDraftJob(handle, targetProductId)
-  if (!result.success) return result
-  revalidatePath('/admin/chromoff/david-studio')
-  return {
-    success: true as const,
-    data: { ...result.data, queued: true, message: 'Задание ИИ в очереди: его заберёт локальный воркер' },
+  const settingsResult = await getBatchAiSettingsAction()
+  if (!settingsResult.success || !settingsResult.data) {
+    return { success: false as const, error: 'Не удалось прочитать настройки ИИ в «Выгрузках»' }
+  }
+  const settings = settingsResult.data as any
+  const provider = String(settings.provider || '')
+
+  const prepared = await prepareDavidDraft({ handle, targetProductId, settings })
+  if (!prepared.success) return prepared
+
+  if (provider === 'cockpit') {
+    const error = 'Выбран провайдер Cockpit: он работает только через локальный воркер. Выберите BYESU или OpenRouter в «Выгрузках» → «Настройки ИИ».'
+    await markDavidDraftError(handle, error)
+    revalidatePath('/admin/chromoff/david-studio')
+    return { success: false as const, error }
+  }
+
+  const model = provider === 'byesu' ? String(settings.byesuModel || '') : String(settings.openrouterModel || '')
+  try {
+    const contactSheets = await buildBatchAiContactSheets(prepared.data.photoUrls, {
+      additionalHosts: ['static.yeezyunique.ru'],
+    })
+    const raw = await runBatchAiOpenRouter({
+      settings,
+      systemPrompt: settings.systemPrompt,
+      userPrompt: prepared.data.userPrompt,
+      contactSheets,
+    })
+    const written = await writeDavidDraftFromRaw({
+      handle,
+      raw,
+      snapshot: prepared.data.snapshot,
+    })
+    revalidatePath('/admin/chromoff/david-studio')
+    if (!written.success) return written
+    return {
+      success: true as const,
+      data: {
+        ...written.data,
+        provider,
+        model,
+        photos: prepared.data.photoUrls.length,
+        message: `Черновик посчитан: ${provider} / ${model}, фото ${prepared.data.photoUrls.length}`,
+      },
+    }
+  } catch (error: any) {
+    const message = String(error?.message || error || 'Модель недоступна')
+    await markDavidDraftError(handle, message)
+    revalidatePath('/admin/chromoff/david-studio')
+    return { success: false as const, error: message }
   }
 }
 
-/** Повтор задания после ошибки: очередь отдаёт его заново. */
+/** Повторный расчёт после ошибки: тот же путь, черновик перезаписывается. */
 export async function retryDavidDraftAction(handle: string, targetProductId: string | null = null) {
   return generateDavidDraftAction(handle, targetProductId)
 }

@@ -1,5 +1,4 @@
 import { scrapingQuery } from '@/lib/db'
-import { davidAiJobsForHandles } from '@/lib/david-ai-jobs'
 
 /**
  * Состояние товара David для списка выгрузки: метки «опубликован в Chromoff» и
@@ -10,6 +9,7 @@ import { davidAiJobsForHandles } from '@/lib/david-ai-jobs'
 export interface DavidProductStatus {
   handle: string
   draftStatus: string | null
+  draftError: string | null
   railsProductId: string | null
   chromoffListingId: string | null
   publishedInChromoff: boolean
@@ -19,8 +19,6 @@ export interface DavidProductStatus {
   photosFailed: number
   photosCleaned: boolean
   cleaning: boolean
-  aiStatus: string | null
-  aiError: string | null
 }
 
 export async function loadDavidProductsStatus(
@@ -32,9 +30,9 @@ export async function loadDavidProductsStatus(
 
   const expected = new Map(products.map((product) => [String(product.handle), Number(product.photos) || 0]))
 
-  const [drafts, photoCounts, jobs] = await Promise.all([
+  const [drafts, photoCounts] = await Promise.all([
     scrapingQuery(
-      `SELECT handle, status, rails_product_id, chromoff_listing_id
+      `SELECT handle, status, error, rails_product_id, chromoff_listing_id
          FROM david_import_drafts WHERE handle = ANY($1::text[])`,
       [handles],
     ),
@@ -49,17 +47,16 @@ export async function loadDavidProductsStatus(
         GROUP BY source_product, status`,
       [handles],
     ).catch(() => ({ rows: [] as any[] })),
-    davidAiJobsForHandles(handles).catch(() => new Map()),
   ])
 
   const draftByHandle = new Map(drafts.rows.map((row: any) => [String(row.handle), row]))
 
   for (const handle of handles) {
     const draft: any = draftByHandle.get(handle)
-    const aiJob: any = jobs.get(handle)
     result[handle] = {
       handle,
       draftStatus: draft?.status || null,
+      draftError: draft?.error || null,
       railsProductId: draft?.rails_product_id || null,
       chromoffListingId: draft?.chromoff_listing_id || null,
       publishedInChromoff: Boolean(draft?.rails_product_id) && String(draft?.status || '') === 'created',
@@ -69,8 +66,6 @@ export async function loadDavidProductsStatus(
       photosFailed: 0,
       photosCleaned: false,
       cleaning: false,
-      aiStatus: aiJob?.status || null,
-      aiError: aiJob?.error || null,
     }
   }
 

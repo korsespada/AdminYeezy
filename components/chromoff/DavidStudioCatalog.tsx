@@ -409,12 +409,12 @@ export default function DavidStudioCatalog({
                           {status.photosFailed ? `, сбоев ${status.photosFailed}` : ''}
                         </Badge>
                       )}
-                      {status?.aiStatus === 'failed' && (
+                      {status?.draftStatus === 'ai_error' && (
                         <Badge className="bg-rose-500/20 text-rose-200 hover:bg-rose-500/20">ИИ: ошибка</Badge>
                       )}
-                      {status?.aiStatus === 'pending' || status?.aiStatus === 'claimed' ? (
-                        <Badge variant="outline" className="border-violet-500/40 bg-slate-900/80 text-violet-200">ИИ в очереди</Badge>
-                      ) : null}
+                      {status?.draftStatus === 'ai_ready' && !status?.publishedInChromoff && (
+                        <Badge variant="outline" className="border-violet-500/40 bg-slate-900/80 text-violet-200">черновик готов</Badge>
+                      )}
                     </div>
                   </div>
 
