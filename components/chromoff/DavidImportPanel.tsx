@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { AlertTriangle, CheckCircle2, Eye, ImageOff, Loader2, RefreshCw, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react'
@@ -39,6 +39,8 @@ type Draft = {
   error: string | null
   rails_product_id: string | null
   chromoff_listing_id: string | null
+  /** Метка обновления черновика: по ней поля ревью перечитывают ответ ИИ. */
+  updated_at: string | null
 } | null
 
 type Option = { id: string; name: string; parent_id?: string | null }
@@ -151,6 +153,29 @@ export default function DavidImportPanel({
     const timer = setInterval(() => router.refresh(), 5000)
     return () => clearInterval(timer)
   }, [busy, router])
+
+  /**
+   * Поля ревью — это состояние, а ответ ИИ приходит пропсом после router.refresh().
+   * Без синхронизации имя и категории оставались прежними (и кнопка создания была
+   * неактивной) до полной перезагрузки страницы. Перечитываем поля, когда черновик
+   * действительно обновился, и не трогаем правки оператора в остальное время.
+   */
+  const draftRevision = draft?.updated_at || ''
+  const seededRevision = useRef<string>('__init__')
+  useEffect(() => {
+    if (seededRevision.current === '__init__') {
+      seededRevision.current = draftRevision
+      return
+    }
+    if (seededRevision.current === draftRevision) return
+    seededRevision.current = draftRevision
+    const next = draft?.ai_output || {}
+    setName(next.name || title)
+    setDescription(next.description || '')
+    setCategoryId(next.subcategory || next.category || '')
+    setChromoffCategoryId(next.chromoffCategory?.id || '')
+    setGender(next.gender || '')
+  }, [draftRevision, draft, title])
 
   const attributes = reviewableAttributes(ai.attributes)
   const measurements = measurementRows(variantMeasurements)

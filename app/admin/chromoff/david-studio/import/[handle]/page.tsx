@@ -29,7 +29,7 @@ export default async function DavidImportPage({
   if (!product) notFound()
 
   const [draftResult, photos, lookups, chromoffCategories, excluded] = await Promise.all([
-    scrapingQuery('SELECT status, ai_output, error, price_rub, rails_product_id, chromoff_listing_id FROM david_import_drafts WHERE handle=$1', [handle]),
+    scrapingQuery('SELECT status, ai_output, error, price_rub, rails_product_id, chromoff_listing_id, updated_at FROM david_import_drafts WHERE handle=$1', [handle]),
     listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
     getRailsCatalogLookups(),
     listRailsChromoffCategories(),
