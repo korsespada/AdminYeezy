@@ -69,8 +69,7 @@ def main() -> None:
 
     norm = core.normalize(image)
     hit = core.detect(cv2.cvtColor(norm, cv2.COLOR_BGR2GRAY), templates)
-    confident = (hit.score >= core.SCORE_HIT and core.REL_LO <= hit.rel <= core.REL_HI
-                 and hit.iso >= core.ISO_MIN)
+    confident = core.is_confident(hit)
     back = image.shape[1] / norm.shape[1]
     hit_orig = core.Hit(**{**hit.__dict__, "x": int(hit.x * back), "y": int(hit.y * back),
                            "w": int(hit.w * back), "h": int(hit.h * back)})

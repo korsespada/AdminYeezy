@@ -38,6 +38,14 @@ REL_SWEEP = [round(0.38 + 0.01 * i, 2) for i in range(23)]   # 0.38 .. 0.60
 REL_LO, REL_HI = 0.40, 0.58     # кластер реальных масштабов вотермарки
 ISO_MIN = 2.5                   # изолированность пика
 SCORE_HIT = 15.0                # порог балла попадания: zB * min(zB/zA, 2)
+# Мягкие пороги для низкого контраста: белые буквы на коже дают менее
+# изолированный пик при том же согласии двух шаблонов. Согласие обязательно:
+# у фактуры металла отношение zB/zA ≈ 1.04, у настоящей вотермарки ≥ 1.3.
+# Диапазон масштабов не расширяем: кадр с чужим логотипом на масштабе 0.62
+# проходил строгое правило и замазывался.
+ISO_MIN_RELAXED = 2.0
+SCORE_HIT_RELAXED = 13.0
+RATIO_MIN = 1.3
 Z_STOP = 0.30                  # прекращаем уточнять, когда остаток почти нулевой
 Z_OK = 1.0                     # порог вердикта «готово»
 MASK_DILATE = 4                 # рабочий шаг маски
@@ -107,6 +115,24 @@ def normalize(image: np.ndarray) -> np.ndarray:
     scale = NORM_WIDTH / image.shape[1]
     return cv2.resize(image, (NORM_WIDTH, max(int(round(image.shape[0] * scale)), 8)),
                       interpolation=cv2.INTER_AREA)
+
+
+def is_confident(hit: "Hit") -> bool:
+    """Решение «вотермарка найдена».
+
+    Строгое правило — высокий балл и изолированный пик. Мягкое включается только
+    при согласии обоих шаблонов (zB/zA >= RATIO_MIN): так проходят кадры, где
+    белые буквы лежат на коже и пик размывается фактурой, а ложные срабатывания
+    на металле (отношение около 1.04) по-прежнему отсекаются.
+    """
+    if not (REL_LO <= hit.rel <= REL_HI):
+        return False
+    if hit.score >= SCORE_HIT and hit.iso >= ISO_MIN:
+        return True
+    ratio = (hit.z_b / hit.z_a) if hit.z_a else 0.0
+    return (ratio >= RATIO_MIN
+            and hit.score >= SCORE_HIT_RELAXED
+            and hit.iso >= ISO_MIN_RELAXED)
 
 
 def score_map_for(diff: np.ndarray, template: np.ndarray, width: int, height: int,
@@ -383,7 +409,7 @@ def main() -> None:
         started = time.time()
         norm = normalize(image)
         hit = detect(cv2.cvtColor(norm, cv2.COLOR_BGR2GRAY), templates)
-        confident = (hit.score >= SCORE_HIT and REL_LO <= hit.rel <= REL_HI and hit.iso >= ISO_MIN)
+        confident = is_confident(hit)
         back = image.shape[1] / norm.shape[1]
         hit_orig = Hit(**{**hit.__dict__, "x": int(hit.x * back), "y": int(hit.y * back),
                           "w": int(hit.w * back), "h": int(hit.h * back)})
