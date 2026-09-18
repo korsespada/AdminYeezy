@@ -95,11 +95,19 @@ export default function DavidImportPanel({
   function run(action: () => Promise<{ success: boolean; error?: string; data?: unknown }>, okText: string) {
     setMessage(null)
     startTransition(async () => {
-      const result = await action()
-      if (!result.success) setMessage({ kind: 'error', text: result.error || 'Не получилось' })
-      else {
-        setMessage({ kind: 'ok', text: okText })
-        router.refresh()
+      try {
+        const result = await action()
+        if (!result.success) setMessage({ kind: 'error', text: result.error || 'Не получилось' })
+        else {
+          setMessage({ kind: 'ok', text: okText })
+          router.refresh()
+        }
+      } catch (error) {
+        // Серверный экшен умеет бросить исключение: без перехвата кнопка просто «ничего не делает».
+        setMessage({
+          kind: 'error',
+          text: error instanceof Error ? error.message : 'Сервер вернул ошибку без описания',
+        })
       }
     })
   }
