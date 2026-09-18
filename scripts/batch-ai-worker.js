@@ -41,6 +41,17 @@ async function main() {
         activeBatches.add(promise)
         continue
       }
+
+      // Черновики David Studio живут в своей очереди: прод не умеет ходить в
+      // модель, поэтому задание забирает этот же воркер и возвращает сырой ответ.
+      const david = await davidApi({ action: 'claim', worker_id: WORKER_ID, limit: 1 }).catch(() => null)
+      if (david?.jobs?.length) {
+        for (const job of david.jobs) {
+          const promise = processDavidJob(job).finally(() => activeBatches.delete(promise))
+          activeBatches.add(promise)
+        }
+        continue
+      }
       
       break // Nothing to claim
     }
@@ -182,6 +193,47 @@ async function cockpitJson({ systemPrompt, content, temperature, maxTokens }) {
 
 async function api(body) {
   const response = await fetch(`${ADMIN_URL}/api/batch-ai/worker`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${WORKER_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error || `AdminYeezy HTTP ${response.status}`)
+  return payload
+}
+
+/**
+ * Черновики David Studio. Промпт и снимок справочников готовит сервер, воркер
+ * только собирает contact sheet, вызывает Cockpit своими ключами и возвращает
+ * сырой ответ — нормализацию и запись черновика снова делает сервер.
+ */
+async function processDavidJob(job) {
+  try {
+    const input = job.input || {}
+    const sheets = await buildContactSheets(input.photoUrls || [])
+    const content = [{ type: 'text', text: input.userPrompt }]
+    sheets.forEach((url, index) => {
+      content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
+      content.push({ type: 'image_url', image_url: { url } })
+    })
+    const output = await cockpitJson({
+      systemPrompt: input.systemPrompt,
+      content,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens,
+    })
+    const result = await davidApi({ action: 'complete', job_id: job.id, lease_token: job.lease_token, output })
+    if (result && result.ok === false) throw new Error(result.error || 'Сервер не принял ответ модели')
+    console.log(`[batch-ai-worker] david draft completed ${job.handle}`)
+  } catch (error) {
+    console.error(`[batch-ai-worker] david draft failed ${job.handle}: ${error.message}`)
+    await davidApi({ action: 'fail', job_id: job.id, lease_token: job.lease_token, error: error.message }).catch(() => undefined)
+  }
+}
+
+async function davidApi(body) {
+  const response = await fetch(`${ADMIN_URL}/api/david-ai/worker`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${WORKER_TOKEN}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

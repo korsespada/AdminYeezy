@@ -4,6 +4,7 @@ import DavidStudioCatalog from '@/components/chromoff/DavidStudioCatalog'
 import { scrapingQuery } from '@/lib/db'
 import { DAVID_SUPPLIER_NAME } from '@/lib/david-studio-import'
 import { DAVID_STUDIO_CATALOG_FILE, loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
+import { loadDavidProductsStatus } from '@/lib/david-studio-status'
 import {
   buildDavidStudioFacets,
   filterDavidStudioProducts,
@@ -89,7 +90,10 @@ export default async function DavidStudioPage({
   const filtered = filterDavidStudioProducts(catalog.products, filters)
   const facets = buildDavidStudioFacets(catalog.products, { category: filters.category })
   const { items, total, totalPages, page } = paginate(filtered, Number(params.page) || 1, perPage)
-  const cleanUrls = await loadDavidCleanPhotoUrls()
+  const [cleanUrls, statuses] = await Promise.all([
+    loadDavidCleanPhotoUrls(),
+    loadDavidProductsStatus(items.map((product) => ({ handle: product.handle, photos: product.images.length }))),
+  ])
 
   return (
     <DavidStudioCatalog
@@ -104,6 +108,7 @@ export default async function DavidStudioPage({
       total={total}
       totalPages={totalPages}
       cleanUrls={cleanUrls}
+      statuses={statuses}
     />
   )
 }

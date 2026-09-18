@@ -1,61 +1,62 @@
 'use server'
 
-import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { revalidatePath } from 'next/cache'
 import { scrapingQuery } from '@/lib/db'
-import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
   createRailsChromoffListing,
   getRailsCatalogLookups,
-  listRailsChromoffCategories,
   listRailsChromoffListings,
   railsFetch,
 } from '@/lib/rails-admin'
-import { buildBatchAiContactSheets, runBatchAiOpenRouter } from '@/lib/batch-ai'
-import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats } from '@/lib/photo-clean-jobs'
 import {
   DAVID_BRAND_NAME,
   DAVID_SUPPLIER_NAME,
-  buildDavidAiPrompt,
   buildDavidMediaPayload,
   buildDavidRailsProductPayload,
   davidPriceRange,
-  normalizeDavidAiOutput,
-  type DavidCatalogProduct,
+  davidProductVariantAttributes,
+  mergeDavidCatalogAttributes,
 } from '@/lib/david-studio-import'
+import {
+  ensureDavidDraft,
+  enqueueDavidDraftJob,
+  getDavidAiJobState,
+  getDavidCatalogProduct,
+  getDavidDraft,
+} from '@/lib/david-studio-ai'
 
-const CATALOG_FILE = path.join(process.cwd(), 'data', 'david-studio', 'catalog.json')
-
-async function loadCatalog(): Promise<{ products: DavidCatalogProduct[] }> {
-  const parsed = JSON.parse(await readFile(CATALOG_FILE, 'utf8'))
-  return { products: Array.isArray(parsed.products) ? parsed.products : [] }
-}
+/**
+ * Экшены импорта David Studio.
+ *
+ * Модель здесь не вызывается: экшен кладёт ИИ-задание в очередь, а его забирает
+ * локальный воркер. Так на проде не нужны ни модель, ни ключи к ней.
+ */
 
 export async function getDavidProductAction(handle: string) {
-  const catalog = await loadCatalog()
-  const product = catalog.products.find((item) => item.handle === handle)
+  const product = await getDavidCatalogProduct(handle)
   if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
-  const draft = await getDavidDraftAction(handle)
-  const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 })
+  const [draft, photos, job] = await Promise.all([
+    getDavidDraft(handle),
+    listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
+    getDavidAiJobState(handle),
+  ])
   return {
     success: true as const,
-    data: { product, draft: draft.data, photos, price: davidPriceRange(product) },
+    data: { product, draft, photos, job, price: davidPriceRange(product) },
   }
 }
 
 export async function getDavidDraftAction(handle: string) {
-  const result = await scrapingQuery('SELECT * FROM david_import_drafts WHERE handle=$1', [handle])
-  return { success: true as const, data: result.rows[0] || null }
+  const [draft, job] = await Promise.all([getDavidDraft(handle), getDavidAiJobState(handle)])
+  return { success: true as const, data: { draft, job } }
 }
 
 export async function getDavidQueueStatsAction() {
   return { success: true as const, data: await photoCleanStats(DAVID_SUPPLIER_NAME) }
 }
 
-/** Поиск товара Chromoff, к которому привязываем фото David. */
+/** Поиск товара Chromoff, к которому привязываем фото и характеристики David. */
 export async function searchChromoffProductsAction(query: string) {
   const result = await listRailsChromoffListings({ search: query.trim(), perPage: 20, page: 1, published: true })
   return {
@@ -67,14 +68,18 @@ export async function searchChromoffProductsAction(query: string) {
       photos: Array.isArray(listing.media) ? listing.media.length : Array.isArray(listing.product?.media) ? listing.product.media.length : 0,
       category: String(listing.chromoff_category?.name || ''),
       price: Number(listing.product?.price || 0),
+      // Признак нашего товара: по нему ревью понимает, что цена должна стать 0.
+      externalId: String(listing.product?.external_id || ''),
+      attributes: listing.product?.catalog_attributes && typeof listing.product.catalog_attributes === 'object'
+        ? listing.product.catalog_attributes
+        : {},
     })).filter((item: any) => item.id),
   }
 }
 
 /** Ставит все фото товара David в очередь на чистку от вотермарки. */
 export async function startDavidPhotoCleaningAction(handle: string) {
-  const catalog = await loadCatalog()
-  const product = catalog.products.find((item) => item.handle === handle)
+  const product = await getDavidCatalogProduct(handle)
   if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
   if (!product.images?.length) return { success: false as const, error: 'У товара нет фотографий' }
 
@@ -89,112 +94,69 @@ export async function startDavidPhotoCleaningAction(handle: string) {
   return { success: true as const, data: queued }
 }
 
-async function ensureDavidDraft(handle: string, mode: string, targetProductId: string | null,
-                               sourceProduct: DavidCatalogProduct) {
-  await scrapingQuery(
-    `INSERT INTO david_import_drafts (id, handle, mode, target_product_id, source_product)
-     VALUES ($1,$2,$3,$4,$5::jsonb)
-     ON CONFLICT (handle) DO UPDATE
-       SET mode=EXCLUDED.mode,
-           target_product_id=EXCLUDED.target_product_id,
-           source_product=EXCLUDED.source_product,
-           updated_at=NOW()`,
-    [randomUUID(), handle, mode, targetProductId, JSON.stringify(sourceProduct)],
-  )
+export interface DavidBatchCleaningResult {
+  products: number
+  created: number
+  existing: number
+  photos: number
 }
 
-/** Готовит черновик: очищенные фото → контактные листы → ИИ → поля для ревью. */
-export async function generateDavidDraftAction(handle: string, targetProductId: string | null = null) {
-  const catalog = await loadCatalog()
-  const product = catalog.products.find((item) => item.handle === handle)
-  if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
+/** Массовая постановка фото выбранных товаров: чистка идёт в фоне у воркера. */
+export async function startDavidPhotoCleaningBatchAction(handles: string[]): Promise<
+  { success: true; data: DavidBatchCleaningResult } | { success: false; error: string }
+> {
+  const unique = [...new Set((handles || []).map((handle) => String(handle || '').trim()).filter(Boolean))]
+  if (!unique.length) return { success: false as const, error: 'Не выбрано ни одного товара' }
 
-  const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 })
-  const ready = photos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
-  if (!ready.length) {
-    return { success: false as const, error: 'Нет очищенных фото: сначала поставьте их в очередь и дождитесь воркера' }
+  let created = 0
+  let existing = 0
+  let photos = 0
+  let products = 0
+
+  for (const handle of unique) {
+    const product = await getDavidCatalogProduct(handle)
+    if (!product?.images?.length) continue
+    products += 1
+    photos += product.images.length
+    const queued = await enqueuePhotoCleanJobs({
+      supplier: DAVID_SUPPLIER_NAME,
+      sourceProduct: handle,
+      photos: product.images.map((image, index) => ({ url: image.src, position: image.position ?? index + 1 })),
+    })
+    created += queued.created
+    existing += queued.existing
+    await ensureDavidDraft(handle, 'new', null, product)
   }
 
-  await ensureDavidDraft(handle, targetProductId ? 'existing' : 'new', targetProductId, product)
-
-  const [settingsResult, lookups, chromoffCategories, attributes] = await Promise.all([
-    getBatchAiSettingsAction(),
-    getRailsCatalogLookups(),
-    listRailsChromoffCategories(),
-    getCatalogAttributeDefinitions(),
-  ])
-  if (!settingsResult.success || !settingsResult.data) {
-    return { success: false as const, error: 'Не удалось прочитать настройки ИИ' }
-  }
-  const settings = settingsResult.data as any
-
-  const photoUrls = ready.map((photo) => photo.s3CleanUrl as string)
-  const { promptProduct, userPrompt } = buildDavidAiPrompt({
-    product,
-    photos: photoUrls,
-    settings,
-    brands: lookups.brands as any,
-    categories: lookups.categories as any,
-    subcategories: lookups.subcategories as any,
-    attributes,
-    chromoffCategories: chromoffCategories.map((category) => ({ id: category.id, name: category.name })),
-  })
-
-  const contactSheets = await buildBatchAiContactSheets(photoUrls, {
-    additionalHosts: ['static.yeezyunique.ru'],
-  })
-  const raw = await runBatchAiOpenRouter({
-    settings,
-    systemPrompt: settings.systemPrompt,
-    userPrompt,
-    contactSheets,
-  })
-
-  const normalized = normalizeDavidAiOutput(raw, {
-    promptProduct,
-    brands: lookups.brands as any,
-    categories: lookups.categories as any,
-    subcategories: lookups.subcategories as any,
-    attributeCodes: attributes.map((definition) => definition.code),
-    chromoffCategories: chromoffCategories.map((category) => ({ id: category.id, name: category.name })),
-  }) as any
-
-  const aiOutput = {
-    name: normalized?.product?.name || '',
-    description: normalized?.product?.description || '',
-    brand: normalized?.product?.brand || '',
-    category: normalized?.product?.category || '',
-    subcategory: normalized?.product?.subcategory || '',
-    gender: normalized?.product?.gender || null,
-    attributes: normalized?.product?.catalog_attributes || {},
-    photoAlts: normalized?.product?.photo_alts || [],
-    chromoffCategory: normalized?.product?.attributes?.chromoff_category_id
-      ? {
-          id: normalized.product.attributes.chromoff_category_id,
-          name: normalized.product.attributes.chromoff_category_name || '',
-          confidence: normalized.product.attributes.chromoff_category_confidence || 0,
-          status: normalized.product.attributes.chromoff_category_status || 'needs_review',
-        }
-      : null,
-    raw: normalized,
-  }
-
-  await scrapingQuery(
-    `UPDATE david_import_drafts
-        SET ai_output=$2::jsonb, status='ai_ready', error=NULL, updated_at=NOW()
-      WHERE handle=$1`,
-    [handle, JSON.stringify(aiOutput)],
-  )
+  if (!products) return { success: false as const, error: 'У выбранных товаров нет фотографий' }
   revalidatePath('/admin/chromoff/david-studio')
-  return { success: true as const, data: aiOutput }
+  return { success: true as const, data: { products, created, existing, photos } }
 }
 
-/** Создаёт hidden-товар в Rails и опубликованный Chromoff-листинг с медиа и альтами. */
+/**
+ * Кладёт ИИ-задание в очередь. Ответ модели придёт от локального воркера,
+ * сервер его нормализует и запишет в черновик.
+ */
+export async function generateDavidDraftAction(handle: string, targetProductId: string | null = null) {
+  const result = await enqueueDavidDraftJob(handle, targetProductId)
+  if (!result.success) return result
+  revalidatePath('/admin/chromoff/david-studio')
+  return {
+    success: true as const,
+    data: { ...result.data, queued: true, message: 'Задание ИИ в очереди: его заберёт локальный воркер' },
+  }
+}
+
+/** Повтор задания после ошибки: очередь отдаёт его заново. */
+export async function retryDavidDraftAction(handle: string, targetProductId: string | null = null) {
+  return generateDavidDraftAction(handle, targetProductId)
+}
+
+/** Создаёт товар в Rails и Chromoff-листинг: цена 0, размеры и замеры из вариантов David. */
 export async function createDavidChromoffProductAction(input: {
   handle: string
   name: string
   description: string
-  priceRub: number
   categoryId: string
   chromoffCategoryId: string
   gender?: string | null
@@ -203,12 +165,11 @@ export async function createDavidChromoffProductAction(input: {
   seoDescription?: string
   published?: boolean
 }) {
-  const catalog = await loadCatalog()
-  const product = catalog.products.find((item) => item.handle === input.handle)
+  const product = await getDavidCatalogProduct(input.handle)
   if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
-  if (!input.priceRub || input.priceRub <= 0) return { success: false as const, error: 'Укажите цену в рублях' }
-  if (!input.chromoffCategoryId) return { success: false as const, error: 'Выберите категорию Chromoff' }
-  if (!input.categoryId) return { success: false as const, error: 'Выберите категорию каталога' }
+  if (!input.chromoffCategoryId) return { success: false as const, error: 'Не определена категория Chromoff' }
+  if (!input.categoryId) return { success: false as const, error: 'Не определена категория каталога' }
+  if (!String(input.name || '').trim()) return { success: false as const, error: 'Пустое название' }
 
   const lookups = await getRailsCatalogLookups()
   const brand = lookups.brands.find(
@@ -222,17 +183,22 @@ export async function createDavidChromoffProductAction(input: {
     .map((photo) => ({ url: photo.s3CleanUrl as string, position: photo.sourcePosition }))
   if (!ready.length) return { success: false as const, error: 'Нет очищенных фото для товара' }
 
+  const variantAttributes = davidProductVariantAttributes(product)
+  const attributes: Record<string, unknown> = {
+    ...mergeDavidCatalogAttributes(input.attributes || {}, variantAttributes),
+    price_source: 'not_assigned',
+  }
   const media = buildDavidMediaPayload(ready, input.photoAlts || [], input.name)
   const payload = buildDavidRailsProductPayload({
     handle: input.handle,
     name: input.name,
     description: input.description,
     seoDescription: input.seoDescription,
-    priceRub: input.priceRub,
     brandId: String((brand as any).id),
     categoryId: input.categoryId,
     gender: input.gender || null,
-    attributes: input.attributes || {},
+    attributes,
+    sizes: variantAttributes.sizes,
     media,
   })
 
@@ -253,48 +219,150 @@ export async function createDavidChromoffProductAction(input: {
     `UPDATE david_import_drafts
         SET status='created', rails_product_id=$2, chromoff_listing_id=$3, edited=$4::jsonb, updated_at=NOW()
       WHERE handle=$1`,
-    [input.handle, productId, String(listing?.id || ''), JSON.stringify({ media, attributes: input.attributes || {} })],
+    [input.handle, productId, String(listing?.id || ''), JSON.stringify({ media, attributes })],
   )
   revalidatePath('/admin/chromoff/david-studio')
   return {
     success: true as const,
-    data: { productId, listingId: String(listing?.id || ''), photos: media.length },
+    data: {
+      productId,
+      listingId: String(listing?.id || ''),
+      photos: media.length,
+      sizes: variantAttributes.sizes,
+      attributes: Object.keys(attributes),
+    },
   }
 }
 
-/** Привязывает очищенные фото David к существующему товару Chromoff, не трогая его поля. */
+/**
+ * Дозапись к существующему товару: фото, характеристики и замеры.
+ *
+ * «Не перетирая то, что там есть» — каждое поле пишется только если у товара
+ * оно пустое; существующие значения остаются и перечисляются в отчёте.
+ * Цену трогаем только по явному требованию оператора.
+ */
 export async function attachDavidPhotosAction(input: {
   handle: string
   productId: string
   photoAlts?: string[]
+  attributes?: Record<string, unknown>
+  zeroPrice?: boolean
+  publish?: boolean
 }) {
+  const product = await getDavidCatalogProduct(input.handle)
+  if (!product) return { success: false as const, error: 'Товар David Studio не найден' }
+
   const photos = await listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: input.handle, limit: 200 })
   const ready = photos
     .filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
-    .map((photo) => ({ url: photo.s3CleanUrl as string, position: photo.sourcePosition, sourceKey: photo.sourceKey }))
+    .map((photo) => ({ url: photo.s3CleanUrl as string, position: photo.sourcePosition }))
   if (!ready.length) return { success: false as const, error: 'Нет очищенных фото для товара' }
 
   const current = await railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(input.productId)}`)
-  const existingMedia = Array.isArray(current.product?.media) ? current.product.media : []
+  const target = current.product
+  if (!target?.id) return { success: false as const, error: 'Товар не найден в Rails' }
+
+  const existingMedia = Array.isArray(target.media) ? target.media : []
   const existingUrls = new Set(existingMedia.map((medium: any) => String(medium.original_url || '')))
+  const addedMedia = ready.filter((photo) => !existingUrls.has(photo.url))
 
-  const added = ready.filter((photo) => !existingUrls.has(photo.url))
-  if (!added.length) return { success: true as const, data: { added: 0, skipped: ready.length } }
+  const variantAttributes = davidProductVariantAttributes(product)
+  const candidateAttributes = mergeDavidCatalogAttributes(input.attributes || {}, variantAttributes)
+  const existingAttributes: Record<string, unknown> = target.catalog_attributes && typeof target.catalog_attributes === 'object'
+    ? target.catalog_attributes
+    : {}
+  const isEmpty = (value: unknown) => value === undefined || value === null || value === ''
+    || (Array.isArray(value) && value.length === 0)
+  const attributesToWrite: Record<string, unknown> = {}
+  const keptAttributes: string[] = []
+  for (const [code, value] of Object.entries(candidateAttributes)) {
+    if (isEmpty(value)) continue
+    if (!isEmpty(existingAttributes[code])) {
+      keptAttributes.push(code)
+      continue
+    }
+    attributesToWrite[code] = value
+  }
 
-  const media = buildDavidMediaPayload(
-    added.map((photo) => ({ url: photo.url, position: photo.position })),
-    input.photoAlts || [],
-    String(current.product?.name || ''),
-  )
-  const merged = [
-    ...existingMedia,
-    ...media.map((medium, index) => ({ ...medium, sort_order: existingMedia.length + index })),
-  ]
+  const isDavidProduct = String(target.external_id || '').startsWith('david-studio-')
+  const zeroPrice = input.zeroPrice === true
+  const publish = input.publish === true
+  const productPatch: Record<string, unknown> = {}
+  // Скрытый товар не виден и в Chromoff: публикация включается явно.
+  if (publish && String(target.status || '') !== 'active') productPatch.status = 'active'
+  if (Object.keys(attributesToWrite).length) productPatch.catalog_attributes = { ...existingAttributes, ...attributesToWrite }
+  if (addedMedia.length) {
+    const media = buildDavidMediaPayload(
+      addedMedia.map((photo) => ({ url: photo.url, position: photo.position })),
+      input.photoAlts || [],
+      String(target.name || ''),
+    )
+    productPatch.media = [
+      ...existingMedia,
+      ...media.map((medium, index) => ({ ...medium, sort_order: existingMedia.length + index })),
+    ]
+  }
+
+  let zeroedVariants = 0
+  if (zeroPrice) {
+    productPatch.price_cents = 0
+    const existingVariants = Array.isArray(target.variants) ? target.variants : []
+    const variants = existingVariants
+      .filter((variant: any) => String(variant.sku || '').trim())
+      .map((variant: any) => ({
+        sku: variant.sku,
+        size: variant.size || null,
+        color: variant.color || null,
+        price_cents: 0,
+        status: variant.status || 'active',
+      }))
+    const knownSizes = new Set(variants.map((variant: any) => variant.size).filter(Boolean))
+    for (const size of variantAttributes.sizes) {
+      if (knownSizes.has(size)) continue
+      variants.push({ size, color: null, price_cents: 0, status: 'active' } as any)
+    }
+    productPatch.variants = variants.length ? variants : [{ size: null, color: null, price_cents: 0, status: 'active' }]
+    zeroedVariants = variants.length
+  }
+
+  if (!Object.keys(productPatch).length) {
+    return {
+      success: true as const,
+      data: {
+        added: 0,
+        skipped: ready.length,
+        attributesWritten: [] as string[],
+        attributesKept: keptAttributes,
+        zeroedVariants: 0,
+        isDavidProduct,
+        message: 'Всё уже есть у товара: фото, характеристики и замеры',
+      },
+    }
+  }
 
   await railsFetch(`/admin/products/${encodeURIComponent(input.productId)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ product: { media: merged } }),
+    body: JSON.stringify({ product: productPatch }),
   })
   revalidatePath('/admin/chromoff/david-studio')
-  return { success: true as const, data: { added: media.length, skipped: ready.length - added.length } }
+  return {
+    success: true as const,
+    data: {
+      added: addedMedia.length,
+      skipped: ready.length - addedMedia.length,
+      attributesWritten: Object.keys(attributesToWrite),
+      attributesKept: keptAttributes,
+      zeroedVariants,
+      sizes: variantAttributes.sizes,
+      isDavidProduct,
+      published: publish,
+      message: [
+        addedMedia.length ? `фото +${addedMedia.length}` : 'новых фото нет',
+        Object.keys(attributesToWrite).length ? `характеристики: ${Object.keys(attributesToWrite).join(', ')}` : 'характеристик для записи нет',
+        keptAttributes.length ? `сохранены прежние: ${keptAttributes.join(', ')}` : '',
+        zeroPrice ? `цена 0 у товара и ${zeroedVariants} вариант(ов)` : '',
+        publish ? 'товар опубликован' : '',
+      ].filter(Boolean).join('; '),
+    },
+  }
 }

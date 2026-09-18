@@ -5,7 +5,8 @@ import DavidImportPanel from '@/components/chromoff/DavidImportPanel'
 import { scrapingQuery } from '@/lib/db'
 import { getRailsCatalogLookups, listRailsChromoffCategories } from '@/lib/rails-admin'
 import { listPhotoCleanJobs } from '@/lib/photo-clean-jobs'
-import { DAVID_SUPPLIER_NAME, davidPriceRange, type DavidCatalogProduct } from '@/lib/david-studio-import'
+import { DAVID_SUPPLIER_NAME, davidPriceRange, davidProductVariantAttributes, type DavidCatalogProduct } from '@/lib/david-studio-import'
+import { getDavidAiJobState } from '@/lib/david-studio-ai'
 import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 
 export const dynamic = 'force-dynamic'
@@ -18,11 +19,12 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
   const product = (catalog.products as DavidCatalogProduct[]).find((item) => item.handle === handle)
   if (!product) notFound()
 
-  const [draftResult, photos, lookups, chromoffCategories] = await Promise.all([
-    scrapingQuery('SELECT status, ai_output, price_rub, rails_product_id, chromoff_listing_id FROM david_import_drafts WHERE handle=$1', [handle]),
+  const [draftResult, photos, lookups, chromoffCategories, job] = await Promise.all([
+    scrapingQuery('SELECT status, ai_output, error, price_rub, rails_product_id, chromoff_listing_id FROM david_import_drafts WHERE handle=$1', [handle]),
     listPhotoCleanJobs({ supplier: DAVID_SUPPLIER_NAME, sourceProduct: handle, limit: 200 }),
     getRailsCatalogLookups(),
     listRailsChromoffCategories(),
+    getDavidAiJobState(handle),
   ])
 
   const categoryNames = new Map<string, string>()
@@ -33,6 +35,8 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
       name: `${categoryNames.get(String(subcategory.parent_id)) || 'Без категории'} / ${subcategory.name}`,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
+
+  const variantAttributes = davidProductVariantAttributes(product)
 
   return (
     <main className="min-h-full bg-slate-900 p-4 text-slate-100 sm:p-6">
@@ -59,6 +63,10 @@ export default async function DavidImportPage({ params }: { params: Promise<{ ha
             error: photo.error,
           }))}
           draft={draftResult.rows[0] || null}
+          job={job ? { status: job.status, attempts: job.attempts, error: job.error, updatedAt: job.updatedAt } : null}
+          variantSizes={variantAttributes.sizes}
+          variantMeasurements={variantAttributes.measurements}
+          variantNotSizes={variantAttributes.notSizes}
           categories={categories}
           chromoffCategories={chromoffCategories.map((category) => ({ id: String(category.id), name: String(category.name) }))}
         />

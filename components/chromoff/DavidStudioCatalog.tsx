@@ -25,6 +25,8 @@ import type {
   DavidStudioProduct,
   DavidStudioSummary,
 } from '@/lib/david-studio-catalog'
+import type { DavidProductStatus } from '@/lib/david-studio-status'
+import { startDavidPhotoCleaningBatchAction } from '@/actions/david-studio'
 
 const BASE_PATH = '/admin/chromoff/david-studio'
 
@@ -41,6 +43,8 @@ export interface DavidStudioCatalogProps {
   totalPages: number
   /** Ключ источника (url без query) → очищенное от вотермарки фото в S3. */
   cleanUrls?: Record<string, string>
+  /** Метки и прогресс по товарам страницы: метки берём из черновиков и очереди чистки. */
+  statuses?: Record<string, DavidProductStatus>
 }
 
 export default function DavidStudioCatalog({
@@ -55,6 +59,7 @@ export default function DavidStudioCatalog({
   total,
   totalPages,
   cleanUrls = {},
+  statuses = {},
 }: DavidStudioCatalogProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -62,6 +67,46 @@ export default function DavidStudioCatalog({
   const [active, setActive] = useState<DavidStudioProduct | null>(null)
   const [activeImage, setActiveImage] = useState(0)
   const [showOriginal, setShowOriginal] = useState(false)
+  const [selected, setSelected] = useState<string[]>([])
+  const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+
+  const statusOf = (handle: string): DavidProductStatus | undefined => statuses[handle]
+  const cleaningAnywhere = Object.values(statuses).some((status) => status.cleaning)
+  const selectedSet = new Set(selected)
+
+  // Пока воркер чистит выбранные фото, показываем прогресс без ручного обновления.
+  useEffect(() => {
+    if (!cleaningAnywhere) return
+    const timer = setInterval(() => router.refresh(), 5000)
+    return () => clearInterval(timer)
+  }, [cleaningAnywhere, router])
+
+  const toggleSelected = (handle: string, checked: boolean) => {
+    setSelected((current) => (checked
+      ? [...new Set([...current, handle])]
+      : current.filter((item) => item !== handle)))
+  }
+
+  const startBatchCleaning = () => {
+    setMessage(null)
+    startTransition(async () => {
+      try {
+        const result = await startDavidPhotoCleaningBatchAction(selected)
+        if (!result.success) {
+          setMessage({ kind: 'error', text: result.error })
+          return
+        }
+        setMessage({
+          kind: 'ok',
+          text: `В очередь: товаров ${result.data.products}, новых заданий ${result.data.created}, уже было ${result.data.existing}. Чистит локальный воркер.`,
+        })
+        setSelected([])
+        router.refresh()
+      } catch (error) {
+        setMessage({ kind: 'error', text: error instanceof Error ? error.message : 'Сервер вернул ошибку без описания' })
+      }
+    })
+  }
 
   /** По умолчанию показываем очищенное фото, переключателем можно вернуть оригинал поставщика. */
   const displaySrc = (src: string) => (showOriginal ? src : cleanUrls[src.split('?')[0]] || src)
@@ -271,15 +316,59 @@ export default function DavidStudioCatalog({
             </div>
           </header>
 
+          {products.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={products.every((product) => selectedSet.has(product.handle))}
+                  onChange={(event) => setSelected(event.target.checked ? products.map((product) => product.handle) : [])}
+                />
+                Выбрать все на странице
+              </label>
+              <Button
+                type="button"
+                onClick={startBatchCleaning}
+                disabled={isPending || selected.length === 0}
+                className="bg-violet-600 text-white hover:bg-violet-500"
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Очистить фото выбранных ({selected.length})
+              </Button>
+              {cleaningAnywhere && (
+                <span className="text-xs text-amber-300">чистка идёт в фоне, прогресс обновляется сам</span>
+              )}
+              {message && (
+                <span className={`text-xs ${message.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}>{message.text}</span>
+              )}
+            </div>
+          )}
+
           {products.length > 0 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {products.map((product) => (
-                <button
+              {products.map((product) => {
+                const status = statusOf(product.handle)
+                return (
+                <div
                   key={product.product_id}
-                  type="button"
-                  onClick={() => openProduct(product)}
-                  className="group flex flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-800/70 text-left transition-colors hover:border-violet-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
+                  className="group relative flex flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-800/70 transition-colors hover:border-violet-500/60 focus-within:ring-2 focus-within:ring-violet-400"
                 >
+                  <label
+                    className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded bg-slate-900/85"
+                    title="Выбрать товар для массовой чистки фото"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(product.handle)}
+                      onChange={(event) => toggleSelected(product.handle, event.target.checked)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => openProduct(product)}
+                    className="flex flex-1 flex-col text-left focus-visible:outline-none"
+                  >
                   <div className="relative aspect-square w-full overflow-hidden bg-slate-900">
                     {product.images[0] ? (
                       <Image
@@ -294,15 +383,38 @@ export default function DavidStudioCatalog({
                         <ImageOff className="h-8 w-8 text-slate-600" />
                       </div>
                     )}
-                    <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+                    <div className="absolute left-10 top-2 flex flex-wrap gap-1">
                       <Badge className={product.available ? 'bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-700'}>
                         {product.available ? 'В наличии' : 'Нет'}
                       </Badge>
                     </div>
-                    <div className="absolute right-2 top-2">
+                    <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
                       <Badge variant="outline" className="border-slate-600 bg-slate-900/80 text-slate-300">
                         {product.images.length} фото
                       </Badge>
+                      {status?.publishedInChromoff && (
+                        <Badge className="bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/20">
+                          <CheckCircle2 className="mr-1 h-3 w-3" />
+                          опубликован в Chromoff
+                        </Badge>
+                      )}
+                      {status?.photosCleaned && (
+                        <Badge className="bg-violet-500/20 text-violet-200 hover:bg-violet-500/20">
+                          фото очищены
+                        </Badge>
+                      )}
+                      {!status?.photosCleaned && status && status.photosExpected > 0 && (
+                        <Badge variant="outline" className="border-amber-500/40 bg-slate-900/80 text-amber-200">
+                          очищено {status.photosDone}/{status.photosExpected}
+                          {status.photosFailed ? `, сбоев ${status.photosFailed}` : ''}
+                        </Badge>
+                      )}
+                      {status?.aiStatus === 'failed' && (
+                        <Badge className="bg-rose-500/20 text-rose-200 hover:bg-rose-500/20">ИИ: ошибка</Badge>
+                      )}
+                      {status?.aiStatus === 'pending' || status?.aiStatus === 'claimed' ? (
+                        <Badge variant="outline" className="border-violet-500/40 bg-slate-900/80 text-violet-200">ИИ в очереди</Badge>
+                      ) : null}
                     </div>
                   </div>
 
@@ -327,8 +439,10 @@ export default function DavidStudioCatalog({
                       </div>
                     </div>
                   </div>
-                </button>
-              ))}
+                  </button>
+                </div>
+                )
+              })}
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-slate-700 py-20 text-center">

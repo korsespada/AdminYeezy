@@ -7,6 +7,7 @@
   boundary.
 - [Admin sections](./admin-sections.md) — current UI areas.
 - [Chromoff catalog](./chromoff-catalog.md) — catalog ownership, import and operator workflow.
+- [David Studio import](./david-studio-import.md) — supplier export, photo cleaning queue and AI draft worker contract.
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
 - [Export history](./exports.md) — export history, stages and publication.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.

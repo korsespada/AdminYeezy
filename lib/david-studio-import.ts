@@ -1,6 +1,7 @@
 import type { BatchAiLookup, BatchAiAttributeDefinition, BatchAiSettings } from '@/lib/batch-ai'
 import { buildBatchAiUserPrompt, normalizeBatchAiOutput } from '@/lib/batch-ai'
 import { normalizePhotoAlts } from '@/lib/product-media-seo'
+import { davidVariantAttributes, parseDavidVariantSize, type DavidVariantAttributes } from '@/lib/david-studio-sizes'
 
 /**
  * Импорт товаров David Studio в Chromoff.
@@ -27,7 +28,9 @@ export const DAVID_STUDIO_AI_INSTRUCTION = [
   'Исходные тексты поставщика на английском: используй их как факты (тип изделия, камень, размер, фурнитура), но не переноси рекламные обороты и не переводи дословно.',
   'Изделия из серебра 925 пробы. Материал указывай только если он подтверждён исходным текстом или фотографией; состав, пробу и камни не выдумывай.',
   'Название, описание и альты — на русском. Название без бренда и артикула, с точным типом изделия и цветом или камнем, если он виден.',
-  'Размеры колец и браслетов указаны на самом изделии, отдельные размерные варианты не создаются: размерный ряд не выдумывай.',
+  'Размерный ряд и замеры приходят из вариантов поставщика и подставляются сервером: sizes и measurements не заполняй и не выдумывай.',
+  'Заполняй catalog_attributes только кодами из группы «Все категории» и группы той категории, которую сам выбрал. Не переноси код из чужой категории и не оставляй пустую строку вместо значения.',
+  'Обязательно заполни те характеристики выбранной категории, которые подтверждены исходным текстом или фотографиями: металл, пробу, камни, тип застёжки, материал, цвет. Отсутствие подтверждения — не повод пропустить характеристику, но и выдумывать значение нельзя.',
   'Клатчи, ремни, сумки и одежда описываются как обычный товар: конструкция, фактура, фурнитура и видимые детали важнее общих слов.',
 ].join('\n')
 
@@ -68,7 +71,7 @@ export function toDavidPromptProduct(product: DavidCatalogProduct, photos: strin
   const tags = Array.isArray(product.tags) ? product.tags : []
   const collections = Array.isArray(product.collections) ? product.collections : []
   const variants = Array.isArray(product.variants) ? product.variants : []
-  const sizes = [...new Set(variants.map((variant) => String(variant.size || '').trim()).filter(Boolean))]
+  const variantAttributes = davidVariantAttributes(variants)
 
   return {
     external_id: String(product.product_id || product.handle),
@@ -88,18 +91,55 @@ export function toDavidPromptProduct(product: DavidCatalogProduct, photos: strin
       vendor: product.vendor || '',
       tags,
       collections,
-      sizes,
+      // Размеры уже приведены к сантиметрам: модель не должна пересчитывать дюймы.
+      sizes: variantAttributes.sizes,
       source_url: product.url || `${DAVID_SOURCE}/products/${product.handle}`,
       source_price_usd_min: price.min || null,
       source_price_usd_max: price.max || null,
       source_supplier: DAVID_SUPPLIER_NAME,
     },
-    variants: variants.map((variant) => ({
-      title: variant.title || '',
-      size: variant.size || null,
-      price: variant.price ?? null,
-    })),
+    variants: variants.map((variant) => {
+      const parsed = parseDavidVariantSize(variant.size)
+      return {
+        // Заголовок варианта у David повторяет размер, поэтому отдаём только
+        // нормализованное значение: дюймы в промпт не попадают.
+        title: parsed.size || String(variant.title || '').trim(),
+        // Неразмерные значения (цвет, «Per Piece») уходят отдельным полем,
+        // чтобы модель не спутала их с размером.
+        size: parsed.size,
+        option: parsed.size ? undefined : String(variant.size || '').trim(),
+        price: variant.price ?? null,
+      }
+    }),
   }
+}
+
+/**
+ * Схема атрибутов, сгруппированная по области категории.
+ *
+ * Реестр AdminYeezy плоский, а требование — заполнять характеристики по схеме
+ * выбранной категории. Поэтому в промпт уходит карта «область → коды», и модель
+ * после выбора категории берёт свою группу плюс общие коды.
+ */
+export function buildDavidAttributeSchema(definitions: Array<BatchAiAttributeDefinition & { category_scope?: string | null; active?: boolean; sort_order?: number }>) {
+  const groups = new Map<string, Array<Record<string, unknown>>>()
+  for (const definition of definitions) {
+    if (definition.active === false) continue
+    const scope = String(definition.category_scope || 'Все категории').trim() || 'Все категории'
+    const list = groups.get(scope) || []
+    list.push({
+      code: definition.code,
+      label: definition.label,
+      value_type: definition.value_type || 'text',
+      unit: definition.unit || null,
+      values: definition.values || [],
+    })
+    groups.set(scope, list)
+  }
+  return Object.fromEntries(
+    [...groups.entries()]
+      .sort(([left], [right]) => (left === 'Все категории' ? -1 : right === 'Все категории' ? 1 : left.localeCompare(right, 'ru'))),
+  )
 }
 
 export function buildDavidAiPrompt(input: {
@@ -119,7 +159,9 @@ export function buildDavidAiPrompt(input: {
     brands: input.brands,
     categories: input.categories,
     subcategories: input.subcategories,
-    attributes: input.attributes,
+    // Реестр уходит картой «область категории → коды»: модель обязана заполнять
+    // характеристики по схеме той категории, которую выбрала сама.
+    attributes: buildDavidAttributeSchema(input.attributes) as unknown as BatchAiAttributeDefinition[],
     categoryRules: input.settings.categoryRules,
     chromoffMode: true,
     chromoffCategories: input.chromoffCategories,
@@ -147,6 +189,9 @@ export function normalizeDavidAiOutput(raw: unknown, input: {
     knownAttributeCodes: new Set(input.attributeCodes),
     attributeDictionaryValues: [],
     priceRuleKeys: new Set<string>(),
+    // Без этого флага нормализация не читает chromoff_category вовсе, и
+    // категория Chromoff всегда оставалась пустой.
+    chromoffMode: true,
     chromoffCategories: input.chromoffCategories.map((row) => ({ id: String(row.id), name: String(row.name || '') })),
   } as any)
 }
@@ -171,43 +216,77 @@ export function buildDavidMediaPayload(photos: DavidPhotoMedia[], alts: unknown,
   }))
 }
 
-/** Товар для Rails: только Chromoff, поэтому status hidden и без индексации в основном магазине. */
+/**
+ * Характеристики товара: ответ ИИ плюс детерминированные размеры и замеры из
+ * вариантов David. Размеры поставщика — источник истины, поэтому они
+ * перекрывают ответ модели, а не наоборот.
+ */
+export function mergeDavidCatalogAttributes(
+  aiAttributes: Record<string, unknown> | null | undefined,
+  variant: DavidVariantAttributes,
+) {
+  const merged: Record<string, unknown> = { ...(aiAttributes || {}) }
+  if (variant.sizes.length) merged.sizes = variant.sizes
+  if (variant.measurements) merged.measurements = variant.measurements
+  return merged
+}
+
+/** Размеры вариантов товара David — для payload и для ревью. */
+export function davidProductVariantAttributes(product: Pick<DavidCatalogProduct, 'variants'>) {
+  return davidVariantAttributes(product.variants)
+}
+
+/**
+ * Товар для Rails.
+ *
+ * Цена всегда 0: у поставщика цена в USD и в рублях её ещё не назначили. Rails
+ * сам отдаёт `price_on_request = true` при нулевой цене, поэтому витрина
+ * показывает «Цена по запросу» и не даёт оформить заказ. Статус active —
+ * требование «публиковать не скрывая»; `noindex` оставляем, чтобы карточки с
+ * неназначенной ценой не попадали в поиск основного магазина.
+ */
 export function buildDavidRailsProductPayload(input: {
   handle: string
   name: string
   description: string
   h1?: string
   seoDescription?: string
-  priceRub: number
   brandId: string
   categoryId: string
   gender?: string | null
   attributes?: Record<string, unknown>
+  sizes?: string[]
   media: ReturnType<typeof buildDavidMediaPayload>
 }) {
-  const priceCents = Math.max(0, Math.round(input.priceRub)) * 100
+  const sizes = [...new Set((input.sizes || []).map((size) => String(size).trim()).filter(Boolean))]
   return {
     external_id: davidExternalId(input.handle),
     name: input.name,
     description: input.description,
     h1: input.h1 || input.name,
     seo_description: input.seoDescription || '',
-    price_cents: priceCents,
+    price_cents: 0,
     currency: 'RUB',
-    status: 'hidden',
+    status: 'active',
     indexing_status: 'noindex',
     brand_id: input.brandId,
     category_id: input.categoryId,
     gender: input.gender || null,
     primary_supplier_name: DAVID_SUPPLIER_NAME,
     catalog_attributes: input.attributes || {},
-    variants: [{ size: null, color: null, price_cents: priceCents, status: 'active' }],
+    variants: (sizes.length ? sizes : [null]).map((size) => ({
+      size,
+      color: null,
+      price_cents: 0,
+      status: 'active',
+    })),
     media: input.media,
     metadata: {
       source: 'david-studio',
       source_handle: input.handle,
       source_supplier_name: DAVID_SUPPLIER_NAME,
       storefront: 'chromoff',
+      price_source: 'not_assigned',
     },
   }
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { CheckCircle2, ImageOff, Loader2, RefreshCw, Search, Sparkles, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ImageOff, Loader2, RefreshCw, Search, Sparkles, Upload } from 'lucide-react'
 import {
   attachDavidPhotosAction,
   createDavidChromoffProductAction,
@@ -11,6 +11,7 @@ import {
   searchChromoffProductsAction,
   startDavidPhotoCleaningAction,
 } from '@/actions/david-studio'
+import type { MeasurementTable } from '@/lib/measurement-templates'
 
 type Photo = {
   id: string
@@ -26,17 +27,59 @@ type Photo = {
 type Draft = {
   status: string
   ai_output: any
-  price_rub: number | null
+  error: string | null
   rails_product_id: string | null
   chromoff_listing_id: string | null
 } | null
 
+type AiJob = {
+  status: string
+  attempts: number
+  error: string | null
+  updatedAt: string | null
+} | null
+
 type Option = { id: string; name: string; parent_id?: string | null }
+type FoundProduct = { id: string; name: string; photos: number; category: string; price: number; externalId: string; attributes: Record<string, unknown> }
 
 const VERDICT_LABEL: Record<string, string> = {
   ok: 'вотермарка убрана',
   review: 'на глаза',
   miss: 'не найдена',
+}
+
+const JOB_LABEL: Record<string, string> = {
+  pending: 'задание ждёт локальный воркер',
+  claimed: 'воркер обрабатывает фото и вызывает модель',
+  done: 'модель ответила, черновик записан',
+  failed: 'ошибка выполнения',
+}
+
+const HIDDEN_ATTRIBUTE_CODES = new Set([
+  'chromoff_category_id',
+  'chromoff_category_name',
+  'chromoff_category_confidence',
+  'chromoff_category_status',
+  'chromoff_category_reason',
+])
+
+/** Характеристики для ревью: служебные ключи Chromoff не показываем. */
+function reviewableAttributes(attributes: Record<string, unknown> | null | undefined) {
+  return Object.entries(attributes || {})
+    .filter(([code]) => !HIDDEN_ATTRIBUTE_CODES.has(code) && code !== 'sizes' && code !== 'measurements')
+    .map(([code, value]) => ({
+      code,
+      value: Array.isArray(value) ? value.join(', ') : value && typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''),
+    }))
+    .filter((item) => item.value)
+}
+
+function measurementRows(table: MeasurementTable | null | undefined) {
+  if (!table?.rows?.length) return []
+  return table.rows.map((row) => ({
+    size: row.size,
+    fit: Object.values(row.values || {}).filter(Boolean).join(', '),
+  }))
 }
 
 export default function DavidImportPanel({
@@ -46,6 +89,10 @@ export default function DavidImportPanel({
   priceLabel,
   photos,
   draft,
+  job,
+  variantSizes,
+  variantMeasurements,
+  variantNotSizes,
   categories,
   chromoffCategories,
 }: {
@@ -55,6 +102,10 @@ export default function DavidImportPanel({
   priceLabel: string
   photos: Photo[]
   draft: Draft
+  job: AiJob
+  variantSizes: string[]
+  variantMeasurements: MeasurementTable | null
+  variantNotSizes: string[]
   categories: Option[]
   chromoffCategories: Option[]
 }) {
@@ -66,16 +117,19 @@ export default function DavidImportPanel({
   const ai = draft?.ai_output || {}
   const [name, setName] = useState<string>(ai.name || title)
   const [description, setDescription] = useState<string>(ai.description || '')
-  const [categoryId, setCategoryId] = useState<string>(ai.category || '')
+  // ИИ возвращает верхнюю категорию и подкатегорию: в выборе каталога живут
+  // подкатегории, поэтому подставляем именно подкатегорию.
+  const [categoryId, setCategoryId] = useState<string>(ai.subcategory || ai.category || '')
   const [chromoffCategoryId, setChromoffCategoryId] = useState<string>(ai.chromoffCategory?.id || '')
   const [gender, setGender] = useState<string>(ai.gender || '')
-  const [priceRub, setPriceRub] = useState<string>(draft?.price_rub ? String(draft.price_rub) : '')
   const [publish, setPublish] = useState(true)
   const [alts, setAlts] = useState<string[]>(Array.isArray(ai.photoAlts) ? ai.photoAlts : [])
 
   const [query, setQuery] = useState('')
-  const [found, setFound] = useState<Array<{ id: string; name: string; photos: number; category: string; price: number }>>([])
+  const [found, setFound] = useState<FoundProduct[]>([])
   const [targetId, setTargetId] = useState<string>('')
+  const [zeroPrice, setZeroPrice] = useState<boolean>(false)
+  const [publishTarget, setPublishTarget] = useState<boolean>(false)
 
   const counts = useMemo(() => {
     const result: Record<string, number> = { pending: 0, claimed: 0, done: 0, failed: 0 }
@@ -84,22 +138,27 @@ export default function DavidImportPanel({
   }, [photos])
 
   const busy = counts.pending > 0 || counts.claimed > 0
+  const aiBusy = job?.status === 'pending' || job?.status === 'claimed'
   useEffect(() => {
-    if (!busy) return
+    if (!busy && !aiBusy) return
     const timer = setInterval(() => router.refresh(), 5000)
     return () => clearInterval(timer)
-  }, [busy, router])
+  }, [busy, aiBusy, router])
 
   const readyPhotos = photos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
+  const attributes = reviewableAttributes(ai.attributes)
+  const measurements = measurementRows(variantMeasurements)
+  const targetProduct = found.find((item) => item.id === targetId) || null
+  const targetIsDavid = Boolean(targetProduct?.externalId?.startsWith('david-studio-'))
 
-  function run(action: () => Promise<{ success: boolean; error?: string; data?: unknown }>, okText: string) {
+  function run(action: () => Promise<any>, okText: string) {
     setMessage(null)
     startTransition(async () => {
       try {
         const result = await action()
-        if (!result.success) setMessage({ kind: 'error', text: result.error || 'Не получилось' })
+        if (!result?.success) setMessage({ kind: 'error', text: result?.error || 'Не получилось' })
         else {
-          setMessage({ kind: 'ok', text: okText })
+          setMessage({ kind: 'ok', text: typeof result.data?.message === 'string' ? `${okText}: ${result.data.message}` : okText })
           router.refresh()
         }
       } catch (error) {
@@ -127,7 +186,7 @@ export default function DavidImportPanel({
           <div>
             <h1 className="text-xl font-bold text-slate-100">{title}</h1>
             <p className="mt-1 text-xs text-slate-400">
-              {handle} · цена David: <span className="text-slate-200">{priceLabel || '—'}</span> ·{' '}
+              {handle} · цена David: <span className="text-slate-200">{priceLabel || '—'}</span> (USD, справка) ·{' '}
               <a href={sourceUrl} target="_blank" rel="noreferrer" className="text-violet-300 hover:underline">
                 карточка поставщика
               </a>
@@ -145,12 +204,15 @@ export default function DavidImportPanel({
             </button>
             <button
               type="button"
-              onClick={() => run(() => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null), 'Черновик ИИ готов')}
-              disabled={pending || !readyPhotos.length}
+              onClick={() => run(
+                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
+                'Задание ИИ в очереди',
+              )}
+              disabled={pending || aiBusy || !readyPhotos.length}
               className="inline-flex h-10 items-center gap-2 rounded-md bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
             >
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Сделать черновик ИИ
+              {pending || aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {aiBusy ? 'ИИ работает…' : 'Поставить задание ИИ'}
             </button>
           </div>
         </div>
@@ -161,6 +223,33 @@ export default function DavidImportPanel({
           <span>готово: <b className="text-emerald-300">{counts.done}</b></span>
           <span>ошибок: <b className="text-rose-300">{counts.failed}</b></span>
           {busy && <span className="text-amber-300">локальный воркер чистит фото — страница обновляется сама</span>}
+        </div>
+
+        <div className="mt-3 rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-slate-400">Черновик ИИ:</span>
+            <b className={draft?.status === 'created' ? 'text-emerald-300' : draft?.status === 'ai_error' ? 'text-rose-300' : 'text-slate-100'}>
+              {draft?.status === 'ai_ready' ? 'готов' : draft?.status === 'ai_queued' ? 'в очереди' : draft?.status === 'created' ? 'товар создан' : draft?.status === 'ai_error' ? 'ошибка' : draft?.status || 'не запускался'}
+            </b>
+            {job && <span className="text-slate-400">задание: {JOB_LABEL[job.status] || job.status} (попыток {job.attempts})</span>}
+            {aiBusy && <span className="text-violet-300">модель вызывает локальный воркер Cockpit</span>}
+          </div>
+          {(job?.error || draft?.error) && (
+            <p className="mt-2 flex items-start gap-2 text-rose-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{job?.error || draft?.error}</span>
+            </p>
+          )}
+          {job?.status === 'failed' && (
+            <button
+              type="button"
+              onClick={() => run(() => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null), 'Задание ИИ в очереди')}
+              disabled={pending}
+              className="mt-2 inline-flex h-8 items-center gap-2 rounded-md border border-slate-600 bg-slate-700 px-3 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
+            >
+              <RefreshCw className="h-3 w-3" /> Повторить задание
+            </button>
+          )}
         </div>
 
         {message && (
@@ -198,6 +287,46 @@ export default function DavidImportPanel({
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4">
+        <h2 className="text-sm font-semibold text-slate-100">Размеры и замеры из вариантов David</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Размеры поставщика приведены к сантиметрам, одна строка замеров на размер. Значения подставляет сервер,
+          модель их не придумывает.
+        </p>
+        {variantSizes.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-1">
+            {variantSizes.map((size) => (
+              <span key={size} className="rounded border border-slate-600 bg-slate-900 px-2 py-0.5 text-xs text-slate-200">{size}</span>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-amber-300">Варианты не дают размера: у товара будет один вариант без размера.</p>
+        )}
+        {measurements.length > 0 && (
+          <table className="mt-3 w-full text-left text-xs">
+            <thead className="text-slate-400">
+              <tr>
+                <th className="py-1 pr-3 font-medium">Размер</th>
+                <th className="py-1 font-medium">Посадка</th>
+              </tr>
+            </thead>
+            <tbody className="text-slate-200">
+              {measurements.map((row) => (
+                <tr key={row.size} className="border-t border-slate-700">
+                  <td className="py-1 pr-3 font-semibold">{row.size}</td>
+                  <td className="py-1">{row.fit || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {variantNotSizes.length > 0 && (
+          <p className="mt-3 text-[11px] text-slate-500">
+            Не размеры (цвета и служебные подписи поставщика): {variantNotSizes.join(', ')}
+          </p>
         )}
       </div>
 
@@ -241,24 +370,34 @@ export default function DavidImportPanel({
 
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block text-sm text-slate-300">
-              Категория каталога
+              Категория каталога <span className="text-xs text-slate-500">(определил ИИ — проверьте)</span>
               <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}
                       className="mt-1 h-10 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100">
-                <option value="">— выберите —</option>
+                <option value="">— не определена —</option>
                 {categories.map((option) => (
                   <option key={option.id} value={option.id}>{option.name}</option>
                 ))}
               </select>
+              {ai.categoryName && (
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  ИИ: {ai.categoryName}{ai.subcategoryName ? ` / ${ai.subcategoryName}` : ''} · ответы модели правятся в каталоге Rails
+                </span>
+              )}
             </label>
             <label className="block text-sm text-slate-300">
-              Категория Chromoff
+              Категория Chromoff <span className="text-xs text-slate-500">(определил ИИ — проверьте)</span>
               <select value={chromoffCategoryId} onChange={(event) => setChromoffCategoryId(event.target.value)}
                       className="mt-1 h-10 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100">
-                <option value="">— выберите —</option>
+                <option value="">— не определена —</option>
                 {chromoffCategories.map((option) => (
                   <option key={option.id} value={option.id}>{option.name}</option>
                 ))}
               </select>
+              <span className="mt-1 block text-[11px] text-slate-500">
+                {ai.chromoffCategory
+                  ? `уверенность ${Math.round(Number(ai.chromoffCategory.confidence || 0) * 100)}% · ${ai.chromoffCategory.status === 'ai_assigned' ? 'присвоена ИИ' : 'нужна проверка'}`
+                  : 'ИИ категорию Chromoff не определил'}
+              </span>
             </label>
             <label className="block text-sm text-slate-300">
               Пол
@@ -272,23 +411,37 @@ export default function DavidImportPanel({
             </label>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="text-sm text-slate-300">
               Цена David (USD)
               <div className="mt-1 flex h-10 items-center rounded-md border border-slate-700 bg-slate-900/60 px-3 text-slate-200">
                 {priceLabel || '—'}
               </div>
             </div>
-            <label className="block text-sm text-slate-300">
-              Цена в рублях
-              <input value={priceRub} onChange={(event) => setPriceRub(event.target.value.replace(/[^\d]/g, ''))}
-                     inputMode="numeric" placeholder="например 45000"
-                     className="mt-1 h-10 w-full rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100" />
-            </label>
-            <label className="flex items-center gap-2 self-end text-sm text-slate-300">
-              <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} />
-              публиковать в Chromoff
-            </label>
+            <div className="text-sm text-slate-300">
+              Цена в каталоге
+              <div className="mt-1 flex h-10 items-center rounded-md border border-slate-700 bg-slate-900/60 px-3 text-slate-200">
+                0 ₽ — витрина покажет «Цена по запросу» и не даст оформить заказ
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+            <h3 className="text-sm font-semibold text-slate-100">Характеристики от ИИ</h3>
+            {attributes.length ? (
+              <ul className="mt-2 grid gap-1 text-xs text-slate-200 sm:grid-cols-2">
+                {attributes.map((item) => (
+                  <li key={item.code} className="flex gap-2">
+                    <span className="text-slate-500">{item.code}:</span>
+                    <span>{item.value}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-xs text-amber-300">
+                Характеристики не заполнены: запустите задание ИИ ещё раз или заполните их в каталоге Rails.
+              </p>
+            )}
           </div>
 
           {alts.length > 0 && (
@@ -304,12 +457,11 @@ export default function DavidImportPanel({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              disabled={pending || !name || !priceRub || !categoryId || !chromoffCategoryId}
+              disabled={pending || !name || !categoryId || !chromoffCategoryId}
               onClick={() => run(() => createDavidChromoffProductAction({
                 handle,
                 name,
                 description,
-                priceRub: Number(priceRub),
                 categoryId,
                 chromoffCategoryId,
                 gender: gender || null,
@@ -323,6 +475,10 @@ export default function DavidImportPanel({
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Создать товар только для Chromoff
             </button>
+            <label className="flex items-center gap-2 self-center text-sm text-slate-300">
+              <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} />
+              публиковать в Chromoff
+            </label>
           </div>
         </div>
       ) : (
@@ -349,8 +505,23 @@ export default function DavidImportPanel({
               {found.map((item) => (
                 <label key={item.id} className="flex cursor-pointer items-center justify-between gap-3 bg-slate-900/60 px-3 py-2 text-sm">
                   <span className="flex items-center gap-3">
-                    <input type="radio" name="target" checked={targetId === item.id} onChange={() => setTargetId(item.id)} />
+                    <input
+                      type="radio"
+                      name="target"
+                      checked={targetId === item.id}
+                      onChange={() => {
+                        setTargetId(item.id)
+                        // У товара, созданного этим импортом, цена обязана быть 0,
+                        // и он должен быть виден в Chromoff.
+                        const isDavid = item.externalId.startsWith('david-studio-')
+                        setZeroPrice(isDavid)
+                        setPublishTarget(isDavid)
+                      }}
+                    />
                     <span className="text-slate-100">{item.name}</span>
+                    {item.externalId.startsWith('david-studio-') && (
+                      <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] text-violet-200">товар David</span>
+                    )}
                   </span>
                   <span className="text-xs text-slate-400">{item.category} · фото {item.photos} · {item.price} ₽</span>
                 </label>
@@ -358,18 +529,47 @@ export default function DavidImportPanel({
             </div>
           )}
 
+          <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
+            <p className="font-semibold text-slate-100">Что будет записано</p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5">
+              <li>фото: {readyPhotos.length} очищенных кадров (уже имеющиеся пропускаются);</li>
+              <li>характеристики и замеры: пишутся только те поля, которых у товара ещё нет;</li>
+              <li>размеры из вариантов David: {variantSizes.length ? variantSizes.join(', ') : 'нет'};</li>
+              <li>название, описание и категории существующего товара не меняются.</li>
+            </ul>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={zeroPrice} onChange={(event) => setZeroPrice(event.target.checked)} />
+            обнулить цену товара и вариантов (правило David: цена 0)
+          </label>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={publishTarget} onChange={(event) => setPublishTarget(event.target.checked)} />
+            сделать товар активным (скрытый товар не виден и в Chromoff)
+          </label>
+
           <button
             type="button"
             disabled={pending || !targetId || !readyPhotos.length}
-            onClick={() => run(() => attachDavidPhotosAction({ handle, productId: targetId, photoAlts: alts }),
-                               'Фото добавлены к товару')}
+            onClick={() => run(
+              () => attachDavidPhotosAction({
+                handle,
+                productId: targetId,
+                photoAlts: alts,
+                attributes: ai.attributes || {},
+                zeroPrice,
+                publish: publishTarget,
+              }),
+              'Записано в товар',
+            )}
             className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
           >
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Добавить очищенные фото ({readyPhotos.length})
+            Добавить фото, характеристики и замеры ({readyPhotos.length})
           </button>
           <p className="text-xs text-slate-400">
-            Название, описание и цена существующего товара не меняются. Фото, которые уже есть у товара, пропускаются.
+            Фото, характеристики и замеры, которые уже есть у товара, не перетираются.
           </p>
         </div>
       )}

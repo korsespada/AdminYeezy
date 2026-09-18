@@ -8,6 +8,9 @@ export default defineConfig([
   globalIgnores([
     '.next/**',
     'node_modules/**',
+    // Локальное окружение Python (torch и т.п.) содержит vendored .mjs,
+    // которые не относятся к коду проекта и ломали npm run lint.
+    '.venv/**',
     'adminpro/**',
     '.adminpro-ref/**',
     '__tests__/**',
