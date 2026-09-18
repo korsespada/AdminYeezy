@@ -9,6 +9,7 @@ import {
   createDavidChromoffProductAction,
   excludeDavidPhotoAction,
   generateDavidDraftAction,
+  requeueDavidProblemPhotosAction,
   restoreDavidPhotoAction,
   searchChromoffProductsAction,
   startDavidPhotoCleaningAction,
@@ -152,6 +153,11 @@ export default function DavidImportPanel({
   const visiblePhotos = photos.filter((photo) => !excludedSet.has(photo.sourceKey))
   const removedPhotos = photos.filter((photo) => excludedSet.has(photo.sourceKey))
   const readyPhotos = visiblePhotos.filter((photo) => photo.status === 'done' && photo.s3CleanUrl)
+  // Кадры, которые стоит прогнать заново: детектор не нашёл вотермарку, кадр
+  // ушёл на глаза или чистка упала.
+  const problemPhotos = visiblePhotos.filter(
+    (photo) => photo.status === 'failed' || (photo.status === 'done' && (photo.cleanStatus === 'miss' || photo.cleanStatus === 'review')),
+  )
 
   function run(action: () => Promise<any>, okText: string) {
     setMessage(null)
@@ -267,7 +273,18 @@ export default function DavidImportPanel({
                 Очищенные кадры: <b className="text-slate-200">{visiblePhotos.length}</b> из {photos.length}
                 {removedPhotos.length > 0 ? ` · убрано ${removedPhotos.length}` : ''}
               </span>
-              <span className="text-slate-500">нажмите на кадр, чтобы открыть в полном размере</span>
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-slate-500">нажмите на кадр, чтобы открыть в полном размере</span>
+                <button
+                  type="button"
+                  disabled={pending || problemPhotos.length === 0}
+                  onClick={() => run(() => requeueDavidProblemPhotosAction(handle), 'Проблемные кадры отправлены на повтор')}
+                  title="Прогнать заново кадры «не найдена», «на глаза» и сбои"
+                  className="inline-flex h-7 items-center gap-1 rounded border border-slate-600 px-2 text-slate-300 hover:border-amber-500/60 hover:text-amber-200 disabled:opacity-40"
+                >
+                  <RefreshCw className="h-3 w-3" /> Переочистить проблемные ({problemPhotos.length})
+                </button>
+              </span>
             </div>
             <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {visiblePhotos.map((photo) => (

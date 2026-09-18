@@ -223,3 +223,54 @@ export async function photoCleanStats(supplier = ''): Promise<Record<string, num
   }
   return stats
 }
+
+/**
+ * Возвращает проблемные кадры в очередь: «не найдена», «на глаза» и сбои.
+ *
+ * Обычная постановка заданий повторно их не берёт (ON CONFLICT DO NOTHING), а
+ * детектор и чистка со временем улучшаются — значит нужен явный перезапуск.
+ * Файлы в S3 не стираем: пока кадр обрабатывается заново, оператор продолжает
+ * видеть прежние кропы «до/после».
+ */
+export async function requeueProblemPhotoCleanJobs(filter: {
+  supplier?: string
+  sourceProduct?: string
+} = {}): Promise<number> {
+  const result = await scrapingQuery(
+    `UPDATE photo_clean_jobs
+        SET status='pending',
+            clean_status=NULL,
+            lease_token=NULL,
+            lease_expires_at=NULL,
+            worker_id=NULL,
+            z_after=NULL,
+            mask_px=NULL,
+            passes=NULL,
+            quality='{}'::jsonb,
+            seconds=NULL,
+            error=NULL,
+            updated_at=NOW()
+      WHERE ($1 = '' OR supplier = $1)
+        AND ($2 = '' OR source_product = $2)
+        AND (status='failed' OR (status='done' AND clean_status IN ('miss','review')))
+      RETURNING id`,
+    [filter.supplier || '', filter.sourceProduct || ''],
+  )
+  return result.rowCount || 0
+}
+
+/** Сколько кадров считается проблемными — для подписи на кнопке. */
+export async function countProblemPhotoCleanJobs(filter: {
+  supplier?: string
+  sourceProduct?: string
+} = {}): Promise<number> {
+  const result = await scrapingQuery(
+    `SELECT COUNT(*)::int AS count
+       FROM photo_clean_jobs
+      WHERE ($1 = '' OR supplier = $1)
+        AND ($2 = '' OR source_product = $2)
+        AND (status='failed' OR (status='done' AND clean_status IN ('miss','review')))`,
+    [filter.supplier || '', filter.sourceProduct || ''],
+  )
+  return Number(result.rows[0]?.count || 0)
+}

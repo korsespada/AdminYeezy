@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { requeueDavidProblemPhotosAction } from '@/actions/david-studio'
 
 /**
  * Очередь чистки фото David: сколько всего, сколько осталось и где именно.
@@ -89,6 +90,20 @@ export default function DavidPhotoQueueDialog({
   const totals = data?.totals
   const done = (totals?.ok || 0) + (totals?.review || 0) + (totals?.miss || 0)
   const active = (data?.products || []).filter((product) => product.pending + product.claimed > 0)
+  const problems = (totals?.miss || 0) + (totals?.review || 0) + (totals?.failed || 0)
+
+  const requeueProblems = async () => {
+    setLoading(true)
+    try {
+      const result: any = await requeueDavidProblemPhotosAction(null)
+      if (!result?.success) throw new Error(result?.error || 'Не получилось')
+      await load()
+    } catch (requeueError) {
+      setError(requeueError instanceof Error ? requeueError.message : 'Не удалось вернуть кадры в очередь')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -116,6 +131,18 @@ export default function DavidPhotoQueueDialog({
             <span className="text-xs text-amber-300">осталось {remaining.toLocaleString('ru-RU')} — воркер работает</span>
           )}
           {remaining === 0 && data && <span className="text-xs text-emerald-300">очередь разобрана</span>}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => { void requeueProblems() }}
+            disabled={loading || problems === 0}
+            title="Вернуть в очередь кадры «не найдена», «на глаза» и сбои"
+            className="border-slate-600 bg-slate-800 text-slate-200"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Переочистить проблемные ({problems})
+          </Button>
         </div>
 
         {error && <p className="text-sm text-rose-300">{error}</p>}

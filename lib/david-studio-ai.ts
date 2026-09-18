@@ -73,6 +73,23 @@ export async function ensureDavidDraft(
   )
 }
 
+/**
+ * Создаёт черновик, если его ещё нет, и обновляет только снимок товара.
+ *
+ * Нужен постановке фото в очередь чистки: она не выбирает режим импорта, поэтому
+ * не должна затирать уже сделанный выбор оператора (`mode`, `target_product_id`).
+ */
+export async function ensureDavidDraftRecord(handle: string, sourceProduct: DavidCatalogProduct) {
+  await scrapingQuery(
+    `INSERT INTO david_import_drafts (id, handle, mode, target_product_id, source_product)
+     VALUES ($1,$2,'new',NULL,$3::jsonb)
+     ON CONFLICT (handle) DO UPDATE
+       SET source_product=EXCLUDED.source_product,
+           updated_at=NOW()`,
+    [randomUUID(), handle, JSON.stringify(sourceProduct)],
+  )
+}
+
 export async function getDavidDraft(handle: string) {
   const result = await scrapingQuery('SELECT * FROM david_import_drafts WHERE handle=$1', [handle])
   return result.rows[0] || null

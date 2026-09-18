@@ -8,7 +8,7 @@ import {
   listRailsChromoffListings,
   railsFetch,
 } from '@/lib/rails-admin'
-import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats } from '@/lib/photo-clean-jobs'
+import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats, requeueProblemPhotoCleanJobs, countProblemPhotoCleanJobs } from '@/lib/photo-clean-jobs'
 import { buildBatchAiContactSheets, runBatchAiOpenRouter, GLOBAL_BATCH_AI_CATALOG_RULES } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
@@ -21,7 +21,7 @@ import {
   mergeDavidCatalogAttributes,
 } from '@/lib/david-studio-import'
 import {
-  ensureDavidDraft,
+  ensureDavidDraftRecord,
   davidReadyPhotos,
   getDavidCatalogProduct,
   getDavidDraft,
@@ -65,6 +65,36 @@ export async function getDavidQueueStatsAction() {
   return { success: true as const, data: await photoCleanStats(DAVID_SUPPLIER_NAME) }
 }
 
+/** Сколько кадров нужно переочистить: «не найдена», «на глаза», сбои. */
+export async function countDavidProblemPhotosAction(handle?: string | null) {
+  return {
+    success: true as const,
+    data: await countProblemPhotoCleanJobs({
+      supplier: DAVID_SUPPLIER_NAME,
+      sourceProduct: handle || '',
+    }),
+  }
+}
+
+/**
+ * Возвращает проблемные кадры в очередь, чтобы воркер прошёл их заново.
+ * Без handle — по всем товарам David (кнопка в модалке очереди).
+ */
+export async function requeueDavidProblemPhotosAction(handle?: string | null) {
+  const requeued = await requeueProblemPhotoCleanJobs({
+    supplier: DAVID_SUPPLIER_NAME,
+    sourceProduct: handle || '',
+  })
+  revalidatePath('/admin/chromoff/david-studio')
+  return {
+    success: true as const,
+    data: {
+      requeued,
+      message: requeued ? `В очередь вернулось кадров: ${requeued}` : 'Проблемных кадров нет',
+    },
+  }
+}
+
 /** Поиск товара Chromoff, к которому привязываем фото и характеристики David. */
 export async function searchChromoffProductsAction(query: string) {
   const result = await listRailsChromoffListings({ search: query.trim(), perPage: 20, page: 1, published: true })
@@ -98,7 +128,7 @@ export async function startDavidPhotoCleaningAction(handle: string) {
     photos: product.images.map((image, index) => ({ url: image.src, position: image.position ?? index + 1 })),
   })
 
-  await ensureDavidDraft(handle, 'new', null, product)
+  await ensureDavidDraftRecord(handle, product)
   revalidatePath('/admin/chromoff/david-studio')
   return { success: true as const, data: queued }
 }
@@ -166,7 +196,7 @@ export async function startDavidPhotoCleaningBatchAction(handles: string[]): Pro
     })
     created += queued.created
     existing += queued.existing
-    await ensureDavidDraft(handle, 'new', null, product)
+    await ensureDavidDraftRecord(handle, product)
   }
 
   if (!products) return { success: false as const, error: 'У выбранных товаров нет фотографий' }
