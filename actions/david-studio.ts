@@ -9,7 +9,7 @@ import {
   railsFetch,
 } from '@/lib/rails-admin'
 import { enqueuePhotoCleanJobs, listPhotoCleanJobs, photoCleanStats } from '@/lib/photo-clean-jobs'
-import { buildBatchAiContactSheets, runBatchAiOpenRouter } from '@/lib/batch-ai'
+import { buildBatchAiContactSheets, runBatchAiOpenRouter, GLOBAL_BATCH_AI_CATALOG_RULES } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
   DAVID_BRAND_NAME,
@@ -168,7 +168,9 @@ export async function generateDavidDraftAction(handle: string, targetProductId: 
     })
     const raw = await runBatchAiOpenRouter({
       settings,
-      systemPrompt: settings.systemPrompt,
+      // Как и в «Выгрузках»: обязательные правила каталога действуют для всех
+      // категорий и имеют приоритет над сохранённым системным промптом.
+      systemPrompt: `${settings.systemPrompt || ''}\n\n${GLOBAL_BATCH_AI_CATALOG_RULES}`,
       userPrompt: prepared.data.userPrompt,
       contactSheets,
     })
