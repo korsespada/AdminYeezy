@@ -433,12 +433,16 @@ export default function DavidStudioCatalog({
                       <Badge variant="outline" className="border-slate-600 bg-slate-900/80 text-slate-300">
                         {product.images.length} фото
                       </Badge>
-                      {status?.publishedInChromoff && (
+                      {status?.mergedIntoListingId ? (
+                        <Badge className="bg-amber-500/20 text-amber-100 hover:bg-amber-500/20">
+                          объединён со старым кольцом
+                        </Badge>
+                      ) : status?.publishedInChromoff ? (
                         <Badge className="bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/20">
                           <CheckCircle2 className="mr-1 h-3 w-3" />
                           опубликован в Chromoff
                         </Badge>
-                      )}
+                      ) : null}
                       {status?.photosCleaned && (
                         <Badge className="bg-violet-500/20 text-violet-200 hover:bg-violet-500/20">
                           фото очищены

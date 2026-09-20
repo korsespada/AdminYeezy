@@ -13,6 +13,8 @@ export interface DavidProductStatus {
   railsProductId: string | null
   chromoffListingId: string | null
   publishedInChromoff: boolean
+  /** Куда влилась карточка: заполняется, когда товар David объединён со старым кольцом. */
+  mergedIntoListingId: string | null
   photosExpected: number
   photosDone: number
   photosPending: number
@@ -32,7 +34,7 @@ export async function loadDavidProductsStatus(
 
   const [drafts, photoCounts] = await Promise.all([
     scrapingQuery(
-      `SELECT handle, status, error, rails_product_id, chromoff_listing_id
+      `SELECT handle, status, error, rails_product_id, chromoff_listing_id, merged_into_listing_id
          FROM david_import_drafts WHERE handle = ANY($1::text[])`,
       [handles],
     ),
@@ -61,7 +63,10 @@ export async function loadDavidProductsStatus(
       chromoffListingId: draft?.chromoff_listing_id || null,
       // Признак публикации — созданный товар, а не статус черновика: повторный
       // расчёт ИИ переводит черновик в ai_ready, но товар остаётся созданным.
-      publishedInChromoff: Boolean(draft?.rails_product_id),
+      // Объединённый со старым кольцом товар тоже считаем опубликованным: его
+      // модель живёт на витрине, просто в старой карточке.
+      publishedInChromoff: Boolean(draft?.rails_product_id || draft?.merged_into_listing_id),
+      mergedIntoListingId: draft?.merged_into_listing_id || null,
       photosExpected: expected.get(handle) || 0,
       photosDone: 0,
       photosPending: 0,

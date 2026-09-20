@@ -754,6 +754,8 @@ export async function runBatchAiOpenRouter(input: {
   userPrompt: string
   contactSheets: string[]
   referenceSheets?: string[]
+  /** Подпись эталонных листов: у сверки колец эталоны — модели, а не цены. */
+  referenceSheetsLabel?: string
   modelReferenceSheets?: string[]
   visualExampleSheets?: string[]
   extraImages?: Array<{ label: string; url: string; detail?: 'low' | 'high' | 'auto' }>
@@ -764,7 +766,7 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'image_url', image_url: { url } })
   })
   ;(input.referenceSheets || []).forEach((url, index) => {
-    content.push({ type: 'text', text: `Эталоны цен ${index + 1}. Это не фотографии текущего товара.` })
+    content.push({ type: 'text', text: `${input.referenceSheetsLabel || 'Эталоны цен'} ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
   ;(input.modelReferenceSheets || []).forEach((url, index) => {

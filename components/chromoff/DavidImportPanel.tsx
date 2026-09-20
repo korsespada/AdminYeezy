@@ -57,6 +57,7 @@ const DRAFT_LABEL: Record<string, string> = {
   ai_ready: 'готов',
   ai_error: 'ошибка',
   created: 'товар создан',
+  merged: 'объединён со старым кольцом',
 }
 
 const HIDDEN_ATTRIBUTE_CODES = new Set([

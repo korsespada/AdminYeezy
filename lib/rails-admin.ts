@@ -1016,6 +1016,46 @@ export async function deleteRailsChromoffListing(id: string) {
   })
 }
 
+/**
+ * Удаление товара из каталога Rails.
+ *
+ * `force` нужен, когда товар попал в заказ: обычное удаление Rails отклоняет,
+ * а force отвязывает позиции заказов и только потом удаляет товар.
+ */
+export async function deleteRailsProduct(id: string, options: { force?: boolean } = {}) {
+  const path = options.force
+    ? `/admin/products/${encodeURIComponent(id)}/force_destroy`
+    : `/admin/products/${encodeURIComponent(id)}`
+  await railsFetch(path, { method: 'DELETE' })
+}
+
+/**
+ * 301-редирект витрины. Storefront ищет его по `/product/<slug>` через
+ * `/seo/redirects/resolve`, поэтому адреса строятся как пути витрины.
+ */
+export async function createRailsSeoRedirect(input: {
+  sourcePath: string
+  targetPath: string
+  statusCode?: 301 | 302 | 410
+  reason?: string
+}) {
+  const result = await railsFetch<{ seo_redirect: { id: string; source_path: string; target_path: string | null; status_code: number } }>(
+    '/admin/seo_redirects',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        seo_redirect: {
+          source_path: input.sourcePath,
+          target_path: input.targetPath,
+          status_code: input.statusCode || 301,
+          reason: input.reason || '',
+        },
+      }),
+    },
+  )
+  return result.seo_redirect
+}
+
 export async function bulkUpdateRailsChromoffListingsPublished(listingIds: string[], published: boolean) {
   const result = await railsFetch<{ updated: number; published: boolean }>('/admin/chromoff/listings/bulk_update', {
     method: 'PATCH',
