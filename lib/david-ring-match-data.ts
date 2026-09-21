@@ -1,6 +1,7 @@
 import { listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
 import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 import { davidExternalId } from '@/lib/david-studio-import'
+import { scrapingQuery } from '@/lib/db'
 import type { RingAnchor, RingCandidate } from '@/lib/david-ring-match'
 
 /**
@@ -118,18 +119,31 @@ export async function loadRingMatchCatalog(options: { force?: boolean } = {}): P
   const candidates: RingCandidate[] = []
   const skippedNotImported: string[] = []
 
+  // Фото выгрузки, уже переехавшие на наш S3 (scripts/mirror-david-studio-media.mjs).
+  // Благодаря им в сравнении участвуют и кольца, карточки которых в Chromoff ещё
+  // нет: раньше они выпадали, потому что CDN поставщика ронял запрос целиком.
+  const mirrors = await scrapingQuery(
+    'SELECT handle, position, s3_url FROM david_media_mirror ORDER BY handle, position',
+  ).catch(() => ({ rows: [] as any[] }))
+  const mirrorPhotos = new Map<string, string[]>()
+  for (const row of mirrors.rows as any[]) {
+    const handle = String(row.handle || '')
+    const url = String(row.s3_url || '')
+    if (!handle || !url) continue
+    const list = mirrorPhotos.get(handle) || []
+    list.push(url)
+    mirrorPhotos.set(handle, list)
+  }
+
   for (const product of (catalog?.products || []) as any[]) {
     if (!isRingProduct(product)) continue
     const handle = String(product.handle || '')
     if (!handle) continue
     const listing = listingsByExternalId.get(davidExternalId(handle))
     const cleanedPhotos = listing ? mediaUrls(listing) : []
+    const photos = cleanedPhotos.length ? cleanedPhotos : (mirrorPhotos.get(handle) || [])
 
-    // Сравнивать можно только кольца, у которых есть карточка в Chromoff: их фото
-    // лежат на нашем S3. Исходные фото выгрузки — на CDN поставщика, он бывает
-    // недоступен и роняет весь запрос, а перенести контент из неимпортированного
-    // кольца всё равно нельзя. Такие кольца показываем отдельным счётчиком.
-    if (!listing || !cleanedPhotos.length) {
+    if (!photos.length) {
       skippedNotImported.push(handle)
       continue
     }
@@ -138,13 +152,13 @@ export async function loadRingMatchCatalog(options: { force?: boolean } = {}): P
       handle,
       externalId: davidExternalId(handle),
       title: String(listing?.name || product.title || handle),
-      productId: String(listing.product_id || '') || null,
-      listingId: String(listing.id || '') || null,
-      slug: String(listing.legacy_slug || '') || null,
-      photos: cleanedPhotos,
-      created: true,
-      priceCents: Number(listing.price_cents || 0),
-      photoSource: 'chromoff',
+      productId: listing ? String(listing.product_id || '') || null : null,
+      listingId: listing ? String(listing.id || '') || null : null,
+      slug: listing ? String(listing.legacy_slug || '') || null : null,
+      photos,
+      created: Boolean(listing),
+      priceCents: listing ? Number(listing.price_cents || 0) : null,
+      photoSource: cleanedPhotos.length ? 'chromoff' : 'mirror',
     })
   }
 

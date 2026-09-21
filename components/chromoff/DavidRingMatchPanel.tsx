@@ -297,8 +297,8 @@ export default function DavidRingMatchPanel({ initial }: { initial: RingMatchOve
 
       {stats.candidatesSkipped ? (
         <p className="text-xs text-slate-400">
-          Ещё {stats.candidatesSkipped} колец David есть в выгрузке, но карточка в Chromoff не создана: их фото лежат на CDN
-          поставщика, поэтому в сравнение они не идут. Импортируйте их в David Studio, и они появятся здесь.
+          Ещё {stats.candidatesSkipped} колец David есть в выгрузке, но их фото не переехали на наш S3, поэтому в сравнение
+          они не идут. Зеркалирование запускается командой <code className="rounded bg-slate-900 px-1">npm run media:mirror:david-studio</code>.
         </p>
       ) : null}
 

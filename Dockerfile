@@ -41,4 +41,4 @@ RUN mkdir -p /app/tmp /app/scratch
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npm run db:migrate:media-seo && npm run db:migrate:supplier-ai && npm run db:migrate:catalog-deletion && npm run db:migrate:measurement-templates && npm run db:migrate:batch-ai && npm run db:migrate:chromoff-ai && npm run db:migrate:david-photo-exclusions && npm run db:migrate:david-ring-matches && npm run db:migrate:photo-clean-manual-box && npm run db:migrate:supplier-post-process && npm run start"]
+CMD ["sh", "-c", "npm run db:migrate:media-seo && npm run db:migrate:supplier-ai && npm run db:migrate:catalog-deletion && npm run db:migrate:measurement-templates && npm run db:migrate:batch-ai && npm run db:migrate:chromoff-ai && npm run db:migrate:david-photo-exclusions && npm run db:migrate:david-ring-matches && npm run db:migrate:david-media-mirror && npm run db:migrate:photo-clean-manual-box && npm run db:migrate:supplier-post-process && npm run start"]

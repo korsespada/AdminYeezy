@@ -36,7 +36,8 @@ export interface RingCandidate {
   photos: string[]
   created: boolean
   priceCents: number | null
-  photoSource: 'chromoff' | 'catalog'
+  /** `chromoff` — очищенные фото из карточки, `mirror` — копия фото выгрузки на нашем S3. */
+  photoSource: 'chromoff' | 'mirror' | 'catalog'
 }
 
 export interface RankedRingCandidate {
