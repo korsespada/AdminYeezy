@@ -3,8 +3,10 @@ import {
   anchorRingTokens,
   buildRingMatchPrompt,
   buildRingMergePatch,
+  buildRingSweepPrompt,
   canonicalRingToken,
   parseRingMatchVerdict,
+  parseRingSweepVerdict,
   rankRingCandidates,
   ringTokens,
   type RingCandidate,
@@ -188,6 +190,54 @@ describe('parseRingMatchVerdict', () => {
   it('переживает мусорный ответ', () => {
     expect(parseRingMatchVerdict(null, candidates).handle).toBeNull()
     expect(parseRingMatchVerdict({ match_index: 'нет' }, candidates).invalidIndex).toBe(true)
+  })
+})
+
+describe('buildRingSweepPrompt и parseRingSweepVerdict', () => {
+  const sweepCandidates = [DAGGER_HEART, DAGGER_SPACER, DOUBLE_DAGGER, SCROLL_SPINNER, SQUARE_CEMETERY, RELIEF]
+
+  it('перечисляет весь каталог и просит номера плиток', () => {
+    const prompt = buildRingSweepPrompt({
+      anchor: { name: 'Кольцо K&T', modelName: '' },
+      candidates: sweepCandidates,
+      anchorTileCount: 4,
+    })
+
+    expect(prompt).toContain('плитки 1–4')
+    expect(prompt).toContain('плитки 1–6')
+    expect(prompt).toContain('dagger-heart-ring')
+    expect(prompt).toContain('по одной модели на плитку')
+  })
+
+  it('превращает номера плиток в handle и убирает повторы', () => {
+    const verdict = parseRingSweepVerdict({ candidates: [2, 1, 2, '3'], confidence: 0.35 }, sweepCandidates)
+
+    expect(verdict.handles).toEqual([
+      'chrome-hearts-6mm-dagger-spacer-ring',
+      'chrome-hearts-dagger-heart-ring',
+      'chrome-hearts-double-dagger-ring',
+    ])
+    expect(verdict.invalidIndexes).toEqual([])
+    expect(verdict.confidence).toBeCloseTo(0.35)
+  })
+
+  it('ограничивает список пятью моделями', () => {
+    const verdict = parseRingSweepVerdict({ candidates: [1, 2, 3, 4, 5, 6] }, sweepCandidates)
+
+    expect(verdict.handles).toHaveLength(5)
+  })
+
+  it('отбрасывает номера вне каталога, но сообщает о них', () => {
+    const verdict = parseRingSweepVerdict({ candidates: [99, 1] }, sweepCandidates)
+
+    expect(verdict.handles).toEqual(['chrome-hearts-dagger-heart-ring'])
+    expect(verdict.invalidIndexes).toEqual([99])
+  })
+
+  it('понимает пустой ответ как «похожих нет»', () => {
+    expect(parseRingSweepVerdict({ candidates: [] }, sweepCandidates).handles).toEqual([])
+    expect(parseRingSweepVerdict(null, sweepCandidates).handles).toEqual([])
+    expect(parseRingSweepVerdict({ candidates: 'нет' }, sweepCandidates).handles).toEqual([])
   })
 })
 

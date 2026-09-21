@@ -8,9 +8,15 @@ import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import {
   RING_MATCH_CONFIDENT,
   RING_MATCH_SYSTEM_PROMPT,
+  RING_SWEEP_MAX,
+  RING_SWEEP_PHOTOS_PER_CANDIDATE,
+  RING_SWEEP_SYSTEM_PROMPT,
   buildRingMatchPrompt,
   buildRingMergePatch,
+  buildRingSweepPrompt,
+  chunkRingCandidates,
   parseRingMatchVerdict,
+  parseRingSweepVerdict,
   rankRingCandidates,
   type RingAnchor,
   type RingCandidate,
@@ -46,6 +52,8 @@ const MAX_BATCH = 10
 export type RingMatchStatus =
   | 'suggested'
   | 'no_match'
+  /** Прошли по всему каталогу David по фото — совпадения нет. */
+  | 'no_match_swept'
   | 'no_candidates'
   | 'invalid_index'
   | 'error'
@@ -96,17 +104,45 @@ export interface RingMatchOverview {
     suggested: number
     confident: number
     noMatch: number
+    noMatchSwept: number
+    /** Сколько колец ещё имеет смысл прогнать по фото среди всего каталога. */
+    sweepable: number
     noCandidates: number
     invalidIndex: number
     errors: number
     applied: number
     rejected: number
+    /** Кольца David из выгрузки, которые ещё не импортированы в Chromoff. */
+    candidatesSkipped: number
   }
   rows: RingMatchRow[]
 }
 
 function photoPreview(urls: string[], limit = 3) {
   return urls.slice(0, limit)
+}
+
+/**
+ * Признаки временного сбоя провайдера. BYESU под нагрузкой отвечает
+ * «system cpu overloaded», а сетевые обрывы дают «Не удалось подключиться».
+ * Такие ошибки имеет смысл повторить после паузы, в отличие от, например,
+ * отсутствующего ключа или выбранной модели.
+ */
+const TRANSIENT_AI_ERROR = /(cpu overloaded|overloaded|Не удалось подключиться|ECONN|ETIMEDOUT|UND_ERR|fetch failed|socket hang up|\b50[234]\b)/i
+
+async function withTransientRetry<T>(run: () => Promise<T>, attempts = 2): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await run()
+    } catch (error: any) {
+      lastError = error
+      const message = String(error?.message || error || '')
+      if (attempt >= attempts || !TRANSIENT_AI_ERROR.test(message)) throw error
+      await new Promise((resolve) => setTimeout(resolve, 8_000 * attempt))
+    }
+  }
+  throw lastError
 }
 
 function mapMatchRow(anchor: RingAnchor, match: any | null, candidatesByHandle: Map<string, RingCandidate>): RingMatchRow {
@@ -170,11 +206,14 @@ export async function getRingMatchOverviewAction(): Promise<
           suggested: count('suggested'),
           confident,
           noMatch: count('no_match'),
+          noMatchSwept: count('no_match_swept'),
+          sweepable: count('no_match') + count('no_candidates'),
           noCandidates: count('no_candidates'),
           invalidIndex: count('invalid_index'),
           errors: count('error'),
           applied: count('applied'),
           rejected: count('rejected'),
+          candidatesSkipped: catalog.skippedNotImported.length,
         },
         rows,
       },
@@ -191,6 +230,199 @@ interface MatchJobResult {
   confidence?: number
   evidence?: string
   error?: string
+}
+
+/**
+ * Поиск по фото среди ВСЕГО каталога David, без отбора по названию.
+ *
+ * Нужен там, где короткий список вышел пустым или не дал совпадения: у старых
+ * колец вроде «Кольцо K&T» модель в названии не указана, и отбирать по словам
+ * нечего. Схема в два шага:
+ *   1. черновой проход — одна плитка на каждую модель каталога, модель называет
+ *      до пяти похожих;
+ *   2. подробное сравнение только этих пяти — по три фото на модель.
+ *
+ * Одна пара за вызов: черновой проход это 12 листов каталога, и вместе с
+ * подробным шагом вызов длится около минуты.
+ */
+export async function sweepRingMatchesAction(input: { limit?: number; anchorListingIds?: string[] } = {}): Promise<
+  | { success: true; data: { processed: number; remaining: number; provider: string; model: string; results: MatchJobResult[] } }
+  | { success: false; error: string }
+> {
+  const limit = Math.min(3, Math.max(1, Number(input.limit || 1)))
+
+  try {
+    const settingsResult = await getBatchAiSettingsAction()
+    if (!settingsResult.success || !settingsResult.data) {
+      return { success: false, error: 'Не удалось прочитать настройки ИИ в «Выгрузках»' }
+    }
+    const settings = settingsResult.data as any
+    const provider = String(settings.provider || '')
+    if (provider === 'cockpit') {
+      return {
+        success: false,
+        error: 'Выбран провайдер Cockpit: он работает только через локальный воркер. Выберите BYESU в «Выгрузках» → «Настройки ИИ».',
+      }
+    }
+    const model = provider === 'byesu' ? String(settings.byesuModel || '') : String(settings.openrouterModel || '')
+
+    const catalog = await loadRingMatchCatalog()
+    const existing = await scrapingQuery('SELECT anchor_listing_id, status FROM david_ring_matches')
+    const byAnchor = new Map(existing.rows.map((row: any) => [String(row.anchor_listing_id), String(row.status)]))
+    const requested = input.anchorListingIds?.length ? new Set(input.anchorListingIds.map(String)) : null
+
+    // Сплошной проход берёт то, где обычный путь не дал пары: пустой короткий
+    // список или честное «нет совпадения» среди шести кандидатов.
+    const sweepable = new Set(['no_candidates', 'no_match'])
+    const targets = catalog.anchors.filter((anchor) => {
+      if (requested) return requested.has(anchor.listingId)
+      return sweepable.has(String(byAnchor.get(anchor.listingId) || ''))
+    })
+    const sorted = targets.sort((left, right) => (
+      Number(byAnchor.get(left.listingId) === 'no_match') - Number(byAnchor.get(right.listingId) === 'no_match')
+    ))
+    const batch = sorted.slice(0, limit)
+    const results: MatchJobResult[] = []
+
+    for (const anchor of batch) {
+      results.push(await sweepSingleAnchor({
+        anchor,
+        candidates: catalog.candidates,
+        settings: settings as AiCompletionSettings,
+        provider,
+        model,
+      }))
+    }
+
+    revalidatePath(PAGE_PATH)
+    return {
+      success: true,
+      data: { processed: results.length, remaining: Math.max(0, sorted.length - results.length), provider, model, results },
+    }
+  } catch (error: any) {
+    return { success: false, error: String(error?.message || error || 'Не удалось выполнить сплошной проход') }
+  }
+}
+
+async function sweepSingleAnchor(input: {
+  anchor: RingAnchor
+  candidates: RingCandidate[]
+  settings: AiCompletionSettings
+  provider: string
+  model: string
+}): Promise<MatchJobResult> {
+  const { anchor, candidates } = input
+  try {
+    const anchorPhotos = anchor.photos.slice(0, ANCHOR_TILES)
+    const contactSheets = await buildBatchAiContactSheets(anchorPhotos)
+
+    // Шаг 1: одна плитка на модель каталога, пачками по 27 плиток. Один запрос на
+    // весь каталог слишком тяжёлый — BYESU отвечает «system cpu overloaded».
+    const chunks = chunkRingCandidates(candidates)
+    const shortlisted: RingCandidate[] = []
+    for (const chunk of chunks) {
+      try {
+        const coarsePhotos = chunk.map((candidate) => candidate.photos[0]).filter(Boolean)
+        const coarseSheets = await buildBatchAiContactSheets(coarsePhotos, {
+          additionalHosts: ringMatchPhotoHosts(chunk),
+        })
+        const coarseRaw = await withTransientRetry(() => runBatchAiOpenRouter({
+          settings: input.settings,
+          systemPrompt: RING_SWEEP_SYSTEM_PROMPT,
+          userPrompt: buildRingSweepPrompt({ anchor, candidates: chunk, anchorTileCount: anchorPhotos.length }),
+          contactSheets,
+          referenceSheets: coarseSheets,
+          referenceSheetsLabel: 'Каталог моделей David Studio',
+        }))
+        const sweep = parseRingSweepVerdict(coarseRaw, chunk)
+        for (const handle of sweep.handles) {
+          if (shortlisted.some((candidate) => candidate.handle === handle)) continue
+          const candidate = candidates.find((item) => item.handle === handle)
+          if (candidate) shortlisted.push(candidate)
+        }
+      } catch (error: any) {
+        // Пачка не должна ронять весь проход: остальные всё ещё могут дать пару.
+        console.warn('Сплошной проход: пачка пропущена:', String(error?.message || error))
+      }
+      if (shortlisted.length >= RING_SWEEP_MAX) break
+    }
+
+    if (!shortlisted.length) {
+      await saveMatch({
+        anchor,
+        status: 'no_match_swept',
+        shortlist: [],
+        provider: input.provider,
+        model: input.model,
+        evidence: `Сплошной проход по всем ${candidates.length} моделям David: похожих нет`,
+      })
+      return { anchor: anchor.name, status: 'no_match_swept', evidence: `сплошной проход: похожих нет (${candidates.length} моделей)` }
+    }
+
+    // Шаг 2: подробное сравнение отобранных, по три фото на модель.
+    const ranked = shortlisted.map((candidate) => ({ candidate, score: 0, shared: [] as string[] }))
+    const finePhotos = shortlisted.flatMap((candidate) => candidate.photos.slice(0, RING_SWEEP_PHOTOS_PER_CANDIDATE))
+    const fineSheets = await buildBatchAiContactSheets(finePhotos, {
+      additionalHosts: ringMatchPhotoHosts(shortlisted),
+    })
+    const fineRaw = await withTransientRetry(() => runBatchAiOpenRouter({
+      settings: input.settings,
+      systemPrompt: RING_MATCH_SYSTEM_PROMPT,
+      userPrompt: buildRingMatchPrompt({
+        anchor,
+        ranked,
+        anchorTileCount: anchorPhotos.length,
+        tilesPerCandidate: RING_SWEEP_PHOTOS_PER_CANDIDATE,
+      }),
+      contactSheets,
+      referenceSheets: fineSheets,
+      referenceSheetsLabel: 'Отобранные модели David Studio',
+    }))
+
+    const verdict = parseRingMatchVerdict(fineRaw, shortlisted)
+    const matched = verdict.handle ? shortlisted.find((candidate) => candidate.handle === verdict.handle) : undefined
+    const shortlist = ranked.map((row) => ({
+      handle: row.candidate.handle,
+      title: row.candidate.title,
+      score: 0,
+      shared: row.shared,
+      created: row.candidate.created,
+      photoSource: row.candidate.photoSource,
+    }))
+
+    await saveMatch({
+      anchor,
+      status: matched ? 'suggested' : 'no_match_swept',
+      shortlist,
+      provider: input.provider,
+      model: input.model,
+      confidence: verdict.confidence,
+      evidence: matched
+        ? `Сплошной проход по фото: ${verdict.evidence}`
+        : `Сплошной проход: черновой отбор дал ${shortlisted.length} моделей, подробное сравнение совпадения не нашло`,
+      candidate: matched || null,
+      candidateScore: null,
+    })
+
+    return {
+      anchor: anchor.name,
+      status: matched ? 'suggested' : 'no_match_swept',
+      davidTitle: matched?.title,
+      confidence: verdict.confidence,
+      evidence: verdict.evidence,
+    }
+  } catch (error: any) {
+    const message = String(error?.message || error || 'Модель недоступна')
+    await saveMatch({
+      anchor,
+      status: 'error',
+      shortlist: [],
+      provider: input.provider,
+      model: input.model,
+      error: message,
+    }).catch(() => {})
+    return { anchor: anchor.name, status: 'error', error: message }
+  }
 }
 
 export async function runRingMatchBatchAction(input: { limit?: number; anchorListingIds?: string[] } = {}): Promise<
@@ -222,11 +454,17 @@ export async function runRingMatchBatchAction(input: { limit?: number; anchorLis
 
     // Повторно считаем только то, что не дало результата: «нет совпадения» и
     // отклонённое оператором — это уже решения, их не перетираем.
-    const queue = catalog.anchors.filter((anchor) => {
-      if (requested && !requested.has(anchor.listingId)) return false
-      const status = byAnchor.get(anchor.listingId)
-      return !status || status === 'error' || status === 'invalid_index'
-    })
+    //
+    // Упавшие уходят в конец очереди, а не в начало: иначе сбойный товар
+    // выбирается снова и снова, и очередь стоит на нём, пока остальные ждут.
+    const priority = (status?: string) => (status === 'error' ? 2 : status === 'invalid_index' ? 1 : 0)
+    const queue = catalog.anchors
+      .filter((anchor) => {
+        if (requested && !requested.has(anchor.listingId)) return false
+        const status = byAnchor.get(anchor.listingId)
+        return !status || status === 'error' || status === 'invalid_index'
+      })
+      .sort((left, right) => priority(byAnchor.get(left.listingId)) - priority(byAnchor.get(right.listingId)))
 
     const batch = queue.slice(0, limit)
     const results: MatchJobResult[] = []
@@ -279,7 +517,7 @@ async function matchSingleAnchor(input: {
       additionalHosts: ringMatchPhotoHosts(ranked.map((row) => row.candidate)),
     })
 
-    const raw = await runBatchAiOpenRouter({
+    const raw = await withTransientRetry(() => runBatchAiOpenRouter({
       settings: input.settings,
       systemPrompt: RING_MATCH_SYSTEM_PROMPT,
       userPrompt: buildRingMatchPrompt({
@@ -291,7 +529,7 @@ async function matchSingleAnchor(input: {
       contactSheets,
       referenceSheets,
       referenceSheetsLabel: 'Эталоны моделей David Studio',
-    })
+    }))
 
     const verdict = parseRingMatchVerdict(raw, ranked.map((row) => row.candidate))
     const shortlist = ranked.map((row) => ({

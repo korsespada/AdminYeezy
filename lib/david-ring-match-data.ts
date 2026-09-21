@@ -24,6 +24,8 @@ export interface RingMatchCatalog {
   categoryName: string
   anchors: RingAnchor[]
   candidates: RingCandidate[]
+  /** Кольца David из выгрузки, у которых ещё нет карточки в Chromoff. */
+  skippedNotImported: string[]
 }
 
 let cache: { at: number; value: RingMatchCatalog } | null = null
@@ -113,36 +115,45 @@ export async function loadRingMatchCatalog(options: { force?: boolean } = {}): P
     }))
     .filter((anchor) => anchor.listingId && anchor.productId && anchor.photos.length > 0)
 
-  const candidates: RingCandidate[] = ((catalog?.products || []) as any[])
-    .filter((product) => isRingProduct(product))
-    .map((product) => {
-      const handle = String(product.handle || '')
-      const externalId = davidExternalId(handle)
-      const listing = listingsByExternalId.get(externalId)
-      const cleanedPhotos = listing ? mediaUrls(listing) : []
-      const sourcePhotos = (Array.isArray(product.images) ? product.images : [])
-        .map((image: any) => String(image?.src || ''))
-        .filter((url: string) => url.startsWith('http'))
-      return {
-        handle,
-        externalId,
-        title: String(listing?.name || product.title || handle),
-        productId: listing ? String(listing.product_id || '') || null : null,
-        listingId: listing ? String(listing.id || '') || null : null,
-        slug: listing ? String(listing.legacy_slug || '') || null : null,
-        photos: cleanedPhotos.length ? cleanedPhotos : sourcePhotos,
-        created: Boolean(listing),
-        priceCents: listing ? Number(listing.price_cents || 0) : null,
-        photoSource: cleanedPhotos.length ? 'chromoff' : 'catalog',
-      } satisfies RingCandidate
+  const candidates: RingCandidate[] = []
+  const skippedNotImported: string[] = []
+
+  for (const product of (catalog?.products || []) as any[]) {
+    if (!isRingProduct(product)) continue
+    const handle = String(product.handle || '')
+    if (!handle) continue
+    const listing = listingsByExternalId.get(davidExternalId(handle))
+    const cleanedPhotos = listing ? mediaUrls(listing) : []
+
+    // Сравнивать можно только кольца, у которых есть карточка в Chromoff: их фото
+    // лежат на нашем S3. Исходные фото выгрузки — на CDN поставщика, он бывает
+    // недоступен и роняет весь запрос, а перенести контент из неимпортированного
+    // кольца всё равно нельзя. Такие кольца показываем отдельным счётчиком.
+    if (!listing || !cleanedPhotos.length) {
+      skippedNotImported.push(handle)
+      continue
+    }
+
+    candidates.push({
+      handle,
+      externalId: davidExternalId(handle),
+      title: String(listing?.name || product.title || handle),
+      productId: String(listing.product_id || '') || null,
+      listingId: String(listing.id || '') || null,
+      slug: String(listing.legacy_slug || '') || null,
+      photos: cleanedPhotos,
+      created: true,
+      priceCents: Number(listing.price_cents || 0),
+      photoSource: 'chromoff',
     })
-    .filter((candidate) => candidate.handle && candidate.photos.length > 0)
+  }
 
   const value: RingMatchCatalog = {
     categoryId: String(category.id),
     categoryName: String(category.name || 'Кольца'),
     anchors,
     candidates,
+    skippedNotImported,
   }
   cache = { at: Date.now(), value }
   return value

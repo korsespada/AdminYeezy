@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import Link from 'next/link'
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw, Sparkles, Undo2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw, Search, Sparkles, Undo2, XCircle } from 'lucide-react'
 import {
   applyRingMatchAction,
   getRingMatchOverviewAction,
@@ -11,6 +10,7 @@ import {
   resetRingMatchAction,
   runRingMatchBatchAction,
   setRingMatchCandidateAction,
+  sweepRingMatchesAction,
   type RingMatchOverview,
   type RingMatchRow,
 } from '@/actions/david-ring-match'
@@ -20,7 +20,8 @@ const STOREFRONT = 'https://chromoff.store'
 const STATUS_LABEL: Record<string, string> = {
   new: 'не считалось',
   suggested: 'есть пара',
-  no_match: 'нет совпадения',
+  no_match: 'нет среди похожих',
+  no_match_swept: 'нет и по фото',
   no_candidates: 'нет кандидатов',
   invalid_index: 'сбой разбора',
   error: 'ошибка',
@@ -32,7 +33,8 @@ const STATUS_FILTERS = [
   { value: 'work', label: 'К работе' },
   { value: 'suggested', label: 'Есть пара' },
   { value: 'confident', label: 'Уверенные' },
-  { value: 'no_match', label: 'Нет совпадения' },
+  { value: 'no_match', label: 'Нет среди похожих' },
+  { value: 'no_match_swept', label: 'Нет и по фото' },
   { value: 'no_candidates', label: 'Нет кандидатов' },
   { value: 'problems', label: 'Сбои' },
   { value: 'applied', label: 'Применённые' },
@@ -44,7 +46,12 @@ type FilterValue = (typeof STATUS_FILTERS)[number]['value']
 
 function matchesFilter(row: RingMatchRow, filter: FilterValue) {
   if (filter === 'all') return true
-  if (filter === 'work') return row.status === 'new' || row.status === 'suggested' || row.status === 'invalid_index' || row.status === 'error'
+  if (filter === 'work') {
+    // «К работе» — всё, что ещё требует решения: не считалось, найдена пара,
+    // нет пары обычным путём (можно прогнать по фото) и сбои.
+    return row.status === 'new' || row.status === 'suggested' || row.status === 'invalid_index'
+      || row.status === 'error' || row.status === 'no_match' || row.status === 'no_candidates'
+  }
   if (filter === 'problems') return row.status === 'invalid_index' || row.status === 'error'
   if (filter === 'confident') return row.status === 'suggested' && Number(row.confidence || 0) >= 0.9
   return row.status === filter
@@ -105,6 +112,42 @@ export default function DavidRingMatchPanel({ initial }: { initial: RingMatchOve
         if (!ok || remaining <= 0) break
       }
       push(stopRef.current ? 'Остановлено оператором' : 'Очередь подбора пуста')
+    })
+  }
+
+  /**
+   * Сплошной проход по фото: для каждого кольца, где подбор по названию не дал
+   * пары, модель смотрит весь каталог David. Одна пара за вызов, поэтому идём
+   * циклом и показываем прогресс.
+   */
+  function startSweep() {
+    stopRef.current = false
+    startRun(async () => {
+      let guard = 0
+      while (!stopRef.current && guard < 200) {
+        guard += 1
+        const result = await sweepRingMatchesAction({ limit: 1 })
+        if (!result.success) {
+          push(`Ошибка сплошного прохода: ${result.error}`)
+          break
+        }
+        const item = result.data.results[0]
+        if (item) {
+          if (item.status === 'suggested') {
+            push(`По фото найдено: ${item.anchor} → ${item.davidTitle} (${Math.round(Number(item.confidence || 0) * 100)}%)`)
+          } else if (item.status === 'no_match_swept') {
+            push(`По фото не найдено: ${item.anchor}`)
+          } else {
+            push(`Сбой: ${item.anchor} — ${item.error}`)
+          }
+        }
+        await refresh()
+        if (result.data.remaining <= 0) {
+          push('Сплошной проход закончен')
+          break
+        }
+      }
+      if (stopRef.current) push('Остановлено оператором')
     })
   }
 
@@ -220,6 +263,16 @@ export default function DavidRingMatchPanel({ initial }: { initial: RingMatchOve
             {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
             Подобрать всё
           </button>
+          <button
+            type="button"
+            onClick={startSweep}
+            disabled={running || stats.sweepable === 0}
+            title="Для колец, где подбор по названию не дал пары: модель смотрит по фото весь каталог David"
+            className="flex h-10 items-center gap-2 rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 text-sm text-amber-100 hover:bg-amber-900/30 disabled:opacity-50"
+          >
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            По фото среди всех ({stats.sweepable})
+          </button>
           <select
             value={batchSize}
             onChange={(event) => setBatchSize(Number(event.target.value))}
@@ -231,15 +284,23 @@ export default function DavidRingMatchPanel({ initial }: { initial: RingMatchOve
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <Stat label="Старых колец" value={stats.anchors} />
         <Stat label="Моделей David" value={stats.candidates} />
         <Stat label="Посчитано" value={stats.processed} />
         <Stat label="Есть пара" value={stats.suggested} tone="violet" />
         <Stat label="Уверенных" value={stats.confident} tone="emerald" />
+        <Stat label="По фото ждут" value={stats.sweepable} tone={stats.sweepable ? 'amber' : undefined} />
         <Stat label="Применено" value={stats.applied} tone="emerald" />
         <Stat label="Сбои" value={stats.errors + stats.invalidIndex} tone={stats.errors + stats.invalidIndex ? 'rose' : undefined} />
       </div>
+
+      {stats.candidatesSkipped ? (
+        <p className="text-xs text-slate-400">
+          Ещё {stats.candidatesSkipped} колец David есть в выгрузке, но карточка в Chromoff не создана: их фото лежат на CDN
+          поставщика, поэтому в сравнение они не идут. Импортируйте их в David Studio, и они появятся здесь.
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         {STATUS_FILTERS.map((item) => (
@@ -293,8 +354,8 @@ export default function DavidRingMatchPanel({ initial }: { initial: RingMatchOve
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: 'violet' | 'emerald' | 'rose' }) {
-  const toneClass = tone === 'violet' ? 'text-violet-200' : tone === 'emerald' ? 'text-emerald-300' : tone === 'rose' ? 'text-rose-300' : 'text-slate-100'
+function Stat({ label, value, tone }: { label: string; value: number; tone?: 'violet' | 'emerald' | 'rose' | 'amber' }) {
+  const toneClass = tone === 'violet' ? 'text-violet-200' : tone === 'emerald' ? 'text-emerald-300' : tone === 'rose' ? 'text-rose-300' : tone === 'amber' ? 'text-amber-200' : 'text-slate-100'
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-3">
       <div className="text-xs text-slate-400">{label}</div>

@@ -917,7 +917,7 @@ async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
     } catch (error) {
       lastError = error
       const message = String((error as Error)?.message || error || '').toLowerCase()
-      const retryable = /temporarily unavailable|rate limit|retry later|upstream|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection/.test(message)
+      const retryable = /temporarily unavailable|rate limit|retry later|upstream|overloaded|cpu overload|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection/.test(message)
       if (!retryable || attempt === 5) throw error
       const waitMs = Math.min(30_000, 1_000 * (2 ** (attempt - 1)))
       console.warn(`${label}: временная ошибка, повтор ${attempt + 1}/5 через ${waitMs} мс: ${message}`)

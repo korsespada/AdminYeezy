@@ -292,6 +292,96 @@ export const RING_MATCH_CONFIDENT = 0.9
 /** Ниже этого порога пара остаётся только подсказкой для ручного ревью. */
 export const RING_MATCH_REVIEW = 0.6
 
+/** Сколько моделей модель может назвать в черновом проходе по всему каталогу. */
+export const RING_SWEEP_MAX = 5
+/** Сколько фото одной модели показываем в подробном сравнении. */
+export const RING_SWEEP_PHOTOS_PER_CANDIDATE = 3
+/**
+ * Размер пачки каталога в одном запросе чернового прохода.
+ *
+ * 27 плиток = три листа. Один большой запрос на весь каталог (105 плиток,
+ * 12 листов) BYESU роняет с «system cpu overloaded», поэтому каталог идёт
+ * пачками: запрос меньше, повторов меньше, прогресс виден.
+ */
+export const RING_SWEEP_CHUNK = 27
+
+/** Режет каталог на пачки для запросов чернового прохода. */
+export function chunkRingCandidates(candidates: RingCandidate[], size: number = RING_SWEEP_CHUNK): RingCandidate[][] {
+  const chunkSize = Math.max(1, Math.floor(size) || 1)
+  const chunks: RingCandidate[][] = []
+  for (let index = 0; index < candidates.length; index += chunkSize) {
+    chunks.push(candidates.slice(index, index + chunkSize))
+  }
+  return chunks
+}
+
+/**
+ * Черновой проход по всему каталогу David.
+ *
+ * Нужен там, где отбор по названию не сработал: у старых колец вроде «Кольцо K&T»
+ * или «Серебряное кольцо с камнями» нет модели в названии, и короткий список
+ * кандидатов выходит пустым. Тогда модель смотрит по одной плитке на каждую
+ * модель каталога и называет те, что вообще могут быть тем же изделием. Дальше
+ * эти несколько кандидатов сравниваются подробно, по три фото на модель.
+ */
+export const RING_SWEEP_SYSTEM_PROMPT = [
+  'Ты просматриваешь каталог ювелирных колец и ищешь то же изделие, что на фотографиях товара.',
+  'Первый лист — фотографии товара Chrome Hearts. Следующие листы — каталог моделей David Studio,',
+  'по одной плитке на модель; плитки пронумерованы подряд по всем листам каталога.',
+  '',
+  'Правила:',
+  '1. Назови до ' + RING_SWEEP_MAX + ' плиток, которые МОГУТ быть тем же изделием. Это черновой отбор: лучше назвать лишнее, чем пропустить.',
+  '2. Смотри на форму, motif (крест, кинжал, лилия, череп, звезда, бабочка), ширину и расположение камней.',
+  '3. Другой цвет камня или покрытие — это всё ещё та же модель, называй её.',
+  '4. Если ни одна плитка не похожа, верни пустой список: угадывать нельзя.',
+  '',
+  'Верни строго JSON вида {"candidates":[12,47,88],"confidence":0.4}.',
+  'candidates — номера плиток каталога, максимум ' + RING_SWEEP_MAX + '.',
+].join('\n')
+
+export function buildRingSweepPrompt(input: {
+  anchor: Pick<RingAnchor, 'name' | 'modelName'>
+  candidates: RingCandidate[]
+  anchorTileCount: number
+}): string {
+  const lines = [
+    `Товар: «${input.anchor.name}».`,
+    input.anchor.modelName ? `Модель из характеристик карточки: ${input.anchor.modelName}.` : '',
+    `Фотографии товара — плитки 1–${input.anchorTileCount} на первом листе.`,
+    `Каталог David Studio — плитки 1–${input.candidates.length} на следующих листах, по одной модели на плитку:`,
+  ]
+  input.candidates.forEach((candidate, index) => {
+    lines.push(`${index + 1}. ${candidate.title} (${candidate.handle})`)
+  })
+  lines.push('', `Назови до ${RING_SWEEP_MAX} плиток каталога, которые могут быть тем же изделием.`)
+  return lines.filter(Boolean).join('\n')
+}
+
+export function parseRingSweepVerdict(raw: unknown, candidates: RingCandidate[]): {
+  handles: string[]
+  confidence: number
+  invalidIndexes: number[]
+} {
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const list = Array.isArray(source.candidates) ? source.candidates : []
+  const confidence = Math.min(1, Math.max(0, readNumber(source.confidence) ?? 0))
+  const handles: string[] = []
+  const invalidIndexes: number[] = []
+
+  for (const value of list) {
+    const index = readNumber(value)
+    if (index === null || !Number.isInteger(index) || index < 1 || index > candidates.length) {
+      if (index !== null) invalidIndexes.push(index)
+      continue
+    }
+    const handle = candidates[index - 1].handle
+    if (!handles.includes(handle)) handles.push(handle)
+    if (handles.length >= RING_SWEEP_MAX) break
+  }
+
+  return { handles, confidence, invalidIndexes }
+}
+
 export interface RingMergeResult {
   /** Патч товара для Rails: контент David, поверх старой карточки. */
   patch: Record<string, unknown>
