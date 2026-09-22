@@ -24,6 +24,8 @@ export interface RingAnchor {
   photos: string[]
   modelName: string
   seoArticle: string
+  /** Металл и проба из характеристик карточки: материал обязан совпасть с моделью David. */
+  metal: string
 }
 
 export interface RingCandidate {
@@ -194,10 +196,11 @@ export const RING_MATCH_SYSTEM_PROMPT = [
   '',
   'Правила:',
   '1. Совпадением считается только та же самая модель: совпадают форма, motif, ширина, расположение крестов, камней и гравировки.',
-  '2. Другой цвет камня, другое покрытие или другое количество камней у той же модели — это ВСЁ ЕЩЁ та же модель: верни совпадение, но confidence не выше 0.8 и опиши разницу в evidence.',
-  '3. Другая модель, даже похожая по motif или по общему слову в названии (например спиннер со Scroll против спиннера с крестом), — это НЕ совпадение.',
-  '4. Если ни один эталон не подходит, верни match_index null и same_model false. Угадывать нельзя.',
-  '5. Опирайся на фотографии. Названия — подсказка, а не доказательство: одинаковые названия бывают у разных моделей.',
+  '2. МАТЕРИАЛ ОБЯЗАН СОВПАСТЬ. Жёлтое золото, белое золото, розовое золото и серебро — это разные позиции, даже когда модель одна и та же. Если материал товара и эталона различается, верни match_index null и same_model false; в evidence напиши, какой материал у товара и какой у эталона.',
+  '3. Камни и покрытие внутри одного материала совпадению не мешают: другой цвет или количество камней у той же модели — это та же модель с confidence не выше 0.8 и описанием разницы.',
+  '4. Другая модель, даже похожая по motif или по общему слову в названии (например спиннер со Scroll против спиннера с крестом), — это НЕ совпадение.',
+  '5. Если ни один эталон не подходит, верни match_index null и same_model false. Угадывать нельзя.',
+  '6. Опирайся на фотографии. Названия — подсказка, а не доказательство: одинаковые названия бывают у разных моделей.',
   '',
   'Верни строго JSON вида {"match_index":2,"same_model":true,"confidence":0.93,"evidence":"что именно совпало и чем отличается"}.',
   'match_index — номер эталона из списка ниже; null, если совпадения нет.',
@@ -209,7 +212,7 @@ export const RING_MATCH_SYSTEM_PROMPT = [
  * где i-й эталон занимает плитки (i-1)*tilesPerCandidate+1 .. i*tilesPerCandidate.
  */
 export function buildRingMatchPrompt(input: {
-  anchor: Pick<RingAnchor, 'name' | 'priceCents' | 'modelName'>
+  anchor: Pick<RingAnchor, 'name' | 'priceCents' | 'modelName' | 'metal'>
   ranked: RankedRingCandidate[]
   anchorTileCount: number
   tilesPerCandidate: number
@@ -217,6 +220,7 @@ export function buildRingMatchPrompt(input: {
   const lines = [
     `Товар: «${input.anchor.name}».`,
     input.anchor.modelName ? `Модель из характеристик карточки: ${input.anchor.modelName}.` : '',
+    input.anchor.metal ? `Материал карточки: ${input.anchor.metal}. Он должен совпасть с материалом эталона.` : '',
     `На листе с фотографиями товара — плитки 1–${input.anchorTileCount}.`,
     'На следующих листах — эталоны моделей David Studio, плитки нумеруются заново в каждом листе и идут подряд по всем листам эталонов.',
     `Эталон i занимает плитки ${formatTileRange(1, input.tilesPerCandidate)}, затем ${formatTileRange(input.tilesPerCandidate + 1, input.tilesPerCandidate * 2)} и так далее.`,
@@ -333,21 +337,23 @@ export const RING_SWEEP_SYSTEM_PROMPT = [
   'Правила:',
   '1. Назови до ' + RING_SWEEP_MAX + ' плиток, которые МОГУТ быть тем же изделием. Это черновой отбор: лучше назвать лишнее, чем пропустить.',
   '2. Смотри на форму, motif (крест, кинжал, лилия, череп, звезда, бабочка), ширину и расположение камней.',
-  '3. Другой цвет камня или покрытие — это всё ещё та же модель, называй её.',
-  '4. Если ни одна плитка не похожа, верни пустой список: угадывать нельзя.',
+  '3. Материал должен совпадать: жёлтое золото, белое золото и серебро — разные позиции. Эталоны другого материала не называй.',
+  '4. Другой цвет камня внутри того же материала — это всё ещё та же модель, называй её.',
+  '5. Если ни одна плитка не похожа, верни пустой список: угадывать нельзя.',
   '',
   'Верни строго JSON вида {"candidates":[12,47,88],"confidence":0.4}.',
   'candidates — номера плиток каталога, максимум ' + RING_SWEEP_MAX + '.',
 ].join('\n')
 
 export function buildRingSweepPrompt(input: {
-  anchor: Pick<RingAnchor, 'name' | 'modelName'>
+  anchor: Pick<RingAnchor, 'name' | 'modelName' | 'metal'>
   candidates: RingCandidate[]
   anchorTileCount: number
 }): string {
   const lines = [
     `Товар: «${input.anchor.name}».`,
     input.anchor.modelName ? `Модель из характеристик карточки: ${input.anchor.modelName}.` : '',
+    input.anchor.metal ? `Материал карточки: ${input.anchor.metal}. Он должен совпасть с материалом эталона.` : '',
     `Фотографии товара — плитки 1–${input.anchorTileCount} на первом листе.`,
     `Каталог David Studio — плитки 1–${input.candidates.length} на следующих листах, по одной модели на плитку:`,
   ]

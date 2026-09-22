@@ -126,12 +126,13 @@ describe('buildRingMatchPrompt', () => {
       [DAGGER_HEART, DAGGER_SPACER],
     )
     const prompt = buildRingMatchPrompt({
-      anchor: { name: 'Серебряное кольцо Dagger Heart', priceCents: 4500000, modelName: 'Dagger Heart' },
+      anchor: { name: 'Серебряное кольцо Dagger Heart', priceCents: 4500000, modelName: 'Dagger Heart', metal: 'Серебро 925' },
       ranked,
       anchorTileCount: 9,
       tilesPerCandidate: 3,
     })
 
+    expect(prompt).toContain('Материал карточки: Серебро 925')
     expect(prompt).toContain('Серебряное кольцо Dagger Heart')
     expect(prompt).toContain('плитки 1–3')
     expect(prompt).toContain('плитки 4–6')
@@ -198,7 +199,7 @@ describe('buildRingSweepPrompt и parseRingSweepVerdict', () => {
 
   it('перечисляет весь каталог и просит номера плиток', () => {
     const prompt = buildRingSweepPrompt({
-      anchor: { name: 'Кольцо K&T', modelName: '' },
+      anchor: { name: 'Кольцо K&T', modelName: '', metal: '' },
       candidates: sweepCandidates,
       anchorTileCount: 4,
     })

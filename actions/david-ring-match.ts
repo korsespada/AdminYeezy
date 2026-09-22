@@ -27,6 +27,7 @@ import {
   deleteRailsChromoffListing,
   deleteRailsProduct,
   railsFetch,
+  updateRailsChromoffListing,
 } from '@/lib/rails-admin'
 
 /**
@@ -678,6 +679,9 @@ export interface ApplyRingMatchResult {
   davidSlug: string | null
   copied: { name: boolean; description: boolean; h1: boolean; seoDescription: boolean; attributes: string[]; photos: number }
   indexingStatus: string | null
+  /** SEO-поля листинга сброшены, чтобы витрина взяла новое название и свою цену. */
+  listingSeoReset: boolean
+  listingSeoError: string | null
   redirectCreated: boolean
   redirectError: string | null
   listingDeleted: boolean
@@ -712,32 +716,93 @@ export async function applyRingMatchAction(matchId: string): Promise<
   try {
     const [anchorResponse, davidResponse] = await Promise.all([
       railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(anchorProductId)}`),
+      // Товар дубля может быть уже удалён соседней парой: это не ошибка, а
+      // повод взять сохранённый контент (см. ниже).
       match.david_product_id
         ? railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(String(match.david_product_id))}`)
+          .catch(() => ({ product: null }))
         : Promise.resolve({ product: null }),
     ])
     const anchorProduct: any = anchorResponse.product
     const davidProduct: any = davidResponse?.product
     if (!anchorProduct?.id) return { success: false, error: 'Старый товар не найден в Rails' }
-    if (!davidProduct?.id) {
-      return {
-        success: false,
-        error: 'Карточка David ещё не создана в Chromoff: сначала импортируйте её, иначе переносить нечего',
-      }
-    }
 
-    const davidMedia = Array.isArray(davidProduct.media) ? davidProduct.media : []
-    const { patch: productPatch, copied } = buildRingMergePatch(anchorProduct, davidProduct)
+    let productPatch: Record<string, unknown>
+    let copied: ApplyRingMatchResult['copied']
+    let davidMedia: any[] = []
+    let davidProductGone = false
+
+    if (davidProduct?.id) {
+      davidMedia = Array.isArray(davidProduct.media) ? davidProduct.media : []
+      const built = buildRingMergePatch(anchorProduct, davidProduct)
+      productPatch = built.patch
+      copied = built.copied
+    } else {
+      // На одну модель David может ссылаться несколько старых карточек (в каталоге
+      // есть дубли): первая пара уже удалила карточку дубля. Контент David теперь
+      // лежит в её карточке-каноне, поэтому берём источником её: фото David идут в
+      // ней первыми, их количество записано в отчёте о применении.
+      const sibling = await scrapingQuery(
+        `SELECT anchor_product_id, applied FROM david_ring_matches
+          WHERE david_handle=$1 AND status='applied' AND id<>$2
+          ORDER BY updated_at LIMIT 1`,
+        [match.david_handle, id],
+      )
+      const siblingRow: any = sibling.rows[0]
+      const siblingProduct = siblingRow?.anchor_product_id
+        ? (await railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(String(siblingRow.anchor_product_id))}`)
+          .catch(() => ({ product: null }))).product
+        : null
+      if (!siblingProduct?.id) {
+        return {
+          success: false,
+          error: 'Карточка David ещё не создана в Chromoff: сначала импортируйте её, иначе переносить нечего',
+        }
+      }
+      const davidPhotosCount = Number(siblingRow?.applied?.copied?.photos || 0)
+      const siblingMedia = Array.isArray(siblingProduct.media) ? siblingProduct.media : []
+      const davidSource = {
+        ...siblingProduct,
+        media: davidPhotosCount > 0 ? siblingMedia.slice(0, davidPhotosCount) : siblingMedia,
+      }
+      const built = buildRingMergePatch(anchorProduct, davidSource)
+      productPatch = built.patch
+      copied = built.copied
+      davidMedia = davidSource.media as any[]
+      davidProductGone = true
+    }
 
     await railsFetch(`/admin/products/${encodeURIComponent(anchorProductId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ product: productPatch }),
     })
 
+    // Заголовок и H1 витрины берутся из листинга, и без сброса там остаётся
+    // прежнее название: seo_title листинга перекрывает товар. Пустые поля
+    // включают презентацию Rails («Chrome Hearts <название> — <цена>»), поэтому
+    // имя приходит из David, а цена остаётся своя.
+    let listingSeoReset = false
+    let listingSeoError: string | null = null
+    if (match.anchor_listing_id) {
+      try {
+        await updateRailsChromoffListing(String(match.anchor_listing_id), {
+          seoTitle: '',
+          seoDescription: '',
+          h1: '',
+        })
+        listingSeoReset = true
+      } catch (error: any) {
+        listingSeoError = String(error?.message || error || 'Не удалось обновить SEO листинга')
+      }
+    }
+
     const davidSlug = match.david_slug ? String(match.david_slug) : null
     let redirectCreated = false
     let redirectError: string | null = null
-    if (davidSlug && davidSlug !== anchorSlug) {
+    if (davidProductGone) {
+      // Дубль уже удалён соседней парой: адрес дубля уже перенаправлен на её товар.
+      redirectError = 'дубль уже удалён другой парой'
+    } else if (davidSlug && davidSlug !== anchorSlug) {
       try {
         await createRailsSeoRedirect({
           sourcePath: `/product/${davidSlug}`,
@@ -754,20 +819,25 @@ export async function applyRingMatchAction(matchId: string): Promise<
     let listingDeleted = false
     let productDeleted = false
     let productDeleteError: string | null = null
-    if (match.david_listing_id) {
-      await deleteRailsChromoffListing(String(match.david_listing_id))
+    if (davidProductGone) {
       listingDeleted = true
-    }
-    if (match.david_product_id) {
-      try {
-        await deleteRailsProduct(String(match.david_product_id))
-        productDeleted = true
-      } catch (firstError: any) {
+      productDeleted = true
+    } else {
+      if (match.david_listing_id) {
+        await deleteRailsChromoffListing(String(match.david_listing_id))
+        listingDeleted = true
+      }
+      if (match.david_product_id) {
         try {
-          await deleteRailsProduct(String(match.david_product_id), { force: true })
+          await deleteRailsProduct(String(match.david_product_id))
           productDeleted = true
-        } catch (secondError: any) {
-          productDeleteError = String(secondError?.message || firstError?.message || 'Не удалось удалить товар дубля')
+        } catch (firstError: any) {
+          try {
+            await deleteRailsProduct(String(match.david_product_id), { force: true })
+            productDeleted = true
+          } catch (secondError: any) {
+            productDeleteError = String(secondError?.message || firstError?.message || 'Не удалось удалить товар дубля')
+          }
         }
       }
     }
@@ -778,6 +848,8 @@ export async function applyRingMatchAction(matchId: string): Promise<
       davidSlug,
       copied,
       indexingStatus: productPatch.indexing_status ? 'indexable' : null,
+      listingSeoReset,
+      listingSeoError,
       redirectCreated,
       redirectError,
       listingDeleted,
@@ -786,6 +858,7 @@ export async function applyRingMatchAction(matchId: string): Promise<
       message: [
         'контент David перенесён в старую карточку',
         davidMedia.length ? `фото +${davidMedia.length}` : 'фото не переносились',
+        listingSeoReset ? 'заголовок и H1 берутся из нового названия' : listingSeoError ? `SEO листинга не обновлён: ${listingSeoError}` : 'листинг не найден',
         redirectCreated ? '301 со slug дубля поставлен' : redirectError ? `301 не поставлен: ${redirectError}` : '301 не требовался',
         listingDeleted ? 'листинг дубля удалён' : 'листинг дубля не найден',
         productDeleted ? 'товар дубля удалён' : productDeleteError ? `товар дубля остался: ${productDeleteError}` : 'товар дубля не найден',
@@ -794,7 +867,9 @@ export async function applyRingMatchAction(matchId: string): Promise<
 
     await scrapingQuery(`UPDATE david_ring_matches SET status='applied', applied=$2::jsonb, error=NULL, updated_at=NOW() WHERE id=$1`, [
       id,
-      JSON.stringify(applied),
+      // Патч храним целиком: на ту же модель David может ссылаться несколько
+      // старых карточек, и следующая пара переиспользует этот контент.
+      JSON.stringify({ ...applied, patch: productPatch }),
     ])
 
     // Чертёж David помечаем объединённым: товара больше нет, но и «необработанным»

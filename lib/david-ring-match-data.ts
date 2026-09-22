@@ -113,6 +113,11 @@ export async function loadRingMatchCatalog(options: { force?: boolean } = {}): P
       photos: mediaUrls(listing),
       modelName: attributeText(listing.catalog_attributes?.model_name),
       seoArticle: String(listing.seo_article || ''),
+      // Материал из характеристик: жёлтое золото не должно склеиться с серебром.
+      metal: [
+        attributeText(listing.catalog_attributes?.jewelry_metal),
+        attributeText(listing.catalog_attributes?.metal_purity),
+      ].filter(Boolean).join(', '),
     }))
     .filter((anchor) => anchor.listingId && anchor.productId && anchor.photos.length > 0)
 
