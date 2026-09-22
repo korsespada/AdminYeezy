@@ -63,7 +63,26 @@ describe('buildDavidRailsProductPayload', () => {
     const noSizes = buildDavidRailsProductPayload({
       handle: 'x', name: 'x', description: '', brandId: 'b', categoryId: 'c', sizes: [], media: [],
     })
-    expect(noSizes.variants).toEqual([{ size: null, color: null, price_cents: 0, status: 'active' }])
+    expect(noSizes.variants).toEqual([{
+      size: null,
+      color: null,
+      price_cents: 0,
+      status: 'active',
+      metadata: { generated_from: 'catalog_attributes.sizes' },
+    }])
+  })
+
+  it('даёт варианту устойчивый SKU и флаг источника размеров', () => {
+    const withSizes = buildDavidRailsProductPayload({
+      handle: 'chrome-hearts-keeper-ring', name: 'Кольцо Keeper', description: '', brandId: 'b', categoryId: 'c',
+      sizes: ['US 10.5', '16 см'], media: [],
+    })
+
+    expect(withSizes.variants.map((variant: any) => variant.sku)).toEqual([
+      'david-studio-chrome-hearts-keeper-ring-us-10-5',
+      'david-studio-chrome-hearts-keeper-ring-16-см',
+    ])
+    expect(withSizes.variants.every((variant: any) => variant.metadata.generated_from === 'catalog_attributes.sizes')).toBe(true)
   })
 })
 
@@ -151,7 +170,7 @@ describe('реальная выгрузка David Studio', () => {
   const catalog = JSON.parse(readFileSync(join(process.cwd(), 'data', 'david-studio', 'catalog.json'), 'utf8'))
 
   it('каждый разобранный размер — сантиметры, миллиметры, US-размер или буква', () => {
-    const allowed = /^(?:[\d,]+(?:–[\d,]+)? (?:см|мм)|US [\d,]+|[0-9]?X{0,4}[SML])$/
+    const allowed = /^(?:[\d,]+(?:–[\d,]+)? (?:см|мм)|US [\d.]+|[0-9]?X{0,4}[SML])$/
     const offenders: string[] = []
     for (const product of catalog.products as DavidCatalogProduct[]) {
       for (const variant of product.variants || []) {

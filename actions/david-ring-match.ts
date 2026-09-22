@@ -713,6 +713,20 @@ export async function applyRingMatchAction(matchId: string): Promise<
   const anchorSlug = String(match.anchor_slug || '')
   if (!anchorProductId || !anchorSlug) return { success: false, error: 'В паре нет старого товара или его slug' }
 
+  // Карточки David могло не быть в момент подбора (модель была только в зеркале
+  // фото): её импортировали позже. Поэтому пустой id ищем по handle прямо сейчас,
+  // иначе пара навсегда осталась бы неприменяемой.
+  if (!match.david_product_id && match.david_handle) {
+    const catalog = await loadRingMatchCatalog({ force: true }).catch(() => null)
+    const candidate = catalog?.candidates.find((item) => item.handle === String(match.david_handle))
+    if (candidate?.productId) {
+      match.david_product_id = candidate.productId
+      match.david_listing_id = candidate.listingId
+      match.david_slug = candidate.slug
+      match.david_title = candidate.title
+    }
+  }
+
   try {
     const [anchorResponse, davidResponse] = await Promise.all([
       railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(anchorProductId)}`),

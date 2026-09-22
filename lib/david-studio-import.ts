@@ -19,6 +19,15 @@ export function davidExternalId(handle: string) {
   return `david-studio-${String(handle || '').trim()}`
 }
 
+/** Хвост SKU размера: «US 10.5» → «us-10-5», «16 см» → «16-см». */
+export function davidSizeSkuSuffix(size: string) {
+  return String(size || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 /**
  * Инструкция поставщика для ИИ. Это source-specific знания, которые не повторяются
  * в общих правилах из «Настроек интеллекта».
@@ -259,8 +268,9 @@ export function buildDavidRailsProductPayload(input: {
   media: ReturnType<typeof buildDavidMediaPayload>
 }) {
   const sizes = [...new Set((input.sizes || []).map((size) => String(size).trim()).filter(Boolean))]
+  const externalId = davidExternalId(input.handle)
   return {
-    external_id: davidExternalId(input.handle),
+    external_id: externalId,
     name: input.name,
     description: input.description,
     h1: input.h1 || input.name,
@@ -274,11 +284,17 @@ export function buildDavidRailsProductPayload(input: {
     gender: input.gender || null,
     primary_supplier_name: DAVID_SUPPLIER_NAME,
     catalog_attributes: input.attributes || {},
+    // Варианту нужен устойчивый SKU: без него Rails на каждом обновлении создаёт
+    // новую строку размера, и в карточке появлялись два одинаковых размера
+    // («US 5,5» и «US 5.5»). Флаг generated_from разрешает Rails удалять размеры,
+    // которых больше нет у поставщика.
     variants: (sizes.length ? sizes : [null]).map((size) => ({
+      sku: size ? `${externalId}-${davidSizeSkuSuffix(size)}` : undefined,
       size,
       color: null,
       price_cents: 0,
       status: 'active',
+      metadata: { generated_from: 'catalog_attributes.sizes' },
     })),
     media: input.media,
     metadata: {

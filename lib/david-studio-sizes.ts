@@ -210,7 +210,11 @@ export function parseDavidVariantSize(rawValue: unknown): DavidSizeInfo {
   const usRing = base.match(/^us\s*(\d+(?:[.,]\d+)?)$/i)
   if (usRing) {
     // Таблицу US→мм не подставляем: это была бы выдуманная характеристика товара.
-    return { raw, size: `US ${ruNumber(usRing[1])}`, fit: fitClause, kind: 'us_ring' }
+    // Десятичный разделитель — точка: поставщик пишет и «US 5,5», и «US 5.5», а
+    // витрина показывает размер как есть, поэтому два написания одного размера
+    // выглядели двумя разными размерами.
+    const value = Number(String(usRing[1]).replace(',', '.'))
+    return { raw, size: `US ${Number.isFinite(value) ? value : usRing[1]}`, fit: fitClause, kind: 'us_ring' }
   }
 
   const letter = collapseSpaces(base.replace(PURCHASE_UNIT_PARENS, ' ')).toUpperCase()
@@ -244,6 +248,11 @@ export function buildDavidMeasurementTable(variants: unknown): MeasurementTable 
     rows.push({ size: parsed.size, values: { fit: parsed.fit } })
   }
   if (!rows.length) return null
+
+  // Таблица без значений не нужна: у колец поставщик отдаёт размеры US без
+  // замеров, и товар получал пустой столбец «Посадка, см».
+  const hasValues = rows.some((row) => Object.values(row.values || {}).some((value) => String(value ?? '').trim()))
+  if (!hasValues && !convertedFromInches) return null
 
   return {
     unit: 'см',

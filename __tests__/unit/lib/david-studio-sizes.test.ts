@@ -52,10 +52,10 @@ describe('parseDavidVariantSize: браслеты и ожерелья из дю�
 })
 
 describe('parseDavidVariantSize: размеры, которые нельзя выдумывать', () => {
-  it('оставляет US-размер кольца как есть', () => {
-    const parsed = parseDavidVariantSize('US4.5')
-    expect(parsed.size).toBe('US 4,5')
-    expect(parsed.kind).toBe('us_ring')
+  it('оставляет US-размер кольца как есть и пишет дробь точкой', () => {
+    expect(parseDavidVariantSize('US4.5').size).toBe('US 4.5')
+    expect(parseDavidVariantSize('US 5,5').size).toBe('US 5.5')
+    expect(parseDavidVariantSize('US4.5').kind).toBe('us_ring')
   })
 
   it('сохраняет буквенные размеры', () => {
@@ -105,5 +105,11 @@ describe('davidVariantAttributes', () => {
   it('не строит таблицу, если размеров нет', () => {
     expect(buildDavidMeasurementTable([{ size: 'Pendant Only' }])).toBeNull()
     expect(davidVariantSizes([{ size: undefined }])).toEqual([])
+  })
+
+  it('не строит таблицу замеров, когда у размеров нет ни одного замера', () => {
+    // У колец поставщик отдаёт только размеры US: раньше товар получал пустую
+    // таблицу «Посадка, см».
+    expect(buildDavidMeasurementTable([{ size: 'US5' }, { size: 'US 5.5' }, { size: 'US6' }])).toBeNull()
   })
 })
