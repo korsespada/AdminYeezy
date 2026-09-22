@@ -5,7 +5,7 @@ const BYESU_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 type ByesuPayload = Record<string, any>
 
-export type ByesuModelGroup = 'gemini' | 'openai'
+export type ByesuModelGroup = 'gemini' | 'openai' | 'claude'
 
 export type ByesuModelOption = {
   value: string
@@ -13,41 +13,66 @@ export type ByesuModelOption = {
   group: ByesuModelGroup
 }
 
+/**
+ * Группа модели у BYESU. Ключи выдаются отдельно на семейство моделей, поэтому
+ * имя модели определяет, какой ключ нужен: `gemini…` — Gemini Business,
+ * `claude…` — Claude, остальное — OpenAI Codex.
+ */
 export function byesuModelGroup(model: unknown): ByesuModelGroup {
-  return String(model || '').trim().toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
+  const value = String(model || '').trim().toLowerCase()
+  if (value.startsWith('gemini')) return 'gemini'
+  if (value.startsWith('claude')) return 'claude'
+  return 'openai'
+}
+
+const BYESU_GROUP_ENV: Record<ByesuModelGroup, string> = {
+  gemini: 'BYESU_GEMINI_API_KEY',
+  openai: 'BYESU_OPENAI_API_KEY',
+  claude: 'BYESU_CLAUDE_API_KEY',
+}
+
+const BYESU_GROUP_LABEL: Record<ByesuModelGroup, string> = {
+  gemini: 'Gemini Business',
+  openai: 'OpenAI Codex',
+  claude: 'Claude',
+}
+
+/** Имя переменной окружения с ключом группы — для подсказок в интерфейсе и ошибках. */
+export function byesuApiKeyEnvName(group: ByesuModelGroup) {
+  return BYESU_GROUP_ENV[group]
+}
+
+export function byesuGroupLabel(group: ByesuModelGroup) {
+  return BYESU_GROUP_LABEL[group]
+}
+
+function legacyByesuGroup(): ByesuModelGroup {
+  const configured = process.env.BYESU_API_GROUP?.trim().toLowerCase()
+  return configured === 'gemini' || configured === 'claude' ? configured : 'openai'
 }
 
 export function byesuApiKeyStatus() {
-  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
+  const legacyGroup = legacyByesuGroup()
   const legacyKey = process.env.BYESU_API_KEY?.trim()
   return {
     gemini: Boolean(process.env.BYESU_GEMINI_API_KEY?.trim() || (legacyGroup === 'gemini' && legacyKey)),
     openai: Boolean(process.env.BYESU_OPENAI_API_KEY?.trim() || (legacyGroup === 'openai' && legacyKey)),
+    claude: Boolean(process.env.BYESU_CLAUDE_API_KEY?.trim() || (legacyGroup === 'claude' && legacyKey)),
     legacy: Boolean(legacyKey),
   }
 }
 
 function byesuApiKey(model: unknown) {
   const group = byesuModelGroup(model)
-  const direct = group === 'gemini'
-    ? process.env.BYESU_GEMINI_API_KEY?.trim()
-    : process.env.BYESU_OPENAI_API_KEY?.trim()
-  if (direct) return { apiKey: direct, group }
-
-  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
-  const legacyKey = process.env.BYESU_API_KEY?.trim()
-  return { apiKey: legacyGroup === group ? legacyKey : undefined, group }
+  return { apiKey: byesuGroupApiKey(group), group }
 }
 
 function byesuGroupApiKey(group: ByesuModelGroup) {
-  const direct = group === 'gemini'
-    ? process.env.BYESU_GEMINI_API_KEY?.trim()
-    : process.env.BYESU_OPENAI_API_KEY?.trim()
+  const direct = process.env[BYESU_GROUP_ENV[group]]?.trim()
   if (direct) return direct
 
-  const legacyGroup = process.env.BYESU_API_GROUP?.trim().toLowerCase() === 'gemini' ? 'gemini' : 'openai'
   const legacyKey = process.env.BYESU_API_KEY?.trim()
-  return legacyGroup === group ? legacyKey : undefined
+  return legacyByesuGroup() === group ? legacyKey : undefined
 }
 
 function modelLabel(value: string) {
@@ -73,7 +98,7 @@ async function fetchByesuModels(group: ByesuModelGroup, apiKey: string): Promise
 }
 
 export async function getByesuModels(): Promise<ByesuModelOption[]> {
-  const groups: ByesuModelGroup[] = ['gemini', 'openai']
+  const groups: ByesuModelGroup[] = ['gemini', 'openai', 'claude']
   const results = await Promise.all(groups.map(async (group) => {
     const apiKey = byesuGroupApiKey(group)
     if (!apiKey) return []
@@ -97,9 +122,7 @@ export async function byesuChatCompletion(
   const apiKey = connection.apiKey?.trim() || legacy.apiKey
   const group = legacy.group
   if (!apiKey) {
-    throw new Error(group === 'gemini'
-      ? 'BYESU_GEMINI_API_KEY не задан для группы Gemini Business'
-      : 'BYESU_OPENAI_API_KEY не задан для группы OpenAI Codex')
+    throw new Error(`${BYESU_GROUP_ENV[group]} не задан для группы ${BYESU_GROUP_LABEL[group]}`)
   }
 
   const target = connection.baseUrl?.trim()

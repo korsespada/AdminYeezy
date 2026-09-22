@@ -6,7 +6,7 @@ import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, Refr
 import { createAiProviderAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
-import type { ByesuModelOption } from '@/lib/byesu'
+import { byesuApiKeyEnvName, byesuGroupLabel, byesuModelGroup, type ByesuModelOption } from '@/lib/byesu'
 import type { AiProviderRecord } from '@/lib/ai-providers'
 import type { Category, Subcategory } from '@/lib/types'
 
@@ -23,6 +23,7 @@ type Props = {
       openrouter?: boolean
       byesuGemini?: boolean
       byesuOpenai?: boolean
+      byesuClaude?: boolean
       byesuLegacy?: boolean
     }
     byesuModels?: ByesuModelOption[]
@@ -35,6 +36,9 @@ type Props = {
 const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
   { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' },
   { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' },
+  // Claude 4.x видит изображения через BYESU, а свежие 5.x отвечают «не вижу фото»:
+  // для сверки по фотографиям подходит именно эта модель.
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', group: 'claude' },
 ]
 
 export default function AIRulesEditor({ initialSettings, initialCategories, initialSubcategories }: Props) {
@@ -68,10 +72,14 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
   const credentials = initialSettings.credentials
   const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
   const activeSavedProvider = providers.find((provider) => provider.id === settings.activeProviderId)
-  const selectedByesuGroup = settings.byesuModel.toLowerCase().startsWith('gemini') ? 'gemini' : 'openai'
-  const selectedByesuKeyReady = selectedByesuGroup === 'gemini'
-    ? Boolean(activeSavedProvider?.hasApiKey || credentials?.byesuGemini)
-    : Boolean(activeSavedProvider?.hasApiKey || credentials?.byesuOpenai)
+  const selectedByesuGroup = byesuModelGroup(settings.byesuModel)
+  const selectedByesuKeyReady = Boolean(activeSavedProvider?.hasApiKey) || (
+    selectedByesuGroup === 'gemini'
+      ? Boolean(credentials?.byesuGemini)
+      : selectedByesuGroup === 'claude'
+        ? Boolean(credentials?.byesuClaude)
+        : Boolean(credentials?.byesuOpenai)
+  )
 
   const update = <K extends keyof BatchAiSettings>(key: K, value: BatchAiSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
@@ -252,7 +260,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
               <ProviderButton
                 active={!settings.activeProviderId && settings.provider === 'byesu'}
                 title="BYESU API"
-                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'}`}
+                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'} · Claude ${credentials?.byesuClaude ? '✓' : '—'}`}
                 onClick={() => selectLegacyProvider('byesu')}
               />
               <ProviderButton
@@ -340,7 +348,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                     <option value={settings.byesuModel}>{settings.byesuModel}</option>
                   )}
                   {byesuModels.map((model) => (
-                    <option key={`${model.group}:${model.value}`} value={model.value}>{model.label} · {model.group === 'gemini' ? 'Gemini Business' : 'OpenAI Codex'}</option>
+                    <option key={`${model.group}:${model.value}`} value={model.value}>{model.label} · {byesuGroupLabel(model.group)}</option>
                   ))}
                 </select>}
                 <div className={`rounded-xl border p-3 text-sm ${
@@ -349,12 +357,12 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                     : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
                 }`}>
                   <div className="font-semibold">
-                    {selectedByesuGroup === 'gemini' ? 'Группа Gemini Business' : 'Группа OpenAI Codex'}
+                    Группа {byesuGroupLabel(selectedByesuGroup)}
                   </div>
                   <p className="mt-1">
                     {selectedByesuKeyReady
                       ? activeSavedProvider ? `Ключ сохранён в провайдере «${activeSavedProvider.name}».` : 'Нужный API-ключ подключён.'
-                      : `Добавьте ${selectedByesuGroup === 'gemini' ? 'BYESU_GEMINI_API_KEY' : 'BYESU_OPENAI_API_KEY'} в Coolify.`}
+                      : `Добавьте ${byesuApiKeyEnvName(selectedByesuGroup)} в Coolify.`}
                   </p>
                 </div>
                 <p className="text-xs leading-relaxed text-slate-500">

@@ -73,7 +73,7 @@ import {
   saveBatchAiSuggestions,
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
-import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
+import { byesuApiKeyEnvName, byesuApiKeyStatus, byesuGroupLabel, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
@@ -174,6 +174,7 @@ export async function getBatchAiSettingsAction() {
         openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
         byesuGemini: byesuKeys.gemini,
         byesuOpenai: byesuKeys.openai,
+        byesuClaude: byesuKeys.claude,
         byesuLegacy: byesuKeys.legacy,
       },
       byesuModels,
@@ -1166,9 +1167,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       if (!keys[group]) {
         return {
           success: false,
-          error: group === 'gemini'
-            ? 'Для этой модели нужен BYESU_GEMINI_API_KEY (группа Gemini Business)'
-            : 'Для этой модели нужен BYESU_OPENAI_API_KEY (группа OpenAI Codex)',
+          error: `Для этой модели нужен ${byesuApiKeyEnvName(group)} (группа ${byesuGroupLabel(group)})`,
         }
       }
     }

@@ -25,11 +25,14 @@ npm run catalog:sync:david-studio
       → сырой ответ → нормализация → david_import_drafts.ai_output
 ```
 
-- Ключи BYESU живут в окружении сервера (`BYESU_GEMINI_API_KEY` /
-  `BYESU_OPENAI_API_KEY`, группы Gemini Business и OpenAI Codex). На проде
-  настроена группа Gemini — на `/admin/ai-rules` это видно как «Gemini ✓»;
-  вторая группа нужна для моделей `gpt-5.*`. Модель выбирает группу сама:
-  имя, начинающееся на `gemini`, идёт в группу Gemini.
+- Ключи BYESU живут в окружении сервера и привязаны к группе моделей:
+  `BYESU_GEMINI_API_KEY` (Gemini Business), `BYESU_OPENAI_API_KEY` (OpenAI Codex) и
+  `BYESU_CLAUDE_API_KEY` (Claude). На `/admin/ai-rules` видно, какие группы
+  подключены: «Gemini ✓ · OpenAI — · Claude —». Группу выбирает имя модели:
+  `gemini…` — Gemini, `claude…` — Claude, остальное — OpenAI Codex.
+- Если Gemini недоступен, берите Claude: изображения через BYESU видят
+  `claude-sonnet-4-6` и `claude-opus-4-8`, а свежие `claude-*-5` отвечают «не вижу
+  изображения» (подробнее — в [Batch AI workflow](./batch-ai-workflow.md#какие-модели-claude-видят-изображения)).
 - Провайдер **Cockpit** доступен только с локального воркера, поэтому при нём
   экшен возвращает понятную ошибку, а не таймаут: выберите BYESU или OpenRouter.
 - Ошибки модели и разбора ответа видны в интерфейсе: блок «Черновик ИИ» с

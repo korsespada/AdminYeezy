@@ -17,7 +17,7 @@ import {
   buildBatchAiContactSheets,
   runBatchAiOpenRouter,
 } from '@/lib/batch-ai'
-import { byesuApiKeyStatus, byesuModelGroup, getByesuModels } from '@/lib/byesu'
+import { byesuApiKeyEnvName, byesuApiKeyStatus, byesuGroupLabel, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { decryptProviderApiKey, type AiProviderKind, type AiProviderRecord } from '@/lib/ai-providers'
 import { applyRailsChromoffAiContent, getRailsChromoffAiContent } from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
@@ -192,9 +192,7 @@ async function ensureProviderReady(settings: ChromoffAiSettings) {
   if (settings.provider === 'byesu' && !settings.providerApiKey) {
     const group = byesuModelGroup(settings.byesuModel)
     if (!byesuApiKeyStatus()[group]) {
-      throw new Error(group === 'gemini'
-        ? 'Для модели нужен BYESU_GEMINI_API_KEY'
-        : 'Для модели нужен BYESU_OPENAI_API_KEY')
+      throw new Error(`Для модели нужен ${byesuApiKeyEnvName(group)} (группа ${byesuGroupLabel(group)})`)
     }
   }
   if (settings.provider === 'openrouter' && !settings.providerApiKey && !process.env.OPENROUTER_API_KEY?.trim()) {
