@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { scrapingQuery } from '@/lib/db'
 import { buildBatchAiContactSheets, runBatchAiOpenRouter, type AiCompletionSettings } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
+import { createDavidChromoffProductAction } from '@/actions/david-studio'
 import {
   RING_MATCH_CONFIDENT,
   RING_MATCH_SYSTEM_PROMPT,
@@ -963,6 +964,204 @@ export async function setRingMatchCandidateAction(
     return { success: true, message: `Пара переведена на модель ${candidate.title}` }
   } catch (error: any) {
     return { success: false, message: String(error?.message || error || 'Не удалось заменить модель') }
+  }
+}
+
+/** Коды характеристик, которые приходят из карточки David и не относятся к старому кольцу. */
+const DAVID_ONLY_ATTRIBUTE_CODES = ['sizes', 'measurements', 'model_name', 'jewelry_size']
+
+export interface RevertRingMatchResult {
+  matchId: string
+  anchorSlug: string
+  restoredPhotos: number
+  removedDavidPhotos: number
+  restoredName: string
+  description: 'regenerated' | 'cleared' | 'unchanged'
+  redirect: 'updated' | 'removed' | 'none'
+  davidCardRecreated: boolean
+  warning: string | null
+  message: string
+}
+
+/**
+ * Откат пары: вернуть старой карточке её название и фото, а модель David — отдельной карточкой.
+ *
+ * Нужен, когда модель ошиблась и слила разные изделия. Что восстанавливается точно:
+ * фотографии (они остались в товаре после фото David), название (сохранено в вердикте)
+ * и заголовок витрины. Описание пересобирается по СВОИМ фото кольца, потому что
+ * прежний текст нигде не хранился; если модель недоступна, описание очищается.
+ */
+export async function revertRingMatchAction(matchId: string): Promise<
+  { success: true; data: RevertRingMatchResult } | { success: false; error: string }
+> {
+  const id = String(matchId || '').trim()
+  if (!id) return { success: false, error: 'Не указано сопоставление' }
+
+  const rows = await scrapingQuery('SELECT * FROM david_ring_matches WHERE id=$1', [id])
+  const match: any = rows.rows[0]
+  if (!match) return { success: false, error: 'Сопоставление не найдено' }
+  if (String(match.status) !== 'applied') return { success: false, error: 'Откатывать можно только применённую пару' }
+  if (!match.david_handle) return { success: false, error: 'В паре нет модели David' }
+
+  const anchorProductId = String(match.anchor_product_id || '')
+  const anchorSlug = String(match.anchor_slug || '')
+  const anchorName = String(match.anchor_name || '')
+  const davidPhotosCount = Number(match.applied?.copied?.photos || 0)
+  if (!anchorProductId || !anchorName) return { success: false, error: 'В паре нет старого товара или его названия' }
+
+  try {
+    const anchorResponse = await railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(anchorProductId)}`)
+    const anchorProduct: any = anchorResponse.product
+    if (!anchorProduct?.id) return { success: false, error: 'Старый товар не найден в Rails' }
+
+    const media = Array.isArray(anchorProduct.media) ? anchorProduct.media : []
+    const davidPhotos = davidPhotosCount > 0 ? media.slice(0, davidPhotosCount) : []
+    const ownPhotos = media.slice(davidPhotos.length)
+    if (!ownPhotos.length) {
+      return { success: false, error: 'У товара не осталось собственных фото: нужен David-дубль, чтобы вернуть их' }
+    }
+
+    const attributes = anchorProduct.catalog_attributes && typeof anchorProduct.catalog_attributes === 'object'
+      ? { ...anchorProduct.catalog_attributes }
+      : {}
+    for (const code of DAVID_ONLY_ATTRIBUTE_CODES) delete attributes[code]
+
+    const productPatch: Record<string, unknown> = {
+      name: anchorName,
+      h1: '',
+      description: '',
+      catalog_attributes: attributes,
+      media: ownPhotos.map((medium: any, index: number) => ({ ...medium, sort_order: index })),
+    }
+
+    // Описание пересобираем по своим фото: прежний текст не сохранялся, а текст
+    // David описывает другое изделие.
+    let description: RevertRingMatchResult['description'] = 'cleared'
+    const settingsResult = await getBatchAiSettingsAction().catch(() => null)
+    const settings = settingsResult && settingsResult.success ? settingsResult.data as any : null
+    if (settings && String(settings.provider) !== 'cockpit') {
+      const urls = ownPhotos.map((medium: any) => String(medium.original_url || '')).filter(Boolean).slice(0, 6)
+      try {
+        const sheets = await buildBatchAiContactSheets(urls)
+        const raw = await runBatchAiOpenRouter({
+          settings: settings as AiCompletionSettings,
+          systemPrompt: [
+            'Ты пишешь описание ювелирного кольца Chrome Hearts по его фотографиям.',
+            'Опиши только то, что видно: тип шинки, ширину, мотив, камни, покрытие. Не выдумывай пробу, камни и модель, которых не видно.',
+            'Верни строго JSON: {"name":"короткое название на русском","description":"2-3 предложения на русском"}',
+          ].join('\n'),
+          userPrompt: 'Опиши кольцо на фотографиях. Верни JSON.',
+          contactSheets: sheets,
+        })
+        const text = String((raw as any)?.description || '').trim()
+        if (text) {
+          productPatch.description = text
+          if (!anchorName) productPatch.name = String((raw as any)?.name || anchorName)
+          description = 'regenerated'
+        }
+      } catch (error: any) {
+        console.warn('Откат: описание не пересобрано:', String(error?.message || error))
+      }
+    }
+
+    await railsFetch(`/admin/products/${encodeURIComponent(anchorProductId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ product: productPatch }),
+    })
+
+    if (match.anchor_listing_id) {
+      await updateRailsChromoffListing(String(match.anchor_listing_id), {
+        seoTitle: '',
+        seoDescription: '',
+        h1: '',
+      }).catch(() => undefined)
+    }
+
+    // Карточка David возвращается отдельным товаром: её ai_output остался в черновике.
+    // На одну модель может ссылаться несколько старых карточек, поэтому сначала
+    // проверяем, не создана ли она уже предыдущим откатом.
+    let davidCardRecreated = false
+    const alreadyThere = await loadRingMatchCatalog({ force: true })
+      .then((catalog) => catalog.candidates.some((item) => item.handle === String(match.david_handle)))
+      .catch(() => false)
+    const draft = await scrapingQuery('SELECT ai_output FROM david_import_drafts WHERE handle=$1', [String(match.david_handle)])
+    const ai: any = draft.rows[0]?.ai_output || {}
+    if (!alreadyThere && ai.name && ai.category) {
+      const chromoffCategoryId = String(ai.chromoffCategory?.id || ai.attributes?.chromoff_category_id || '')
+      if (chromoffCategoryId) {
+        const created = await createDavidChromoffProductAction({
+          handle: String(match.david_handle),
+          name: String(ai.name),
+          description: String(ai.description || ''),
+          categoryId: String(ai.category),
+          chromoffCategoryId,
+          gender: ai.gender || null,
+          attributes: ai.attributes || {},
+          photoAlts: Array.isArray(ai.photoAlts) ? ai.photoAlts : [],
+          seoDescription: String(ai.seoDescription || ''),
+          published: true,
+        })
+        davidCardRecreated = created.success
+      }
+    }
+
+    // Старый адрес дубля больше не должен вести на старое кольцо: либо на новую
+    // карточку David, либо никуда.
+    let redirect: RevertRingMatchResult['redirect'] = 'none'
+    const davidSlug = String(match.david_slug || '')
+    if (davidSlug) {
+      const redirects = await railsFetch<{ seo_redirects: any[] }>('/admin/seo_redirects').catch(() => ({ seo_redirects: [] }))
+      const existing = (redirects.seo_redirects || []).find((item) => String(item.source_path) === `/product/${davidSlug}`)
+      if (existing) {
+        if (davidCardRecreated) {
+          const catalog = await loadRingMatchCatalog({ force: true }).catch(() => null)
+          const candidate = catalog?.candidates.find((item) => item.handle === String(match.david_handle))
+          if (candidate?.slug && candidate.slug !== davidSlug) {
+            await railsFetch(`/admin/seo_redirects/${encodeURIComponent(String(existing.id))}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ seo_redirect: { target_path: `/product/${candidate.slug}` } }),
+            }).catch(() => undefined)
+            redirect = 'updated'
+          }
+        }
+        if (redirect === 'none') {
+          await railsFetch(`/admin/seo_redirects/${encodeURIComponent(String(existing.id))}`, { method: 'DELETE' }).catch(() => undefined)
+          redirect = 'removed'
+        }
+      }
+    }
+
+    const result: RevertRingMatchResult = {
+      matchId: id,
+      anchorSlug,
+      restoredPhotos: ownPhotos.length,
+      removedDavidPhotos: davidPhotos.length,
+      restoredName: anchorName,
+      description,
+      redirect,
+      davidCardRecreated,
+      warning: davidCardRecreated ? null : 'карточка David не пересоздана — импортируйте её в David Studio',
+      message: [
+        `возвращено название «${anchorName}»`,
+        `своих фото ${ownPhotos.length}, убрано чужих ${davidPhotos.length}`,
+        description === 'regenerated' ? 'описание пересобрано по своим фото' : 'описание очищено',
+        davidCardRecreated ? 'карточка David создана заново' : 'карточку David нужно импортировать',
+      ].join('; '),
+    }
+
+    await scrapingQuery(`UPDATE david_ring_matches SET status='reverted', applied=$2::jsonb, updated_at=NOW() WHERE id=$1`, [
+      id,
+      JSON.stringify({ ...(match.applied || {}), revert: result }),
+    ])
+    invalidateRingMatchCatalog()
+    revalidatePath(PAGE_PATH)
+    revalidatePath('/admin/chromoff/david-studio')
+
+    return { success: true, data: result }
+  } catch (error: any) {
+    const message = String(error?.message || error || 'Не удалось откатить пару')
+    await scrapingQuery(`UPDATE david_ring_matches SET error=$2, updated_at=NOW() WHERE id=$1`, [id, message]).catch(() => {})
+    return { success: false, error: message }
   }
 }
 
