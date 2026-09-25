@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { useEffect } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
+import ProductPhotoGallery, { isPhotoLightboxOpen } from '@/components/products/ProductPhotoGallery'
 
 vi.mock('next/image', () => ({
   default: ({ fill: _fill, unoptimized: _unoptimized, priority: _priority, ...props }: React.ImgHTMLAttributes<HTMLImageElement> & { fill?: boolean; unoptimized?: boolean; priority?: boolean }) => <img {...props} alt={props.alt || ''} />,
@@ -16,8 +17,43 @@ describe('ProductPhotoGallery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Открыть фото 1 полностью' }))
     expect(screen.getByRole('dialog', { name: 'Фото 1 из 2' })).toBeInTheDocument()
 
-    fireEvent.keyDown(window, { key: 'Escape' })
+    fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('keeps Escape inside the gallery: the product container stays open', () => {
+    const onContainerEscape = vi.fn()
+
+    // Так же ведут себя шторка товара (ProductForm) и дровер Chromoff.
+    function ProductContainer() {
+      useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+          if (event.key !== 'Escape') return
+          if (isPhotoLightboxOpen()) return
+          onContainerEscape()
+        }
+        window.addEventListener('keydown', onKeyDown)
+        return () => window.removeEventListener('keydown', onKeyDown)
+      }, [])
+
+      return <ProductPhotoGallery photos={['https://example.com/one.jpg', 'https://example.com/two.jpg']} />
+    }
+
+    render(<ProductContainer />)
+    expect(isPhotoLightboxOpen()).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть фото 1 полностью' }))
+    expect(isPhotoLightboxOpen()).toBe(true)
+
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+
+    expect(onContainerEscape).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(isPhotoLightboxOpen()).toBe(false)
+
+    // Товар без галереи закрывается по Escape как раньше.
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    expect(onContainerEscape).toHaveBeenCalledTimes(1)
   })
 
   it('shows the generated alt text as a photo hint', () => {

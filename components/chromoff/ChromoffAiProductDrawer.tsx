@@ -6,7 +6,7 @@ import { Loader2, WandSparkles, X } from 'lucide-react'
 import { getChromoffAiListingAction } from '@/actions/chromoff-ai'
 import type { RailsChromoffListing } from '@/lib/rails-admin'
 import { Badge } from '@/components/ui/badge'
-import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
+import ProductPhotoGallery, { isPhotoLightboxOpen } from '@/components/products/ProductPhotoGallery'
 
 type QueueItem = {
   status: 'pending' | 'running' | 'completed' | 'failed'
@@ -82,6 +82,8 @@ export default function ChromoffAiProductDrawer({
     if (!isOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      // Пока открыта полноэкранная галерея, Esc закрывает только её.
+      if (isPhotoLightboxOpen()) return
       event.preventDefault()
       onClose()
     }

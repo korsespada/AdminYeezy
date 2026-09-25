@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import Image from 'next/image'
 import { ChevronLeft, ChevronRight, Download, GripVertical, Maximize2, Trash2, X } from 'lucide-react'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
@@ -23,6 +23,20 @@ function buildGalleryPhotos(photos: string[]): GalleryPhoto[] {
     occurrences.set(url, occurrence + 1)
     return { url, key: `${url}#${occurrence}` }
   })
+}
+
+/**
+ * Сколько полноэкранных галерей открыто прямо сейчас.
+ *
+ * Галерея — отдельный слой Radix поверх шторки товара или дровера Chromoff. Она
+ * забирает Escape и стрелки себе (см. `PhotoLightbox`), поэтому Esc закрывает
+ * только галерею. Контейнер, который сам закрывается по Esc, обязан спросить
+ * `isPhotoLightboxOpen()` — иначе по Esc закроются и галерея, и товар.
+ */
+let openPhotoLightboxes = 0
+
+export function isPhotoLightboxOpen() {
+  return openPhotoLightboxes > 0
 }
 
 export default function ProductPhotoGallery({
@@ -145,19 +159,29 @@ export default function ProductPhotoGallery({
           )
         })}
       </div>
-      {lightboxIndex !== null && createPortal(
+      {lightboxIndex !== null && (
         <PhotoLightbox
           photos={photos}
           index={Math.min(lightboxIndex, photos.length - 1)}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
-        />,
-        document.body,
+        />
       )}
     </>
   )
 }
 
+/**
+ * Полноэкранное фото.
+ *
+ * Это отдельный слой Radix (Dialog), а не самодельный оверлей в портале: пока
+ * открыта шторка товара, Rails-контейнер ставит `body { pointer-events: none }`
+ * и включает их только своим слоям. Портал в `document.body` оказывался вне
+ * такого слоя, поэтому клики по галерее уходили в интерфейс админки. Radix
+ * регистрирует галерею как верхний слой: она получает и клики, и Escape.
+ *
+ * Клик по затемнению закрывает галерею (Radix), клик по самому фото — нет.
+ */
 function PhotoLightbox({
   photos,
   index,
@@ -170,31 +194,76 @@ function PhotoLightbox({
   onClose: () => void
 }) {
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    openPhotoLightboxes += 1
+    return () => { openPhotoLightboxes -= 1 }
+  }, [])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-      if (event.key === 'ArrowLeft' && photos.length > 1) onIndexChange((index - 1 + photos.length) % photos.length)
-      if (event.key === 'ArrowRight' && photos.length > 1) onIndexChange((index + 1) % photos.length)
+      const isPrevious = event.key === 'ArrowLeft'
+      const isNext = event.key === 'ArrowRight'
+      if (event.key !== 'Escape' && !isPrevious && !isNext) return
+
+      // Escape и стрелки забирает только галерея: без этого шторка товара и
+      // дровер Chromoff закрывались бы вместе с фото.
+      event.preventDefault()
+      event.stopImmediatePropagation()
+
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (photos.length < 2) return
+      onIndexChange(isPrevious
+        ? (index - 1 + photos.length) % photos.length
+        : (index + 1) % photos.length)
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = previousOverflow
-    }
+
+    // Capture на window: обработчики контейнеров висят ниже по фазе, поэтому
+    // до них событие уже не доходит.
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [index, onClose, onIndexChange, photos.length])
 
+  const step = (delta: number) => {
+    if (photos.length < 2) return
+    onIndexChange((index + delta + photos.length) % photos.length)
+  }
+
   return (
-    <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/95 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label={`Фото ${index + 1} из ${photos.length}`}>
-      <div className="relative h-full w-full" onClick={(event) => event.stopPropagation()}>
-        <Image src={photos[index]} alt={`Фото товара ${index + 1}`} fill sizes="100vw" className="object-contain" unoptimized priority />
-        <button type="button" onClick={onClose} className="absolute right-2 top-2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" title="Закрыть (Esc)"><X className="h-5 w-5" /></button>
-        {photos.length > 1 && <>
-          <button type="button" onClick={() => onIndexChange((index - 1 + photos.length) % photos.length)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" aria-label="Предыдущее фото"><ChevronLeft className="h-6 w-6" /></button>
-          <button type="button" onClick={() => onIndexChange((index + 1) % photos.length)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" aria-label="Следующее фото"><ChevronRight className="h-6 w-6" /></button>
-        </>}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/70 px-3 py-1 text-xs text-white">{index + 1} / {photos.length}</div>
-      </div>
-    </div>
+    <DialogPrimitive.Root open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay
+          className="fixed inset-0 z-[220] bg-black/95"
+          onClick={(event) => event.stopPropagation()}
+        />
+        <DialogPrimitive.Content
+          aria-label={`Фото ${index + 1} из ${photos.length}`}
+          aria-describedby={undefined}
+          // Размер контейнера равен размеру фото, поэтому клик «помимо фото»
+          // попадает в затемнение и закрывает галерею, а не в пустое поле.
+          className="fixed left-1/2 top-1/2 z-[221] -translate-x-1/2 -translate-y-1/2 outline-none"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <DialogPrimitive.Title className="sr-only">{`Фото ${index + 1} из ${photos.length}`}</DialogPrimitive.Title>
+          <Image
+            src={photos[index]}
+            alt={`Фото товара ${index + 1}`}
+            width={0}
+            height={0}
+            sizes="100vw"
+            unoptimized
+            priority
+            className="block h-auto max-h-[calc(100dvh-2rem)] w-auto max-w-[calc(100vw-2rem)] object-contain"
+          />
+          <button type="button" onClick={onClose} className="absolute right-2 top-2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" title="Закрыть (Esc)"><X className="h-5 w-5" /></button>
+          {photos.length > 1 && <>
+            <button type="button" onClick={() => step(-1)} className="absolute left-2 top-1/2 -translate-y-1/2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" aria-label="Предыдущее фото"><ChevronLeft className="h-6 w-6" /></button>
+            <button type="button" onClick={() => step(1)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-black/70 p-2 text-white hover:bg-slate-800" aria-label="Следующее фото"><ChevronRight className="h-6 w-6" /></button>
+          </>}
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded bg-black/70 px-3 py-1 text-xs text-white">{index + 1} / {photos.length}</div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   )
 }

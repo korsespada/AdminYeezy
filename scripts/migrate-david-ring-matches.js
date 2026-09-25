@@ -1,13 +1,14 @@
 /**
- * Сопоставления старых колец Chromoff с моделями David Studio.
+ * Хвост удалённого раздела «Дубли колец» (он убран 2026-09-25).
  *
- * Старое кольцо — каноническая карточка: у неё живой URL, история и цена. Карточка
- * David на ту же модель — дубль, который надо убрать. Таблица держит вердикт ИИ по
- * каждому старому кольцу, чтобы батч был возобновляемым и оператор видел, что уже
- * проверено, а что применить не удалось.
+ * Скрипт делает две вещи:
+ *   1. гарантирует колонки `david_import_drafts.merged_into_*` — по ним экран
+ *      David Studio показывает метку «объединён со старым кольцом»;
+ *   2. убирает таблицу `david_ring_matches`: код её больше не читает, а её данные
+ *      были аудитом уже сделанных объединений (готовые товары живут в Rails).
  *
- * anchor_listing_id уникален: на одно старое кольцо ровно один вердикт, повторный
- * расчёт перезаписывает строку, а не плодит дубли.
+ * Обе операции идемпотентны, поэтому скрипт безопасно вызывается при каждом
+ * старте контейнера и не даёт таблице появиться снова.
  *
  * Запуск: node scripts/migrate-david-ring-matches.js
  */
@@ -28,41 +29,7 @@ async function migrate() {
   try {
     await client.query('BEGIN')
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS david_ring_matches (
-        id UUID PRIMARY KEY,
-        anchor_listing_id TEXT NOT NULL,
-        anchor_product_id TEXT NOT NULL,
-        anchor_slug TEXT,
-        anchor_name TEXT,
-        david_handle TEXT,
-        david_product_id TEXT,
-        david_listing_id TEXT,
-        david_slug TEXT,
-        david_title TEXT,
-        confidence NUMERIC(4, 3),
-        candidate_score NUMERIC(8, 4),
-        evidence TEXT,
-        status TEXT NOT NULL DEFAULT 'suggested',
-        shortlist JSONB NOT NULL DEFAULT '[]'::jsonb,
-        provider TEXT,
-        model TEXT,
-        applied JSONB,
-        error TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `)
-
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS david_ring_matches_anchor_idx
-      ON david_ring_matches (anchor_listing_id)
-    `)
-
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS david_ring_matches_status_idx
-      ON david_ring_matches (status)
-    `)
+    await client.query('DROP TABLE IF EXISTS david_ring_matches')
 
     // Чертёж товара David после объединения перестаёт быть «созданным» товаром, но
     // и «необработанным» он быть не должен: иначе оператор создаст дубль заново.
@@ -80,15 +47,12 @@ async function migrate() {
 
     await client.query('COMMIT')
 
-    const columns = await client.query(`
-      SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'david_ring_matches' ORDER BY ordinal_position
-    `)
     const draftColumns = await client.query(`
       SELECT column_name FROM information_schema.columns
       WHERE table_name = 'david_import_drafts' AND column_name LIKE 'merged%'
     `)
-    console.log('david_ring_matches готова, колонок:', columns.rowCount, '| колонок объединения в david_import_drafts:', draftColumns.rowCount)
+    const leftoverTable = await client.query("SELECT to_regclass('public.david_ring_matches') AS name")
+    console.log('david_ring_matches:', leftoverTable.rows[0]?.name ? 'ОСТАЛАСЬ' : 'удалена', '| колонок объединения в david_import_drafts:', draftColumns.rowCount)
   } catch (error) {
     await client.query('ROLLBACK')
     throw error

@@ -54,9 +54,9 @@ describe('buildDavidRailsProductPayload', () => {
     expect(payload.variants.map((variant) => variant.size)).toEqual(['16 см', '17 см'])
   })
 
-  it('публикует товар, но не отдаёт его в поиск основного магазина', () => {
+  it('публикует товар и отдаёт его в поиск', () => {
     expect(payload.status).toBe('active')
-    expect(payload.indexing_status).toBe('noindex')
+    expect(payload.indexing_status).toBe('indexable')
   })
 
   it('без размеров оставляет один вариант без размера', () => {

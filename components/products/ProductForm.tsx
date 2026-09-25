@@ -22,7 +22,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { normalizeDescription } from '@/components/products/ProductDescription'
-import ProductPhotoGallery from '@/components/products/ProductPhotoGallery'
+import ProductPhotoGallery, { isPhotoLightboxOpen } from '@/components/products/ProductPhotoGallery'
 import MeasurementTemplatePicker from '@/components/import/MeasurementTemplatePicker'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
@@ -815,7 +815,8 @@ export default function ProductForm({
 
     const handleSaveShortcut = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (isPhotoModalOpen) return
+        // Пока открыта полноэкранная галерея, Esc закрывает только её.
+        if (isPhotoModalOpen || isPhotoLightboxOpen()) return
 
         event.preventDefault()
         onClose()

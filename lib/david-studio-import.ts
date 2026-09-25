@@ -251,8 +251,8 @@ export function davidProductVariantAttributes(product: Pick<DavidCatalogProduct,
  * Цена всегда 0: у поставщика цена в USD и в рублях её ещё не назначили. Rails
  * сам отдаёт `price_on_request = true` при нулевой цене, поэтому витрина
  * показывает «Цена по запросу» и не даёт оформить заказ. Статус active —
- * требование «публиковать не скрывая»; `noindex` оставляем, чтобы карточки с
- * неназначенной ценой не попадали в поиск основного магазина.
+ * требование «публиковать не скрывая»; индекс — `indexable`, чтобы карточки
+ * David попадали в поиск витрины Chromoff.
  */
 export function buildDavidRailsProductPayload(input: {
   handle: string
@@ -278,7 +278,7 @@ export function buildDavidRailsProductPayload(input: {
     price_cents: 0,
     currency: 'RUB',
     status: 'active',
-    indexing_status: 'noindex',
+    indexing_status: 'indexable',
     brand_id: input.brandId,
     category_id: input.categoryId,
     gender: input.gender || null,
