@@ -88,6 +88,25 @@ describe('measurement template normalization', () => {
     })
   })
 
+  it('replaces inventoried standard sizes with the row sizes of the measurement table', () => {
+    const table = { unit: 'см', columns: [{ key: 'chest', label: 'Обхват груди' }], rows: [
+      { size: '1', values: { chest: '108' } },
+      { size: '2', values: { chest: '112' } },
+      { size: '3', values: { chest: '116' } },
+      { size: '4', values: { chest: '120' } },
+    ] }
+    expect(applyMeasurementTableAttributes({ sizes: ['1', '2', '3', '4', 'S', 'M', 'L', 'XL'] }, table)).toMatchObject({
+      sizes: ['1', '2', '3', '4'],
+      measurements: table,
+    })
+    expect(applyMeasurementTableAttributes({ sizes: { values: ['S', 'M'], groups: [{ system: 'EU', values: ['S', 'M'] }] } }, table)).toMatchObject({
+      sizes: { values: ['1', '2', '3', '4'], groups: [{ system: 'EU', values: ['S', 'M'] }] },
+    })
+    expect(applyMeasurementTableAttributes({ sizes: ['S', 'M'] }, { unit: 'см', columns: [], rows: [] })).toMatchObject({
+      sizes: ['S', 'M'],
+    })
+  })
+
   it('keeps multiple named garment tables separate and collapses a single tab back to the legacy shape', () => {
     const vest = {
       unit: 'см',

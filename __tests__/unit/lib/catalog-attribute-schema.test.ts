@@ -26,6 +26,9 @@ describe('catalog attribute schema', () => {
   it('combines common and category-specific attributes', () => {
     const clothing = getCatalogAttributeDefinitionsForCategory('Одежда').map((item) => item.code)
     expect(clothing).toEqual(expect.arrayContaining(['colors', 'model_name', 'sizes', 'materials', 'fit', 'size_recommendation']))
+    expect(clothing).toEqual(expect.arrayContaining([
+      'filling', 'fur_type', 'collar', 'hood', 'closure', 'belt', 'product_length', 'lining_material',
+    ]))
     expect(clothing).not.toContain('season')
     expect(clothing).not.toContain('country_of_origin')
   })

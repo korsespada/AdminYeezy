@@ -72,6 +72,51 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     aliases: ['крой', 'посадка'],
     values: ['Облегающая', 'Обычная', 'Свободная', 'Oversize'],
   }),
+  definition('filling', 'Наполнитель', 'Одежда', 'multi_enum', 62, {
+    aliases: ['insulation', 'filling_material', 'наполнитель', 'утеплитель', 'материал наполнителя'],
+    values: ['Гусиный пух', 'Утиный пух', 'Пух', 'Пухо-перо', 'Синтепон', 'Полиэстер', 'Шерсть', 'Без наполнителя'],
+    rules: [
+      'Наполнитель: гусиный пух 90/10',
+      'goose down filling',
+      '特级鹅绒填充',
+      'Заполняй только для утеплённой верхней одежды и жилетов, когда наполнитель явно назван в тексте; не угадывай по внешнему виду.',
+    ],
+  }),
+  definition('fur_type', 'Мех', 'Одежда', 'multi_enum', 63, {
+    aliases: ['fur', 'fur_type', 'мех', 'тип меха'],
+    values: ['Натуральный мех', 'Овчина', 'Лиса', 'Норка', 'Кролик', 'Искусственный мех', 'Без меха'],
+    rules: [
+      'Воротник из натурального меха лисы',
+      'imported fox fur collar',
+      '狐狸毛领',
+      'Указывай только вид меха из текста: натуральный, овчина, лиса, норка, кролик или искусственный.',
+    ],
+  }),
+  definition('collar', 'Воротник', 'Одежда', 'multi_enum', 64, {
+    aliases: ['collar', 'воротник'],
+    values: ['Меховой', 'Вязаный', 'Стойка', 'Отложной', 'Съёмный', 'Без воротника'],
+    rules: ['Съёмный меховой воротник', 'knitted collar', 'detachable wool collar', 'Воротник-стойка'],
+  }),
+  definition('hood', 'Капюшон', 'Одежда', 'enum', 65, {
+    aliases: ['hood', 'капюшон'],
+    values: ['Есть', 'Съёмный', 'Нет'],
+    rules: ['Съёмный капюшон', 'detachable hood', '连帽可脱卸'],
+  }),
+  definition('closure', 'Застёжка', 'Одежда', 'multi_enum', 66, {
+    aliases: ['closure', 'fastening', 'застёжка'],
+    values: ['Молния', 'Кнопки', 'Пуговицы', 'Комбинированная'],
+    rules: ['Застёжка на кнопки и молнию', 'button opening and closing', '拉链/纽扣'],
+  }),
+  definition('belt', 'Пояс', 'Одежда', 'enum', 67, {
+    aliases: ['belt', 'пояс', 'пояс на талии'],
+    values: ['Есть', 'Съёмный', 'Нет'],
+    rules: ['Съёмный пояс', 'detachable waist belt', '腰带'],
+  }),
+  definition('product_length', 'Длина изделия', 'Одежда', 'enum', 68, {
+    aliases: ['length', 'длина изделия', 'длина'],
+    values: ['Укороченная', 'Средняя', 'Удлинённая', 'Длинная', 'Макси'],
+    rules: ['Укороченная длина', 'short cut silhouette', '中长款', 'Длина: миди'],
+  }),
   definition('measurements', 'Замеры', 'Одежда и обувь', 'text', 70, {
     aliases: ['clothing_measurements', 'shoe_measurements', 'замеры одежды', 'замеры обуви', 'замеры'],
     rules: [
@@ -90,9 +135,9 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     aliases: ['верх', 'материал верха', 'upper material'],
     values: ['Кожа', 'Замша', 'Текстиль', 'Сетка', 'Резина', 'Пластик'],
   }),
-  definition('lining_material', 'Материал подкладки', 'Обувь', 'multi_enum', 90, {
+  definition('lining_material', 'Материал подкладки', 'Одежда и обувь', 'multi_enum', 90, {
     aliases: ['подкладка', 'материал подкладки', 'lining'],
-    values: ['Кожа', 'Текстиль', 'Мех', 'Без подкладки'],
+    values: ['Кожа', 'Текстиль', 'Мех', 'Нейлон', 'Полиэстер', 'Вискоза', 'Хлопок', 'Шерсть', 'Без подкладки'],
   }),
   definition('sole_material', 'Материал подошвы', 'Обувь', 'multi_enum', 100, {
     aliases: ['подошва', 'материал подошвы', 'sole'],
@@ -224,7 +269,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
 export const CATEGORY_ATTRIBUTE_RULES: CategoryRule[] = [
   {
     category: 'Одежда',
-    attributes: ['sizes', 'size_system', 'materials', 'fit', 'measurements', 'size_recommendation'],
+    attributes: [
+      'sizes', 'size_system', 'materials', 'fit', 'filling', 'fur_type', 'collar', 'hood',
+      'closure', 'belt', 'product_length', 'lining_material', 'measurements', 'size_recommendation',
+    ],
   },
   {
     category: 'Обувь',

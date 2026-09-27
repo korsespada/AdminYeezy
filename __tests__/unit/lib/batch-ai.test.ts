@@ -94,7 +94,8 @@ describe('batch AI normalization', () => {
 
     const richPrompt = buildBatchAiUserPrompt({ product: richProduct, brands: [], categories: [], subcategories: [], attributes: [] })
     expect(richPrompt).toContain('богатый фактический источник')
-    expect(richPrompt).toContain('500–800 знаков')
+    expect(richPrompt).toContain('900–2000 знаков')
+    expect(richPrompt).toContain('минимальная глубина, а не верхняя граница')
     expect(richPrompt).toContain('технологии, материалы, конструкцию')
 
     const sparsePrompt = buildBatchAiColorSplitPrompt({ product: sparseProduct, brands: [], categories: [], subcategories: [], attributes: [] })

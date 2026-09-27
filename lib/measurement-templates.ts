@@ -69,6 +69,13 @@ export function productMeasurementSizes(value: unknown): string[] {
   return measurementTableSizes(normalized)
 }
 
+/**
+ * The measurement table is the size run of the product: its row sizes replace
+ * the attribute value list. AI reads the same attribute dictionary for every
+ * product, so an additive merge used to leave invented standard sizes
+ * (`S`, `M`, `L`, `XL`) on a jacket whose table only has manufacturer sizes
+ * `1–4`. Tables without row sizes never touch the existing value.
+ */
 export function applyMeasurementTableAttributes(
   attributes: Record<string, any> | null | undefined,
   measurements: unknown,
@@ -78,20 +85,16 @@ export function applyMeasurementTableAttributes(
     ...(attributes || {}),
     measurements: normalizedMeasurements || measurements,
   }
-  const sizes = productMeasurementSizes(normalizedMeasurements)
+  const sizes = [...new Set(productMeasurementSizes(normalizedMeasurements)
+    .map((value) => value.trim())
+    .filter(Boolean))]
   if (!sizes.length) return next
 
   const existing = next.sizes
-  const existingValues = Array.isArray(existing)
-    ? existing.map(String)
-    : existing && typeof existing === 'object' && Array.isArray(existing.values)
-      ? existing.values.map(String)
-      : existing === undefined || existing === null || existing === '' ? [] : [String(existing)]
-  const mergedSizes = [...new Set([...existingValues, ...sizes].map((value) => value.trim()).filter(Boolean))]
   next.sizes = existing && typeof existing === 'object' && !Array.isArray(existing)
-    ? { ...existing, values: mergedSizes }
-    : mergedSizes
-  if (!next.size_system && mergedSizes.some((size) => /^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|[2-6]XL)$/i.test(size))) {
+    ? { ...existing, values: sizes }
+    : sizes
+  if (!next.size_system && sizes.some((size) => /^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|[2-6]XL)$/i.test(size))) {
     next.size_system = 'International'
   }
   return next

@@ -67,10 +67,16 @@ export async function getCatalogAttributeDefinitions(): Promise<CatalogAttribute
     return [...new Set([...defaultsByCode.keys(), ...overridesByCode.keys()])].map((code, index) => {
       const definition = defaultsByCode.get(code) || genericDefinition(code, index)
       const dictionaryValues = valuesByCode.get(code) || []
+      const dictionaryCanonicalValues = dictionaryValues
+        .filter((item) => item.active)
+        .map((item) => item.canonical_value)
       return {
         ...definition,
         ...overridesByCode.get(code),
-        values: dictionaryValues.filter((item) => item.active).map((item) => item.canonical_value),
+        // Codes that exist only in the built-in schema (a new clothing
+        // characteristic before its Rails dictionary is filled) keep their own
+        // value list instead of losing it to an empty override.
+        values: dictionaryCanonicalValues.length ? dictionaryCanonicalValues : (definition.values || []),
         dictionary_values: dictionaryValues,
       }
     }).sort((left, right) => left.sort_order - right.sort_order)
