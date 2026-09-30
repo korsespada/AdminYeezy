@@ -396,6 +396,7 @@ export interface MatchRun {
   batch_size: number
   applied: number
   failed: number
+  unusable: number
   started_at: string | null
   heartbeat_at: string | null
   finished_at: string | null
@@ -407,7 +408,7 @@ export const MATCH_RUN_STALE_SECONDS = 90
 
 export async function getMatchRun(batchId: string) {
   const result = await scrapingQuery<MatchRun>(
-    `SELECT source_batch_id, status, batch_size, applied, failed, started_at, heartbeat_at, finished_at, last_error
+    `SELECT source_batch_id, status, batch_size, applied, failed, unusable, started_at, heartbeat_at, finished_at, last_error
      FROM product_video_match_runs WHERE source_batch_id = $1`,
     [batchId],
   )
@@ -423,15 +424,24 @@ export async function isMatchRunActive(batchId: string) {
   return Boolean(result.rows[0]?.active)
 }
 
+/** Партии, у которых запуск числится активным: по ним супервизор поднимает задачи. */
+export async function listRunningMatchRuns() {
+  const result = await scrapingQuery<{ source_batch_id: string }>(
+    `SELECT source_batch_id FROM product_video_match_runs WHERE status = 'running'`,
+  )
+  return result.rows
+}
+
 export async function startMatchRun(batchId: string, batchSize: number) {
   await scrapingQuery(
-    `INSERT INTO product_video_match_runs (source_batch_id, status, batch_size, applied, failed, started_at, heartbeat_at, finished_at, last_error, updated_at)
-     VALUES ($1, 'running', $2, 0, 0, NOW(), NOW(), NULL, NULL, NOW())
+    `INSERT INTO product_video_match_runs (source_batch_id, status, batch_size, applied, failed, unusable, started_at, heartbeat_at, finished_at, last_error, updated_at)
+     VALUES ($1, 'running', $2, 0, 0, 0, NOW(), NOW(), NULL, NULL, NOW())
      ON CONFLICT (source_batch_id) DO UPDATE SET
        status = 'running',
        batch_size = EXCLUDED.batch_size,
        applied = 0,
        failed = 0,
+       unusable = 0,
        started_at = NOW(),
        heartbeat_at = NOW(),
        finished_at = NULL,
@@ -455,6 +465,7 @@ export async function stopMatchRun(batchId: string) {
 export async function touchMatchRun(batchId: string, update: {
   appliedDelta?: number
   failedDelta?: number
+  unusableDelta?: number
   status?: MatchRun['status']
   error?: string | null
 } = {}) {
@@ -464,12 +475,13 @@ export async function touchMatchRun(batchId: string, update: {
      SET heartbeat_at = NOW(),
          applied = applied + $2,
          failed = failed + $3,
-         status = COALESCE($4, status),
-         last_error = COALESCE($5, last_error),
-         finished_at = CASE WHEN $6 THEN NOW() ELSE finished_at END,
+         unusable = unusable + $4,
+         status = COALESCE($5, status),
+         last_error = COALESCE($6, last_error),
+         finished_at = CASE WHEN $7 THEN NOW() ELSE finished_at END,
          updated_at = NOW()
      WHERE source_batch_id = $1`,
-    [batchId, Number(update.appliedDelta || 0), Number(update.failedDelta || 0), update.status || null, update.error ?? null, Boolean(finished)],
+    [batchId, Number(update.appliedDelta || 0), Number(update.failedDelta || 0), Number(update.unusableDelta || 0), update.status || null, update.error ?? null, Boolean(finished)],
   )
 }
 
@@ -500,6 +512,20 @@ export async function markMatchFailed(id: number, error: string) {
      SET status = 'failed', error = $2, updated_at = NOW()
      WHERE id = $1`,
     [id, String(error || 'неизвестная ошибка').slice(0, 1000)],
+  )
+}
+
+/**
+ * Ролик у поставщика нечитаем (полный файл без moov, пустой ответ, 404).
+ * Это не сбой заливки: строку помечаем отклонённой с причиной, чтобы она не
+ * висела в «ошибках», а оператор выбрал другой вариант товара.
+ */
+export async function markMatchUnusable(id: number, reason: string) {
+  await scrapingQuery(
+    `UPDATE product_video_matches
+     SET status = 'rejected', error = $2, decided_at = NOW(), updated_at = NOW()
+     WHERE id = $1`,
+    [id, `Источник нечитаем: ${String(reason || '').slice(0, 500)}`],
   )
 }
 

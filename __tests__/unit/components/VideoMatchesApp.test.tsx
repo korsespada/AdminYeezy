@@ -102,7 +102,7 @@ describe('VideoMatchesApp', () => {
         ...stats,
         counts: { ...stats.counts, approved: 200, applied: 12 },
         runActive: true,
-        run: { status: 'running', batch_size: 4, applied: 12, failed: 1, heartbeat_at: new Date().toISOString(), finished_at: null, last_error: null },
+        run: { status: 'running', batch_size: 4, applied: 12, failed: 1, unusable: 0, heartbeat_at: new Date().toISOString(), finished_at: null, last_error: null },
       },
     })
     render(<VideoMatchesApp />)

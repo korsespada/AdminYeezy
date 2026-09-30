@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { compactApplyError } from '@/lib/video-match-apply'
+import { compactApplyError, isUnusableSource } from '@/lib/video-match-apply'
+
+describe('isUnusableSource', () => {
+  it('считает битым источник без moov или пустой ответ', () => {
+    expect(isUnusableSource(new Error('[mov,mp4 @ 0x1] moov atom not found\nInvalid data found when processing input'))).toBe(true)
+    expect(isUnusableSource(new Error('источник вернул пустое видео'))).toBe(true)
+    expect(isUnusableSource(new Error('источник видео вернул HTTP 404'))).toBe(true)
+  })
+
+  it('не считает битым источник временные сбои', () => {
+    expect(isUnusableSource(new Error('The operation was aborted due to timeout'))).toBe(false)
+    expect(isUnusableSource(new Error('S3 не вернул ссылку на видео'))).toBe(false)
+  })
+})
 
 describe('compactApplyError', () => {
   it('оставляет короткий текст как есть', () => {

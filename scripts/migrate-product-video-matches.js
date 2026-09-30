@@ -97,12 +97,18 @@ async function migrate() {
         batch_size INTEGER NOT NULL DEFAULT 2,
         applied INTEGER NOT NULL DEFAULT 0,
         failed INTEGER NOT NULL DEFAULT 0,
+        unusable INTEGER NOT NULL DEFAULT 0,
         started_at TIMESTAMPTZ,
         heartbeat_at TIMESTAMPTZ,
         finished_at TIMESTAMPTZ,
         last_error TEXT,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `)
+    // Ролики, которые поставщик отдаёт битыми (полный файл без moov, пустой ответ),
+    // считаем отдельно от сбоев заливки: повторять их бессмысленно.
+    await client.query(`
+      ALTER TABLE product_video_match_runs ADD COLUMN IF NOT EXISTS unusable INTEGER NOT NULL DEFAULT 0
     `)
     await client.query('COMMIT')
     console.log('Product video matches migration complete')

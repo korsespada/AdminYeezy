@@ -1,8 +1,10 @@
 import { patchRailsAdminProduct } from '@/lib/rails-admin'
 import {
   getMatchRun,
+  listRunningMatchRuns,
   markMatchApplied,
   markMatchFailed,
+  markMatchUnusable,
   retryFailedMatches,
   selectApprovedForApply,
   touchMatchRun,
@@ -10,12 +12,17 @@ import {
 
 /**
  * Фоновый перенос апрувнутых видео в S3 и в карточки товара.
- * Работает в процессе сервера, а не во вкладке оператора: вкладку можно закрыть,
- * прогресс виден по `product_video_match_runs` и статусам строк.
+ *
+ * Цикл не привязан ни к вкладке оператора, ни к конкретному запросу: задачи
+ * поднимает супервизор, зарегистрированный при старте сервера
+ * (см. `instrumentation.ts`). Он проверяет таблицу запусков и держит по одной
+ * задаче на партию, поэтому заливка продолжается после перезагрузки страницы и
+ * после перезапуска контейнера.
  */
 
 const APPLY_ATTEMPTS = 3
 const RETRY_DELAYS_MS = [1500, 5000]
+const SUPERVISOR_INTERVAL_MS = 10_000
 
 /** Ошибка ffmpeg занимает килобайты баннера: оставляем суть, а не шапку сборки. */
 export function compactApplyError(error: unknown) {
@@ -25,6 +32,15 @@ export function compactApplyError(error: unknown) {
   const head = lines.slice(0, 2).join(' ')
   const tail = lines.slice(-3).join(' ')
   return `${head} … ${tail}`.slice(0, 700)
+}
+
+/**
+ * Ролик битый у источника, а не сбой заливки: полный файл без moov, пустой ответ,
+ * недоступный адрес. Повторять бессмысленно, такой вариант надо заменить другим.
+ */
+export function isUnusableSource(error: unknown) {
+  const text = String((error as any)?.message || error || '').toLowerCase()
+  return /moov atom|invalid data found|пустое видео|http 404|http 410/.test(text)
 }
 
 /** Одна попытка: скачать источник, перекодировать, положить в S3 и обновить карточку. */
@@ -43,10 +59,11 @@ async function applyMatchOnce(row: { video_source_url: string; crm_product_id: s
 /** Обрабатывает одну порцию апрувнутых строк, повторяя временные сбои. */
 export async function applyApprovedBatch(batchId: string, limit: number) {
   const rows = await selectApprovedForApply(batchId, limit)
-  if (rows.length === 0) return { processed: 0, applied: 0, failed: 0 }
+  if (rows.length === 0) return { processed: 0, applied: 0, failed: 0, unusable: 0 }
 
   let applied = 0
   let failed = 0
+  let unusable = 0
   await Promise.all(rows.map(async (row) => {
     let lastError: unknown = null
     for (let attempt = 0; attempt < APPLY_ATTEMPTS; attempt += 1) {
@@ -61,11 +78,17 @@ export async function applyApprovedBatch(batchId: string, limit: number) {
         if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
       }
     }
+    const message = compactApplyError(lastError)
+    if (isUnusableSource(lastError)) {
+      unusable += 1
+      await markMatchUnusable(row.id, message)
+      return
+    }
     failed += 1
-    await markMatchFailed(row.id, compactApplyError(lastError))
+    await markMatchFailed(row.id, message)
   }))
 
-  return { processed: rows.length, applied, failed }
+  return { processed: rows.length, applied, failed, unusable }
 }
 
 /**
@@ -98,8 +121,51 @@ export async function runApplyLoop(batchId: string, options: { maxMinutes?: numb
       await touchMatchRun(batchId, { status: 'finished' })
       return
     }
-    await touchMatchRun(batchId, { appliedDelta: result.applied, failedDelta: result.failed })
+    await touchMatchRun(batchId, { appliedDelta: result.applied, failedDelta: result.failed, unusableDelta: result.unusable })
     // Небольшая пауза, чтобы не занимать процесс на 100% между порциями.
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
+}
+
+const activeTasks = new Map<string, Promise<void>>()
+let supervisorStarted = false
+
+/**
+ * Поднимает задачи по всем запущенным партиям. Вызывается супервизором при
+ * старте сервера и сразу после нажатия кнопки, чтобы заливка началась без задержки.
+ */
+export async function ensureMatchApplyTasks() {
+  let runs: Array<{ source_batch_id: string }> = []
+  try {
+    runs = await listRunningMatchRuns()
+  } catch (error) {
+    console.error('Video match supervisor: не удалось прочитать запуски', error)
+    return
+  }
+
+  for (const run of runs) {
+    const batchId = run.source_batch_id
+    if (activeTasks.has(batchId)) continue
+    const task = runApplyLoop(batchId)
+      .catch(async (error) => {
+        console.error('Video match apply loop failed', error)
+        await touchMatchRun(batchId, { status: 'interrupted', error: String(error?.message || error).slice(0, 500) })
+      })
+      .finally(() => { activeTasks.delete(batchId) })
+    activeTasks.set(batchId, task)
+  }
+}
+
+/**
+ * Супервизор фоновой заливки: раз в десять секунд проверяет таблицу запусков и
+ * держит по одной задаче на партию. Зарегистрирован в `instrumentation.ts`,
+ * поэтому не зависит от запросов и открытых вкладок.
+ */
+export function startMatchApplySupervisor() {
+  if (supervisorStarted) return
+  supervisorStarted = true
+  const timer = setInterval(() => { void ensureMatchApplyTasks() }, SUPERVISOR_INTERVAL_MS)
+  // Процесс приложения живёт долго: таймер не должен удерживать его при остановке.
+  if (typeof timer.unref === 'function') timer.unref()
+  void ensureMatchApplyTasks()
 }

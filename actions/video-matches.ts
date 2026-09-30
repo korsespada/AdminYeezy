@@ -1,6 +1,5 @@
 'use server'
 
-import { after } from 'next/server'
 import { requireAdmin } from '@/lib/admin-session'
 import { scrapingQuery } from '@/lib/db'
 import {
@@ -8,7 +7,7 @@ import {
   listRailsAdminProducts,
   patchRailsAdminProduct,
 } from '@/lib/rails-admin'
-import { runApplyLoop } from '@/lib/video-match-apply'
+import { ensureMatchApplyTasks } from '@/lib/video-match-apply'
 import {
   buildAlbumIndex,
   buildMatchRows,
@@ -35,7 +34,6 @@ import {
   saveMatchScope,
   startMatchRun,
   stopMatchRun,
-  touchMatchRun,
   videoMatchCounts,
   type VideoMatchStatus,
 } from '@/lib/product-video-matches'
@@ -135,19 +133,6 @@ export async function getVideoMatchStatsAction(presetKey: string): Promise<Actio
       [preset.batchId],
     )
     let run = await getMatchRun(preset.batchId)
-
-    // Сторож: контейнер перезапускался во время заливки — цикл умер, но строки
-    // остались апрувнутыми. Поднимаем его заново, восстановление идемпотентно.
-    if (run?.status === 'running' && !(await isMatchRunActive(preset.batchId)) && counts.approved > 0) {
-      await touchMatchRun(preset.batchId, {})
-      after(() => {
-        runApplyLoop(preset.batchId).catch(async (error) => {
-          console.error('Video match apply resume failed', error)
-          await touchMatchRun(preset.batchId, { status: 'interrupted', error: String(error?.message || error).slice(0, 500) })
-        })
-      })
-      run = await getMatchRun(preset.batchId)
-    }
 
     return {
       success: true,
@@ -430,8 +415,8 @@ export async function clearVideoMatchesAction(presetKey: string): Promise<Action
 }
 
 /**
- * Запуск фоновой заливки: цикл живёт в процессе сервера, поэтому вкладку можно
- * закрыть или перезагрузить — прогресс сохраняется в product_video_match_runs.
+ * Запуск фоновой заливки: строка запуска переводится в running, а работу ведёт
+ * супервизор приложения (instrumentation.ts) — вкладку можно закрыть.
  */
 export async function startVideoMatchApplyAction(presetKey: string, batchSize = 2): Promise<ActionResponse> {
   try {
@@ -441,12 +426,8 @@ export async function startVideoMatchApplyAction(presetKey: string, batchSize = 
       return { success: false, error: 'Заливка уже идёт' }
     }
     await startMatchRun(preset.batchId, batchSize)
-    after(() => {
-      runApplyLoop(preset.batchId).catch(async (error) => {
-        console.error('Video match apply loop failed', error)
-        await touchMatchRun(preset.batchId, { status: 'interrupted', error: String(error?.message || error).slice(0, 500) })
-      })
-    })
+    // Не ждём следующего тика супервизора — он подхватит запуск в течение десяти секунд.
+    void ensureMatchApplyTasks()
     return { success: true, data: { started: true } }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось запустить заливку' }

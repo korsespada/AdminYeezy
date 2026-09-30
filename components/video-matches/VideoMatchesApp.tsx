@@ -74,6 +74,7 @@ type Stats = {
     batch_size: number
     applied: number
     failed: number
+    unusable: number
     heartbeat_at: string | null
     finished_at: string | null
     last_error: string | null
@@ -454,13 +455,18 @@ export default function VideoMatchesApp() {
           {runActive && stats?.run && (
             <p className="text-sky-300">
               Фоновая заливка идёт: привязано за запуск {stats.run.applied}
-              {stats.run.failed ? `, ошибок ${stats.run.failed}` : ''} · параллельно {stats.run.batch_size}
+              {stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}
+              {stats.run.unusable ? `, без видео у источника ${stats.run.unusable}` : ''} · параллельно {stats.run.batch_size}
               {stats.run.heartbeat_at ? ` · отклик ${Math.max(0, Math.round((Date.now() - new Date(stats.run.heartbeat_at).getTime()) / 1000))} с назад` : ''}
               {' '}— вкладку можно закрыть, процесс идёт на сервере
             </p>
           )}
           {!runActive && stats?.run?.status === 'finished' && stats.run.applied > 0 && (
-            <p className="text-emerald-300">Последняя заливка завершена: привязано {stats.run.applied}{stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}</p>
+            <p className="text-emerald-300">
+              Последняя заливка завершена: привязано {stats.run.applied}
+              {stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}
+              {stats.run.unusable ? `, без видео у источника ${stats.run.unusable} (они в «Отклонённых»)` : ''}
+            </p>
           )}
           {!runActive && stats?.run?.status === 'stopped' && (
             <p className="text-amber-300">Заливка остановлена оператором: привязано {stats.run.applied}{stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}</p>
@@ -740,6 +746,9 @@ function MatchCard({ row, selected, onToggle, onDecide, busy }: {
             )}
             {note && <span className="text-[11px] text-emerald-300">{note}</span>}
             {row.error && <span className="text-xs text-rose-300">{row.error}</span>}
+            {row.error?.startsWith('Источник нечитаем') && (
+              <span className="text-[11px] text-amber-300">— выберите рядом другой вариант и апрувните его</span>
+            )}
           </div>
 
           <div className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
