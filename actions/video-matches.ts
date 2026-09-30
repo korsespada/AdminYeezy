@@ -28,6 +28,7 @@ import {
   rejectMatches,
   resetApprovedMatches,
   resetMatches,
+  retryFailedMatches,
   saveMatchRows,
   saveMatchScope,
   selectApprovedForApply,
@@ -364,6 +365,18 @@ export async function resetApprovedVideoMatchesAction(presetKey: string): Promis
     return { success: true, data: { updated } }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось сбросить апрув' }
+  }
+}
+
+/** Повтор упавших заливок (таймаут загрузки видео и подобные сбои). */
+export async function retryFailedVideoMatchesAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findVideoMatchPreset(presetKey)
+    const updated = await retryFailedMatches(preset.batchId)
+    return { success: true, data: { updated } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось вернуть ошибки в очередь' }
   }
 }
 

@@ -14,6 +14,7 @@ import {
   rejectVideoMatchesAction,
   resetApprovedVideoMatchesAction,
   resetVideoMatchesAction,
+  retryFailedVideoMatchesAction,
   type VideoMatchCursor,
 } from '@/actions/video-matches'
 import { VIDEO_MATCH_BAND_LABELS, VIDEO_MATCH_PRESETS } from '@/lib/video-match-presets'
@@ -140,6 +141,9 @@ export default function VideoMatchesApp() {
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(60)
+  // Сколько видео заливается параллельно в одном запросе: больше — быстрее,
+  // но каждый файл качается и перекодируется ffmpeg.
+  const [applyBatchSize, setApplyBatchSize] = useState(2)
   const [misses, setMisses] = useState<Miss[]>([])
   const [showMisses, setShowMisses] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -270,7 +274,7 @@ export default function VideoMatchesApp() {
     let applied = 0
     let failed = 0
     for (;;) {
-      const result = await applyApprovedVideoMatchesAction(preset.key, 2)
+      const result = await applyApprovedVideoMatchesAction(preset.key, applyBatchSize)
       if (!result.success) throw new Error(result.error || 'Ошибка загрузки видео')
       const data = result.data
       applied += Number(data.applied || 0)
@@ -282,6 +286,16 @@ export default function VideoMatchesApp() {
       }
     }
   }).catch((cause: any) => setError(cause?.message || 'Ошибка загрузки видео'))
+
+  const retryFailed = async () => {
+    setBusy('bulk')
+    setError('')
+    const result = await retryFailedVideoMatchesAction(preset.key)
+    if (result.success) setMessage(`Возвращено в очередь на заливку: ${result.data?.updated ?? 0}`)
+    else setError(result.error || 'Не удалось вернуть ошибки в очередь')
+    setBusy('')
+    await Promise.all([loadStats(), loadRows({ silent: true })])
+  }
 
   const bulkApprove = async (single: boolean) => {
     setBusy('bulk')
@@ -368,6 +382,29 @@ export default function VideoMatchesApp() {
             {busy === 'apply' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             4. Загрузить апрувнутые ({counts?.approved ?? 0})
           </button>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400">
+            параллельно
+            <select
+              value={applyBatchSize}
+              onChange={(event) => setApplyBatchSize(Number(event.target.value))}
+              disabled={Boolean(busy)}
+              className="h-7 rounded border border-slate-700 bg-slate-950 px-1 text-xs text-white"
+            >
+              {[2, 4, 6].map((size) => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+          {(counts?.failed ?? 0) > 0 && (
+            <button
+              onClick={() => {
+                if (!window.confirm(`Вернуть в очередь ${counts?.failed ?? 0} упавших заливок и попробовать снова?`)) return
+                void retryFailed()
+              }}
+              disabled={Boolean(busy)}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" /> Повторить ошибки ({counts?.failed ?? 0})
+            </button>
+          )}
           {busy && (
             <button onClick={() => { cancelRef.current = true }} className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800">
               Остановить

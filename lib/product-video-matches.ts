@@ -379,6 +379,17 @@ export async function resetApprovedMatches(batchId: string) {
   return result.rowCount || 0
 }
 
+/** Повтор упавших заливок: строка снова уходит в очередь на применение. */
+export async function retryFailedMatches(batchId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_video_matches
+     SET status = 'approved', error = NULL, updated_at = NOW()
+     WHERE source_batch_id = $1 AND status = 'failed'`,
+    [batchId],
+  )
+  return result.rowCount || 0
+}
+
 export async function selectApprovedForApply(batchId: string, limit: number) {
   const result = await scrapingQuery<VideoMatchRecord>(
     `SELECT ${SELECT_COLUMNS} FROM product_video_matches
