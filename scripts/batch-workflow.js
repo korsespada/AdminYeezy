@@ -1843,10 +1843,17 @@ async function importScrapedFileToBatch({ supplier, taskId, outputPath, itemsCou
   }
 }
 
-async function startScraping(supplierId, endDate, overrideTag, overrideGroup, onComplete) {
+// Источник Szwego у поставщика: альбомы, единая лента или только видео.
+function normalizeSzwegoParseMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return mode === 'all' || mode === 'video' ? mode : 'images';
+}
+
+async function startScraping(supplierId, endDate, overrideTag, overrideGroup, overrideMode, onComplete) {
   const supplier = await getSupplier(supplierId);
   if (!supplier) throw new Error('Поставщик не найден');
   const parserSupplier = supplier;
+  const parseMode = normalizeSzwegoParseMode(overrideMode || supplier.szwego_parse_mode);
 
   await scrapingPool.query(`
     UPDATE scraping_tasks SET status='failed',error_message='Остановлено: нет обновлений более 12 часов',updated_at=NOW()
@@ -1874,7 +1881,7 @@ async function startScraping(supplierId, endDate, overrideTag, overrideGroup, on
     '--output', outputPath,
     '--format', 'json',
   ];
-  args.push('--parse_mode', supplier.szwego_parse_mode === 'all' ? 'all' : 'images');
+  args.push('--parse_mode', parseMode);
   if (endDate) args.push('--end_date', endDate);
 
   const finalGroup = overrideGroup || supplier.group_id;

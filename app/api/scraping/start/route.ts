@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       body?.endDate || undefined,
       body?.overrideTag || undefined,
       body?.overrideGroup || undefined,
+      body?.overrideMode || undefined,
       expectedSecret || (process.env.NODE_ENV !== 'production' ? 'dev-api-route' : undefined),
     )
 

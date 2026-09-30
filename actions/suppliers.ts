@@ -28,6 +28,11 @@ import {
 import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
+import { normalizeSzwegoParseMode } from '@/lib/szwego-parse-mode'
+
+// Предпросмотр альбома идёт крупными страницами API: Szwego принимает limit до
+// 3999, поэтому весь альбом укладывается в единицы запросов вместо сотен.
+const SZWEGO_STATS_PAGE_LIMIT = 3000
 
 // --- Suppliers CRUD ---
 
@@ -253,7 +258,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
-    const szwego_parse_mode = formData.get('szwego_parse_mode') === 'all' ? 'all' : 'images'
+    const szwego_parse_mode = normalizeSzwegoParseMode(formData.get('szwego_parse_mode'))
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
     const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
@@ -314,7 +319,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
-    const szwego_parse_mode = formData.get('szwego_parse_mode') === 'all' ? 'all' : 'images'
+    const szwego_parse_mode = normalizeSzwegoParseMode(formData.get('szwego_parse_mode'))
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
     const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
@@ -498,6 +503,65 @@ export async function discoverSupplierSzwegoTagsAction(supplierId: number): Prom
           return resolve({ success: true, data: tags })
         } catch {
           return resolve({ success: false, error: 'Получен некорректный список тегов от Szwego' })
+        }
+      })
+    })
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+export async function fetchSupplierSzwegoStatsAction(supplierId: number, tagId?: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const res = await scrapingQuery('SELECT album_id, cookie, min_photos, min_desc_len FROM suppliers WHERE id=$1', [supplierId])
+    const supplier = res.rows[0]
+    if (!supplier) return { success: false, error: 'Поставщик не найден' }
+
+    const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || ''
+    if (!cookie) return { success: false, error: 'Для предпросмотра нужен действующий Cookie Szwego у поставщика' }
+
+    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
+    const args = [
+      /*turbopackIgnore: true*/ scriptPath,
+      '--album_id', supplier.album_id,
+      '--cookie', cookie,
+      '--stats',
+      // Крупная страница API: предпросмотр всего альбома укладывается в единицы запросов.
+      '--limit', String(SZWEGO_STATS_PAGE_LIMIT),
+    ]
+    // Пороги передаются так же, как при выгрузке: без значения парсер берёт
+    // своё поведение по умолчанию для выбранного источника.
+    if (Number(supplier.min_photos) > 0) args.push('--min_photos', String(Number(supplier.min_photos)))
+    if (Number(supplier.min_desc_len) > 0) args.push('--min_desc', String(Number(supplier.min_desc_len)))
+    if (tagId) args.push('--tag_id', tagId)
+
+    return new Promise((resolve) => {
+      const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', args)
+      let stdout = ''
+      let stderr = ''
+      const timeout = setTimeout(() => {
+        pythonProcess.kill()
+        resolve({ success: false, error: 'Предпросмотр Szwego не завершился за 5 минут' })
+      }, 300_000)
+
+      pythonProcess.stdout.on('data', (data) => { stdout += data.toString() })
+      pythonProcess.stderr.on('data', (data) => { stderr += data.toString() })
+      pythonProcess.on('error', (error) => {
+        clearTimeout(timeout)
+        resolve({ success: false, error: `Не удалось запустить парсер Szwego: ${error.message}` })
+      })
+      pythonProcess.on('close', (code) => {
+        clearTimeout(timeout)
+        const resultLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_STATS:'))
+        if (code !== 0 || !resultLine) {
+          const scraperError = stderr.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_STATS_ERROR:'))
+          return resolve({ success: false, error: scraperError?.replace('SZWEGO_STATS_ERROR:', '').trim() || stderr || 'Szwego не вернул статистику альбома' })
+        }
+        try {
+          return resolve({ success: true, data: JSON.parse(resultLine.replace('SZWEGO_STATS:', '')) })
+        } catch {
+          return resolve({ success: false, error: 'Получена некорректная статистика от Szwego' })
         }
       })
     })
@@ -927,7 +991,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
   }
 }
 
-async function forwardScrapingToWorker(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse | null> {
+async function forwardScrapingToWorker(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string, overrideMode?: string): Promise<ActionResponse | null> {
   const workerUrl = process.env.SCRAPER_WORKER_URL?.replace(/\/+$/, '')
   if (!workerUrl) return null
 
@@ -942,7 +1006,7 @@ async function forwardScrapingToWorker(supplierId: number, endDate?: string, ove
     const response = await fetch(`${workerUrl}/api/scraping/start`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ supplierId, endDate, overrideTag, overrideGroup }),
+      body: JSON.stringify({ supplierId, endDate, overrideTag, overrideGroup, overrideMode }),
       cache: 'no-store',
     })
 
@@ -970,8 +1034,12 @@ function hasConfiguredSzwegoTag(brandTags: unknown) {
   })
 }
 
-function validateScrapingScope(supplier: any, overrideTag?: string, overrideGroup?: string) {
-  if (supplier.szwego_parse_mode !== 'all' || !hasConfiguredSzwegoTag(supplier.brand_tags)) return null
+function validateScrapingScope(supplier: any, overrideTag?: string, overrideGroup?: string, overrideMode?: string) {
+  const mode = normalizeSzwegoParseMode(overrideMode || supplier.szwego_parse_mode)
+  if (mode === 'video' && overrideGroup) {
+    return 'Для выгрузки видео выберите тег или оставьте выбор пустым: группы относятся только к альбомному источнику.'
+  }
+  if (mode !== 'all' || !hasConfiguredSzwegoTag(supplier.brand_tags)) return null
   if (overrideGroup || !String(overrideTag || '').trim()) {
     return 'Для единой ленты выберите включённый тег при запуске выгрузки.'
   }
@@ -1058,19 +1126,19 @@ export async function toggleSupplierFavoriteAction(id: number): Promise<ActionRe
   }
 }
 
-export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string): Promise<ActionResponse> {
+export async function startScrapingAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string, overrideMode?: string): Promise<ActionResponse> {
   await requireAdmin()
   const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
   const supplier = supplierRes.rows[0]
   if (!supplier) return { success: false, error: 'Supplier not found' }
-  const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup)
+  const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup, overrideMode)
   if (scopeError) return { success: false, error: scopeError }
-  const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup)
+  const workerResult = await forwardScrapingToWorker(supplierId, endDate, overrideTag, overrideGroup, overrideMode)
   if (workerResult) return workerResult
-  return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup)
+  return startScrapingLocalAction(supplierId, endDate, overrideTag, overrideGroup, overrideMode)
 }
 
-export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string, workerSecret?: string): Promise<ActionResponse> {
+export async function startScrapingLocalAction(supplierId: number, endDate?: string, overrideTag?: string, overrideGroup?: string, overrideMode?: string, workerSecret?: string): Promise<ActionResponse> {
   try {
     await requireAdminOrWorker(workerSecret)
 
@@ -1078,8 +1146,9 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     const supplierRes = await scrapingQuery('SELECT * FROM suppliers WHERE id=$1', [supplierId])
     const supplier = supplierRes.rows[0]
     if (!supplier) return { success: false, error: 'Supplier not found' }
-    const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup)
+    const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup, overrideMode)
     if (scopeError) return { success: false, error: scopeError }
+    const parseMode = normalizeSzwegoParseMode(overrideMode || supplier.szwego_parse_mode)
     const parserDefaults = {
       brand: supplier.default_brand,
       category: supplier.default_category,
@@ -1116,7 +1185,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
       '--output', outputPath,
       '--format', 'json'
     ]
-    args.push('--parse_mode', supplier.szwego_parse_mode === 'all' ? 'all' : 'images')
+    args.push('--parse_mode', parseMode)
     if (endDate) args.push('--end_date', endDate)
     
     let finalGroup = supplier.group_id

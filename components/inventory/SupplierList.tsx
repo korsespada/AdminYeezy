@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'
 import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle, ClipboardPaste, Upload } from 'lucide-react'
-import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
+import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, fetchSupplierSzwegoStatsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
@@ -11,6 +11,7 @@ import {
 } from '@/lib/catalog-attribute-schema'
 import { SupplierPostProcessEditor } from '@/components/inventory/SupplierPostProcessEditor'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
+import { SZWEGO_PARSE_MODE_LABELS, normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
 
 type SupplierAiProcessingOptions = {
   colorFamilyByArticle: boolean
@@ -36,11 +37,36 @@ const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   suggestAttributes: false,
 }
 
+type SzwegoStatsFeed = {
+  posts: number
+  unique_goods: number
+  pinned: number
+  with_video: number
+  text_only: number
+  kept: number
+  skipped?: Record<string, number>
+  photos?: Record<string, number>
+  description?: Record<string, number>
+  months?: Record<string, number>
+  top_tags?: { label: string; count: number }[]
+  first_post?: string | null
+  last_post?: string | null
+  error?: string
+}
+
+type SzwegoAlbumStats = {
+  album_id: string
+  album_total_posts?: number | null
+  shop?: { name?: string; totalItemCount?: number; icon?: string; isFollowed?: boolean }
+  filters?: { min_photos?: number; min_desc?: number; tag_id?: string | null }
+  modes: Record<SzwegoParseMode, SzwegoStatsFeed>
+}
+
 interface Supplier {
   id: number
   name: string
   album_id: string
-  szwego_parse_mode: 'images' | 'all'
+  szwego_parse_mode: SzwegoParseMode
   group_id: string
   tag_id: string
   default_category: string
@@ -195,6 +221,10 @@ export default function SupplierList({
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null)
   const [endDate, setEndDate] = useState('')
   const [overrideValue, setOverrideValue] = useState('') // Format: "type:id"
+  const [overrideMode, setOverrideMode] = useState<SzwegoParseMode>('images')
+  const [isStatsLoading, setIsStatsLoading] = useState(false)
+  const [statsResult, setStatsResult] = useState<SzwegoAlbumStats | null>(null)
+  const [statsError, setStatsError] = useState('')
 
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -479,12 +509,15 @@ export default function SupplierList({
 
     const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
     const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
-    const requiresFeedTag = selectedSupplier?.szwego_parse_mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
+    const mode = overrideMode || selectedSupplier?.szwego_parse_mode || 'images'
+    // Единая лента обязана идти по тегу: без него постобработка получает весь альбом.
+    // Видео-лента работает и целиком, тег в ней только сужает выбор.
+    const requiresFeedTag = mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
     if (requiresFeedTag && !overrideValue.startsWith('tag:')) {
       alert('Для единой ленты выберите включённый тег при запуске выгрузки.')
       return
     }
-    if (configuredTags.length > 0 && !overrideValue) {
+    if (mode !== 'video' && configuredTags.length > 0 && !overrideValue) {
       alert('Выберите включённый альбом или категорию для выгрузки.')
       return
     }
@@ -497,13 +530,31 @@ export default function SupplierList({
       if (type === 'tag') tag = id
       if (type === 'group') group = id
     }
+    if (mode === 'video' && group) {
+      alert('Для выгрузки видео выберите тег или оставьте выбор пустым: группы относятся только к альбомному источнику.')
+      return
+    }
 
-    const res = await startScrapingAction(selectedSupplierId, endDate, tag, group)
+    const res = await startScrapingAction(selectedSupplierId, endDate, tag, group, mode)
     if (res.success) {
       alert('Выгрузка запущена! Проверьте статус в разделе "Выгрузки".')
       setIsScrapingModalOpen(false)
     } else {
       alert(res.error)
+    }
+  }
+
+  const handleLoadSzwegoStats = async (tagId?: string) => {
+    if (!selectedSupplierId) return
+    setIsStatsLoading(true)
+    setStatsError('')
+    setStatsResult(null)
+    const res = await fetchSupplierSzwegoStatsAction(selectedSupplierId, tagId)
+    setIsStatsLoading(false)
+    if (res.success && res.data) {
+      setStatsResult(res.data as SzwegoAlbumStats)
+    } else {
+      setStatsError(res.error || 'Szwego не вернул статистику')
     }
   }
 
@@ -660,6 +711,9 @@ export default function SupplierList({
                   setSelectedSupplierId(s.id);
                   setIsScrapingModalOpen(true);
                   setOverrideValue(''); // Reset to default
+                  setOverrideMode(normalizeSzwegoParseMode(s.szwego_parse_mode));
+                  setStatsResult(null);
+                  setStatsError('');
                 }}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs text-white transition hover:bg-indigo-600"
               >
@@ -719,13 +773,14 @@ export default function SupplierList({
                       <select
                         name="szwego_parse_mode"
                         value={editingSupplier?.szwego_parse_mode || 'images'}
-                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, szwego_parse_mode: event.target.value as 'images' | 'all' })}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, szwego_parse_mode: normalizeSzwegoParseMode(event.target.value) })}
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm outline-none focus:border-emerald-500"
                       >
                         <option value="images">Альбомы / изображения (по умолчанию)</option>
                         <option value="all">全部 / единая лента</option>
+                        <option value="video">Только видео</option>
                       </select>
-                      <p className="mt-1 text-xs text-slate-500">Единая лента сохраняет текстовые публикации, одиночные фото и размерные сетки для постобработки.</p>
+                      <p className="mt-1 text-xs text-slate-500">Единая лента сохраняет текстовые публикации, одиночные фото и размерные сетки для постобработки. Режим «Только видео» выгружает видео-публикации альбома отдельной партией.</p>
                     </div>
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Avatar URL (опционально)</label>
@@ -1227,31 +1282,104 @@ export default function SupplierList({
               <p className="text-sm text-slate-400 mb-6">Выберите параметры выгрузки из альбома.</p>
 
               <div className="space-y-4">
+                {/* Источник Szwego: разовый выбор, по умолчанию — из карточки поставщика */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Источник Szwego</label>
+                  <select
+                    value={overrideMode}
+                    onChange={(e) => { setOverrideMode(normalizeSzwegoParseMode(e.target.value)); setStatsResult(null); setStatsError('') }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-indigo-500"
+                  >
+                    <option value="images">{SZWEGO_PARSE_MODE_LABELS.images}</option>
+                    <option value="all">{SZWEGO_PARSE_MODE_LABELS.all}</option>
+                    <option value="video">{SZWEGO_PARSE_MODE_LABELS.video}</option>
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">По умолчанию используется источник из карточки поставщика.</p>
+                </div>
+
                 {/* Unified Selector */}
                 {selectedSupplierId && (() => {
                   const selectedSupplier = suppliers.find(s => s.id === selectedSupplierId)
                   const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
-                  const requiresFeedTag = selectedSupplier?.szwego_parse_mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
-                  const enabledTags = configuredTags.filter((tag) => tag.enabled && (!requiresFeedTag || tag.type === 'tag'))
+                  const isVideoMode = overrideMode === 'video'
+                  const requiresFeedTag = overrideMode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
+                  const enabledTags = configuredTags.filter((tag) => tag.enabled && (isVideoMode || requiresFeedTag ? tag.type === 'tag' : true))
                   return (configuredTags.length > 0 || requiresFeedTag) ? (
                   <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-2">{requiresFeedTag ? 'Выберите включённый тег' : 'Выберите включённый альбом или категорию'}</label>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">
+                      {isVideoMode ? 'Тег видео (необязательно)' : requiresFeedTag ? 'Выберите включённый тег' : 'Выберите включённый альбом или категорию'}
+                    </label>
                     <select
                       value={overrideValue}
                       onChange={(e) => setOverrideValue(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-indigo-500"
                     >
-                      <option value="">{enabledTags.length ? 'Выберите…' : 'Нет включённых тегов'}</option>
+                      <option value="">{isVideoMode ? 'Все видео' : enabledTags.length ? 'Выберите…' : 'Нет включённых тегов'}</option>
                       {enabledTags.map(bt => (
                         <option key={`${bt.type}:${bt.value}`} value={`${bt.type}:${bt.value}`}>
                           {bt.type === 'tag' ? '🏷️ Тэг' : '📁 Груп.'} | {bt.label}
                         </option>
                       ))}
                     </select>
-                    {!enabledTags.length && <p className="mt-1 text-xs text-amber-300">Вернитесь в настройки поставщика и отметьте нужные строки.</p>}
+                    {!enabledTags.length && !isVideoMode && <p className="mt-1 text-xs text-amber-300">Вернитесь в настройки поставщика и отметьте нужные строки.</p>}
                   </div>
                   ) : null
                 })()}
+
+                <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-slate-300">Предпросмотр альбома</p>
+                      <p className="text-xs text-slate-500">Сколько постов даст каждый источник и сколько пройдёт пороги. Крупные страницы API: один запрос вместо десятков.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const tag = overrideValue.startsWith('tag:') ? overrideValue.split(':')[1] : undefined
+                        void handleLoadSzwegoStats(tag)
+                      }}
+                      disabled={isStatsLoading}
+                      className="shrink-0 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-xs text-white transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isStatsLoading ? 'animate-spin' : ''}`} />
+                      {isStatsLoading ? 'Считаю…' : 'Показать'}
+                    </button>
+                  </div>
+                  {statsError && <p className="mt-2 text-xs text-red-300">{statsError}</p>}
+                  {statsResult && (
+                    <div className="mt-3 space-y-2 text-xs text-slate-300">
+                      <p className="text-slate-400">
+                        {statsResult.shop?.name || 'Альбом'}: всего постов {statsResult.album_total_posts ?? '—'}
+                        {statsResult.shop?.totalItemCount ? ` (Szwego: ${statsResult.shop.totalItemCount})` : ''}
+                      </p>
+                      {(['images', 'all', 'video'] as const).map((modeKey) => {
+                        const feed = statsResult.modes?.[modeKey]
+                        if (!feed) return null
+                        return (
+                          <div key={modeKey} className="rounded-lg bg-slate-800/60 px-2.5 py-2">
+                            <span className="text-slate-200">{SZWEGO_PARSE_MODE_LABELS[modeKey]}</span>
+                            {feed.error ? (
+                              <span className="text-red-300"> — ошибка: {feed.error}</span>
+                            ) : (
+                              <>
+                                {' '}— пройдёт <span className="text-emerald-300">{feed.kept}</span> из {feed.posts}
+                                {feed.with_video ? ` · с видео ${feed.with_video}` : ''}
+                                {feed.skipped && Object.keys(feed.skipped).length > 0 && (
+                                  <span className="text-slate-500"> · отсев: {Object.entries(feed.skipped).map(([reason, count]) => `${reason} ${count}`).join(', ')}</span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {statsResult.modes?.video?.top_tags?.length ? (
+                        <p className="text-slate-500">
+                          Теги видео: {statsResult.modes.video.top_tags.slice(0, 6).map((tag) => `${tag.label} (${tag.count})`).join(', ')}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Остановиться на дате</label>

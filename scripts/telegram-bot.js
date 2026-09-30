@@ -285,7 +285,7 @@ bot.action(/period:(\d+):(.+)/, async (ctx) => {
   const endDate = periodToDate(period);
   await ctx.answerCbQuery('Запускаю выгрузку');
 
-  const started = await startScraping(supplierId, endDate, undefined, undefined, (result) => handleCompletedExport(ctx.chat.id, result));
+  const started = await startScraping(supplierId, endDate, undefined, undefined, undefined, (result) => handleCompletedExport(ctx.chat.id, result));
   return safeEditOrReply(
     ctx,
     `🚀 Выгрузка запущена\nПоставщик: ${started.supplierName}\nЗадача: #${started.taskId}\nПериод до: ${endDate || 'все время'}\n\nЯ пришлю кнопки действий, когда сбор завершится.`,
