@@ -88,6 +88,23 @@ SHOP_INFO_FIELDS = (
     "hasVideo", "isHasTag", "icon", "userType", "desc",
 )
 
+# Ответы Szwego, которые оператор должен видеть словами, а не кодом.
+SZWEGO_ERROR_HINTS = {
+    9: "Сессия Szwego истекла: обновите Cookie поставщика.",
+    1019: "Магазин поставщика закрыт или недоступен для просмотра (已临时打烊). Свяжитесь с поставщиком или проверьте доступ к магазину.",
+    2210013: "Szwego не подтвердил доступ к магазину: проверьте, что аккаунт с Cookie видит этот альбом.",
+    2210024: "Этот адрес Szwego принимает только POST-запрос.",
+    1001002: "Szwego отклонил недокументированный размер страницы.",
+}
+
+def _describe_api_error(data):
+    """Ошибка Szwego одной строкой: код, китайский текст и подсказка оператору."""
+    errcode = (data or {}).get("errcode")
+    errmsg = (data or {}).get("errmsg") or ""
+    base = f"Szwego вернул ошибку {errcode}: {errmsg}".strip()
+    hint = SZWEGO_ERROR_HINTS.get(errcode)
+    return f"{base}. {hint}" if hint else base
+
 def _moscow_today() -> date:
     return datetime.now(MOSCOW_TZ).date()
 
@@ -294,10 +311,14 @@ def fetch_page_resilient(session, headers, args, mode, timestamp, bulk_limit):
 
     Szwego изредка отвечает errcode 1001002 на крупную страницу. Повторяем тот
     же запрос один раз и только потом возвращаемся к штатному размеру страницы,
-    чтобы разовый сбой не превращал всю выгрузку в постраничную.
+    чтобы разовый сбой не превращал всю выгрузку в постраничную. Прочие ошибки
+    (истёкшая сессия, закрытый магазин) возвращаются как есть: повторять их
+    бессмысленно, а оператору нужен точный текст.
     """
     data = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, args.tag_id, args.group_id)
     if data is None or data.get("success") or not bulk_limit:
+        return data, bulk_limit
+    if data.get("errcode") != 1001002:
         return data, bulk_limit
 
     retry = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, args.tag_id, args.group_id)
@@ -532,7 +553,7 @@ def collect_feed_stats(session, headers, args, mode, progress_label):
             feed["error"] = "Szwego не ответил"
             break
         if not data.get("success"):
-            feed["error"] = data.get("errmsg") or f"errcode {data.get('errcode')}"
+            feed["error"] = _describe_api_error(data)
             break
 
         result = data.get("result") or {}
@@ -742,6 +763,9 @@ def main():
     shop_info = {}
     expected_total = None
     pinned_skipped = 0
+    newest_post = None
+    oldest_post = None
+    api_error = None
 
     csv_header = ["external_id", "name", "description", "price", "brand", "category", "subcategory", "gender", "photos"]
 
@@ -757,7 +781,9 @@ def main():
                 if data.get("errcode") == 9:
                     print("❌ ОШИБКА: Ваша сессия (Cookie) истекла. Пожалуйста, обновите Cookie в настройках поставщика в админке.")
                     sys.exit(1)
-                print("API Error:", data)
+                # Текст ошибки печатается один раз — в итоговом блоке, вместе с
+                # понятной причиной пустой выгрузки.
+                api_error = _describe_api_error(data)
                 break
 
             if not shop_info:
@@ -784,6 +810,13 @@ def main():
                     pinned_skipped += 1
                     continue
                 row, skip_reason, item_date = evaluate_item(item, args, session, headers, args.album_id, seen_photo_keys)
+                if item_date:
+                    # Границы периода нужны для понятной ошибки, когда фильтр по
+                    # дате отбрасывает весь альбом.
+                    if newest_post is None or item_date > newest_post:
+                        newest_post = item_date
+                    if oldest_post is None or item_date < oldest_post:
+                        oldest_post = item_date
                 if skip_reason:
                     skip_reasons[skip_reason] = skip_reasons.get(skip_reason, 0) + 1
                     continue
@@ -857,6 +890,9 @@ def main():
             "pinned_skipped": pinned_skipped,
             "limit": bulk_limit or "default",
             "shop": shop_info,
+            "skipped": skip_reasons,
+            "newest_post": newest_post.isoformat() if newest_post else None,
+            "oldest_post": oldest_post.isoformat() if oldest_post else None,
         }
         print("SZWEGO_SUMMARY:" + json.dumps(summary, ensure_ascii=False), flush=True)
         if pinned_skipped:
@@ -874,6 +910,33 @@ def main():
             print(f"Final: Saved {len(all_rows)} items to {args.output}")
         else:
             print("No items found.")
+
+    # Пустой результат — это провал выгрузки, а не успех с пустым файлом:
+    # админка и Telegram показывают оператору причину из stderr.
+    if not all_rows:
+        if api_error:
+            print(f"❌ {api_error}", file=sys.stderr)
+        elif skip_reasons.get("old_date") and parsed_end_date and newest_post:
+            print(
+                f"❌ Публикаций позже {args.end_date} нет: последняя публикация в альбоме — {newest_post.isoformat()}. "
+                f"Выберите «Все время» или более раннюю дату.",
+                file=sys.stderr,
+            )
+        elif skip_reasons.get("old_date") and parsed_end_date:
+            print(
+                f"❌ Публикаций позже {args.end_date} в альбоме нет. Выберите «Все время» или более раннюю дату.",
+                file=sys.stderr,
+            )
+        elif pinned_skipped and expected_total and pinned_skipped >= expected_total:
+            print("❌ В альбоме только закреплённые публикации. Включите их флагом --include_pinned.", file=sys.stderr)
+        else:
+            detail = ", ".join(f"{reason}: {count}" for reason, count in sorted(skip_reasons.items())) or "совпадений нет"
+            print(
+                f"❌ Под настройки поставщика не подошла ни одна публикация ({detail}). "
+                f"Проверьте пороги «мин. фото» и «мин. символов» или выберите другой источник.",
+                file=sys.stderr,
+            )
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
