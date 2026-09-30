@@ -19,12 +19,14 @@ import {
   approveMatches,
   approveMatchesByBand,
   clearBatchMatches,
+  countVideoMatches,
   listMatchAlternatives,
   listScopeWithoutCandidates,
   listVideoMatches,
   markMatchApplied,
   markMatchFailed,
   rejectMatches,
+  resetApprovedMatches,
   resetMatches,
   saveMatchRows,
   saveMatchScope,
@@ -157,7 +159,11 @@ export async function listVideoMatchesAction(input: {
   try {
     await requireAdmin()
     const preset = findVideoMatchPreset(input.presetKey)
-    const rows = await listVideoMatches({ ...input, batchId: preset.batchId })
+    const filters = { ...input, batchId: preset.batchId }
+    const [rows, total] = await Promise.all([
+      listVideoMatches(filters),
+      countVideoMatches(filters),
+    ])
     const alternatives = await listMatchAlternatives(preset.batchId, [...new Set(rows.map((row) => row.crm_product_id))])
     const grouped = new Map<string, typeof alternatives>()
     for (const row of alternatives) {
@@ -169,6 +175,7 @@ export async function listVideoMatchesAction(input: {
       success: true,
       data: {
         rows: rows.map((row) => ({ ...row, alternatives: grouped.get(row.crm_product_id) || [] })),
+        total,
       },
     }
   } catch (error: any) {
@@ -345,6 +352,18 @@ export async function resetVideoMatchesAction(ids: number[]): Promise<ActionResp
     return { success: true, data: { updated } }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось вернуть в ожидание' }
+  }
+}
+
+/** Откат массового апрува: все апрувнутые варианты партии возвращаются в ожидание. */
+export async function resetApprovedVideoMatchesAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findVideoMatchPreset(presetKey)
+    const updated = await resetApprovedMatches(preset.batchId)
+    return { success: true, data: { updated } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось сбросить апрув' }
   }
 }
 

@@ -12,6 +12,7 @@ import {
   listVideoMatchMissesAction,
   listVideoMatchesAction,
   rejectVideoMatchesAction,
+  resetApprovedVideoMatchesAction,
   resetVideoMatchesAction,
   type VideoMatchCursor,
 } from '@/actions/video-matches'
@@ -63,7 +64,7 @@ type Miss = {
 
 type Stats = {
   counts: {
-    total: number; pending: number; approved: number; applied: number; rejected: number; failed: number
+    total: number; pending: number; pendingAlternatives: number; approved: number; applied: number; rejected: number; failed: number
     exact: number; strong: number; probable: number; singleCandidate: number; products: number; withoutCandidates: number
   }
   scannedProducts: number
@@ -103,6 +104,8 @@ const BAND_STYLE: Record<string, string> = {
   weak: 'border-slate-600 bg-slate-800 text-slate-300',
 }
 
+const PER_PAGE_OPTIONS = [30, 60, 100, 200]
+
 export default function VideoMatchesApp() {
   const preset = VIDEO_MATCH_PRESETS[0]
   const [status, setStatus] = useState('pending')
@@ -111,6 +114,9 @@ export default function VideoMatchesApp() {
   const [onlySingleCandidate, setOnlySingleCandidate] = useState(false)
   const [stats, setStats] = useState<Stats | null>(null)
   const [rows, setRows] = useState<Row[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(60)
   const [misses, setMisses] = useState<Miss[]>([])
   const [showMisses, setShowMisses] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
@@ -134,19 +140,32 @@ export default function VideoMatchesApp() {
       status: status as any,
       bands: status === 'pending' ? bands : undefined,
       onlySingleCandidate: status === 'pending' ? onlySingleCandidate : false,
+      // В «Ждут решения» показываем только основной вариант, а в статусах-решениях —
+      // все строки: оператор мог апрувить не первый вариант товара.
+      onlyBest: status === 'pending' || status === 'all',
       search: search.trim() || undefined,
-      limit: 60,
+      limit: perPage,
+      offset: (page - 1) * perPage,
     })
-    if (result.success) setRows((result.data?.rows || []) as Row[])
-    else setError(result.error || 'Не удалось загрузить совпадения')
+    if (result.success) {
+      setRows((result.data?.rows || []) as Row[])
+      setTotal(Number(result.data?.total || 0))
+    } else {
+      setError(result.error || 'Не удалось загрузить совпадения')
+    }
     setLoading(false)
-  }, [preset.key, status, bands, onlySingleCandidate, search])
+  }, [preset.key, status, bands, onlySingleCandidate, search, page, perPage])
 
   const refresh = useCallback(async () => {
     await Promise.all([loadStats(), loadRows()])
   }, [loadStats, loadRows])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  // Смена фильтров возвращает на первую страницу: иначе оператор остаётся
+  // на несуществующем номере страницы и видит пустой список.
+  const bandsKey = bands.join(',')
+  useEffect(() => { setPage(1); setSelected(new Set()) }, [status, search, onlySingleCandidate, perPage, bandsKey])
 
   const loadMisses = useCallback(async () => {
     const result = await listVideoMatchMissesAction(preset.key, 60)
@@ -239,6 +258,16 @@ export default function VideoMatchesApp() {
     await refresh()
   }
 
+  const resetApproved = async () => {
+    setBusy('bulk')
+    setError('')
+    const result = await resetApprovedVideoMatchesAction(preset.key)
+    if (result.success) setMessage(`Возвращено в ожидание: ${result.data?.updated ?? 0}`)
+    else setError(result.error || 'Не удалось сбросить апрув')
+    setBusy('')
+    await refresh()
+  }
+
   const decide = async (ids: number[], action: 'approve' | 'reject' | 'reset') => {
     if (ids.length === 0) return
     setBusy('decide')
@@ -266,6 +295,11 @@ export default function VideoMatchesApp() {
 
   const counts = stats?.counts
   const allSelected = rows.length > 0 && rows.every((row) => selected.has(row.id))
+
+  // Сколько строк затронет массовый апрув при текущем наборе уровней.
+  const approxBulkCount = (['exact', 'strong', 'probable', 'weak'] as const)
+    .filter((band) => bands.includes(band))
+    .reduce((sum, band) => sum + Number((counts as any)?.[band] || 0), 0)
 
   const selectionSummary = useMemo(() => `${selected.size} выбрано`, [selected])
 
@@ -309,8 +343,12 @@ export default function VideoMatchesApp() {
       )}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Товаров в скоупе" value={stats?.scannedProducts ?? 0} hint={`вариантов: ${counts?.total ?? 0}`} />
-        <StatCard label="Ждут решения" value={counts?.pending ?? 0} hint={`точных: ${counts?.exact ?? 0} · спорных: ${(counts?.strong ?? 0) + (counts?.probable ?? 0)}`} />
+        <StatCard label="Товаров в скоупе" value={stats?.scannedProducts ?? 0} hint={`вариантов всего: ${counts?.total ?? 0}`} />
+        <StatCard
+          label="Ждут решения"
+          value={counts?.pending ?? 0}
+          hint={`точных: ${counts?.exact ?? 0} · спорных: ${(counts?.strong ?? 0) + (counts?.probable ?? 0)} · запасных вариантов: ${counts?.pendingAlternatives ?? 0}`}
+        />
         <StatCard label="Апрувнуто / привязано" value={`${counts?.approved ?? 0} / ${counts?.applied ?? 0}`} hint={counts?.failed ? `ошибок: ${counts.failed}` : 'ошибок нет'} />
         <StatCard label="Без совпадений" value={counts?.withoutCandidates ?? 0} hint={`альбомов с полями: ${stats?.albums ?? 0} из ${(stats?.albums ?? 0) + (stats?.albumsWithoutFields ?? 0)}`} />
       </div>
@@ -349,12 +387,64 @@ export default function VideoMatchesApp() {
         <span className="ml-auto text-xs text-slate-500">{selectionSummary}</span>
       </div>
 
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-400">
+        <span>
+          Показано {total === 0 ? 0 : (page - 1) * perPage + 1}–{Math.min(page * perPage, total)} из {total}
+        </span>
+        <label className="flex items-center gap-2">
+          На странице
+          <select
+            value={perPage}
+            onChange={(event) => setPerPage(Number(event.target.value))}
+            className="h-8 rounded-lg border border-slate-700 bg-slate-950 px-2 text-xs text-white"
+          >
+            {PER_PAGE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPage((value) => Math.max(1, value - 1))}
+            disabled={page <= 1 || loading}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          >
+            Назад
+          </button>
+          <span className="px-1">
+            стр. {page} из {Math.max(1, Math.ceil(total / perPage))}
+          </span>
+          <button
+            onClick={() => setPage((value) => value + 1)}
+            disabled={page >= Math.ceil(total / perPage) || loading}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+          >
+            Вперёд
+          </button>
+        </div>
+      </div>
+
       {status === 'pending' && (
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => void bulkApprove(false)} disabled={Boolean(busy) || bands.length === 0} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
-            <CheckCircle2 className="h-4 w-4" /> 3. Массово апрувить выбранные уровни
+          <button
+            onClick={() => {
+              const scope = bands.length === 0
+                ? 'уровни не выбраны'
+                : `уровни: ${bands.map((band) => VIDEO_MATCH_BAND_LABELS[band] || band).join(', ')}`
+              if (!window.confirm(`Апрувить основные варианты (${scope})? Затронуто товаров: ~${approxBulkCount}. Видео на сайт не уйдёт, пока не нажмёте «Загрузить апрувнутые».`)) return
+              void bulkApprove(false)
+            }}
+            disabled={Boolean(busy) || bands.length === 0}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-4 w-4" /> 3. Массово апрувить выбранные уровни ({approxBulkCount})
           </button>
-          <button onClick={() => void bulkApprove(true)} disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50">
+          <button
+            onClick={() => {
+              if (!window.confirm(`Апрувить только товары с единственным вариантом (${counts?.singleCandidate ?? 0})?`)) return
+              void bulkApprove(true)
+            }}
+            disabled={Boolean(busy)}
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-500/40 px-3 py-2 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50"
+          >
             Только однозначные ({counts?.singleCandidate ?? 0})
           </button>
           <button onClick={() => void decide([...selected], 'approve')} disabled={Boolean(busy) || selected.size === 0} className="rounded-lg border border-emerald-500/40 px-3 py-2 text-sm text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50">
@@ -366,6 +456,18 @@ export default function VideoMatchesApp() {
           <button onClick={() => void decide([...selected], 'reset')} disabled={Boolean(busy) || selected.size === 0} className="rounded-lg border border-slate-600 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50">
             <RotateCcw className="h-4 w-4" />
           </button>
+          {(counts?.approved ?? 0) > 0 && (
+            <button
+              onClick={() => {
+                if (!window.confirm(`Вернуть в ожидание все апрувнутые варианты (${counts?.approved ?? 0})? Уже привязанные к товарам видео останутся на месте.`)) return
+                void resetApproved()
+              }}
+              disabled={Boolean(busy)}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-2 text-sm text-amber-300 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" /> Сбросить апрув ({counts?.approved ?? 0})
+            </button>
+          )}
           <button
             onClick={() => { setShowMisses((value) => !value); if (!showMisses) void loadMisses() }}
             className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
@@ -389,8 +491,17 @@ export default function VideoMatchesApp() {
       {loading ? (
         <div className="flex items-center gap-2 py-12 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> Загрузка…</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-700 p-10 text-center text-sm text-slate-500">
-          Нет строк под текущий фильтр. Если раздел пустой — нажмите «Собрать совпадения».
+        <div className="space-y-2 rounded-xl border border-dashed border-slate-700 p-10 text-center text-sm text-slate-500">
+          <p>Под текущий фильтр строк нет.</p>
+          {status === 'pending' && (counts?.approved ?? 0) > 0 && (
+            <p className="text-slate-400">
+              Основные варианты уже апрувнуты ({(counts?.approved ?? 0).toLocaleString('ru-RU')}) — включите фильтр «Апрувнуты»
+              или нажмите «Сбросить апрув», чтобы вернуть их в ожидание.
+            </p>
+          )}
+          {status === 'pending' && (counts?.pending ?? 0) === 0 && (counts?.total ?? 0) === 0 && (
+            <p className="text-slate-400">Совпадений ещё нет — нажмите «Собрать совпадения».</p>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

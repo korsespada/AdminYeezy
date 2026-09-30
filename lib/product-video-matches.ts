@@ -36,6 +36,7 @@ export interface VideoMatchRecord {
 export interface VideoMatchCounts {
   total: number
   pending: number
+  pendingAlternatives: number
   approved: number
   applied: number
   rejected: number
@@ -154,12 +155,14 @@ export async function saveMatchScope(batchId: string, entries: Array<{
 
 export async function videoMatchCounts(batchId: string): Promise<VideoMatchCounts> {
   const result = await scrapingQuery<{
-    total: string; pending: string; approved: string; applied: string; rejected: string; failed: string
-    exact: string; strong: string; probable: string; single_candidate: string; products: string
+    total: string; pending: string; pending_alternatives: string; approved: string; applied: string
+    rejected: string; failed: string; exact: string; strong: string; probable: string
+    single_candidate: string; products: string
   }>(
     `SELECT
        COUNT(*)::text AS total,
-       COUNT(*) FILTER (WHERE status = 'pending')::text AS pending,
+       COUNT(*) FILTER (WHERE status = 'pending' AND rank = 1)::text AS pending,
+       COUNT(*) FILTER (WHERE status = 'pending' AND rank > 1)::text AS pending_alternatives,
        COUNT(*) FILTER (WHERE status = 'approved')::text AS approved,
        COUNT(*) FILTER (WHERE status = 'applied')::text AS applied,
        COUNT(*) FILTER (WHERE status = 'rejected')::text AS rejected,
@@ -182,6 +185,7 @@ export async function videoMatchCounts(batchId: string): Promise<VideoMatchCount
   return {
     total: number(row?.total),
     pending: number(row?.pending),
+    pendingAlternatives: number(row?.pending_alternatives),
     approved: number(row?.approved),
     applied: number(row?.applied),
     rejected: number(row?.rejected),
@@ -219,7 +223,7 @@ export async function listScopeWithoutCandidates(batchId: string, limit = 50) {
   return result.rows
 }
 
-export async function listVideoMatches(options: {
+export interface VideoMatchListFilters {
   batchId: string
   status?: VideoMatchStatus | 'all'
   bands?: string[]
@@ -227,9 +231,10 @@ export async function listVideoMatches(options: {
   onlySingleCandidate?: boolean
   search?: string
   category?: string
-  limit?: number
-  offset?: number
-}) {
+}
+
+/** Условия отбора одинаковы для страницы списка и для счётчика всего найденного. */
+function listConditions(options: VideoMatchListFilters) {
   const conditions = ['source_batch_id = $1']
   const values: any[] = [options.batchId]
   const status = options.status || 'pending'
@@ -252,6 +257,20 @@ export async function listVideoMatches(options: {
     values.push(`%${search}%`)
     conditions.push(`(crm_name ILIKE $${values.length} OR crm_slug ILIKE $${values.length} OR source_external_id ILIKE $${values.length})`)
   }
+  return { conditions, values }
+}
+
+export async function countVideoMatches(options: VideoMatchListFilters) {
+  const { conditions, values } = listConditions(options)
+  const result = await scrapingQuery<{ total: string }>(
+    `SELECT COUNT(*)::text AS total FROM product_video_matches WHERE ${conditions.join(' AND ')}`,
+    values,
+  )
+  return Number(result.rows[0]?.total || 0)
+}
+
+export async function listVideoMatches(options: VideoMatchListFilters & { limit?: number; offset?: number }) {
+  const { conditions, values } = listConditions(options)
   const limit = Math.min(Math.max(Number(options.limit) || 50, 1), 200)
   const offset = Math.max(Number(options.offset) || 0, 0)
   values.push(limit, offset)
@@ -334,6 +353,17 @@ export async function approveMatchesByBand(batchId: string, bands: string[], onl
        AND confidence = ANY($2::text[])
        ${onlySingleCandidate ? 'AND candidates_total = 1' : ''}`,
     [batchId, bands],
+  )
+  return result.rowCount || 0
+}
+
+/** Возвращает в ожидание все апрувнутые варианты партии — откат массового апрува. */
+export async function resetApprovedMatches(batchId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_video_matches
+     SET status = 'pending', decided_at = NULL, updated_at = NOW()
+     WHERE source_batch_id = $1 AND status = 'approved'`,
+    [batchId],
   )
   return result.rowCount || 0
 }
