@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Film, ImageOff, Link2, Loader2, PlayCircle, RefreshCw, RotateCcw, Search, Upload, XCircle } from 'lucide-react'
 import {
-  applyApprovedVideoMatchesAction,
   approveVideoMatchesAction,
   attachVideoMatchSupplierChunkAction,
   buildVideoMatchesChunkAction,
@@ -15,6 +14,8 @@ import {
   resetApprovedVideoMatchesAction,
   resetVideoMatchesAction,
   retryFailedVideoMatchesAction,
+  startVideoMatchApplyAction,
+  stopVideoMatchApplyAction,
   type VideoMatchCursor,
 } from '@/actions/video-matches'
 import { VIDEO_MATCH_BAND_LABELS, VIDEO_MATCH_PRESETS } from '@/lib/video-match-presets'
@@ -68,6 +69,16 @@ type Stats = {
     total: number; pending: number; pendingAlternatives: number; approved: number; applied: number; rejected: number; failed: number
     exact: number; strong: number; probable: number; singleCandidate: number; products: number; withoutCandidates: number
   }
+  run: {
+    status: string
+    batch_size: number
+    applied: number
+    failed: number
+    heartbeat_at: string | null
+    finished_at: string | null
+    last_error: string | null
+  } | null
+  runActive: boolean
   scannedProducts: number
   albums: number
   albumsWithoutFields: number
@@ -201,6 +212,20 @@ export default function VideoMatchesApp() {
     restoreScroll(snapshot)
   }, [rows])
 
+  // Пока фоновая заливка идёт, прогресс подтягивается сам: счётчики каждые 5 секунд,
+  // список — реже, чтобы не мешать оператору листать очередь.
+  const runActive = Boolean(stats?.runActive)
+  useEffect(() => {
+    if (!runActive) return
+    let tick = 0
+    const timer = setInterval(() => {
+      tick += 1
+      void loadStats()
+      if (tick % 3 === 0) void loadRows({ silent: true })
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [runActive, loadStats, loadRows])
+
   // Смена фильтров возвращает на первую страницу: иначе оператор остаётся
   // на несуществующем номере страницы и видит пустой список.
   const bandsKey = bands.join(',')
@@ -270,22 +295,26 @@ export default function VideoMatchesApp() {
     }
   }).catch((cause: any) => setError(cause?.message || 'Ошибка закрепления поставщика'))
 
-  const applyApproved = () => runLoop('apply', async () => {
-    let applied = 0
-    let failed = 0
-    for (;;) {
-      const result = await applyApprovedVideoMatchesAction(preset.key, applyBatchSize)
-      if (!result.success) throw new Error(result.error || 'Ошибка загрузки видео')
-      const data = result.data
-      applied += Number(data.applied || 0)
-      failed += Number(data.failed || 0)
-      setProgress(`Видео в S3 и в карточках: ${applied}${failed ? `, ошибок ${failed}` : ''}`)
-      if (!data.processed) {
-        setMessage(`Загрузка завершена: привязано ${applied}${failed ? `, ошибок ${failed}` : ''}`)
-        return { done: true, note: `Готово: привязано ${applied}` }
-      }
-    }
-  }).catch((cause: any) => setError(cause?.message || 'Ошибка загрузки видео'))
+  const applyApproved = async () => {
+    setBusy('apply')
+    setError('')
+    setMessage('')
+    const result = await startVideoMatchApplyAction(preset.key, applyBatchSize)
+    if (result.success) setMessage('Заливка запущена в фоне: вкладку можно закрыть')
+    else setError(result.error || 'Не удалось запустить заливку')
+    setBusy('')
+    await loadStats()
+  }
+
+  const stopApply = async () => {
+    setBusy('apply')
+    setError('')
+    const result = await stopVideoMatchApplyAction(preset.key)
+    if (result.success) setMessage('Остановка запрошена — цикл завершит текущую порцию')
+    else setError(result.error || 'Не удалось остановить заливку')
+    setBusy('')
+    await loadStats()
+  }
 
   const retryFailed = async () => {
     setBusy('bulk')
@@ -378,10 +407,17 @@ export default function VideoMatchesApp() {
             {busy === 'build' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             2. Собрать совпадения
           </button>
-          <button onClick={applyApproved} disabled={Boolean(busy) || !counts?.approved} className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 px-3 py-2 text-sm font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-50">
-            {busy === 'apply' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            4. Загрузить апрувнутые ({counts?.approved ?? 0})
-          </button>
+          {runActive ? (
+            <button onClick={() => void stopApply()} disabled={busy === 'apply'} className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/10 disabled:opacity-50">
+              {busy === 'apply' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+              Остановить заливку
+            </button>
+          ) : (
+            <button onClick={() => void applyApproved()} disabled={Boolean(busy) || !counts?.approved} className="inline-flex items-center gap-2 rounded-lg border border-sky-500/40 px-3 py-2 text-sm font-semibold text-sky-300 hover:bg-sky-500/10 disabled:opacity-50">
+              {busy === 'apply' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              4. Загрузить апрувнутые ({counts?.approved ?? 0})
+            </button>
+          )}
           <label className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-400">
             параллельно
             <select
@@ -413,8 +449,25 @@ export default function VideoMatchesApp() {
         </div>
       </div>
 
-      {(progress || message || error) && (
+      {(progress || message || error || stats?.run) && (
         <div className="space-y-1 text-xs">
+          {runActive && stats?.run && (
+            <p className="text-sky-300">
+              Фоновая заливка идёт: привязано за запуск {stats.run.applied}
+              {stats.run.failed ? `, ошибок ${stats.run.failed}` : ''} · параллельно {stats.run.batch_size}
+              {stats.run.heartbeat_at ? ` · отклик ${Math.max(0, Math.round((Date.now() - new Date(stats.run.heartbeat_at).getTime()) / 1000))} с назад` : ''}
+              {' '}— вкладку можно закрыть, процесс идёт на сервере
+            </p>
+          )}
+          {!runActive && stats?.run?.status === 'finished' && stats.run.applied > 0 && (
+            <p className="text-emerald-300">Последняя заливка завершена: привязано {stats.run.applied}{stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}</p>
+          )}
+          {!runActive && stats?.run?.status === 'stopped' && (
+            <p className="text-amber-300">Заливка остановлена оператором: привязано {stats.run.applied}{stats.run.failed ? `, ошибок ${stats.run.failed}` : ''}</p>
+          )}
+          {!runActive && stats?.run?.status === 'interrupted' && (
+            <p className="text-rose-300">Заливка прервана сервером: {stats.run.last_error || 'неизвестная причина'}. Нажмите «Загрузить апрувнутые», чтобы продолжить.</p>
+          )}
           {progress && <p className="text-slate-400">{progress}</p>}
           {message && <p className="text-emerald-300">{message}</p>}
           {error && <p className="text-rose-300">{error}</p>}

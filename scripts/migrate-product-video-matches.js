@@ -88,6 +88,22 @@ async function migrate() {
       CREATE INDEX IF NOT EXISTS product_video_match_scope_candidates_idx
       ON product_video_match_scope(source_batch_id, candidates)
     `)
+    // Состояние фоновой заливки видео: одна строка на партию, по ней UI понимает,
+    // идёт ли процесс, и видит прогресс без открытой вкладки.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS product_video_match_runs (
+        source_batch_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        batch_size INTEGER NOT NULL DEFAULT 2,
+        applied INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        started_at TIMESTAMPTZ,
+        heartbeat_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        last_error TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
     await client.query('COMMIT')
     console.log('Product video matches migration complete')
   } catch (error) {

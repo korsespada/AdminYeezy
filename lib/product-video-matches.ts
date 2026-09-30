@@ -390,6 +390,89 @@ export async function retryFailedMatches(batchId: string) {
   return result.rowCount || 0
 }
 
+export interface MatchRun {
+  source_batch_id: string
+  status: 'idle' | 'running' | 'stopped' | 'finished' | 'interrupted'
+  batch_size: number
+  applied: number
+  failed: number
+  started_at: string | null
+  heartbeat_at: string | null
+  finished_at: string | null
+  last_error: string | null
+}
+
+/** Отклик старше этого срока означает, что фоновый цикл умер вместе с процессом. */
+export const MATCH_RUN_STALE_SECONDS = 90
+
+export async function getMatchRun(batchId: string) {
+  const result = await scrapingQuery<MatchRun>(
+    `SELECT source_batch_id, status, batch_size, applied, failed, started_at, heartbeat_at, finished_at, last_error
+     FROM product_video_match_runs WHERE source_batch_id = $1`,
+    [batchId],
+  )
+  return result.rows[0] || null
+}
+
+export async function isMatchRunActive(batchId: string) {
+  const result = await scrapingQuery<{ active: boolean }>(
+    `SELECT (status = 'running' AND heartbeat_at > NOW() - ($2 || ' seconds')::interval) AS active
+     FROM product_video_match_runs WHERE source_batch_id = $1`,
+    [batchId, String(MATCH_RUN_STALE_SECONDS)],
+  )
+  return Boolean(result.rows[0]?.active)
+}
+
+export async function startMatchRun(batchId: string, batchSize: number) {
+  await scrapingQuery(
+    `INSERT INTO product_video_match_runs (source_batch_id, status, batch_size, applied, failed, started_at, heartbeat_at, finished_at, last_error, updated_at)
+     VALUES ($1, 'running', $2, 0, 0, NOW(), NOW(), NULL, NULL, NOW())
+     ON CONFLICT (source_batch_id) DO UPDATE SET
+       status = 'running',
+       batch_size = EXCLUDED.batch_size,
+       applied = 0,
+       failed = 0,
+       started_at = NOW(),
+       heartbeat_at = NOW(),
+       finished_at = NULL,
+       last_error = NULL,
+       updated_at = NOW()`,
+    [batchId, Math.min(Math.max(Number(batchSize) || 2, 1), 6)],
+  )
+}
+
+export async function stopMatchRun(batchId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_video_match_runs
+     SET status = 'stopped', finished_at = NOW(), updated_at = NOW()
+     WHERE source_batch_id = $1 AND status = 'running'`,
+    [batchId],
+  )
+  return result.rowCount || 0
+}
+
+/** Продление аренды: цикл подтверждает, что жив, и накапливает счётчики. */
+export async function touchMatchRun(batchId: string, update: {
+  appliedDelta?: number
+  failedDelta?: number
+  status?: MatchRun['status']
+  error?: string | null
+} = {}) {
+  const finished = update.status && update.status !== 'running'
+  await scrapingQuery(
+    `UPDATE product_video_match_runs
+     SET heartbeat_at = NOW(),
+         applied = applied + $2,
+         failed = failed + $3,
+         status = COALESCE($4, status),
+         last_error = COALESCE($5, last_error),
+         finished_at = CASE WHEN $6 THEN NOW() ELSE finished_at END,
+         updated_at = NOW()
+     WHERE source_batch_id = $1`,
+    [batchId, Number(update.appliedDelta || 0), Number(update.failedDelta || 0), update.status || null, update.error ?? null, Boolean(finished)],
+  )
+}
+
 export async function selectApprovedForApply(batchId: string, limit: number) {
   const result = await scrapingQuery<VideoMatchRecord>(
     `SELECT ${SELECT_COLUMNS} FROM product_video_matches

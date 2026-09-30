@@ -10,10 +10,11 @@ const mocks = vi.hoisted(() => ({
   reject: vi.fn(),
   reset: vi.fn(),
   misses: vi.fn(),
+  startApply: vi.fn(),
+  stopApply: vi.fn(),
 }))
 
 vi.mock('@/actions/video-matches', () => ({
-  applyApprovedVideoMatchesAction: vi.fn(),
   approveVideoMatchesAction: mocks.approve,
   attachVideoMatchSupplierChunkAction: vi.fn(),
   buildVideoMatchesChunkAction: vi.fn(),
@@ -24,6 +25,9 @@ vi.mock('@/actions/video-matches', () => ({
   rejectVideoMatchesAction: mocks.reject,
   resetApprovedVideoMatchesAction: vi.fn(),
   resetVideoMatchesAction: mocks.reset,
+  retryFailedVideoMatchesAction: vi.fn(),
+  startVideoMatchApplyAction: mocks.startApply,
+  stopVideoMatchApplyAction: mocks.stopApply,
 }))
 
 const row = (id: number, name: string) => ({
@@ -58,6 +62,8 @@ const stats = {
     total: 2, pending: 2, pendingAlternatives: 4, approved: 0, applied: 0, rejected: 0, failed: 0,
     exact: 2, strong: 0, probable: 0, singleCandidate: 0, products: 2, withoutCandidates: 0,
   },
+  run: null,
+  runActive: false,
   scannedProducts: 2,
   albums: 10,
   albumsWithoutFields: 1,
@@ -70,6 +76,42 @@ describe('VideoMatchesApp', () => {
     mocks.stats.mockResolvedValue({ success: true, data: stats })
     mocks.list.mockResolvedValue({ success: true, data: { rows: [row(1, 'Kelly 25'), row(2, 'Birkin 30')], total: 2 } })
     mocks.approve.mockResolvedValue({ success: true, data: { updated: 1 } })
+    mocks.startApply.mockResolvedValue({ success: true, data: { started: true } })
+    mocks.stopApply.mockResolvedValue({ success: true, data: { stopped: 1 } })
+  })
+
+  it('запускает заливку на сервере, а не циклом во вкладке', async () => {
+    const user = userEvent.setup()
+    mocks.stats.mockResolvedValue({
+      success: true,
+      data: { ...stats, counts: { ...stats.counts, approved: 5 } },
+    })
+    render(<VideoMatchesApp />)
+
+    await user.click(await screen.findByRole('button', { name: /Загрузить апрувнутые \(5\)/ }))
+
+    await waitFor(() => expect(mocks.startApply).toHaveBeenCalledWith('hermes', 2))
+    expect(await screen.findByText(/Заливка запущена в фоне/)).toBeInTheDocument()
+  })
+
+  it('показывает прогресс фоновой заливки и умеет её остановить', async () => {
+    const user = userEvent.setup()
+    mocks.stats.mockResolvedValue({
+      success: true,
+      data: {
+        ...stats,
+        counts: { ...stats.counts, approved: 200, applied: 12 },
+        runActive: true,
+        run: { status: 'running', batch_size: 4, applied: 12, failed: 1, heartbeat_at: new Date().toISOString(), finished_at: null, last_error: null },
+      },
+    })
+    render(<VideoMatchesApp />)
+
+    expect(await screen.findByText(/Фоновая заливка идёт: привязано за запуск 12/)).toBeInTheDocument()
+    const stop = await screen.findByRole('button', { name: /Остановить заливку/ })
+    await user.click(stop)
+
+    await waitFor(() => expect(mocks.stopApply).toHaveBeenCalledWith('hermes'))
   })
 
   it('после одиночного апрува список не перезагружается и строки остаются на месте', async () => {

@@ -1,5 +1,6 @@
 'use server'
 
+import { after } from 'next/server'
 import { requireAdmin } from '@/lib/admin-session'
 import { scrapingQuery } from '@/lib/db'
 import {
@@ -7,6 +8,7 @@ import {
   listRailsAdminProducts,
   patchRailsAdminProduct,
 } from '@/lib/rails-admin'
+import { runApplyLoop } from '@/lib/video-match-apply'
 import {
   buildAlbumIndex,
   buildMatchRows,
@@ -20,18 +22,20 @@ import {
   approveMatchesByBand,
   clearBatchMatches,
   countVideoMatches,
+  getMatchRun,
+  isMatchRunActive,
   listMatchAlternatives,
   listScopeWithoutCandidates,
   listVideoMatches,
-  markMatchApplied,
-  markMatchFailed,
   rejectMatches,
   resetApprovedMatches,
   resetMatches,
   retryFailedMatches,
   saveMatchRows,
   saveMatchScope,
-  selectApprovedForApply,
+  startMatchRun,
+  stopMatchRun,
+  touchMatchRun,
   videoMatchCounts,
   type VideoMatchStatus,
 } from '@/lib/product-video-matches'
@@ -130,10 +134,27 @@ export async function getVideoMatchStatsAction(presetKey: string): Promise<Actio
       `SELECT COUNT(*)::text AS products FROM product_video_match_scope WHERE source_batch_id = $1`,
       [preset.batchId],
     )
+    let run = await getMatchRun(preset.batchId)
+
+    // Сторож: контейнер перезапускался во время заливки — цикл умер, но строки
+    // остались апрувнутыми. Поднимаем его заново, восстановление идемпотентно.
+    if (run?.status === 'running' && !(await isMatchRunActive(preset.batchId)) && counts.approved > 0) {
+      await touchMatchRun(preset.batchId, {})
+      after(() => {
+        runApplyLoop(preset.batchId).catch(async (error) => {
+          console.error('Video match apply resume failed', error)
+          await touchMatchRun(preset.batchId, { status: 'interrupted', error: String(error?.message || error).slice(0, 500) })
+        })
+      })
+      run = await getMatchRun(preset.batchId)
+    }
+
     return {
       success: true,
       data: {
         counts,
+        run,
+        runActive: run?.status === 'running' ? await isMatchRunActive(preset.batchId) : false,
         scannedProducts: Number(scope.rows[0]?.products || 0),
         albums: index.albums.length,
         albumsWithoutFields: index.withoutFields,
@@ -409,40 +430,36 @@ export async function clearVideoMatchesAction(presetKey: string): Promise<Action
 }
 
 /**
- * Один чанк применения: видео уезжает в S3 и прикрепляется к товару каталога.
- * Повторный запуск безопасен: S3-ключ детерминирован по ссылке источника.
+ * Запуск фоновой заливки: цикл живёт в процессе сервера, поэтому вкладку можно
+ * закрыть или перезагрузить — прогресс сохраняется в product_video_match_runs.
  */
-export async function applyApprovedVideoMatchesAction(presetKey: string, limit = 2): Promise<ActionResponse> {
+export async function startVideoMatchApplyAction(presetKey: string, batchSize = 2): Promise<ActionResponse> {
   try {
     await requireAdmin()
     const preset = findVideoMatchPreset(presetKey)
-    const rows = await selectApprovedForApply(preset.batchId, limit)
-    if (rows.length === 0) return { success: true, data: { processed: 0, applied: 0, failed: 0 } }
-
-    const workflow = await import('../scripts/batch-workflow')
-
-    let applied = 0
-    let failed = 0
-    await Promise.all(rows.map(async (row) => {
-      try {
-        const { videoKey, posterKey } = workflow.videoStorageKeys(row.video_source_url)
-        const hosted = await workflow.uploadVideoIfNeeded(row.video_source_url, videoKey, posterKey)
-        if (!hosted?.url) throw new Error('S3 не вернул ссылку на видео')
-        await patchRailsAdminProduct(row.crm_product_id, {
-          videoUrl: hosted.url,
-          videoPosterUrl: hosted.posterUrl || null,
-        })
-        await markMatchApplied(row.id, hosted.url, hosted.posterUrl || null)
-        applied += 1
-      } catch (error: any) {
-        failed += 1
-        await markMatchFailed(row.id, error?.message || 'ошибка применения')
-      }
-    }))
-
-    return { success: true, data: { processed: rows.length, applied, failed } }
+    if (await isMatchRunActive(preset.batchId)) {
+      return { success: false, error: 'Заливка уже идёт' }
+    }
+    await startMatchRun(preset.batchId, batchSize)
+    after(() => {
+      runApplyLoop(preset.batchId).catch(async (error) => {
+        console.error('Video match apply loop failed', error)
+        await touchMatchRun(preset.batchId, { status: 'interrupted', error: String(error?.message || error).slice(0, 500) })
+      })
+    })
+    return { success: true, data: { started: true } }
   } catch (error: any) {
-    console.error('Apply approved video matches error:', error)
-    return { success: false, error: error.message || 'Не удалось применить видео' }
+    return { success: false, error: error.message || 'Не удалось запустить заливку' }
+  }
+}
+
+export async function stopVideoMatchApplyAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findVideoMatchPreset(presetKey)
+    const stopped = await stopMatchRun(preset.batchId)
+    return { success: true, data: { stopped } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось остановить заливку' }
   }
 }
