@@ -56,6 +56,12 @@ interface ProductFormProps {
   onOpenProduct?: (productId: string) => void
   chromoffListing?: RailsChromoffListing | null
   chromoffCategories?: RailsChromoffCategory[]
+  /**
+   * Создание товара только для Chromoff: после создания общего товара форма
+   * создаёт Chromoff-листинг в выбранном подразделе. Секция Chromoff в этом
+   * режиме показывается и для нового товара.
+   */
+  onCreateChromoffListing?: (input: { productId: string; chromoffCategoryId: string; published: boolean }) => Promise<{ success: boolean; message?: string }>
 }
 
 function formatPublishedAt(value: unknown) {
@@ -82,6 +88,7 @@ export default function ProductForm({
   supplierOptions = EMPTY_SUPPLIER_OPTIONS,
   chromoffListing = null,
   chromoffCategories = [],
+  onCreateChromoffListing,
 }: ProductFormProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
@@ -138,6 +145,7 @@ export default function ProductForm({
   const videoRehostTokenRef = useRef(0)
   const [chromoffCategoryId, setChromoffCategoryId] = useState('')
   const [chromoffPublished, setChromoffPublished] = useState(false)
+  const [chromoffOnly, setChromoffOnly] = useState(false)
   const [chromoffLegacySlug, setChromoffLegacySlug] = useState('')
   const [chromoffH1, setChromoffH1] = useState('')
   const [chromoffSeoTitle, setChromoffSeoTitle] = useState('')
@@ -395,6 +403,7 @@ export default function ProductForm({
         setVideoPosterUrl(product.video_poster_url || '')
         setChromoffCategoryId(chromoffListing?.chromoff_category?.id || '')
         setChromoffPublished(Boolean(chromoffListing?.published ?? chromoffListing?.chromoff_published))
+        setChromoffOnly(Boolean(chromoffListing?.chromoff_only ?? product.chromoff_only))
         setChromoffLegacySlug(chromoffListing?.legacy_slug || product.slug || '')
         setChromoffH1(chromoffListing?.h1 || product.h1 || product.name || '')
         setChromoffSeoTitle(chromoffListing?.seo_title || product.seo_title || product.name || '')
@@ -462,7 +471,10 @@ export default function ProductForm({
         setVideoUrl('')
         setVideoPosterUrl('')
         setChromoffCategoryId('')
-        setChromoffPublished(false)
+        // Новый товар из раздела Chromoff создаётся сразу опубликованным и
+        // «только для Chromoff».
+        setChromoffPublished(Boolean(onCreateChromoffListing))
+        setChromoffOnly(Boolean(onCreateChromoffListing))
         setChromoffLegacySlug('')
         setChromoffH1('')
         setChromoffSeoTitle('')
@@ -481,7 +493,7 @@ export default function ProductForm({
       initializedFormKeyRef.current = null
       formDirtyRef.current = false
     }
-  }, [isOpen, product, brands, categories, chromoffListing, productSupplierOptions])
+  }, [isOpen, product, brands, categories, chromoffListing, productSupplierOptions, onCreateChromoffListing])
 
   const handleAddUrls = () => {
     const urls = photoUrlsToAdd
@@ -632,6 +644,7 @@ export default function ProductForm({
     formData.append('fulfillment_mode', 'made_to_order')
     formData.append('availability_confidence', availabilityConfidence || 'unknown')
     formData.append('indexing_status', indexingStatus || 'indexable')
+    formData.append('chromoff_only', chromoffOnly ? 'true' : 'false')
     formData.append('production_min_days', productionMinDays)
     formData.append('production_max_days', productionMaxDays)
     formData.append('office_delivery_min_days', officeDeliveryMinDays)
@@ -700,6 +713,7 @@ export default function ProductForm({
             ? chromoffCategories?.find((c) => c.id === chromoffCategoryId) || chromoffListing.chromoff_category
             : null,
           chromoff_category_status: 'manual',
+          chromoff_only: chromoffOnly,
           legacy_slug: chromoffLegacySlug.trim() || chromoffListing.legacy_slug,
           h1: chromoffH1.trim(),
           seo_title: chromoffSeoTitle.trim(),
@@ -730,6 +744,7 @@ export default function ProductForm({
           fulfillment_mode: 'made_to_order',
           availability_confidence: availabilityConfidence,
           indexing_status: indexingStatus,
+          chromoff_only: chromoffOnly,
           production_min_days: productionMinDays ? Number(productionMinDays) : null,
           production_max_days: productionMaxDays ? Number(productionMaxDays) : null,
           office_delivery_min_days: officeDeliveryMinDays ? Number(officeDeliveryMinDays) : null,
@@ -796,8 +811,20 @@ export default function ProductForm({
         const result = await createProductAction(formData)
 
         if (result.success) {
-          onClose()
           const savedProductId = String(result.data?.id || '')
+          // Товар из раздела Chromoff создаётся вместе со своим листингом:
+          // без подраздела витрина не покажет карточку.
+          if (onCreateChromoffListing && savedProductId) {
+            const listingResult = await onCreateChromoffListing({
+              productId: savedProductId,
+              chromoffCategoryId,
+              published: chromoffPublished,
+            })
+            if (!listingResult.success) {
+              window.alert(listingResult.message || 'Товар создан, но добавить его в Chromoff не удалось')
+            }
+          }
+          onClose()
           if (savedProductId) queueBackgroundMediaUpload(savedProductId, pendingPhotosSnapshot, pendingVideoSnapshot, videoUrlSnapshot, videoPosterUrlSnapshot)
           // Только при создании нового товара нужен рефреш (чтобы новый появился в списке)
           router.refresh()
@@ -1378,7 +1405,7 @@ export default function ProductForm({
               </div>
             </details>
 
-            {chromoffListing && (
+            {(chromoffListing || onCreateChromoffListing) && (
               <section className="space-y-3 rounded-lg border border-violet-500/30 bg-violet-500/5 p-3">
                 <div>
                   <h3 className="text-sm font-semibold text-violet-100">Chromoff</h3>
@@ -1392,6 +1419,7 @@ export default function ProductForm({
                       onChange={(event) => setChromoffCategoryId(event.target.value)}
                       className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500"
                       disabled={isPending}
+                      required={Boolean(onCreateChromoffListing) && !chromoffListing}
                     >
                       <option value="">Без категории</option>
                       {chromoffCategories.map((item) => (
@@ -1412,24 +1440,41 @@ export default function ProductForm({
                     </select>
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-slate-300">Chromoff slug</label>
-                  <input value={chromoffLegacySlug} onChange={(event) => setChromoffLegacySlug(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-medium text-slate-300">Chromoff H1</label>
-                    <input value={chromoffH1} onChange={(event) => setChromoffH1(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-xs font-medium text-slate-300">Chromoff SEO title</label>
-                    <input value={chromoffSeoTitle} onChange={(event) => setChromoffSeoTitle(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-slate-300">Chromoff SEO description</label>
-                  <textarea value={chromoffSeoDescription} onChange={(event) => setChromoffSeoDescription(event.target.value)} rows={3} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
-                </div>
+                <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-500/30 bg-slate-950/50 p-3">
+                  <input
+                    type="checkbox"
+                    checked={chromoffOnly}
+                    onChange={(event) => setChromoffOnly(event.target.checked)}
+                    disabled={isPending}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-violet-500"
+                  />
+                  <span>
+                    <span className="block text-xs font-medium text-slate-200">Показывать только в Chromoff</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-400">Товар не показывается в каталоге, поиске, sitemap и фидах yeezyunique и остаётся только на chromoff.store.</span>
+                  </span>
+                </label>
+                {chromoffListing && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-slate-300">Chromoff slug</label>
+                      <input value={chromoffLegacySlug} onChange={(event) => setChromoffLegacySlug(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="block text-xs font-medium text-slate-300">Chromoff H1</label>
+                        <input value={chromoffH1} onChange={(event) => setChromoffH1(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="block text-xs font-medium text-slate-300">Chromoff SEO title</label>
+                        <input value={chromoffSeoTitle} onChange={(event) => setChromoffSeoTitle(event.target.value)} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-xs font-medium text-slate-300">Chromoff SEO description</label>
+                      <textarea value={chromoffSeoDescription} onChange={(event) => setChromoffSeoDescription(event.target.value)} rows={3} disabled={isPending} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-violet-500" />
+                    </div>
+                  </>
+                )}
               </section>
             )}
 

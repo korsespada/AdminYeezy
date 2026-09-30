@@ -59,6 +59,10 @@ describe('buildDavidRailsProductPayload', () => {
     expect(payload.indexing_status).toBe('indexable')
   })
 
+  it('отдаёт товар только в Chromoff', () => {
+    expect(payload.chromoff_only).toBe(true)
+  })
+
   it('без размеров оставляет один вариант без размера', () => {
     const noSizes = buildDavidRailsProductPayload({
       handle: 'x', name: 'x', description: '', brandId: 'b', categoryId: 'c', sizes: [], media: [],

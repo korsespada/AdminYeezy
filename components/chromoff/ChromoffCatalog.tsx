@@ -1,29 +1,27 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { CheckSquare, Filter, FolderTree, Gem, Images, LayoutGrid, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react'
+import { CheckSquare, Filter, FolderTree, Gem, Images, LayoutGrid, Plus, RotateCcw, Square, Trash2, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import type { Brand, Category, Product, ProductSupplierOption, Subcategory } from '@/lib/types'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
-import type { RailsChromoffCandidate, RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
+import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
 import { getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
-import { createChromoffListingAction, deleteChromoffListingAction, deleteChromoffListingsAction, importChromoffCatalogAction, previewChromoffImportAction, setChromoffListingPublishedAction, setChromoffListingsCategoryAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
+import { createChromoffListingAction, deleteChromoffListingAction, deleteChromoffListingsAction, setChromoffListingPublishedAction, setChromoffListingsCategoryAction, setChromoffListingsPublishedAction, setChromoffListingsSupplierAction } from '@/actions/chromoff'
 import ProductCard from '@/components/products/ProductCard'
 import ProductForm from '@/components/products/ProductForm'
 import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chromoff/ChromoffSidebar'
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface ChromoffCatalogProps {
   categories: RailsChromoffCategory[]
   listings: RailsChromoffListing[]
-  candidates: RailsChromoffCandidate[]
   catalogCategories: Category[]
   catalogSubcategories: Subcategory[]
   brands: Brand[]
@@ -72,6 +70,7 @@ function listingToProduct(listing: RailsChromoffListing): Product {
     fulfillment_mode: 'made_to_order',
     availability_confidence: 'unknown',
     indexing_status: 'indexable',
+    chromoff_only: Boolean(listing.chromoff_only),
     currency: 'RUB',
     seo_title: listing.seo_title || '',
     seo_description: listing.seo_description || '',
@@ -113,11 +112,6 @@ function seoLabel(listing: RailsChromoffListing) {
   return listing.h1 && listing.seo_title && listing.seo_description ? 'SEO заполнено' : 'SEO требует внимания'
 }
 
-function formatPrice(priceCents: number) {
-  if (priceCents <= 0) return 'Цена по запросу'
-  return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(priceCents / 100)
-}
-
 function buildPageUrl(searchParams: URLSearchParams, page: number) {
   const next = new URLSearchParams(searchParams)
   if (page > 1) next.set('page', String(page))
@@ -128,7 +122,6 @@ function buildPageUrl(searchParams: URLSearchParams, page: number) {
 export default function ChromoffCatalog({
   categories,
   listings: initialListings,
-  candidates,
   catalogCategories,
   catalogSubcategories,
   brands,
@@ -144,14 +137,11 @@ export default function ChromoffCatalog({
   const searchParams = useSearchParams()
   const [listings, setListings] = useState(initialListings)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [isImportOpen, setIsImportOpen] = useState(false)
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editingListing, setEditingListing] = useState<RailsChromoffListing | null>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isPending, startTransition] = useTransition()
-  const [importMessage, setImportMessage] = useState('')
-  const [addMessage, setAddMessage] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [selectedSubcategory, setSelectedSubcategory] = useState('')
   const [selectedGender, setSelectedGender] = useState('')
@@ -400,16 +390,16 @@ export default function ChromoffCatalog({
     })
   }
 
-  const previewImport = () => startTransition(async () => {
-    const result = await previewChromoffImportAction()
-    setImportMessage(result.success ? `Проверено: ${Number(result.result?.products_received || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
-  })
+  // Новый товар создаётся формой общего каталога и сразу получает листинг
+  // Chromoff: карточка существует только на chromoff.store.
+  const createChromoffListing = async (input: { productId: string; chromoffCategoryId: string; published: boolean }) => {
+    const formData = new FormData()
+    formData.append('product_id', input.productId)
+    formData.append('chromoff_category_id', input.chromoffCategoryId)
+    formData.append('published', String(input.published))
+    return createChromoffListingAction(formData)
+  }
 
-  const importCatalog = () => startTransition(async () => {
-    const result = await importChromoffCatalogAction()
-    setImportMessage(result.success ? `Импортировано: ${Number(result.imported || 0).toLocaleString('ru-RU')} товаров.` : result.message || '')
-    if (result.success) router.refresh()
-  })
   return (
     <div className="min-h-screen bg-slate-900 font-sans text-slate-200 lg:flex">
       <ChromoffSidebar categories={catalogCategories} subcategories={catalogSubcategories} chromoffCategories={categories} suppliers={suppliers} count={totalItems} isOpen={isSidebarOpen} onClose={() => setIsSidebarOpen(false)} isNavigationPending={isPending} />
@@ -419,7 +409,6 @@ export default function ChromoffCatalog({
             <div><div className="flex items-center gap-2"><h1 className="text-2xl font-bold text-slate-100">Chromoff</h1><Badge className="bg-violet-500/15 text-violet-200 hover:bg-violet-500/15">chromoff.store</Badge></div><p className="mt-1 text-sm text-slate-400">Каталог общего товара с отдельной публикацией, категорией и SEO Chromoff</p></div>
             <div className="flex w-full flex-wrap gap-2 sm:w-auto">
               <Button type="button" variant="outline" onClick={() => setIsSidebarOpen(true)} className="h-11 flex-1 border-slate-700 bg-slate-800 text-slate-200 lg:hidden"><Filter className="h-4 w-4" />Фильтры</Button>
-              <Button type="button" variant="outline" onClick={() => setIsImportOpen(true)} className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Upload className="h-4 w-4" />Импорт</Button>
               <Button asChild type="button" variant="outline" className="h-11 border-emerald-700/60 bg-emerald-950/30 text-emerald-200"><Link href="/admin/chromoff/ai-seo">AI SEO</Link></Button>
               <Button asChild type="button" variant="outline" className="h-11 border-slate-700 bg-slate-800 text-slate-200"><Link href="/admin/chromoff/categories"><FolderTree className="h-4 w-4" />Категории</Link></Button>
               <Button asChild type="button" variant="outline" className="h-11 border-violet-700/60 bg-violet-950/30 text-violet-200"><Link href="/admin/chromoff/david-studio"><Gem className="h-4 w-4" />David Studio</Link></Button>
@@ -505,6 +494,8 @@ export default function ChromoffCatalog({
 
       <ProductForm product={editingProduct} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} supplierOptions={assignableSuppliers.map((item): ProductSupplierOption => ({ id: item.id, name: item.name, source_id: item.id.startsWith('_') ? item.id : null, rails_id: item.id.startsWith('_') ? null : item.id }))} isOpen={Boolean(editingProduct && editingListing)} chromoffListing={editingListing} chromoffCategories={categories} onClose={() => { setEditingListing(null); setEditingProduct(null) }} onSave={updateListingFromProduct} />
 
+      <ProductForm product={null} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} supplierOptions={assignableSuppliers.map((item): ProductSupplierOption => ({ id: item.id, name: item.name, source_id: item.id.startsWith('_') ? item.id : null, rails_id: item.id.startsWith('_') ? null : item.id }))} isOpen={isAddOpen} chromoffCategories={categories} onCreateChromoffListing={createChromoffListing} onClose={() => setIsAddOpen(false)} />
+
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
           <Select value={selectedPublication || '__unchanged__'} onValueChange={(value) => setSelectedPublication(value === '__unchanged__' ? '' : value as 'published' | 'hidden')}><SelectTrigger className="h-10 bg-slate-700 text-slate-200"><SelectValue placeholder="Публикация Chromoff" /></SelectTrigger><SelectContent><SelectItem value="__unchanged__">Chromoff: без изменений</SelectItem><SelectItem value="published">Опубликовать</SelectItem><SelectItem value="hidden">Скрыть</SelectItem></SelectContent></Select>
@@ -518,10 +509,6 @@ export default function ChromoffCatalog({
           <Button type="button" onClick={handleBulkUpdate} disabled={!hasBulkUpdates || isBulkUpdating || isBulkDeleting} className="h-10">{isBulkUpdating ? 'Обновление…' : 'Применить'}</Button><Button type="button" variant="destructive" size="icon" onClick={handleBulkDelete} disabled={isBulkUpdating || isBulkDeleting} className="h-10 w-10" title="Удалить из Chromoff"><Trash2 className="h-4 w-4" /></Button>
         </div></div>
       </div>
-
-      <Dialog open={isImportOpen} onOpenChange={setIsImportOpen}><DialogContent className="border-slate-700 bg-slate-800 text-slate-100"><DialogHeader><DialogTitle>Импорт каталога Chromoff</DialogTitle><DialogDescription className="text-slate-400">Сначала выполните проверку, затем запустите импорт из старого источника.</DialogDescription></DialogHeader><div className="flex flex-col gap-3 sm:flex-row"><Button type="button" variant="outline" onClick={previewImport} disabled={isPending} className="border-slate-600 bg-slate-700 text-slate-200">{isPending ? 'Проверяем…' : 'Проверить импорт'}</Button><Button type="button" onClick={importCatalog} disabled={isPending}>{isPending ? 'Импортируем…' : 'Импортировать каталог'}</Button></div>{importMessage && <p className="text-sm text-slate-300" role="status">{importMessage}</p>}<DialogFooter><Button type="button" variant="ghost" onClick={() => setIsImportOpen(false)}>Закрыть</Button></DialogFooter></DialogContent></Dialog>
-
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}><DialogContent className="border-slate-700 bg-slate-800 text-slate-100"><DialogHeader><DialogTitle>Добавить товар в Chromoff</DialogTitle><DialogDescription className="text-slate-400">Выберите существующий общий товар и подраздел Chromoff.</DialogDescription></DialogHeader><form action={(formData) => startTransition(async () => { const result = await createChromoffListingAction(formData); setAddMessage(result.message); if (result.success) router.refresh() })} className="space-y-3"><select name="product_id" required className="h-11 w-full rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-200"><option value="">Выберите товар</option>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} · {formatPrice(candidate.price_cents)}</option>)}</select><select name="chromoff_category_id" required className="h-11 w-full rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-200"><option value="">Выберите категорию Chromoff</option>{categories.filter((item) => item.parent_id).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><input type="hidden" name="published" value="true" /><Button type="submit" disabled={isPending} className="w-full">{isPending ? 'Добавляем…' : 'Добавить и опубликовать'}</Button>{addMessage && <p className="text-sm text-slate-300" role="status">{addMessage}</p>}</form></DialogContent></Dialog>
     </div>
   )
 }

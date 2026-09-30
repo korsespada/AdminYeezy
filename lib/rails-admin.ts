@@ -231,6 +231,8 @@ export interface RailsChromoffListing {
   seo_article?: string
   slug?: string
   gender?: string | null
+  /** Общий товар отдаётся только на chromoff.store. */
+  chromoff_only?: boolean
   catalog_attributes?: Record<string, unknown>
   category?: { id: string; name: string; slug: string; parent_id?: string | null } | null
   brand?: { id: string; name: string; slug?: string } | null
@@ -286,13 +288,6 @@ export interface RailsChromoffImportSummary {
   existing_categories: number
   existing_listings: number
   missing_category_sources: string[]
-}
-
-export interface RailsChromoffCandidate {
-  id: string
-  name: string
-  slug: string
-  price_cents: number
 }
 
 export interface RailsStoreTelegramContact {
@@ -755,6 +750,7 @@ export function mapRailsProduct(product: any): Product {
     fulfillment_mode: 'made_to_order',
     availability_confidence: product.availability_confidence || 'unknown',
     indexing_status: product.indexing_status || 'indexable',
+    chromoff_only: Boolean(product.chromoff_only),
     currency: product.currency || 'RUB',
     production_min_days: product.production_min_days ?? null,
     production_max_days: product.production_max_days ?? null,
@@ -1078,11 +1074,6 @@ export async function bulkUpdateRailsChromoffListingsCategory(listingIds: string
     body: JSON.stringify({ listing_ids: listingIds, chromoff_category_id: chromoffCategoryId || '__none__' }),
   })
   return result
-}
-
-export async function listRailsChromoffCandidates() {
-  const result = await railsFetch<{ products: RailsChromoffCandidate[] }>('/admin/chromoff/listings/candidates?per_page=100')
-  return result.products || []
 }
 
 export async function createRailsChromoffListing(input: {
@@ -2531,6 +2522,7 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('currency')) product.currency = String(formData.get('currency') || 'RUB')
   if (formData.has('fulfillment_mode')) product.fulfillment_mode = 'made_to_order'
   if (formData.has('indexing_status')) product.indexing_status = String(formData.get('indexing_status') || 'indexable')
+  if (formData.has('chromoff_only')) product.chromoff_only = formBoolean(formData.get('chromoff_only'))
   if (formData.has('availability_confidence')) product.availability_confidence = String(formData.get('availability_confidence') || 'unknown')
   if (formData.has('production_min_days')) product.production_min_days = optionalInt(formData.get('production_min_days'))
   if (formData.has('production_max_days')) product.production_max_days = optionalInt(formData.get('production_max_days'))

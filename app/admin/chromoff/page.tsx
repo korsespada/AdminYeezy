@@ -1,5 +1,5 @@
 import ChromoffCatalog from '@/components/chromoff/ChromoffCatalog'
-import { getRailsCatalogLookups, listRailsChromoffCandidates, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
+import { getRailsCatalogLookups, listRailsChromoffCategories, listRailsChromoffListings } from '@/lib/rails-admin'
 import { getCatalogAttributeDefinitions } from '@/lib/catalog-attribute-registry'
 import { connection } from 'next/server'
 
@@ -78,7 +78,7 @@ export default async function ChromoffPage({
   }
 
   try {
-    const [categories, listings, candidates, lookups, attributeDefinitions] = await Promise.all([
+    const [categories, listings, lookups, attributeDefinitions] = await Promise.all([
       listRailsChromoffCategories(),
       listRailsChromoffListings({
         page,
@@ -97,7 +97,6 @@ export default async function ChromoffPage({
         aiStatus: filters.aiStatus,
         published: filters.published === 'all' ? undefined : filters.published === 'published',
       }),
-      listRailsChromoffCandidates(),
       getRailsCatalogLookups(),
       getCatalogAttributeDefinitions(),
     ])
@@ -110,7 +109,6 @@ export default async function ChromoffPage({
       <ChromoffCatalog
         categories={categories}
         listings={listings.items}
-        candidates={candidates}
         catalogCategories={lookups.categories}
         catalogSubcategories={lookups.subcategories}
         brands={lookups.brands}

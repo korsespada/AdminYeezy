@@ -279,6 +279,8 @@ export function buildDavidRailsProductPayload(input: {
     currency: 'RUB',
     status: 'active',
     indexing_status: 'indexable',
+    // Товары David продаются только на chromoff.store.
+    chromoff_only: true,
     brand_id: input.brandId,
     category_id: input.categoryId,
     gender: input.gender || null,
