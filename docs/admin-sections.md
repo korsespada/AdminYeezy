@@ -165,7 +165,6 @@ batch и сохранённым snapshot используют те же canonica
 | URL | Назначение | Источник |
 |---|---|---|
 | `/admin/filter-characteristics` | Реестр атрибутов каталога и их режимов | Rails CRM: `catalog_attribute_definitions`, `catalog_attribute_values` |
-| `/admin/catalog-attributes` | Проверка и подтверждение предложений AI | Rails catalog attribute suggestions |
 
 В реестре можно отдельно включить показ атрибута в карточке, фильтрацию на сайте и использование как варианта товара. Подписи и алиасы применяются API при построении фасетов, поэтому старые варианты объединяются без массовой перезаписи товаров.
 
@@ -199,11 +198,11 @@ batch и сохранённым snapshot используют те же canonica
 
 | URL | Назначение | Источник |
 |---|---|---|
-| `/admin/seo-ai` | AI-каталог: очередь, сравнение, массовая обработка и настройки | Rails SEO AI API + worker (BYESU по умолчанию, также OpenRouter/Cockpit) |
+| `/admin/video-matches` | Сопоставление альбомов с видео из выгрузки поставщика с товарами каталога, апрув и перенос видео в S3 | scraping `product_video_matches` + Rails CRM `/admin/products` |
 | `/admin/ai-rules` | Глобальные настройки batch AI: OpenRouter/Cockpit, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` + Cockpit heartbeat |
 | `/admin/analytics` | Аналитика каталога, трафика и коммерческих показателей: разделение каналов (Сайт десктоп/мобайл, TG Mini App), мультиканальная сегментация источников (Яндекс Органика, Google Поиск, TG Mini App, внешний трафик), поисковый спрос покупателей на витрине, сквозная воронка конверсии, выручка CRM, средний чек, топ товаров, произвольные даты и хаб 4 платформ (Яндекс.Метрика с поддержкой прямого API, Google Search Console, Google Merchant Center, Яндекс.Вебмастер, GA4) | AdminYeezy `analytics_events` + Rails CRM `/admin/orders` |
 
-SEO landings, redirects, audits и AI-каталог относятся к Rails CRM/API. Production создаёт задания и хранит черновики, а локальный worker забирает их через защищённые `/api/v1/admin/seo_ai/worker/*` endpoints. Прямые записи в CRM-БД запрещены.
+SEO landings, redirects и audits относятся к Rails CRM/API. Прямые записи в CRM-БД запрещены.
 В разделе `/admin/analytics` коммерческие метрики (выручка, оплаченные заказы, AOV, возвраты и отмены) агрегируются из Rails CRM API, а поведенческие метрики (сессии, воронка, онлайн, топ просмотров и корзин, поисковые запросы витрины и каналы привлечения) — из базы аналитических событий. Реализован единый центр управления внешней аналитикой и SEO-индексацией по 4 платформам (Яндекс.Метрика с прямым получением показателей по API при наличии токена, Google Search Console, Google Merchant Center, Яндекс.Вебмастер). Поддерживается фильтрация по произвольным диапазонам дат и отдельным каналам. Маршрут `GET /api/analytics` поддерживает прямой доступ для внешних ИИ-агентов по токену `ANALYTICS_API_KEY` (через `Authorization: Bearer <token>` или `x-api-key`) и форматы выгрузки `?format=summary` (JSON-сводка с компактными метриками) и `?format=text` (готовый текстовый markdown-дайджест).
 
 ## Что важно не сломать

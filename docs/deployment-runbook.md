@@ -109,6 +109,12 @@ npm run db:audit:batches
 При старте также выполняется `db:migrate:chromoff-ai`; она создаёт технические
 таблицы очереди `chromoff_ai_runs` и `chromoff_ai_items` в scraping DB.
 
+При старте также выполняется `db:migrate:product-video-matches`; она создаёт
+таблицы раздела «Видео → товары» (`product_video_matches`,
+`product_video_match_scope`) в scraping DB. Без неё страница
+`/admin/video-matches` не откроется, поэтому миграция включена в команду запуска
+контейнера, а не только в `db:migrate:scraping`.
+
 Команда идемпотентна. В том числе она создаёт блокировки операций, реестр публикаций, уникальный активный запуск парсера на поставщика и ограничения связей задач/партий/товаров.
 
 При наличии старой очереди с колонкой `settings` её настройки переносятся в
@@ -130,6 +136,7 @@ Smoke-check AdminYeezy:
 https://admin.yeezyunique.ru/login
 https://admin.yeezyunique.ru/admin/home
 https://admin.yeezyunique.ru/admin
+https://admin.yeezyunique.ru/admin/video-matches
 https://admin.yeezyunique.ru/admin/crm
 https://admin.yeezyunique.ru/admin/crm/orders
 https://admin.yeezyunique.ru/admin/crm/customers

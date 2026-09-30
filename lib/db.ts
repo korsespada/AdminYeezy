@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, type QueryResultRow } from 'pg';
 import { Redis } from 'ioredis';
 import { Client as ElasticClient } from '@elastic/elasticsearch';
 
@@ -65,10 +65,10 @@ export function describeScrapingDatabaseConnection() {
   }
 }
 
-export const query = (text: string, params?: any[]) => pool.query(text, params);
-export const legacyCatalogQuery = (text: string, params?: any[]) => legacyCatalogPool.query(text, params);
-export const analyticsQuery = (text: string, params?: any[]) => analyticsPool.query(text, params);
-export const scrapingQuery = (text: string, params?: any[]) => scrapingPool.query(text, params);
+export const query = <T extends QueryResultRow = any>(text: string, params?: any[]) => pool.query<T>(text, params);
+export const legacyCatalogQuery = <T extends QueryResultRow = any>(text: string, params?: any[]) => legacyCatalogPool.query<T>(text, params);
+export const analyticsQuery = <T extends QueryResultRow = any>(text: string, params?: any[]) => analyticsPool.query<T>(text, params);
+export const scrapingQuery = <T extends QueryResultRow = any>(text: string, params?: any[]) => scrapingPool.query<T>(text, params);
 export const getClient = () => pool.connect();
 export const getLegacyCatalogClient = () => legacyCatalogPool.connect();
 export const getAnalyticsClient = () => analyticsPool.connect();

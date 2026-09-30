@@ -4,7 +4,7 @@ import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { Menu, RefreshCw, BarChart3, LogOut, Trash2, Sparkles, ClipboardList, ListChecks, SlidersHorizontal, Gem, X, PackageSearch } from 'lucide-react'
+import { Menu, RefreshCw, BarChart3, LogOut, Trash2, ClipboardList, SlidersHorizontal, Gem, X, PackageSearch } from 'lucide-react'
 import { logoutAction } from '@/actions/auth'
 import { Button } from '@/components/ui/button'
 
@@ -18,8 +18,6 @@ const coreNavigation = [
 
 const utilityNavigation = [
   { href: '/admin/analytics', label: 'Аналитика', icon: BarChart3, tone: 'text-indigo-400' },
-  { href: '/admin/seo-ai', label: 'AI-каталог', icon: Sparkles, tone: 'text-fuchsia-400' },
-  { href: '/admin/catalog-attributes', label: 'Атрибуты', icon: ListChecks, tone: 'text-emerald-400' },
   { href: '/admin/filter-characteristics', label: 'Схема', icon: SlidersHorizontal, tone: 'text-cyan-400' },
   { href: '/admin/trash', label: 'Корзина', icon: Trash2, tone: 'text-red-400' },
 ]

@@ -10,6 +10,7 @@
 - [David Studio import](./david-studio-import.md) — supplier export, photo cleaning queue and AI draft worker contract.
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
 - [Export history](./exports.md) — export history, stages and publication.
+- [Video matches](./video-matches.md) — attaching supplier videos to catalog products.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.
 - [Coolify deployment](./coolify-deployment.md) — environment and operations.
 - [Codex workflow](./CODEX_WORKFLOW.md) — project-specific agent rules.
