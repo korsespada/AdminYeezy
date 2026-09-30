@@ -342,16 +342,27 @@ export async function resetMatches(ids: number[]) {
   return result.rowCount || 0
 }
 
-/** Массовый апрув: только первые варианты выбранных уровней уверенности. */
+/**
+ * Массовый апрув: только первые варианты выбранных уровней уверенности.
+ * Товары, у которых оператор уже выбрал видео вручную (или оно уже привязано),
+ * пропускаются — иначе массовый апрув перебил бы ручной выбор первым вариантом.
+ */
 export async function approveMatchesByBand(batchId: string, bands: string[], onlySingleCandidate = false) {
   const result = await scrapingQuery(
-    `UPDATE product_video_matches
+    `UPDATE product_video_matches AS target
      SET status = 'approved', error = NULL, decided_at = NOW(), updated_at = NOW()
-     WHERE source_batch_id = $1
-       AND status = 'pending'
-       AND rank = 1
-       AND confidence = ANY($2::text[])
-       ${onlySingleCandidate ? 'AND candidates_total = 1' : ''}`,
+     WHERE target.source_batch_id = $1
+       AND target.status = 'pending'
+       AND target.rank = 1
+       AND target.confidence = ANY($2::text[])
+       ${onlySingleCandidate ? 'AND target.candidates_total = 1' : ''}
+       AND NOT EXISTS (
+         SELECT 1 FROM product_video_matches AS decided
+         WHERE decided.source_batch_id = target.source_batch_id
+           AND decided.crm_product_id = target.crm_product_id
+           AND decided.id <> target.id
+           AND decided.status IN ('approved', 'applied')
+       )`,
     [batchId, bands],
   )
   return result.rowCount || 0
