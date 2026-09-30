@@ -1006,8 +1006,13 @@ export async function applyRailsChromoffAiContent(id: string, input: {
   return result.listing
 }
 
-export async function deleteRailsChromoffListing(id: string) {
-  await railsFetch(`/admin/chromoff/listings/${encodeURIComponent(id)}`, {
+/**
+ * Удаление Chromoff-листинга. `hideProduct` дополнительно скрывает общий товар
+ * с yeezyunique (`chromoff_only`), сам товар из каталога не удаляется.
+ */
+export async function deleteRailsChromoffListing(id: string, options: { hideProduct?: boolean } = {}) {
+  const query = options.hideProduct ? '?hide_product=true' : ''
+  await railsFetch(`/admin/chromoff/listings/${encodeURIComponent(id)}${query}`, {
     method: 'DELETE',
   })
 }

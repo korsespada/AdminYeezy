@@ -16,6 +16,7 @@ import ChromoffSidebar, { type ChromoffSupplierOption } from '@/components/chrom
 import { isPriceOnRequest } from '@/lib/product-pricing'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
@@ -148,6 +149,9 @@ export default function ChromoffCatalog({
   const [selectedPrice, setSelectedPrice] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+  /** Подтверждение удаления из Chromoff: список листингов и опция скрыть товар с yeezyunique. */
+  const [deleteRequest, setDeleteRequest] = useState<{ listingIds: string[]; label: string } | null>(null)
+  const [deleteHideProduct, setDeleteHideProduct] = useState(false)
   const [isBulkPublishing, setIsBulkPublishing] = useState(false)
   const [isBulkSupplierUpdating, setIsBulkSupplierUpdating] = useState(false)
   const [selectedPublication, setSelectedPublication] = useState<'published' | 'hidden' | ''>('')
@@ -259,12 +263,27 @@ export default function ChromoffCatalog({
     })
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     const listing = listings.find((item) => listingProductId(item) === id)
-    if (!listing || !confirm('Удалить этот товар из Chromoff?')) return
-    const result = await deleteChromoffListingAction(listing.id)
-    if (result.success) setListings((current) => current.filter((item) => item.id !== listing.id))
-    else window.alert(result.message || 'Не удалось удалить товар из Chromoff')
+    if (!listing) return
+    setDeleteHideProduct(false)
+    setDeleteRequest({ listingIds: [listing.id], label: listing.name || 'товар' })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteRequest) return
+    setIsBulkDeleting(true)
+    const result = deleteRequest.listingIds.length === 1
+      ? await deleteChromoffListingAction(deleteRequest.listingIds[0], deleteHideProduct)
+      : await deleteChromoffListingsAction(deleteRequest.listingIds, deleteHideProduct)
+    if (result.success) {
+      setListings((current) => current.filter((listing) => !deleteRequest.listingIds.includes(listing.id)))
+      setSelectedIds([])
+      setDeleteRequest(null)
+    } else {
+      window.alert(result.message || 'Не удалось удалить товар из Chromoff')
+    }
+    setIsBulkDeleting(false)
   }
 
   const handleBulkUpdate = async () => {
@@ -330,18 +349,13 @@ export default function ChromoffCatalog({
     setIsBulkUpdating(false)
   }
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     const selectedListingIds = listings
       .filter((listing) => selectedIds.includes(listingProductId(listing)))
       .map((listing) => listing.id)
-    if (!selectedListingIds.length || !confirm(`Удалить ${selectedListingIds.length} товаров из Chromoff?`)) return
-    setIsBulkDeleting(true)
-    const result = await deleteChromoffListingsAction(selectedListingIds)
-    if (result.success) {
-      setListings((current) => current.filter((listing) => !selectedListingIds.includes(listing.id)))
-      setSelectedIds([])
-    } else window.alert(result.message || 'Не удалось удалить товары из Chromoff')
-    setIsBulkDeleting(false)
+    if (!selectedListingIds.length) return
+    setDeleteHideProduct(false)
+    setDeleteRequest({ listingIds: selectedListingIds, label: `${selectedListingIds.length} товаров` })
   }
 
   const handleBulkPublication = () => {
@@ -495,6 +509,34 @@ export default function ChromoffCatalog({
       <ProductForm product={editingProduct} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} supplierOptions={assignableSuppliers.map((item): ProductSupplierOption => ({ id: item.id, name: item.name, source_id: item.id.startsWith('_') ? item.id : null, rails_id: item.id.startsWith('_') ? null : item.id }))} isOpen={Boolean(editingProduct && editingListing)} chromoffListing={editingListing} chromoffCategories={categories} onClose={() => { setEditingListing(null); setEditingProduct(null) }} onSave={updateListingFromProduct} />
 
       <ProductForm product={null} brands={brands} categories={catalogCategories} subcategories={catalogSubcategories} attributeDefinitions={attributeDefinitions} supplierOptions={assignableSuppliers.map((item): ProductSupplierOption => ({ id: item.id, name: item.name, source_id: item.id.startsWith('_') ? item.id : null, rails_id: item.id.startsWith('_') ? null : item.id }))} isOpen={isAddOpen} chromoffCategories={categories} onCreateChromoffListing={createChromoffListing} onClose={() => setIsAddOpen(false)} />
+
+      <Dialog open={Boolean(deleteRequest)} onOpenChange={(open) => { if (!open && !isBulkDeleting) setDeleteRequest(null) }}>
+        <DialogContent className="border-slate-700 bg-slate-800 text-slate-100">
+          <DialogHeader>
+            <DialogTitle>Удалить из Chromoff</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {deleteRequest ? `Удаляем ${deleteRequest.label}. Общий товар останется в каталоге.` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-violet-500/30 bg-slate-950/50 p-3">
+            <input
+              type="checkbox"
+              checked={deleteHideProduct}
+              onChange={(event) => setDeleteHideProduct(event.target.checked)}
+              disabled={isBulkDeleting}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-violet-500"
+            />
+            <span>
+              <span className="block text-xs font-medium text-slate-200">Скрыть товар и на yeezyunique</span>
+              <span className="mt-0.5 block text-[11px] text-slate-400">Товар пропадёт с yeezyunique, но останется в каталоге: вернуть его можно, сняв галочку «Показывать только в Chromoff» в карточке.</span>
+            </span>
+          </label>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setDeleteRequest(null)} disabled={isBulkDeleting}>Отмена</Button>
+            <Button type="button" variant="destructive" onClick={confirmDelete} disabled={isBulkDeleting}>{isBulkDeleting ? 'Удаляем…' : 'Удалить из Chromoff'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className={`fixed bottom-0 left-0 right-0 z-40 border-t border-slate-700 bg-slate-800 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-2xl shadow-black/40 transition-transform lg:left-72 ${selectedIds.length ? 'translate-y-0' : 'translate-y-full'}`}>
         <div className="mx-auto flex max-w-[1600px] flex-col gap-3 lg:flex-row lg:items-center"><div className="flex items-center justify-between gap-2 text-sm text-slate-300 lg:shrink-0"><Badge>{selectedIds.length}</Badge><span>выбрано</span><Button type="button" variant="ghost" size="icon" onClick={() => setSelectedIds([])} className="h-8 w-8 text-slate-500 hover:text-slate-300"><X className="h-4 w-4" /></Button></div><div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:flex-1 lg:justify-end">
