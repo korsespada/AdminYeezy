@@ -251,17 +251,17 @@ AI-нормализации. У оставшихся карточек поле `
 Глобальная настройка на `/admin/ai-rules` выбирает `OpenRouter` или `Cockpit`. Эта страница является единственным интерфейсом глобальных batch AI-настроек; раздел выгрузок использует сохранённые значения.
 
 - OpenRouter вызывается сервером AdminYeezy; модель задаётся в интерфейсе.
-- Cockpit обрабатывает очередь локальным `scripts/batch-ai-worker.js`; модель задаётся `COCKPIT_MODEL` на worker. Команда `ai:catalog-worker` запускает вместе SEO worker и batch worker.
+- Cockpit обрабатывает очередь локальным `scripts/batch-ai-worker.js`; модель задаётся `COCKPIT_MODEL` на worker.
 - Системный и пользовательский промпты одинаковы для провайдеров.
 - Если Cockpit heartbeat старше 30 секунд, новый запуск сразу отклоняется.
 
-Запуск обоих worker:
+Запуск worker:
 
 ```bash
-npm run ai:catalog-worker
+npm run ai:batch-worker
 ```
 
-Для отдельного запуска только batch-очереди остаётся `npm run ai:batch-worker`. Обязательные env: `BATCH_AI_WORKER_TOKEN` (либо `AI_CATALOG_WORKER_TOKEN`), `COCKPIT_API_URL`, `COCKPIT_API_KEY`. `ADMINYEEZY_URL` обязателен вне локальной машины; локально используется `http://localhost:3000`. Количество одновременных запросов задаётся на `/admin/ai-rules` и передаётся worker через heartbeat.
+Обязательные env: `BATCH_AI_WORKER_TOKEN` (либо `AI_CATALOG_WORKER_TOKEN`), `COCKPIT_API_URL`, `COCKPIT_API_KEY`. `ADMINYEEZY_URL` обязателен вне локальной машины; локально используется `http://localhost:3000`. Количество одновременных запросов задаётся на `/admin/ai-rules` и передаётся worker через heartbeat.
 
 ## Промпты
 
