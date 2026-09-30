@@ -2362,7 +2362,10 @@ async function uploadVideoIfNeeded(url, videoKey, posterKey) {
     await runProcess(process.env.FFMPEG_PATH || 'ffmpeg', [
       '-y', '-i', sourcePath,
       '-map', '0:v:0', '-map', '0:a?',
-      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,format=yuv420p",
+      // Второй scale выравнивает стороны до чётных: у вертикальных роликов
+      // (например 1080x1770) первый scale даёт 659 пикселей ширины, а libx264
+      // с yuv420p отказывается работать с нечётными размерами.
+      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
       '-c:a', 'aac', '-b:a', '128k',
       '-movflags', '+faststart', outputPath,

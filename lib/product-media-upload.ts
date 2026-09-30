@@ -140,7 +140,9 @@ export async function uploadProductVideoFromBuffer(source: string, buffer: Buffe
     await runProcess(ffmpeg, [
       '-y', '-i', sourcePath,
       '-map', '0:v:0', '-map', '0:a?',
-      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,format=yuv420p",
+      // Второй scale выравнивает стороны до чётных: у вертикальных роликов
+      // первый scale даёт нечётную ширину, а libx264 с yuv420p её не принимает.
+      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
       '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath,
     ])
