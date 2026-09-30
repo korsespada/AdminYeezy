@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Film, ImageOff, Link2, Loader2, PlayCircle, RefreshCw, RotateCcw, Search, Upload, XCircle } from 'lucide-react'
 import {
   applyApprovedVideoMatchesAction,
@@ -106,6 +106,29 @@ const BAND_STYLE: Record<string, string> = {
 
 const PER_PAGE_OPTIONS = [30, 60, 100, 200]
 
+/**
+ * Скроллится не window, а оболочка админки, поэтому позицию снимаем со всех
+ * возможных контейнеров и возвращаем её после перерисовки списка.
+ */
+function scrollElements(): HTMLElement[] {
+  return [
+    document.scrollingElement as HTMLElement | null,
+    document.querySelector<HTMLElement>('.admin-scroll'),
+    document.querySelector<HTMLElement>('.admin-shell'),
+    document.querySelector<HTMLElement>('main'),
+  ].filter((element): element is HTMLElement => Boolean(element))
+}
+
+function captureScroll() {
+  return scrollElements().map((element) => ({ element, top: element.scrollTop }))
+}
+
+function restoreScroll(snapshot: Array<{ element: HTMLElement; top: number }>) {
+  for (const { element, top } of snapshot) {
+    if (element.isConnected) element.scrollTop = top
+  }
+}
+
 export default function VideoMatchesApp() {
   const preset = VIDEO_MATCH_PRESETS[0]
   const [status, setStatus] = useState('pending')
@@ -126,6 +149,7 @@ export default function VideoMatchesApp() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const cancelRef = useRef(false)
+  const scrollSnapshotRef = useRef<Array<{ element: HTMLElement; top: number }> | null>(null)
 
   const loadStats = useCallback(async () => {
     const result = await getVideoMatchStatsAction(preset.key)
@@ -133,8 +157,11 @@ export default function VideoMatchesApp() {
     return result
   }, [preset.key])
 
-  const loadRows = useCallback(async () => {
-    setLoading(true)
+  const loadRows = useCallback(async (options: { silent?: boolean } = {}) => {
+    // Тихая перезагрузка не сбрасывает список в состояние «Загрузка…»: иначе
+    // страница схлопывается и оператора отбрасывает в начало списка.
+    if (!options.silent) setLoading(true)
+    else scrollSnapshotRef.current = captureScroll()
     const result = await listVideoMatchesAction({
       presetKey: preset.key,
       status: status as any,
@@ -153,7 +180,7 @@ export default function VideoMatchesApp() {
     } else {
       setError(result.error || 'Не удалось загрузить совпадения')
     }
-    setLoading(false)
+    if (!options.silent) setLoading(false)
   }, [preset.key, status, bands, onlySingleCandidate, search, page, perPage])
 
   const refresh = useCallback(async () => {
@@ -161,6 +188,14 @@ export default function VideoMatchesApp() {
   }, [loadStats, loadRows])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  // Возврат к прежней позиции после тихой перезагрузки списка.
+  useLayoutEffect(() => {
+    const snapshot = scrollSnapshotRef.current
+    if (!snapshot) return
+    scrollSnapshotRef.current = null
+    restoreScroll(snapshot)
+  }, [rows])
 
   // Смена фильтров возвращает на первую страницу: иначе оператор остаётся
   // на несуществующем номере страницы и видит пустой список.
@@ -255,7 +290,7 @@ export default function VideoMatchesApp() {
     if (result.success) setMessage(`Апрувнуто вариантов: ${result.data?.updated ?? 0}`)
     else setError(result.error || 'Ошибка массового апрува')
     setBusy('')
-    await refresh()
+    await Promise.all([loadStats(), loadRows({ silent: true })])
   }
 
   const resetApproved = async () => {
@@ -265,9 +300,14 @@ export default function VideoMatchesApp() {
     if (result.success) setMessage(`Возвращено в ожидание: ${result.data?.updated ?? 0}`)
     else setError(result.error || 'Не удалось сбросить апрув')
     setBusy('')
-    await refresh()
+    await Promise.all([loadStats(), loadRows({ silent: true })])
   }
 
+  /**
+   * Решение по одной строке: список не перезагружаем — иначе карточки
+   * размонтируются, страница схлопывается и скролл улетает наверх.
+   * Строка сразу получает новый статус, а очередь обновится штатным «Обновить».
+   */
   const decide = async (ids: number[], action: 'approve' | 'reject' | 'reset') => {
     if (ids.length === 0) return
     setBusy('decide')
@@ -275,9 +315,11 @@ export default function VideoMatchesApp() {
     const runner = action === 'approve' ? approveVideoMatchesAction : action === 'reject' ? rejectVideoMatchesAction : resetVideoMatchesAction
     const result = await runner(ids)
     if (!result.success) setError(result.error || 'Ошибка решения')
+    const nextStatus = action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'pending'
+    setRows((current) => current.map((row) => (ids.includes(row.id) ? { ...row, status: nextStatus } : row)))
     setSelected(new Set())
     setBusy('')
-    await refresh()
+    await loadStats()
   }
 
   const toggleSelected = (id: number) => {
@@ -548,10 +590,24 @@ function MatchCard({ row, selected, onToggle, onDecide, busy }: {
 }) {
   const [played, setPlayed] = useState(false)
   const [pickedId, setPickedId] = useState(row.id)
+  const [note, setNote] = useState('')
   const picked = row.alternatives.find((item) => item.id === pickedId) || null
   const videoUrl = picked?.video_source_url || row.video_source_url
   const posterUrl = picked?.video_poster_url || row.video_poster_url || row.crm_photo_url
   const differences = row.differences
+
+  // Решение по строке не перезагружает список: карточка остаётся на месте,
+  // а результат виден подписью и бейджем статуса.
+  const decide = async (ids: number[], action: 'approve' | 'reject' | 'reset', label: string) => {
+    setNote(label)
+    await onDecide(ids, action)
+  }
+
+  const statusLabel = row.status === 'approved' ? 'апрувнуто'
+    : row.status === 'rejected' ? 'отклонено'
+      : row.status === 'applied' ? 'видео привязано'
+        : row.status === 'failed' ? 'ошибка заливки'
+          : ''
 
   return (
     <article className={`rounded-xl border p-3 ${selected ? 'border-indigo-500/60 bg-indigo-500/5' : 'border-slate-800 bg-slate-900/40'}`}>
@@ -583,7 +639,12 @@ function MatchCard({ row, selected, onToggle, onDecide, busy }: {
               {VIDEO_MATCH_BAND_LABELS[row.confidence] || row.confidence} · {row.score}
             </span>
             <span className="text-xs text-slate-500">{row.crm_category} · {row.crm_status}{row.candidates_total > 1 ? ` · вариантов ${row.candidates_total}` : ' · единственный вариант'}</span>
-            {row.status === 'applied' && <span className="text-xs text-emerald-300">видео привязано</span>}
+            {statusLabel && (
+              <span className={`rounded border px-2 py-0.5 text-[11px] ${row.status === 'rejected' || row.status === 'failed' ? 'border-rose-500/40 bg-rose-500/10 text-rose-300' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'}`}>
+                {statusLabel}
+              </span>
+            )}
+            {note && <span className="text-[11px] text-emerald-300">{note}</span>}
             {row.error && <span className="text-xs text-rose-300">{row.error}</span>}
           </div>
 
@@ -604,7 +665,7 @@ function MatchCard({ row, selected, onToggle, onDecide, busy }: {
               {row.alternatives.map((alternative) => (
                 <button
                   key={alternative.id}
-                  onClick={() => { setPickedId(alternative.id); setPlayed(false) }}
+                  onClick={() => { setPickedId(alternative.id); setPlayed(false); setNote('') }}
                   className={`rounded border px-2 py-0.5 text-[11px] ${pickedId === alternative.id ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-200' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}
                 >
                   #{alternative.rank} · {alternative.score}
@@ -618,14 +679,26 @@ function MatchCard({ row, selected, onToggle, onDecide, busy }: {
               row.s3_video_url && <a href={row.s3_video_url} target="_blank" rel="noreferrer" className="text-xs text-sky-300 underline">S3-видео</a>
             ) : (
               <>
-                <button onClick={() => void onDecide([pickedId], 'approve')} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+                <button
+                  onClick={() => void decide([pickedId], 'approve', pickedId === row.id ? 'апрувнуто' : `апрувнут вариант #${picked?.rank ?? ''}`)}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
                   <CheckCircle2 className="h-3.5 w-3.5" /> Апрувить{pickedId !== row.id ? ' выбранный' : ''}
                 </button>
-                <button onClick={() => void onDecide([row.id], 'reject')} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50">
+                <button
+                  onClick={() => void decide([row.id], 'reject', 'отклонено')}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-3 py-1.5 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                >
                   <XCircle className="h-3.5 w-3.5" /> Отклонить
                 </button>
                 {row.status !== 'pending' && (
-                  <button onClick={() => void onDecide([row.id], 'reset')} disabled={busy} className="inline-flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                  <button
+                    onClick={() => void decide([row.id], 'reset', 'возвращено в ожидание')}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+                  >
                     <RotateCcw className="h-3.5 w-3.5" /> В ожидание
                   </button>
                 )}
