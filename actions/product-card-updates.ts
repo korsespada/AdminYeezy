@@ -26,6 +26,14 @@ import {
 import { applyApprovedCardUpdates } from '@/lib/product-card-apply'
 import { runProductCardAi, PRODUCT_CARD_AI_SYSTEM_PROMPT } from '@/lib/product-card-ai'
 import { resolveCardSupplierPrompt, saveCardSupplierSettings } from '@/lib/product-card-suppliers'
+import {
+  cardAiRunProgress,
+  ensureCardAiTasks,
+  getCardAiRun,
+  isCardAiRunActive,
+  startCardAiRun,
+  stopCardAiRun,
+} from '@/lib/product-card-ai-run'
 import { hydrateBatchAiSettings } from '@/lib/batch-ai-settings'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
@@ -90,6 +98,56 @@ export async function listProductCardSuppliersAction(): Promise<ActionResponse> 
     return { success: true, data: { suppliers } }
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось загрузить поставщиков' }
+  }
+}
+
+/** Запускает фоновый прогон ИИ по всем карточкам поставщика. */
+export async function startProductCardsAiRunAction(presetKey: string, batchSize = 4): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    await startCardAiRun(preset.supplierUuid, batchSize)
+    // Будим супервизор, чтобы прогон начался без ожидания его таймера.
+    void ensureCardAiTasks().catch(() => {})
+    return { success: true, data: { run: await getCardAiRun(preset.supplierUuid) } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось запустить прогон ИИ' }
+  }
+}
+
+export async function stopProductCardsAiRunAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    const stopped = await stopCardAiRun(preset.supplierUuid)
+    return { success: true, data: { stopped } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось остановить прогон ИИ' }
+  }
+}
+
+/** Прогресс прогона ИИ: сколько обработано, сколько осталось, жив ли цикл. */
+export async function getProductCardsAiRunAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    const [run, active, progress] = await Promise.all([
+      getCardAiRun(preset.supplierUuid),
+      isCardAiRunActive(preset.supplierUuid),
+      cardAiRunProgress(preset.supplierUuid),
+    ])
+    return {
+      success: true,
+      data: {
+        run,
+        active,
+        remaining: progress.remaining,
+        aiReady: progress.counts.aiReady,
+        aiFailed: progress.counts.aiFailed,
+      },
+    }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось прочитать прогресс ИИ' }
   }
 }
 

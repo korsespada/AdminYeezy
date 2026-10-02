@@ -84,6 +84,23 @@ async function migrate() {
       ALTER TABLE product_card_supplier_settings
       ADD COLUMN IF NOT EXISTS packaging_text TEXT NOT NULL DEFAULT ''
     `)
+    // Прогон ИИ по всем карточкам поставщика: работает в фоновом супервизоре,
+    // поэтому прогресс и признак жизни цикла хранятся в базе.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS product_card_ai_runs (
+        supplier_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        batch_size INTEGER NOT NULL DEFAULT 4,
+        processed INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        model TEXT,
+        started_at TIMESTAMPTZ,
+        heartbeat_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        last_error TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
     await client.query('COMMIT')
     console.log('Product card updates migration complete')
   } catch (error) {

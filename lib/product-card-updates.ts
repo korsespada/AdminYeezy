@@ -342,7 +342,19 @@ export async function selectPendingCardUpdatesForAi(supplierId: string, limit: n
   return result.rows
 }
 
-export async function selectApprovedCardUpdates(supplierId: string, limit: number) {  const result = await scrapingQuery<CardUpdateRecord>(
+/** Возвращает упавшие строки ИИ в работу: разовые сбои провайдера проходят со второй попытки. */
+export async function requeueFailedCardAi(supplierId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_card_updates
+     SET ai_status = 'pending', ai_error = NULL, updated_at = NOW()
+     WHERE supplier_id = $1 AND status = 'pending' AND ai_status = 'failed'`,
+    [supplierId],
+  )
+  return result.rowCount || 0
+}
+
+export async function selectApprovedCardUpdates(supplierId: string, limit: number) {
+  const result = await scrapingQuery<CardUpdateRecord>(
     `SELECT ${SELECT_COLUMNS} FROM product_card_updates
      WHERE supplier_id = $1 AND status = 'approved'
      ORDER BY kind ASC, id ASC

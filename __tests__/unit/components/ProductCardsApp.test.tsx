@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   clear: vi.fn(),
   getPrompt: vi.fn(),
   savePrompt: vi.fn(),
+  aiRun: vi.fn(),
+  startAiRun: vi.fn(),
+  stopAiRun: vi.fn(),
 }))
 
 vi.mock('@/actions/product-card-updates', () => ({
@@ -29,6 +32,9 @@ vi.mock('@/actions/product-card-updates', () => ({
   clearPendingProductCardsAction: mocks.clear,
   getProductCardPromptAction: mocks.getPrompt,
   saveProductCardPromptAction: mocks.savePrompt,
+  getProductCardsAiRunAction: mocks.aiRun,
+  startProductCardsAiRunAction: mocks.startAiRun,
+  stopProductCardsAiRunAction: mocks.stopAiRun,
 }))
 
 const counts = {
@@ -93,6 +99,18 @@ describe('ProductCardsApp', () => {
       success: true,
       data: { stored: 'Новый промпт', effective: 'Новый промпт', packagingStored: 'Новая комплектация', packaging: 'Новая комплектация' },
     })
+    mocks.aiRun.mockResolvedValue({
+      success: true,
+      data: {
+        run: { status: 'idle', batch_size: 4, processed: 0, failed: 0, model: null, started_at: null, heartbeat_at: null, finished_at: null, last_error: null },
+        active: false,
+        remaining: 2186,
+        aiReady: 18,
+        aiFailed: 0,
+      },
+    })
+    mocks.startAiRun.mockResolvedValue({ success: true, data: { run: { status: 'running' } } })
+    mocks.stopAiRun.mockResolvedValue({ success: true, data: { stopped: 1 } })
   })
 
   it('показывает строки поставщиков с прогрессом ИИ', async () => {
@@ -142,6 +160,37 @@ describe('ProductCardsApp', () => {
       'Новый промпт',
       'Комплектация: коробка, пыльник, бутиковый сет.',
     ))
+  })
+
+  it('запускает фоновый прогон ИИ по всем карточкам', async () => {
+    render(<ProductCardsApp />)
+    await userEvent.click(await screen.findByText('Hermes'))
+    await screen.findByText('Lindy 26 18/Etoupe')
+
+    await userEvent.click(screen.getByRole('button', { name: /ИИ по всем/ }))
+
+    await waitFor(() => expect(mocks.startAiRun).toHaveBeenCalledWith('hermes', 4))
+  })
+
+  it('показывает прогресс прогона ИИ', async () => {
+    mocks.aiRun.mockResolvedValue({
+      success: true,
+      data: {
+        run: { status: 'running', batch_size: 4, processed: 120, failed: 3, model: 'gemini-3.8-flash-high', started_at: null, heartbeat_at: null, finished_at: null, last_error: 'таймаут провайдера' },
+        active: true,
+        remaining: 2066,
+        aiReady: 138,
+        aiFailed: 3,
+      },
+    })
+    render(<ProductCardsApp />)
+    await userEvent.click(await screen.findByText('Hermes'))
+
+    expect(await screen.findByText('Прогон ИИ по всем:')).toBeInTheDocument()
+    expect(screen.getByText('идёт')).toBeInTheDocument()
+    expect(screen.getByText('обработано 120')).toBeInTheDocument()
+    expect(screen.getByText('осталось 2066')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Пауза ИИ/ })).toBeInTheDocument()
   })
 
   it('апрувит карточку и перезагружает очередь', async () => {

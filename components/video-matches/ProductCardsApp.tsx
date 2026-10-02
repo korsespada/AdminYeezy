@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, ImageOff, Loader2, RefreshCw, Save, Search, Sparkles, Trash2, Upload, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, ImageOff, Loader2, Pause, RefreshCw, Save, Search, Sparkles, Trash2, Upload, XCircle } from 'lucide-react'
 import {
   applyProductCardsChunkAction,
   approveSafeProductCardsAction,
@@ -9,11 +9,14 @@ import {
   decideProductCardsAction,
   getProductCardPromptAction,
   getProductCardStatsAction,
+  getProductCardsAiRunAction,
   listProductCardSuppliersAction,
   listProductCardsAction,
   runProductCardsAiAction,
   saveProductCardPromptAction,
   scanProductCardsChunkAction,
+  startProductCardsAiRunAction,
+  stopProductCardsAiRunAction,
   type ProductCardCursor,
 } from '@/actions/product-card-updates'
 import type { CardAiStatus, CardKind, CardUpdateStatus } from '@/lib/product-card-updates'
@@ -72,6 +75,24 @@ type PromptState = {
   packagingStored: string
   packagingFallback: string
   packaging: string
+}
+
+type AiRunState = {
+  run: {
+    status: string
+    batch_size: number
+    processed: number
+    failed: number
+    model: string | null
+    started_at: string | null
+    heartbeat_at: string | null
+    finished_at: string | null
+    last_error: string | null
+  } | null
+  active: boolean
+  remaining: number
+  aiReady: number
+  aiFailed: number
 }
 
 const STATUS_FILTERS: Array<{ value: CardUpdateStatus | 'all'; label: string }> = [
@@ -220,6 +241,7 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
   const [promptDraft, setPromptDraft] = useState('')
   const [packagingDraft, setPackagingDraft] = useState('')
   const [showPrompt, setShowPrompt] = useState(false)
+  const [aiRun, setAiRun] = useState<AiRunState | null>(null)
 
   const loadStats = useCallback(async () => {
     const result = await getProductCardStatsAction(presetKey)
@@ -248,6 +270,49 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
 
   useEffect(() => { void loadStats(); void loadPrompt() }, [loadStats, loadPrompt])
   useEffect(() => { void loadRows() }, [loadRows])
+
+  const loadAiRun = useCallback(async () => {
+    const result = await getProductCardsAiRunAction(presetKey)
+    if (result.success) setAiRun(result.data as AiRunState)
+  }, [presetKey])
+
+  useEffect(() => { void loadAiRun() }, [loadAiRun])
+
+  // Пока фоновый прогон идёт, раз в пять секунд обновляем прогресс и очередь.
+  const runStatus = aiRun?.run?.status
+  useEffect(() => {
+    if (runStatus !== 'running') return
+    const timer = setInterval(() => {
+      void loadAiRun()
+      void loadStats()
+      void loadRows()
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [runStatus, loadAiRun, loadStats, loadRows])
+
+  const startAiRun = async () => {
+    setBusy('ai-run')
+    setNote('')
+    try {
+      const result = await startProductCardsAiRunAction(presetKey, 4)
+      if (!result.success) setNote(result.error || 'Не удалось запустить прогон ИИ')
+      else setNote('Прогон ИИ по всем карточкам запущен: вкладку можно закрыть, обработка идёт на сервере')
+      await Promise.all([loadAiRun(), loadStats()])
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const stopAiRun = async () => {
+    setBusy('ai-run')
+    try {
+      await stopProductCardsAiRunAction(presetKey)
+      setNote('Прогон ИИ остановлен')
+      await loadAiRun()
+    } finally {
+      setBusy('')
+    }
+  }
 
   const runScan = async () => {
     setBusy('scan')
@@ -384,6 +449,15 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
             {busy === 'ai' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
             {selected.length ? `ИИ по выбранным (${selected.length})` : `ИИ по ${AI_PER_CLICK}`}
           </button>
+          {runStatus === 'running' ? (
+            <button onClick={() => void stopAiRun()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 px-3 py-2 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+              {busy === 'ai-run' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Пауза ИИ
+            </button>
+          ) : (
+            <button onClick={() => void startAiRun()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500 disabled:opacity-50">
+              {busy === 'ai-run' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} ИИ по всем
+            </button>
+          )}
           <button onClick={() => void approveAllSafe()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
             <CheckCircle2 className="h-3.5 w-3.5" /> Апрувить без спорных
           </button>
@@ -444,6 +518,24 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
         <StatCard label="Апрувнуто / применено" value={`${counts?.approved ?? 0} / ${counts?.applied ?? 0}`} hint={counts?.failed ? `ошибок: ${counts.failed}` : 'ошибок нет'} />
         <StatCard label="ИИ обработано" value={counts?.aiReady ?? 0} hint={`осталось ${counts?.aiPending ?? 0}, ошибок ${counts?.aiFailed ?? 0}`} />
       </div>
+
+      {aiRun?.run && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-3 text-xs text-indigo-100">
+          <span className="font-semibold">Прогон ИИ по всем:</span>
+          <span>
+            {aiRun.run.status === 'running'
+              ? (aiRun.active ? 'идёт' : 'запущен, цикл поднимается')
+              : aiRun.run.status === 'finished' ? 'завершён'
+                : aiRun.run.status === 'stopped' ? 'остановлен'
+                  : aiRun.run.status === 'interrupted' ? 'прерван' : aiRun.run.status}
+          </span>
+          <span>обработано {aiRun.run.processed}</span>
+          <span>ошибок {aiRun.run.failed}</span>
+          <span>осталось {aiRun.remaining}</span>
+          {aiRun.run.model && <span>модель {aiRun.run.model}</span>}
+          {aiRun.run.last_error && <span className="text-rose-300">последняя ошибка: {aiRun.run.last_error}</span>}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={status} onChange={(event) => setStatus(event.target.value as CardUpdateStatus | 'all')} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200">
