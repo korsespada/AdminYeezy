@@ -18,6 +18,7 @@ import {
   rejectRailsCrmRefund,
   rejectRailsCrmWalletWithdrawal,
   restoreRailsAdminProductFromTrash,
+  setRailsAdminProductSlug,
 } from '@/lib/rails-admin'
 
 describe('rails admin product adapter', () => {
@@ -111,8 +112,30 @@ describe('rails admin product adapter', () => {
     expect(init.headers.Authorization).toBe('Bearer test-token')
   })
 
-  it('searches a plain product name without matching slugs of renamed products', () => {
-    const params = buildRailsAdminProductsParams({
+  it('sets an explicit product slug through the dedicated endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        product: {
+          id: 'product-1',
+          slug: 'hermes-birkin-25-89-noir-silver-swift-her-46911',
+          slug_locked: true,
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await setRailsAdminProductSlug('product-1', ' hermes-birkin-25-89-noir-silver-swift-her-46911 ')
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://rails.example.test/api/v1/admin/products/product-1/set_slug')
+    const init = fetchMock.mock.calls[0][1]
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ product: { slug: 'hermes-birkin-25-89-noir-silver-swift-her-46911' } })
+    expect(result.slug).toBe('hermes-birkin-25-89-noir-silver-swift-her-46911')
+    expect(result.slug_locked).toBe(true)
+  })
+
+  it('searches a plain product name without matching slugs of renamed products', () => {    const params = buildRailsAdminProductsParams({
       page: 1,
       perPage: 40,
       name: '  kelly  ',

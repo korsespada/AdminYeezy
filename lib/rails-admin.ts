@@ -1115,8 +1115,7 @@ export interface RailsProductSlugRefresh {
   seo_article: string
 }
 
-export async function refreshRailsProductSlugs(externalIds: string[]) {
-  const ids = [...new Set(externalIds.map(String).map((value) => value.trim()).filter(Boolean))]
+export async function refreshRailsProductSlugs(externalIds: string[]) {  const ids = [...new Set(externalIds.map(String).map((value) => value.trim()).filter(Boolean))]
   const products: RailsProductSlugRefresh[] = []
   const missingExternalIds: string[] = []
 
@@ -1133,6 +1132,24 @@ export async function refreshRailsProductSlugs(externalIds: string[]) {
   }
 
   return { products, missingExternalIds: [...new Set(missingExternalIds)] }
+}
+
+/**
+ * Явный адрес товара для раздела «Видео → товары» и обработки карточек поставщика.
+ *
+ * Rails пересчитывает канонический slug на каждой записи (`Catalog::ProductSlug`),
+ * поэтому адрес ставится отдельным вызовом: crm-api параметризует значение,
+ * при коллизии добавляет номер перед артикулом, помечает товар `slug_locked`
+ * и создаёт 301 со старого адреса. Возвращается фактический адрес.
+ */
+export async function setRailsAdminProductSlug(productId: string, slug: string) {
+  const result = await railsFetch<{
+    product: { id: string; external_id?: string; slug: string; seo_article?: string; slug_locked?: boolean }
+  }>(`/admin/products/${encodeURIComponent(productId)}/set_slug`, {
+    method: 'POST',
+    body: JSON.stringify({ product: { slug: String(slug || '').trim() } }),
+  })
+  return result.product
 }
 
 async function resolveCategoryFilterSlug(value?: string) {

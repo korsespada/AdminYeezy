@@ -36,7 +36,7 @@ type CategoryRule = {
 // Unclassified supplier products still need enough schema for AI to preserve
 // size information before it chooses the final category. These attributes are
 // safe fallbacks for mixed supplier albums such as clothing + footwear.
-const COMMON_ATTRIBUTE_CODES = ['colors', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements', 'size_recommendation']
+const COMMON_ATTRIBUTE_CODES = ['colors', 'supplier_color', 'model_name', 'materials', 'hardware_color', 'sizes', 'size_system', 'measurements', 'size_recommendation']
 
 export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
   definition('colors', 'Цвет', 'Все категории', 'multi_enum', 10, {
@@ -44,6 +44,10 @@ export const CATALOG_ATTRIBUTE_DEFINITIONS: CatalogAttributeDefinition[] = [
     aliases: ['color', 'цвет', 'цвета'],
     values: ['Чёрный', 'Белый', 'Бежевый', 'Коричневый', 'Серый', 'Синий', 'Красный', 'Розовый', 'Зелёный', 'Фиолетовый', 'Бордовый', 'Жёлтый', 'Оранжевый', 'Золотой', 'Серебристый'],
     rules: ['Цвет: чёрный', 'black / noir', 'бордовый'],
+  }),
+  definition('supplier_color', 'Цвет поставщика', 'Все категории', 'text', 15, {
+    aliases: ['supplier_colour', 'цвет поставщика', 'внутренний цвет', 'цвет производителя'],
+    rules: ['Цвет поставщика: 18/Etoupe', 'Цвет поставщика: 89/Noir', 'цвет поставщика: 37/Gold'],
   }),
   definition('model_name', 'Модель', 'Все категории', 'text', 20, {
     aliases: ['model', 'модель', 'артикул модели'],
