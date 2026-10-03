@@ -126,6 +126,25 @@ describe('applyCardUpdateOnce', () => {
     expect(setRailsAdminProductSlug).toHaveBeenCalledWith('product-1', row.proposed_slug)
   })
 
+  it('перезаписывает строку, которую мы уже применяли: карточка изменилась нашими руками', async () => {
+    getRailsAdminProduct.mockResolvedValue({
+      name: 'Сумка Lindy 26 см Clemence from France 18/Etoupe',
+      media: row.current_media,
+    })
+    patchRailsAdminProduct.mockResolvedValue({})
+    setRailsAdminProductSlug.mockResolvedValue({ slug: row.proposed_slug })
+
+    const { applyCardUpdateOnce } = await import('@/lib/product-card-apply')
+    const result = await applyCardUpdateOnce({
+      ...row,
+      ai_status: 'ready',
+      applied_at: '2026-10-03T10:38:59.942Z',
+    })
+
+    expect(patchRailsAdminProduct.mock.calls[0][1].name).toBe('Lindy 26 18/Etoupe')
+    expect(result.slug).toBe(row.proposed_slug)
+  })
+
   it('не заменяет описание черновиком, пока ИИ не отработал', async () => {
     getRailsAdminProduct.mockResolvedValue({ name: row.current_name, media: row.current_media })
     patchRailsAdminProduct.mockResolvedValue({})

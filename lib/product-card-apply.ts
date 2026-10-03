@@ -58,10 +58,14 @@ export async function applyCardUpdateOnce(row: CardUpdateRecord) {
   // Предложение собрано по снимку сканирования. Если название в каталоге уже
   // другое (кто-то правил карточку после скана), применение остановится, чтобы
   // не перезаписать чужие изменения: строку нужно пересобрать и проверить заново.
+  // Исключение — строки, которые мы уже применяли сами: карточка изменилась
+  // нашими же руками (например после правки описаний или комплектации), и
+  // повторная запись здесь ожидаема.
   const freshName = String(fresh.name || '')
   const scannedName = String(row.current_name || '')
   const proposedName = String(row.proposed_name || '')
-  if (freshName !== scannedName && freshName !== proposedName) {
+  const appliedByUs = Boolean(row.applied_at)
+  if (!appliedByUs && freshName !== scannedName && freshName !== proposedName) {
     throw new Error(`Карточка изменилась после скана («${freshName}» вместо «${scannedName}»): обновите очередь и проверьте предложение`)
   }
 
