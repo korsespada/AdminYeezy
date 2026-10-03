@@ -3,6 +3,7 @@ import {
   PRODUCT_CARD_AI_SYSTEM_PROMPT,
   buildProductCardAiPrompt,
   normalizeProductCardAiOutput,
+  packagingApplies,
 } from '@/lib/product-card-ai'
 import { HERMES_CARD_PROMPT_DEFAULT, composeCardSystemPrompt, defaultCardPromptForPreset } from '@/lib/product-card-prompts'
 import type { CardUpdateRecord } from '@/lib/product-card-updates'
@@ -93,6 +94,14 @@ describe('промпт поставщика', () => {
     expect(defaultCardPromptForPreset('unknown')).toBe('')
     expect(HERMES_CARD_PROMPT_DEFAULT).toContain('18/Etoupe')
     expect(HERMES_CARD_PROMPT_DEFAULT).toContain('34–41')
+  })
+
+  it('не добавляет комплектацию обуви и чемоданам', () => {
+    expect(packagingApplies({ kind: 'bag', category: 'Сумки на плечо' })).toBe(true)
+    expect(packagingApplies({ kind: 'shoe', category: 'Шлепанцы и тапочки' })).toBe(false)
+    expect(packagingApplies({ kind: 'bag', category: 'Чемоданы' })).toBe(false)
+    expect(packagingApplies({ kind: 'bag', category: 'Luggage 20' })).toBe(false)
+    expect(packagingApplies({ kind: 'bag', category: null })).toBe(true)
   })
 
   it('собирает системный промпт из базы, инструкции поставщика и правил каталога', () => {

@@ -55,6 +55,16 @@ export function buildProductCardAiPrompt(row: CardUpdateRecord) {
   return lines.join('\n')
 }
 
+/**
+ * Комплектация добавляется только сумкам. У обуви и чемоданов бутикового сета с
+ * замком и ключами нет, поэтому абзац про упаковку к их описанию не клеим.
+ */
+export function packagingApplies(row: { kind?: string | null; category?: string | null }) {
+  if (String(row.kind || '').trim().toLowerCase() === 'shoe') return false
+  if (/чемодан|luggage|багаж/i.test(String(row.category || ''))) return false
+  return true
+}
+
 /** Нормализует ответ модели: описание, альты и подтверждённые материалы. */
 export function normalizeProductCardAiOutput(raw: unknown, photoCount: number, fallbackName: string) {
   const payload = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
@@ -103,7 +113,7 @@ export async function runProductCardAi(
   )
   if (!normalized.description) throw new Error('ИИ не вернул описание')
 
-  const packagingText = String(packaging || '').trim()
+  const packagingText = packagingApplies(row) ? String(packaging || '').trim() : ''
   return {
     ...normalized,
     description: packagingText ? `${normalized.description}\n\n${packagingText}` : normalized.description,

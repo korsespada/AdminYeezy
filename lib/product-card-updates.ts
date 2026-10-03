@@ -342,6 +342,24 @@ export async function selectPendingCardUpdatesForAi(supplierId: string, limit: n
   return result.rows
 }
 
+/**
+ * Убирает абзац комплектации у карточек, которым он не подходит (обувь,
+ * чемоданы). Текст описания остаётся ИИ-текстом, меняется только хвост с
+ * упаковкой, поэтому повторный ИИ-проход не нужен.
+ */
+export async function stripPackagingFromCards(supplierId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_card_updates
+     SET proposed_description = rtrim(split_part(proposed_description, E'\\n\\nКомплектация:', 1)),
+         updated_at = NOW()
+     WHERE supplier_id = $1
+       AND proposed_description LIKE '%Комплектация:%'
+       AND (kind = 'shoe' OR category ILIKE '%чемодан%' OR category ILIKE '%luggage%')`,
+    [supplierId],
+  )
+  return result.rowCount || 0
+}
+
 /** Возвращает упавшие строки ИИ в работу: разовые сбои провайдера проходят со второй попытки. */
 export async function requeueFailedCardAi(supplierId: string) {
   const result = await scrapingQuery(

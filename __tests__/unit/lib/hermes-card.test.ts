@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseHermesCardFacts, hermesColourDisplay, parseHermesColour } from '@/lib/hermes-card-facts'
+import { parseHermesCardFacts, hermesColourDisplay, parseHermesColour, materialsFromText } from '@/lib/hermes-card-facts'
 import { buildHermesCardProposal, extractHermesModel, extractHermesSizeToken } from '@/lib/hermes-card-build'
 import { buildHermesCardSlug, colourSlugValue, hardwareSlugValue, materialSlugValue } from '@/lib/hermes-card-slug'
 
@@ -100,8 +100,15 @@ describe('parseHermesCardFacts', () => {
   it('берёт цвет из свободного текста, когда поля «Цвет» нет', () => {
     expect(parseHermesCardFacts('Кабинный чемодан выполнен в бордовом цвете с серебристой фурнитурой.').colourDisplay).toBe('Бордовый')
     expect(parseHermesCardFacts('Чемодан выполнен в сером цвете, вес около 4 кг.').colourDisplay).toBe('Серый')
+    // «в тёмно-синем цвете» — окончание «ем» даёт «-ий», а не «-ый».
+    expect(parseHermesCardFacts('Модель выполнена в тёмно-синем цвете.').colourDisplay).toBe('Тёмно-синий')
     // Сложные формулировки не угадываем: остаётся предупреждение и решение оператора.
     expect(parseHermesCardFacts('Модель в зелёно-бежевой гамме дополнена ручкой.').colourDisplay).toBeNull()
+  })
+
+  it('не считает материалом слово «лента»', () => {
+    expect(materialsFromText('Корпус из канваса H canvas, застёжка на ленту с пряжкой.')).toEqual(['Канвас H canvas'])
+    expect(materialsFromText('Пыльник изо льна, отделка из кожи taurillon Regate.')).toEqual(['Лён', 'Кожа Taurillon Regate'])
   })
 
   it('распознаёт код и имя цвета Hermes', () => {
