@@ -13,17 +13,24 @@ import { findProductCardPreset } from '@/lib/product-card-presets'
 interface CardSupplierSettings {
   ai_prompt: string
   packaging_text: string
+  auto_apply: boolean
 }
 
 async function readSettings(supplierId: string): Promise<CardSupplierSettings> {
   const result = await scrapingQuery<CardSupplierSettings>(
-    `SELECT ai_prompt, packaging_text FROM product_card_supplier_settings WHERE supplier_id = $1`,
+    `SELECT ai_prompt, packaging_text, auto_apply FROM product_card_supplier_settings WHERE supplier_id = $1`,
     [supplierId],
   )
   return {
     ai_prompt: String(result.rows[0]?.ai_prompt || ''),
     packaging_text: String(result.rows[0]?.packaging_text || ''),
+    auto_apply: Boolean(result.rows[0]?.auto_apply),
   }
+}
+
+/** Автоприменение: апрувнутое уходит в Rails без нажатия кнопки. */
+export async function isCardAutoApplyEnabled(supplierId: string) {
+  return (await readSettings(supplierId)).auto_apply
 }
 
 export async function getCardSupplierPrompt(supplierId: string) {
@@ -34,19 +41,28 @@ export async function getCardSupplierPackaging(supplierId: string) {
   return (await readSettings(supplierId)).packaging_text
 }
 
-export async function saveCardSupplierSettings(supplierId: string, input: { prompt?: string; packaging?: string }) {
+export async function saveCardSupplierSettings(
+  supplierId: string,
+  input: { prompt?: string; packaging?: string; autoApply?: boolean },
+) {
   const current = await readSettings(supplierId)
   const prompt = input.prompt === undefined ? current.ai_prompt : String(input.prompt || '')
   const packaging = input.packaging === undefined ? current.packaging_text : String(input.packaging || '')
+  const autoApply = input.autoApply === undefined ? current.auto_apply : Boolean(input.autoApply)
   await scrapingQuery(
-    `INSERT INTO product_card_supplier_settings (supplier_id, ai_prompt, packaging_text, updated_at)
-     VALUES ($1, $2, $3, NOW())
+    `INSERT INTO product_card_supplier_settings (supplier_id, ai_prompt, packaging_text, auto_apply, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
      ON CONFLICT (supplier_id) DO UPDATE SET
        ai_prompt = EXCLUDED.ai_prompt,
        packaging_text = EXCLUDED.packaging_text,
+       auto_apply = EXCLUDED.auto_apply,
        updated_at = NOW()`,
-    [supplierId, prompt, packaging],
+    [supplierId, prompt, packaging, autoApply],
   )
+}
+
+export async function saveCardSupplierAutoApply(supplierId: string, enabled: boolean) {
+  await saveCardSupplierSettings(supplierId, { autoApply: enabled })
 }
 
 export async function saveCardSupplierPrompt(supplierId: string, prompt: string) {

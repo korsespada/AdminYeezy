@@ -84,6 +84,27 @@ async function migrate() {
       ALTER TABLE product_card_supplier_settings
       ADD COLUMN IF NOT EXISTS packaging_text TEXT NOT NULL DEFAULT ''
     `)
+    // Автоприменение: апрувнутое оператором уходит в Rails без нажатия кнопки.
+    await client.query(`
+      ALTER TABLE product_card_supplier_settings
+      ADD COLUMN IF NOT EXISTS auto_apply BOOLEAN NOT NULL DEFAULT FALSE
+    `)
+    // Прогон применения: та же схема, что у прогона ИИ — прогресс в базе,
+    // цикл в супервизоре, поэтому кликать по кнопке не нужно.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS product_card_apply_runs (
+        supplier_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        batch_size INTEGER NOT NULL DEFAULT 10,
+        applied INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        started_at TIMESTAMPTZ,
+        heartbeat_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        last_error TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `)
     // Прогон ИИ по всем карточкам поставщика: работает в фоновом супервизоре,
     // поэтому прогресс и признак жизни цикла хранятся в базе.
     await client.query(`

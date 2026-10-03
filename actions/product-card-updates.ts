@@ -25,7 +25,7 @@ import {
 } from '@/lib/product-card-updates'
 import { applyApprovedCardUpdates } from '@/lib/product-card-apply'
 import { runProductCardAi, PRODUCT_CARD_AI_SYSTEM_PROMPT } from '@/lib/product-card-ai'
-import { resolveCardSupplierPrompt, saveCardSupplierSettings } from '@/lib/product-card-suppliers'
+import { resolveCardSupplierPrompt, saveCardSupplierAutoApply, saveCardSupplierSettings } from '@/lib/product-card-suppliers'
 import {
   cardAiRunProgress,
   ensureCardAiTasks,
@@ -34,6 +34,15 @@ import {
   startCardAiRun,
   stopCardAiRun,
 } from '@/lib/product-card-ai-run'
+import {
+  ensureCardApplyTasks,
+  getCardApplyRun,
+  isCardApplyRunActive,
+  runCardApplyLoopTracked,
+  startCardApplyRun,
+  stopCardApplyRun,
+} from '@/lib/product-card-apply-run'
+import { isCardAutoApplyEnabled } from '@/lib/product-card-suppliers'
 import { hydrateBatchAiSettings } from '@/lib/batch-ai-settings'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
@@ -128,26 +137,96 @@ export async function stopProductCardsAiRunAction(presetKey: string): Promise<Ac
 
 /** Прогресс прогона ИИ: сколько обработано, сколько осталось, жив ли цикл. */
 export async function getProductCardsAiRunAction(presetKey: string): Promise<ActionResponse> {
+  return getProductCardsRunsAction(presetKey)
+}
+
+/** Включает и выключает автоприменение: апрувнутое уходит в Rails само. */
+export async function setProductCardsAutoApplyAction(presetKey: string, enabled: boolean): Promise<ActionResponse> {
   try {
     await requireAdmin()
     const preset = findProductCardPreset(presetKey)
-    const [run, active, progress] = await Promise.all([
+    await saveCardSupplierAutoApply(preset.supplierUuid, enabled)
+    if (enabled) void ensureCardApplyTasks().catch(() => {})
+    return { success: true, data: { autoApply: enabled } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось сохранить автоприменение' }
+  }
+}
+
+/**
+ * Применение в стиле «Публикации» из «Выгрузок»: работа идёт в этом же запросе,
+ * прогресс пишется в `product_card_apply_runs`, интерфейс его опрашивает, а
+ * кнопка «Пауза применения» останавливает цикл между порциями.
+ */
+export async function applyProductCardsRunAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    if (!(await isCardApplyRunActive(preset.supplierUuid))) {
+      await startCardApplyRun(preset.supplierUuid, 10)
+    }
+    await runCardApplyLoopTracked(preset.supplierUuid)
+    return { success: true, data: { run: await getCardApplyRun(preset.supplierUuid) } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось применить карточки' }
+  }
+}
+
+/** Запускает фоновое применение апрувнутых карточек (одно нажатие на всё). */
+export async function startProductCardsApplyRunAction(presetKey: string, batchSize = 10): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    await startCardApplyRun(preset.supplierUuid, batchSize)
+    void ensureCardApplyTasks().catch(() => {})
+    return { success: true, data: { run: await getCardApplyRun(preset.supplierUuid) } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось запустить применение' }
+  }
+}
+
+export async function stopProductCardsApplyRunAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    const stopped = await stopCardApplyRun(preset.supplierUuid)
+    return { success: true, data: { stopped } }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Не удалось остановить применение' }
+  }
+}
+
+/** Прогресс фоновых прогонов: ИИ и применение. */
+export async function getProductCardsRunsAction(presetKey: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const preset = findProductCardPreset(presetKey)
+    const [aiRun, aiActive, applyRun, applyActive, progress, autoApply] = await Promise.all([
       getCardAiRun(preset.supplierUuid),
       isCardAiRunActive(preset.supplierUuid),
+      getCardApplyRun(preset.supplierUuid),
+      isCardApplyRunActive(preset.supplierUuid),
       cardAiRunProgress(preset.supplierUuid),
+      isCardAutoApplyEnabled(preset.supplierUuid),
     ])
     return {
       success: true,
       data: {
-        run,
-        active,
+        run: aiRun,
+        active: aiActive,
         remaining: progress.remaining,
         aiReady: progress.counts.aiReady,
         aiFailed: progress.counts.aiFailed,
+        applyRun,
+        applyActive,
+        approved: progress.counts.approved,
+        applied: progress.counts.applied,
+        applyFailed: progress.counts.failed,
+        autoApply,
       },
     }
   } catch (error: any) {
-    return { success: false, error: error.message || 'Не удалось прочитать прогресс ИИ' }
+    return { success: false, error: error.message || 'Не удалось прочитать прогресс прогонов' }
   }
 }
 

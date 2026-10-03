@@ -360,6 +360,17 @@ export async function stripPackagingFromCards(supplierId: string) {
   return result.rowCount || 0
 }
 
+/** Возвращает упавшие при применении строки в работу: одна повторная попытка на прогон. */
+export async function requeueFailedCardApply(supplierId: string) {
+  const result = await scrapingQuery(
+    `UPDATE product_card_updates
+     SET status = 'approved', error = NULL, updated_at = NOW()
+     WHERE supplier_id = $1 AND status = 'failed'`,
+    [supplierId],
+  )
+  return result.rowCount || 0
+}
+
 /** Возвращает упавшие строки ИИ в работу: разовые сбои провайдера проходят со второй попытки. */
 export async function requeueFailedCardAi(supplierId: string) {
   const result = await scrapingQuery(

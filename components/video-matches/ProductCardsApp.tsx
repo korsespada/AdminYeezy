@@ -3,20 +3,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronRight, ImageOff, Loader2, Pause, RefreshCw, Save, Search, Sparkles, Trash2, Upload, XCircle } from 'lucide-react'
 import {
-  applyProductCardsChunkAction,
   approveSafeProductCardsAction,
   clearPendingProductCardsAction,
   decideProductCardsAction,
   getProductCardPromptAction,
   getProductCardStatsAction,
-  getProductCardsAiRunAction,
+  getProductCardsRunsAction,
+  applyProductCardsRunAction,
   listProductCardSuppliersAction,
   listProductCardsAction,
   runProductCardsAiAction,
   saveProductCardPromptAction,
   scanProductCardsChunkAction,
+  setProductCardsAutoApplyAction,
   startProductCardsAiRunAction,
+  startProductCardsApplyRunAction,
   stopProductCardsAiRunAction,
+  stopProductCardsApplyRunAction,
   type ProductCardCursor,
 } from '@/actions/product-card-updates'
 import type { CardAiStatus, CardKind, CardUpdateStatus } from '@/lib/product-card-updates'
@@ -93,6 +96,21 @@ type AiRunState = {
   remaining: number
   aiReady: number
   aiFailed: number
+  applyRun: {
+    status: string
+    batch_size: number
+    applied: number
+    failed: number
+    started_at: string | null
+    heartbeat_at: string | null
+    finished_at: string | null
+    last_error: string | null
+  } | null
+  applyActive: boolean
+  approved: number
+  applied: number
+  applyFailed: number
+  autoApply: boolean
 }
 
 const STATUS_FILTERS: Array<{ value: CardUpdateStatus | 'all'; label: string }> = [
@@ -132,7 +150,6 @@ const ATTRIBUTE_LABELS: Record<string, string> = {
 }
 
 const SCAN_CHUNKS_PER_CLICK = 10
-const APPLY_CHUNKS_PER_CLICK = 5
 const AI_PER_CLICK = 3
 
 function valueLabel(value: unknown) {
@@ -272,23 +289,24 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
   useEffect(() => { void loadRows() }, [loadRows])
 
   const loadAiRun = useCallback(async () => {
-    const result = await getProductCardsAiRunAction(presetKey)
+    const result = await getProductCardsRunsAction(presetKey)
     if (result.success) setAiRun(result.data as AiRunState)
   }, [presetKey])
 
   useEffect(() => { void loadAiRun() }, [loadAiRun])
 
-  // Пока фоновый прогон идёт, раз в пять секунд обновляем прогресс и очередь.
+  // Пока идут фоновые прогоны, раз в пять секунд обновляем прогресс и очередь.
   const runStatus = aiRun?.run?.status
+  const applyStatus = aiRun?.applyRun?.status
   useEffect(() => {
-    if (runStatus !== 'running') return
+    if (runStatus !== 'running' && applyStatus !== 'running') return
     const timer = setInterval(() => {
       void loadAiRun()
       void loadStats()
       void loadRows()
     }, 5000)
     return () => clearInterval(timer)
-  }, [runStatus, loadAiRun, loadStats, loadRows])
+  }, [runStatus, applyStatus, loadAiRun, loadStats, loadRows])
 
   const startAiRun = async () => {
     setBusy('ai-run')
@@ -308,6 +326,58 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
     try {
       await stopProductCardsAiRunAction(presetKey)
       setNote('Прогон ИИ остановлен')
+      await loadAiRun()
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const startApplyRun = async () => {
+    setBusy('apply-run')
+    setNote('')
+    try {
+      const result = await startProductCardsApplyRunAction(presetKey, 10)
+      if (!result.success) setNote(result.error || 'Не удалось запустить применение')
+      else setNote('Применение запущено в фоне: апрувнутые карточки уходят в Rails, вкладку можно закрыть')
+      await Promise.all([loadAiRun(), loadStats()])
+    } finally {
+      setBusy('')
+    }
+  }
+
+  /**
+   * «Применить всё» в стиле «Публикации»: работа идёт в этом же запросе, поэтому
+   * ответ не ждём — прогресс и ошибки покажет опрос ниже.
+   */
+  const applyEverything = () => {
+    setNote('Применение запущено: карточки уходят в Rails, прогресс обновляется ниже')
+    void applyProductCardsRunAction(presetKey)
+      .then((result) => {
+        if (!result.success) setNote(result.error || 'Применение остановилось с ошибкой')
+        return Promise.all([loadAiRun(), loadStats(), loadRows()])
+      })
+      .catch((error) => setNote(String(error?.message || error)))
+  }
+
+  const stopApplyRun = async () => {
+    setBusy('apply-run')
+    try {
+      await stopProductCardsApplyRunAction(presetKey)
+      setNote('Применение остановлено')
+      await loadAiRun()
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const toggleAutoApply = async (enabled: boolean) => {
+    setBusy('auto-apply')
+    try {
+      const result = await setProductCardsAutoApplyAction(presetKey, enabled)
+      if (!result.success) setNote(result.error || 'Не удалось сохранить автоприменение')
+      else setNote(enabled
+        ? 'Автоприменение включено: всё апрувнутое уходит в Rails само'
+        : 'Автоприменение выключено')
       await loadAiRun()
     } finally {
       setBusy('')
@@ -347,31 +417,6 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
       setFailures(data.failures || [])
       setNote(`ИИ (${data.model || ''}, промпт: ${data.promptSource === 'supplier' ? 'поставщика' : 'по умолчанию'}): обработано ${data.processed}, готово ${data.ready}, ошибок ${data.failed}`)
       await Promise.all([loadStats(), loadRows()])
-    } finally {
-      setBusy('')
-    }
-  }
-
-  const applyApproved = async () => {
-    setBusy('apply')
-    setNote('')
-    try {
-      let applied = 0
-      let failed = 0
-      const collected: string[] = []
-      for (let index = 0; index < APPLY_CHUNKS_PER_CLICK; index += 1) {
-        const result = await applyProductCardsChunkAction(presetKey, 10)
-        if (!result.success) { setNote(result.error || 'Сбой применения'); break }
-        const data = result.data as { processed: number; applied: number; failed: number; failures: string[] }
-        applied += data.applied
-        failed += data.failed
-        collected.push(...(data.failures || []))
-        setNote(`Применение: ${applied} записано, ошибок ${failed}`)
-        if (data.processed === 0) break
-      }
-      setFailures(collected)
-      await Promise.all([loadStats(), loadRows()])
-      setNote(`Применение завершено: ${applied} записано, ошибок ${failed}`)
     } finally {
       setBusy('')
     }
@@ -461,9 +506,24 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
           <button onClick={() => void approveAllSafe()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
             <CheckCircle2 className="h-3.5 w-3.5" /> Апрувить без спорных
           </button>
-          <button onClick={() => void applyApproved()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
-            {busy === 'apply' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Применить апрувнутые
-          </button>
+          {applyStatus === 'running' ? (
+            <button onClick={() => void stopApplyRun()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg border border-amber-500/50 px-3 py-2 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+              {busy === 'apply-run' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pause className="h-3.5 w-3.5" />} Пауза применения
+            </button>
+          ) : (
+            <button onClick={() => applyEverything()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg bg-sky-600 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50">
+              {busy === 'apply-run' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Применить всё
+            </button>
+          )}
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-3 py-2 text-xs text-slate-200">
+            <input
+              type="checkbox"
+              checked={Boolean(aiRun?.autoApply)}
+              disabled={Boolean(busy)}
+              onChange={(event) => void toggleAutoApply(event.target.checked)}
+            />
+            применять автоматически
+          </label>
           <button onClick={() => void clearQueue()} disabled={Boolean(busy)} className="inline-flex items-center gap-1 rounded-lg border border-rose-500/40 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 disabled:opacity-50">
             <Trash2 className="h-3.5 w-3.5" /> Очистить несогласованные
           </button>
@@ -534,6 +594,25 @@ function SupplierCards({ presetKey, onBack }: { presetKey: string; onBack: () =>
           <span>осталось {aiRun.remaining}</span>
           {aiRun.run.model && <span>модель {aiRun.run.model}</span>}
           {aiRun.run.last_error && <span className="text-rose-300">последняя ошибка: {aiRun.run.last_error}</span>}
+        </div>
+      )}
+
+      {aiRun?.applyRun && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-3 text-xs text-sky-100">
+          <span className="font-semibold">Применение в Rails:</span>
+          <span>
+            {aiRun.applyRun.status === 'running'
+              ? (aiRun.applyActive ? 'идёт' : 'запущено, цикл поднимается')
+              : aiRun.applyRun.status === 'finished' ? 'завершено'
+                : aiRun.applyRun.status === 'stopped' ? 'остановлено'
+                  : aiRun.applyRun.status === 'interrupted' ? 'прервано' : aiRun.applyRun.status}
+          </span>
+          <span>записано {aiRun.applyRun.applied}</span>
+          <span>ошибок {aiRun.applyRun.failed}</span>
+          <span>апрувнуто {aiRun.approved}</span>
+          <span>уже в Rails {aiRun.applied}</span>
+          <span>{aiRun.autoApply ? 'автоприменение включено' : 'автоприменение выключено'}</span>
+          {aiRun.applyRun.last_error && <span className="text-rose-300">последняя ошибка: {aiRun.applyRun.last_error}</span>}
         </div>
       )}
 

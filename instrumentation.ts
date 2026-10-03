@@ -18,4 +18,10 @@ export async function register() {
   } catch (error) {
     console.error('Не удалось запустить супервизор ИИ по карточкам', error)
   }
+  try {
+    const { startCardApplySupervisor } = await import('@/lib/product-card-apply-run')
+    startCardApplySupervisor()
+  } catch (error) {
+    console.error('Не удалось запустить супервизор применения карточек', error)
+  }
 }
