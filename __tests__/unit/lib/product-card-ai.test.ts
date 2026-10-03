@@ -5,7 +5,7 @@ import {
   normalizeProductCardAiOutput,
   packagingApplies,
 } from '@/lib/product-card-ai'
-import { HERMES_CARD_PROMPT_DEFAULT, composeCardSystemPrompt, defaultCardPromptForPreset } from '@/lib/product-card-prompts'
+import { HERMES_CARD_PROMPT_DEFAULT, HERMES_PACKAGING_DEFAULT, composeCardSystemPrompt, defaultCardPromptForPreset } from '@/lib/product-card-prompts'
 import type { CardUpdateRecord } from '@/lib/product-card-updates'
 
 /**
@@ -102,6 +102,12 @@ describe('промпт поставщика', () => {
     expect(packagingApplies({ kind: 'bag', category: 'Чемоданы' })).toBe(false)
     expect(packagingApplies({ kind: 'bag', category: 'Luggage 20' })).toBe(false)
     expect(packagingApplies({ kind: 'bag', category: null })).toBe(true)
+  })
+
+  it('каждый пункт комплектации идёт с длинного тире', () => {
+    const items = HERMES_PACKAGING_DEFAULT.split('\n').slice(1)
+    expect(items.length).toBe(4)
+    for (const item of items) expect(item.startsWith('— ')).toBe(true)
   })
 
   it('собирает системный промпт из базы, инструкции поставщика и правил каталога', () => {

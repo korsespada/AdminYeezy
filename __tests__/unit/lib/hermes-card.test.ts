@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseHermesCardFacts, hermesColourDisplay, parseHermesColour, materialsFromText } from '@/lib/hermes-card-facts'
-import { buildHermesCardProposal, extractHermesModel, extractHermesSizeToken } from '@/lib/hermes-card-build'
+import { buildHermesCardProposal, extractHermesModel, extractHermesSizeToken, materialNameToken, tidyHermesMaterial } from '@/lib/hermes-card-build'
 import { buildHermesCardSlug, colourSlugValue, hardwareSlugValue, materialSlugValue } from '@/lib/hermes-card-slug'
 
 /**
@@ -109,6 +109,27 @@ describe('parseHermesCardFacts', () => {
   it('не считает материалом слово «лента»', () => {
     expect(materialsFromText('Корпус из канваса H canvas, застёжка на ленту с пряжкой.')).toEqual(['Канвас H canvas'])
     expect(materialsFromText('Пыльник изо льна, отделка из кожи taurillon Regate.')).toEqual(['Лён', 'Кожа Taurillon Regate'])
+  })
+
+  it('убирает страну происхождения из материала', () => {
+    expect(tidyHermesMaterial('chèvre From France')).toBe('Chèvre')
+    expect(tidyHermesMaterial('swift from France')).toBe('Swift')
+    expect(tidyHermesMaterial('Box From France')).toBe('Box')
+    expect(tidyHermesMaterial('Clemence form france')).toBe('Clemence')
+    expect(tidyHermesMaterial('Niloticus imported From France which originally from nile')).toBe('Кожа нильского крокодила')
+    expect(tidyHermesMaterial('Матового аллигатора, импортированного из Франции, родом из')).toBe('Кожа аллигатора')
+    expect(tidyHermesMaterial('Ящерица , импортированная из Франции, родом из Южной Африки')).toBe('Кожа ящерицы')
+    expect(tidyHermesMaterial('Кожа страуса, импортированной из Франции')).toBe('Кожа страуса')
+    expect(tidyHermesMaterial('Французская телячья кожа Clemence')).toBe('Телячья кожа Clemence')
+    expect(materialNameToken('chèvre From France')).toBe('Chèvre')
+  })
+
+  it('исправляет опечатки поставщика в названиях кож', () => {
+    expect(tidyHermesMaterial('Evecolor From France')).toBe('Evercolor')
+    expect(tidyHermesMaterial('Eposm From France')).toBe('Epsom')
+    expect(tidyHermesMaterial('Аллгатор')).toBe('Кожа аллигатора')
+    expect(tidyHermesMaterial('Ostrich')).toBe('Кожа страуса')
+    expect(tidyHermesMaterial('- крокодилья кожа , импортированная из Франции, родом из')).toBe('Кожа крокодила')
   })
 
   it('распознаёт код и имя цвета Hermes', () => {

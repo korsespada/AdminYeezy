@@ -228,17 +228,58 @@ export function extractHermesModel(value: unknown): string | null {
   return /[\d/]/.test(model) ? model : null
 }
 
+/** Кожи Hermes, которые поставщик пишет с опечатками. */
+const LEATHER_TYPO_FORMS: Array<[RegExp, string]> = [
+  [/\bevecolor\b/i, 'Evercolor'],
+  [/\beposm\b/i, 'Epsom'],
+]
+
+/** Русские названия экзотических кож: в каталоге пишем «Кожа <кого>». */
+const EXOTIC_LEATHER_FORMS: Array<[RegExp, string]> = [
+  [/ал+и?гатор/i, 'Кожа аллигатора'],
+  [/alligator/i, 'Кожа аллигатора'],
+  [/ящериц/i, 'Кожа ящерицы'],
+  [/\blizard\b/i, 'Кожа ящерицы'],
+  [/крокодил/i, 'Кожа крокодила'],
+  [/\bcrocodile\b/i, 'Кожа крокодила'],
+  [/страус|ostrich/i, 'Кожа страуса'],
+  [/питон|\bpython\b/i, 'Кожа питона'],
+  [/нилот|niloticus/i, 'Кожа нильского крокодила'],
+]
+
 /**
  * Материал в характеристику: короткое подтверждённое значение вместо абзаца
  * («Верх из кожи ящерицы. Кожа ящерицы импортирована из Франции» → «Кожа ящерицы»).
+ *
+ * Поставщик добавляет к коже страну происхождения и свои опечатки, поэтому
+ * значение чистится от «from France», «импортированная… родом из» и приводится
+ * к каталогу: «Evecolor» → «Evercolor», «Аллгатор» → «Кожа аллигатора».
  */
 export function tidyHermesMaterial(value: string | null | undefined): string | null {
   let text = tidy(value)
   if (!text) return null
   text = text.split(/[.;]/)[0]
   text = text.replace(/^(?:верх|подкладка|материал)\s*(?:из|:)?\s*/i, '').replace(/^из\s+/i, '')
-  text = text.replace(/^кож[аи]\s+/i, 'Кожа ').replace(/^замш[аи]\s+/i, 'Замша ')
+  // Страна происхождения и служебные слова поставщика в названии не нужны.
+  text = text
+    .replace(/\b(?:from|form)\s+france\b/gi, ' ')
+    .replace(/(?:^|\s)из\s+франции/gi, ' ')
+    .replace(/французск[а-яё]*/gi, ' ')
+    .replace(/\bimported\b[^,]*/gi, ' ')
+    .replace(/\bwhich\s+originally\s+from\b[^,]*/gi, ' ')
+    .replace(/импортированн[а-яё]*/gi, ' ')
+    .replace(/родом\s+из[^,]*/gi, ' ')
+  text = text.replace(/^[\s\-–—:]+/, '').replace(/[,\s]+$/, '')
   text = text.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  for (const [pattern, replacement] of EXOTIC_LEATHER_FORMS) {
+    if (pattern.test(text)) return replacement
+  }
+  for (const [pattern, replacement] of LEATHER_TYPO_FORMS) {
+    text = text.replace(pattern, replacement)
+  }
+  text = text.replace(/^кож[аи]\s+/i, 'Кожа ').replace(/^замш[аи]\s+/i, 'Замша ')
+  text = text.replace(/[,\s]+$/, '').replace(/\s+/g, ' ').trim()
   if (!text) return null
   if (text.length > 60) {
     const cut = text.slice(0, 60)
