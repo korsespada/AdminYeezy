@@ -394,9 +394,17 @@ export async function selectApprovedCardUpdates(supplierId: string, limit: numbe
 }
 
 export async function markCardUpdateApplied(id: number, appliedSlug: string | null) {
+  // Снимок «сейчас» обновляем тем, что только что записали: иначе повторное
+  // применение (например после правки описаний) упрётся в защиту от устаревшего
+  // снимка — карточка-то изменилась нашими же руками.
   await scrapingQuery(
     `UPDATE product_card_updates
-     SET status = 'applied', error = NULL, proposed_slug = COALESCE($2, proposed_slug),
+     SET status = 'applied', error = NULL,
+         proposed_slug = COALESCE($2, proposed_slug),
+         current_name = COALESCE(proposed_name, current_name),
+         current_slug = COALESCE($2, proposed_slug, current_slug),
+         current_description = CASE WHEN ai_status = 'ready' THEN proposed_description ELSE current_description END,
+         current_attributes = proposed_attributes,
          applied_at = NOW(), updated_at = NOW()
      WHERE id = $1`,
     [id, appliedSlug],
