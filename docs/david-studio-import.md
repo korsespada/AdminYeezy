@@ -26,10 +26,11 @@ npm run catalog:sync:david-studio
 ```
 
 - Ключи BYESU живут в окружении сервера и привязаны к группе моделей:
-  `BYESU_GEMINI_API_KEY` (Gemini Business), `BYESU_OPENAI_API_KEY` (OpenAI Codex) и
-  `BYESU_CLAUDE_API_KEY` (Claude). На `/admin/ai-rules` видно, какие группы
-  подключены: «Gemini ✓ · OpenAI — · Claude —». Группу выбирает имя модели:
-  `gemini…` — Gemini, `claude…` — Claude, остальное — OpenAI Codex.
+  `BYESU_GEMINI_API_KEY` (Gemini Business), `BYESU_OPENAI_API_KEY` (OpenAI Codex),
+  `BYESU_CLAUDE_API_KEY` (Claude) и `BYESU_GROK_API_KEY` (Grok). На `/admin/ai-rules`
+  видно, какие группы подключены: «Gemini ✓ · OpenAI — · Claude — · Grok —».
+  Группу выбирает имя модели: `gemini…` — Gemini, `claude…` — Claude,
+  `grok…` — Grok, остальное — OpenAI Codex.
 - Если Gemini недоступен, берите Claude: изображения через BYESU видят
   `claude-sonnet-4-6` и `claude-opus-4-8`, а свежие `claude-*-5` отвечают «не вижу
   изображения» (подробнее — в [Batch AI workflow](./batch-ai-workflow.md#какие-модели-claude-видят-изображения)).

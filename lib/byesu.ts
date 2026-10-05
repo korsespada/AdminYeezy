@@ -5,7 +5,7 @@ const BYESU_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 
 type ByesuPayload = Record<string, any>
 
-export type ByesuModelGroup = 'gemini' | 'openai' | 'claude'
+export type ByesuModelGroup = 'gemini' | 'openai' | 'claude' | 'grok'
 
 export type ByesuModelOption = {
   value: string
@@ -16,12 +16,13 @@ export type ByesuModelOption = {
 /**
  * Группа модели у BYESU. Ключи выдаются отдельно на семейство моделей, поэтому
  * имя модели определяет, какой ключ нужен: `gemini…` — Gemini Business,
- * `claude…` — Claude, остальное — OpenAI Codex.
+ * `claude…` — Claude, `grok…` — Grok (xAI), остальное — OpenAI Codex.
  */
 export function byesuModelGroup(model: unknown): ByesuModelGroup {
   const value = String(model || '').trim().toLowerCase()
   if (value.startsWith('gemini')) return 'gemini'
   if (value.startsWith('claude')) return 'claude'
+  if (value.startsWith('grok')) return 'grok'
   return 'openai'
 }
 
@@ -29,12 +30,14 @@ const BYESU_GROUP_ENV: Record<ByesuModelGroup, string> = {
   gemini: 'BYESU_GEMINI_API_KEY',
   openai: 'BYESU_OPENAI_API_KEY',
   claude: 'BYESU_CLAUDE_API_KEY',
+  grok: 'BYESU_GROK_API_KEY',
 }
 
 const BYESU_GROUP_LABEL: Record<ByesuModelGroup, string> = {
   gemini: 'Gemini Business',
   openai: 'OpenAI Codex',
   claude: 'Claude',
+  grok: 'Grok',
 }
 
 /** Имя переменной окружения с ключом группы — для подсказок в интерфейсе и ошибках. */
@@ -48,7 +51,7 @@ export function byesuGroupLabel(group: ByesuModelGroup) {
 
 function legacyByesuGroup(): ByesuModelGroup {
   const configured = process.env.BYESU_API_GROUP?.trim().toLowerCase()
-  return configured === 'gemini' || configured === 'claude' ? configured : 'openai'
+  return configured === 'gemini' || configured === 'claude' || configured === 'grok' ? configured : 'openai'
 }
 
 export function byesuApiKeyStatus() {
@@ -58,6 +61,7 @@ export function byesuApiKeyStatus() {
     gemini: Boolean(process.env.BYESU_GEMINI_API_KEY?.trim() || (legacyGroup === 'gemini' && legacyKey)),
     openai: Boolean(process.env.BYESU_OPENAI_API_KEY?.trim() || (legacyGroup === 'openai' && legacyKey)),
     claude: Boolean(process.env.BYESU_CLAUDE_API_KEY?.trim() || (legacyGroup === 'claude' && legacyKey)),
+    grok: Boolean(process.env.BYESU_GROK_API_KEY?.trim() || (legacyGroup === 'grok' && legacyKey)),
     legacy: Boolean(legacyKey),
   }
 }
@@ -98,7 +102,7 @@ async function fetchByesuModels(group: ByesuModelGroup, apiKey: string): Promise
 }
 
 export async function getByesuModels(): Promise<ByesuModelOption[]> {
-  const groups: ByesuModelGroup[] = ['gemini', 'openai', 'claude']
+  const groups: ByesuModelGroup[] = ['gemini', 'openai', 'claude', 'grok']
   const results = await Promise.all(groups.map(async (group) => {
     const apiKey = byesuGroupApiKey(group)
     if (!apiKey) return []

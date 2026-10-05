@@ -24,6 +24,7 @@ type Props = {
       byesuGemini?: boolean
       byesuOpenai?: boolean
       byesuClaude?: boolean
+      byesuGrok?: boolean
       byesuLegacy?: boolean
     }
     byesuModels?: ByesuModelOption[]
@@ -39,6 +40,7 @@ const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
   // Claude 4.x видит изображения через BYESU, а свежие 5.x отвечают «не вижу фото»:
   // для сверки по фотографиям подходит именно эта модель.
   { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', group: 'claude' },
+  { value: 'grok-4.7', label: 'Grok 4.7', group: 'grok' },
 ]
 
 export default function AIRulesEditor({ initialSettings, initialCategories, initialSubcategories }: Props) {
@@ -78,7 +80,9 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
       ? Boolean(credentials?.byesuGemini)
       : selectedByesuGroup === 'claude'
         ? Boolean(credentials?.byesuClaude)
-        : Boolean(credentials?.byesuOpenai)
+        : selectedByesuGroup === 'grok'
+          ? Boolean(credentials?.byesuGrok)
+          : Boolean(credentials?.byesuOpenai)
   )
 
   const update = <K extends keyof BatchAiSettings>(key: K, value: BatchAiSettings[K]) => {
@@ -260,7 +264,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
               <ProviderButton
                 active={!settings.activeProviderId && settings.provider === 'byesu'}
                 title="BYESU API"
-                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'} · Claude ${credentials?.byesuClaude ? '✓' : '—'}`}
+                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'} · Claude ${credentials?.byesuClaude ? '✓' : '—'} · Grok ${credentials?.byesuGrok ? '✓' : '—'}`}
                 onClick={() => selectLegacyProvider('byesu')}
               />
               <ProviderButton

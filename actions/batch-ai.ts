@@ -106,6 +106,7 @@ const SETTINGS_KEYS = [
 const FALLBACK_BYESU_MODELS = [
   { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' as const },
   { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' as const },
+  { value: 'grok-4.7', label: 'Grok 4.7', group: 'grok' as const },
 ]
 
 function finiteNumber(value: unknown, fallback: number) {
@@ -176,6 +177,7 @@ export async function getBatchAiSettingsAction() {
         byesuGemini: byesuKeys.gemini,
         byesuOpenai: byesuKeys.openai,
         byesuClaude: byesuKeys.claude,
+        byesuGrok: byesuKeys.grok,
         byesuLegacy: byesuKeys.legacy,
       },
       byesuModels,
