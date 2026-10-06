@@ -1,10 +1,20 @@
 import https from 'node:https'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { SocksProxyAgent } from 'socks-proxy-agent'
+import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 
 const OPENROUTER_CHAT_URL = new URL('https://openrouter.ai/api/v1/chat/completions')
-const OPENROUTER_TIMEOUT_MS = 120_000
+/**
+ * Тяжёлая карточка может считаться минутами (замер на реальной выгрузке:
+ * 127–152 с), поэтому 120 с обрывали такие запросы и выдавали это за отказ
+ * соединения.
+ */
+const OPENROUTER_DEFAULT_TIMEOUT_MS = 300_000
 const OPENROUTER_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+
+export function openRouterTimeoutMs() {
+  return providerTimeoutMsFromEnv('OPENROUTER_TIMEOUT_MS', OPENROUTER_DEFAULT_TIMEOUT_MS)
+}
 
 type OpenRouterPayload = Record<string, any>
 
@@ -89,12 +99,17 @@ export async function openRouterChatCompletion(
       })
     })
 
-    request.setTimeout(OPENROUTER_TIMEOUT_MS, () => {
-      request.destroy(new Error('OpenRouter не ответил за 120 секунд'))
+    request.setTimeout(openRouterTimeoutMs(), () => {
+      request.destroy(providerTimeoutError('OpenRouter', openRouterTimeoutMs()))
     })
     request.on('error', (error: NodeJS.ErrnoException) => {
-      const code = error.code ? ` (${error.code})` : ''
-      reject(new Error(`Не удалось подключиться к OpenRouter${code}`))
+      // Тайм-аут сохраняем как тайм-аут: раньше он подменялся сообщением об
+      // отказе соединения, и batch AI не повторял такой запрос.
+      if (isProviderTimeoutError(error)) {
+        reject(error)
+        return
+      }
+      reject(providerConnectionError('OpenRouter', error))
     })
     request.end(body)
   })

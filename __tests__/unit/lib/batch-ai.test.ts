@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -1559,5 +1559,28 @@ describe('batch AI normalization', () => {
     ])
 
     expect(rule.id).toBe(3)
+  })
+})
+
+describe('batch AI retry classification', () => {
+  it('считает тайм-аут запроса временной ошибкой', () => {
+    const timeout = Object.assign(new Error('BYESU не ответил за 300 с (тайм-аут запроса)'), { name: 'TimeoutError' })
+    expect(isBatchAiRequestTimeout(timeout)).toBe(true)
+    expect(isRetryableBatchAiError(timeout)).toBe(true)
+    expect(isBatchAiRequestTimeout(Object.assign(new Error('aborted'), { code: 23 }))).toBe(true)
+  })
+
+  it('повторяет сетевые обрывы по коду, а не по русскому тексту', () => {
+    const socket = Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })
+    const connection = Object.assign(new Error('Не удалось подключиться к BYESU (ECONNRESET)'), { code: 'ECONNRESET' })
+
+    expect(isRetryableBatchAiError(socket)).toBe(true)
+    expect(isRetryableBatchAiError(connection)).toBe(true)
+    expect(isBatchAiRequestTimeout(connection)).toBe(false)
+  })
+
+  it('не повторяет содержательные ошибки', () => {
+    expect(isRetryableBatchAiError(new Error('BYESU вернул некорректный JSON (200)'))).toBe(false)
+    expect(isRetryableBatchAiError(new Error('Ответ BYESU превышает допустимый размер'))).toBe(false)
   })
 })

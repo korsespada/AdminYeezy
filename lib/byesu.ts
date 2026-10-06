@@ -1,7 +1,33 @@
+import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
+
 const BYESU_CHAT_URL = 'https://byesu.com/v1/chat/completions'
 const BYESU_MODELS_URL = 'https://byesu.com/v1/models'
-const BYESU_TIMEOUT_MS = 120_000
+/**
+ * Тяжёлая карточка (десятки тысяч токенов промпта и справочников) у
+ * `…-flash-high` считает рассуждения минутами: замер на реальной выгрузке дал
+ * 127–152 с на один товар. Прежние 120 с обрывали такой запрос, а ошибка
+ * выглядела как «не удалось подключиться».
+ */
+const BYESU_DEFAULT_TIMEOUT_MS = 300_000
 const BYESU_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+
+export function byesuTimeoutMs() {
+  return providerTimeoutMsFromEnv('BYESU_TIMEOUT_MS', BYESU_DEFAULT_TIMEOUT_MS)
+}
+
+/**
+ * Разбирает отказ `fetch` к BYESU по структуре, а не по тексту.
+ * `AbortSignal.timeout` бросает DOMException с `name = TimeoutError` и
+ * legacy-кодом 23, поэтому прежнее «(23)» означало тайм-аут запроса, а не
+ * отказ соединения; реальные сетевые коды лежат в `error.cause.code`.
+ */
+export function byesuRequestError(error: any, timeoutMs = byesuTimeoutMs()) {
+  const causeCode = error?.cause?.code
+  if (isProviderTimeoutError(error) || causeCode === 'UND_ERR_HEADERS_TIMEOUT' || causeCode === 'UND_ERR_BODY_TIMEOUT') {
+    return providerTimeoutError('BYESU', timeoutMs, error)
+  }
+  return providerConnectionError('BYESU', error)
+}
 
 type ByesuPayload = Record<string, any>
 
@@ -139,10 +165,9 @@ export async function byesuChatCompletion(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(BYESU_TIMEOUT_MS),
-  }).catch((error: NodeJS.ErrnoException) => {
-    const code = error.code ? ` (${error.code})` : ''
-    throw new Error(`Не удалось подключиться к BYESU${code}`)
+    signal: AbortSignal.timeout(byesuTimeoutMs()),
+  }).catch((error: any) => {
+    throw byesuRequestError(error)
   })
 
   const declaredSize = Number(response.headers.get('content-length') || 0)

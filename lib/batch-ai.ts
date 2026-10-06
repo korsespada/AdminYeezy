@@ -2,7 +2,7 @@ import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
-import { providerProtocol } from '@/lib/ai-providers'
+import { isProviderTimeoutError, providerProtocol } from '@/lib/ai-providers'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
@@ -909,6 +909,31 @@ export async function runBatchAiOpenRouterRefinement(input: {
   return parseBatchAiJson(text)
 }
 
+/**
+ * Тайм-аут запроса к провайдеру: `AbortSignal.timeout` бросает DOMException с
+ * `name = TimeoutError` и legacy-кодом 23. Такие ошибки стоят минуты, поэтому
+ * повторов для них меньше, чем для обычных временных сбоев.
+ */
+export function isBatchAiRequestTimeout(error: unknown) {
+  return isProviderTimeoutError(error)
+}
+
+/**
+ * Повторяем временные ошибки провайдера. Классификация структурная, потому что
+ * русский текст ошибки («Не удалось подключиться к BYESU») не совпадал с
+ * англоязычными маркерами, и зависший запрос падал без единого повтора.
+ */
+export function isRetryableBatchAiError(error: unknown) {
+  if (isBatchAiRequestTimeout(error)) return true
+  const record = error as { code?: unknown; cause?: { code?: unknown } } | null
+  const networkCodePattern = /^(ECONN|ETIMEDOUT|EAI_AGAIN|UND_ERR|EPIPE|ENOTFOUND|EHOSTUNREACH|ENETUNREACH)/i
+  for (const value of [record?.code, record?.cause?.code]) {
+    if (typeof value === 'string' && networkCodePattern.test(value)) return true
+  }
+  const message = String((error as Error)?.message || error || '').toLowerCase()
+  return /temporarily unavailable|rate limit|retry later|upstream|overloaded|cpu overload|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection|тайм-аут|не ответил за/.test(message)
+}
+
 async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
   let lastError: unknown
   for (let attempt = 1; attempt <= 5; attempt += 1) {
@@ -916,11 +941,11 @@ async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
       return await operation()
     } catch (error) {
       lastError = error
-      const message = String((error as Error)?.message || error || '').toLowerCase()
-      const retryable = /temporarily unavailable|rate limit|retry later|upstream|overloaded|cpu overload|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection/.test(message)
-      if (!retryable || attempt === 5) throw error
+      const retryable = isRetryableBatchAiError(error)
+      const maxAttempts = isBatchAiRequestTimeout(error) ? 3 : 5
+      if (!retryable || attempt >= maxAttempts) throw error
       const waitMs = Math.min(30_000, 1_000 * (2 ** (attempt - 1)))
-      console.warn(`${label}: временная ошибка, повтор ${attempt + 1}/5 через ${waitMs} мс: ${message}`)
+      console.warn(`${label}: временная ошибка, повтор ${attempt + 1}/${maxAttempts} через ${waitMs} мс: ${String((error as Error)?.message || error)}`)
       await new Promise((resolve) => setTimeout(resolve, waitMs))
     }
   }

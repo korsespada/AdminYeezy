@@ -1,7 +1,11 @@
-import { providerMessagesUrl } from '@/lib/ai-providers'
+import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv, providerMessagesUrl } from '@/lib/ai-providers'
 
-const ANTHROPIC_TIMEOUT_MS = 120_000
+const ANTHROPIC_DEFAULT_TIMEOUT_MS = 300_000
 const ANTHROPIC_MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+
+export function anthropicTimeoutMs() {
+  return providerTimeoutMsFromEnv('ANTHROPIC_TIMEOUT_MS', ANTHROPIC_DEFAULT_TIMEOUT_MS)
+}
 
 type AnthropicPayload = Record<string, any>
 
@@ -35,7 +39,7 @@ function headers(baseUrl: string, apiKey: string) {
     result['anthropic-beta'] = 'claude-code-20250219,interleaved-thinking-2025-05-14,effort-2025-11-24,redact-thinking-2026-02-12'
     result['anthropic-dangerous-direct-browser-access'] = 'true'
     result['X-Stainless-Retry-Count'] = '0'
-    result['X-Stainless-Timeout'] = '120'
+    result['X-Stainless-Timeout'] = String(Math.round(anthropicTimeoutMs() / 1000))
     result['X-Stainless-Lang'] = 'js'
     result['X-Stainless-Package-Version'] = '0.76.0'
     result['X-Stainless-OS'] = 'Linux'
@@ -60,10 +64,13 @@ export async function anthropicMessagesCompletion(
     method: 'POST',
     headers: headers(baseUrl, apiKey),
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(ANTHROPIC_TIMEOUT_MS),
-  }).catch((error: NodeJS.ErrnoException) => {
-    const code = error.code ? ` (${error.code})` : ''
-    throw new Error(`Не удалось подключиться к Anthropic${code}`)
+    signal: AbortSignal.timeout(anthropicTimeoutMs()),
+  }).catch((error: any) => {
+    const causeCode = error?.cause?.code
+    if (isProviderTimeoutError(error) || causeCode === 'UND_ERR_HEADERS_TIMEOUT' || causeCode === 'UND_ERR_BODY_TIMEOUT') {
+      throw providerTimeoutError('Anthropic', anthropicTimeoutMs(), error)
+    }
+    throw providerConnectionError('Anthropic', error)
   })
 
   const declaredSize = Number(response.headers.get('content-length') || 0)

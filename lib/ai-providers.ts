@@ -113,3 +113,41 @@ export async function fetchProviderModels(baseUrl: string, apiKey: string) {
   }
   return [...unique.values()].sort((left, right) => left.value.localeCompare(right.value))
 }
+
+/**
+ * Тяжёлая карточка считается минутами: замер на реальной выгрузке дал 127–152 с
+ * на товар, поэтому провайдерские тайм-ауты держим около 300 с и разрешаем
+ * переопределять переменной окружения.
+ */
+export function providerTimeoutMsFromEnv(name: string, fallbackMs: number) {
+  const configured = Number(process.env[name] || fallbackMs)
+  return Number.isFinite(configured) && configured >= 10_000 ? configured : fallbackMs
+}
+
+/**
+ * Провайдер не ответил вовремя. `AbortSignal.timeout` бросает DOMException с
+ * `name = TimeoutError` и legacy-кодом 23, поэтому структурный признак
+ * сохраняется: batch AI решает по нему, повторять запрос или нет.
+ */
+export function providerTimeoutError(label: string, timeoutMs: number, cause?: unknown) {
+  const error = new Error(`${label} не ответил за ${Math.round(timeoutMs / 1000)} с (тайм-аут запроса)`)
+  error.name = 'TimeoutError'
+  if (cause !== undefined) (error as Error & { cause?: unknown }).cause = cause
+  return error
+}
+
+export function isProviderTimeoutError(error: unknown) {
+  const record = error as { name?: unknown; code?: unknown } | null
+  return record?.name === 'TimeoutError' || record?.code === 23
+}
+
+/** Обрыв соединения: настоящий сетевой код лежит в `cause.code` у fetch. */
+export function providerConnectionError(label: string, error: unknown) {
+  const record = error as { code?: unknown; cause?: { code?: unknown } } | null
+  const causeCode = record?.cause?.code
+  const code = typeof causeCode === 'string' ? causeCode : typeof record?.code === 'string' ? record.code : ''
+  const wrapped = new Error(code ? `Не удалось подключиться к ${label} (${code})` : `Не удалось подключиться к ${label}`)
+  if (code) (wrapped as Error & { code?: string }).code = code
+  ;(wrapped as Error & { cause?: unknown }).cause = error
+  return wrapped
+}
