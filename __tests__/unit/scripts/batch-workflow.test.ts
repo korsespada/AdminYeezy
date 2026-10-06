@@ -671,6 +671,90 @@ describe('batch workflow CSV compatibility adapter', () => {
     }
   })
 
+  it('keeps the inline Rails import only as an explicit rollback', () => {
+    const previous = process.env.RAILS_IMPORT_ASYNC
+    try {
+      delete process.env.RAILS_IMPORT_ASYNC
+      expect(workflow.railsImportAsyncEnabled()).toBe(true)
+      for (const value of ['0', 'false', 'off', 'no']) {
+        process.env.RAILS_IMPORT_ASYNC = value
+        expect(workflow.railsImportAsyncEnabled()).toBe(false)
+      }
+      process.env.RAILS_IMPORT_ASYNC = '1'
+      expect(workflow.railsImportAsyncEnabled()).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.RAILS_IMPORT_ASYNC
+      else process.env.RAILS_IMPORT_ASYNC = previous
+    }
+  })
+
+  it('parses Rails import row errors from the terminal batch', () => {
+    expect(workflow.parseRailsImportErrors('[]')).toEqual([])
+    expect(workflow.parseRailsImportErrors(null)).toEqual([])
+    expect(workflow.parseRailsImportErrors(JSON.stringify([{ line: 4, error: 'Цена не заполнена' }])))
+      .toEqual([{ line: 4, error: 'Цена не заполнена' }])
+    expect(workflow.parseRailsImportErrors('boom')).toEqual([{ line: '', error: 'boom' }])
+  })
+
+  it('polls the Rails import batch until it reaches a terminal status', async () => {
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    const previousInterval = process.env.RAILS_IMPORT_POLL_MS
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    process.env.RAILS_IMPORT_POLL_MS = '250'
+    let call = 0
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => {
+      call += 1
+      return new Response(JSON.stringify({
+        import_batch: call < 3
+          ? { id: 'batch-1', status: 'processing', products_seen: call * 10, products_imported: call * 10 - 2 }
+          : { id: 'batch-1', status: 'processed', products_seen: 30, products_imported: 28, products_failed: 0 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      const batch = await workflow.waitForRailsImportBatch('batch-1')
+      expect(batch.status).toBe('processed')
+      expect(batch.products_imported).toBe(28)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      expect(String(fetchMock.mock.calls[0][0])).toContain('/admin/import_batches/batch-1')
+    } finally {
+      fetchMock.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
+      if (previousInterval === undefined) delete process.env.RAILS_IMPORT_POLL_MS
+      else process.env.RAILS_IMPORT_POLL_MS = previousInterval
+    }
+  })
+
+  it('reports a stalled Rails import instead of waiting forever', async () => {
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    const previousTimeout = process.env.RAILS_IMPORT_POLL_TIMEOUT_MS
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    process.env.RAILS_IMPORT_POLL_TIMEOUT_MS = '1'
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => (
+      new Response(JSON.stringify({ import_batch: { id: 'batch-2', status: 'processing' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ))
+    try {
+      await expect(workflow.waitForRailsImportBatch('batch-2')).rejects.toThrow(/не завершился/)
+    } finally {
+      fetchMock.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
+      if (previousTimeout === undefined) delete process.env.RAILS_IMPORT_POLL_TIMEOUT_MS
+      else process.env.RAILS_IMPORT_POLL_TIMEOUT_MS = previousTimeout
+    }
+  })
+
   it('keeps concurrent mapping ordered and within the configured limit', async () => {
     let active = 0
     let peak = 0

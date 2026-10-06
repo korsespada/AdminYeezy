@@ -1319,7 +1319,10 @@ async function postRailsImportBatch({ name, products, sourceSupplierId, supplier
       supplier_avatar: supplierAvatar || null,
       source_supplier_id: sourceSupplierId || null,
       published_at: publishedAt || null,
-      wait: true,
+      // `wait: true` держит импорт внутри HTTP-запроса, где rack-timeout
+      // обрывает его на 25-й секунде. Асинхронный режим оставлен флагом
+      // RAILS_IMPORT_ASYNC=0 только как откат на прежнее поведение.
+      ...(railsImportAsyncEnabled() ? {} : { wait: true }),
       products,
     }),
     timeoutMs: 120_000,
@@ -1330,6 +1333,69 @@ function railsImportChunkSize() {
   const configured = Number(process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE || 50);
   if (!Number.isFinite(configured) || configured < 1) return 50;
   return Math.min(100, Math.floor(configured));
+}
+
+/**
+ * Асинхронный импорт — режим по умолчанию: crm-api выполняет работу в
+ * SolidQueue и сразу отдаёт id батча, а публикация ждёт терминального статуса.
+ */
+function railsImportAsyncEnabled() {
+  const value = String(process.env.RAILS_IMPORT_ASYNC || '').trim().toLowerCase();
+  return !['0', 'false', 'off', 'no'].includes(value);
+}
+
+function railsImportPollIntervalMs() {
+  const configured = Number(process.env.RAILS_IMPORT_POLL_MS || 2500);
+  return Number.isFinite(configured) && configured >= 250 ? configured : 2500;
+}
+
+function railsImportPollTimeoutMs() {
+  const configured = Number(process.env.RAILS_IMPORT_POLL_TIMEOUT_MS || 10 * 60 * 1000);
+  return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60 * 1000;
+}
+
+function parseRailsImportErrors(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw === '[]') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((entry) => ({
+          line: entry && entry.line !== undefined && entry.line !== null ? entry.line : '',
+          error: String(entry && typeof entry === 'object' ? entry.error ?? '' : entry ?? ''),
+        }))
+        .filter((entry) => entry.error);
+    }
+  } catch {
+    // Не JSON — показываем текст ошибки как есть.
+  }
+  return [{ line: '', error: raw }];
+}
+
+function railsImportErrorMessage(entry) {
+  return entry.line === '' ? `Rails import: ${entry.error}` : `Rails line ${entry.line}: ${entry.error}`;
+}
+
+/**
+ * Ждёт терминального статуса импорта. Без этого публикация не знает, что
+ * именно уже попало в каталог, и не может честно записать batch_publications.
+ */
+async function waitForRailsImportBatch(importBatchId, options = {}) {
+  const deadline = Date.now() + railsImportPollTimeoutMs();
+  for (;;) {
+    const payload = await fetchJsonWithRetry(railsApiUrl(`/admin/import_batches/${encodeURIComponent(importBatchId)}`), {
+      headers: { Authorization: `Bearer ${await railsAdminToken()}` },
+    }, 'Rails import status');
+    const batch = payload?.import_batch || {};
+    const status = String(batch.status || '');
+    if (typeof options.onPoll === 'function') await options.onPoll(batch);
+    if (status === 'processed' || status === 'failed') return batch;
+    if (Date.now() >= deadline) {
+      throw new Error(`Rails import ${importBatchId} не завершился за ${Math.round(railsImportPollTimeoutMs() / 1000)} с (статус ${status || 'unknown'})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, railsImportPollIntervalMs()));
+  }
 }
 
 function parseCsvText(text) {
@@ -2986,13 +3052,37 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       supplierAvatar: batch?.supplier_avatar,
       publishedAt: publicationTimestamp,
     });
-    importBatches.push(payload.import_batch?.id);
-    imported += Number(payload.result?.products_imported || 0);
-    // Коммитим владение сразу после каждого успешно принятого Rails-чанка.
-    // Если следующий чанк упадет, повторный запуск не потеряет уже опубликованное.
-    await recordBatchPublications(batchId, chunk.map((row) => row.external_id), payloadHashes);
-    if (payload.result?.products_failed) {
-      for (const error of payload.result.errors || []) errors.push(`Rails line ${error.line}: ${error.error}`);
+    const importBatchId = payload?.import_batch_id || payload?.import_batch?.id || null;
+    let productsImported = 0;
+    let rowErrors = [];
+
+    if (railsImportAsyncEnabled()) {
+      if (!importBatchId) {
+        throw new Error('Rails не вернул import_batch_id: сначала выкатите crm-api с асинхронным импортом');
+      }
+      const finishedBatch = await waitForRailsImportBatch(importBatchId);
+      productsImported = Number(finishedBatch.products_imported ?? finishedBatch.items_count ?? 0);
+      rowErrors = parseRailsImportErrors(finishedBatch.error_message);
+      if (String(finishedBatch.status) !== 'processed' && rowErrors.length === 0) {
+        throw new Error(`Rails import ${importBatchId} завершился со статусом ${finishedBatch.status || 'unknown'}: ${finishedBatch.error_message || 'без описания'}`);
+      }
+    } else {
+      const inlineResult = payload?.result;
+      if (!inlineResult) throw new Error('Rails import не вернул результат синхронного импорта');
+      productsImported = Number(inlineResult.products_imported || 0);
+      rowErrors = Array.isArray(inlineResult.errors) ? inlineResult.errors : [];
+    }
+
+    if (importBatchId) importBatches.push(importBatchId);
+    imported += productsImported;
+    if (rowErrors.length > 0) {
+      // Частично применённый чанк в реестр не пишем: иначе следующий запуск
+      // счёл бы не созданный в Rails товар уже опубликованным.
+      for (const error of rowErrors) errors.push(railsImportErrorMessage(error));
+    } else {
+      // Коммитим владение сразу после каждого успешно принятого Rails-чанка.
+      // Если следующий чанк упадет, повторный запуск не потеряет уже опубликованное.
+      await recordBatchPublications(batchId, chunk.map((row) => row.external_id), payloadHashes);
     }
     importedProcessed += chunk.length;
     if (onProgress) await onProgress({
@@ -3094,7 +3184,10 @@ module.exports = {
   productToRailsJsonRow,
   mapWithConcurrency,
   mediaUploadConcurrency,
+  parseRailsImportErrors,
+  railsImportAsyncEnabled,
   railsImportChunkSize,
+  waitForRailsImportBatch,
   railsUpdatePayload,
   listAllSuppliers,
   listFavoriteSuppliers,
