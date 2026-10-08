@@ -7,8 +7,13 @@ import { getExportFoldersAction } from '@/actions/batch-ai'
 export const dynamic = 'force-dynamic'
 
 export default async function BatchesPage() {
-  const res = await getExportHistoryAction()
-  
+  // История выгрузок и папки читаются из одной scraping-БД независимо друг от
+  // друга: параллельный запрос убирает второе ожидание при открытии раздела.
+  const [res, foldersResult] = await Promise.all([
+    getExportHistoryAction(),
+    getExportFoldersAction(),
+  ])
+
   if (!res.success) {
     const db = res.data?.kind === 'scraping_db_unreachable' ? res.data.db : null
 
@@ -42,8 +47,6 @@ export default async function BatchesPage() {
       </div>
     )
   }
-
-  const foldersResult = await getExportFoldersAction()
 
   return (
     <div className="min-w-0 p-4 sm:p-8">

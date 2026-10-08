@@ -55,4 +55,35 @@ describe('local admin login', () => {
     )
     expect(mocks.redirect).toHaveBeenCalledWith('/admin/home')
   })
+
+  it('keeps the admin session cookie alive for 90 days by default', async () => {
+    const { loginAction } = await import('@/actions/auth')
+    const formData = new FormData()
+    formData.set('email', 'local@example.com')
+    formData.set('password', 'local-password')
+
+    await expect(loginAction(formData)).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      'admin_auth',
+      expect.any(String),
+      expect.objectContaining({ maxAge: 90 * 24 * 60 * 60 }),
+    )
+  })
+
+  it('honours ADMIN_SESSION_TTL_DAYS for the admin session cookie', async () => {
+    vi.stubEnv('ADMIN_SESSION_TTL_DAYS', '7')
+    const { loginAction } = await import('@/actions/auth')
+    const formData = new FormData()
+    formData.set('email', 'local@example.com')
+    formData.set('password', 'local-password')
+
+    await expect(loginAction(formData)).rejects.toThrow('NEXT_REDIRECT')
+
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      'admin_auth',
+      expect.any(String),
+      expect.objectContaining({ maxAge: 7 * 24 * 60 * 60 }),
+    )
+  })
 })

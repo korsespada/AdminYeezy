@@ -7,7 +7,7 @@ import { type Product, type Brand, type Category, type Subcategory, type Product
 import { deleteProductAction, getProductAction } from '@/actions/products'
 import { bulkUpdateProductsAction, bulkDeleteProductsAction, type BulkProductUpdates } from '@/actions/bulk-update'
 import ProductForm from '@/components/products/ProductForm'
-import { Filter, Layers3, LayoutGrid, List, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
+import { Filter, Layers3, LayoutGrid, List, Images, Search, Plus, CheckSquare, Square, Trash2, X } from 'lucide-react'
 import Sidebar from '@/components/ui/Sidebar'
 import ProductCard from '@/components/products/ProductCard'
 import ProductTableView from '@/components/products/ProductTableView'
@@ -23,6 +23,22 @@ import { isPriceOnRequest } from '@/lib/product-pricing'
 import { applyMeasurementTableAttributes, type MeasurementTemplate } from '@/lib/measurement-templates'
 
 const DESKTOP_VIEWPORT_QUERY = '(min-width: 1024px)'
+
+type ProductViewMode = 'grid' | 'list' | 'photos'
+
+/**
+ * Классы заданы литералами: Tailwind ищет их в исходнике и не увидел бы
+ * строку, собранную из шаблона.
+ */
+const CARD_COLUMN_CLASS: Record<number, string> = {
+  4: 'lg:grid-cols-4',
+  5: 'lg:grid-cols-5',
+  6: 'lg:grid-cols-6',
+  7: 'lg:grid-cols-7',
+  8: 'lg:grid-cols-8',
+  9: 'lg:grid-cols-9',
+  10: 'lg:grid-cols-10',
+}
 
 function subscribeToDesktopViewport(onChange: () => void) {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {}
@@ -72,7 +88,7 @@ export default function ProductList({
   const routeKey = searchParams.toString()
 
   const [products, setProducts] = useState<Product[]>(initialData)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [viewMode, setViewMode] = useState<ProductViewMode>('grid')
   const [cardColumns, setCardColumns] = useState(4)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -122,8 +138,8 @@ export default function ProductList({
 
   // Load view mode from localStorage
   useEffect(() => {
-    const saved = localStorage.getItem('productViewMode') as 'grid' | 'list'
-    if (saved === 'grid' || saved === 'list') {
+    const saved = localStorage.getItem('productViewMode')
+    if (saved === 'grid' || saved === 'list' || saved === 'photos') {
       setViewMode(saved)
     }
     const savedColumns = Number(localStorage.getItem('productCardColumns'))
@@ -132,7 +148,7 @@ export default function ProductList({
     }
   }, [])
 
-  const handleViewModeChange = (mode: 'grid' | 'list') => {
+  const handleViewModeChange = (mode: ProductViewMode) => {
     setViewMode(mode)
     localStorage.setItem('productViewMode', mode)
   }
@@ -363,6 +379,32 @@ export default function ProductList({
     router.refresh()
   }, [router])
 
+  /** Карточка товара одинакова во всех режимах: в режиме «только фото» остаётся один квадрат. */
+  const renderProductCard = (product: Product, photosOnly: boolean) => (
+    <ProductCard
+      key={product.id}
+      product={product}
+      onEdit={handleEdit}
+      onDelete={handleDelete}
+      onUpdate={handleProductUpdate}
+      selected={selectedProductIds.includes(product.id)}
+      onToggleSelect={handleToggleSelect}
+      onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
+      categories={categories}
+      subcategories={subcategories}
+      supplierOptions={supplierOptions}
+      variantCount={product.color_variants?.length || 0}
+      variantColors={Array.from(new Set(
+        (product.color_variants || [])
+          .map((variant) => variant.color)
+          .filter((color): color is string => Boolean(color)),
+      ))}
+      showAttributeSummary={false}
+      photosOnly={photosOnly}
+      squarePhoto={photosOnly}
+    />
+  )
+
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col lg:flex-row font-sans text-slate-200">
 
@@ -414,15 +456,32 @@ export default function ProductList({
                       size="icon"
                       onClick={() => handleViewModeChange('grid')}
                       className={viewMode === 'grid' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
+                      title="Карточки товаров"
+                      aria-label="Карточки товаров"
                     >
                       <LayoutGrid className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={viewMode === 'photos' ? 'default' : 'ghost'}
+                      size="icon"
+                      onClick={() => handleViewModeChange('photos')}
+                      className={viewMode === 'photos' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
+                      title="Только фото"
+                      aria-label="Только фото"
+                    >
+                      <Images className="w-4 h-4" />
                     </Button>
                     <Button
                       type="button"
                       variant={viewMode === 'list' ? 'default' : 'ghost'}
                       size="icon"
                       onClick={() => handleViewModeChange('list')}
-                      className={viewMode === 'list' ? 'h-8 w-8' : 'h-8 w-8 text-slate-400 hover:text-slate-200'}
+                      // Широкая таблица на телефоне недоступна: там режим списка
+                      // показывает обычные карточки, поэтому кнопку не дублируем.
+                      className={viewMode === 'list' ? 'hidden h-8 w-8 lg:inline-flex' : 'hidden h-8 w-8 text-slate-400 hover:text-slate-200 lg:inline-flex'}
+                      title="Список"
+                      aria-label="Список"
                     >
                       <List className="w-4 h-4" />
                     </Button>
@@ -462,7 +521,22 @@ export default function ProductList({
               </div>
             ) : isDesktopViewport ? (
               <div className="hidden lg:block">
-                {viewMode === 'grid' ? (
+                {viewMode === 'list' ? (
+                  <ProductTableView
+                    products={products}
+                    selectedIds={selectedProductIds}
+                    supplierOptions={supplierOptions}
+                    onToggleSelect={handleToggleSelect}
+                    onToggleSelectAll={() => {
+                      if (selectedProductIds.length === products.length) {
+                        setSelectedProductIds([])
+                      } else {
+                        setSelectedProductIds(products.map(p => p.id))
+                      }
+                    }}
+                    onUpdateProduct={handleProductUpdate}
+                  />
+                ) : (
                   <div className="space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-3 px-1">
                       <Button
@@ -498,72 +572,22 @@ export default function ProductList({
                         />
                       </label>
                     </div>
-                    <div className={`mb-8 grid grid-cols-2 gap-4 ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`}>
-                      {products.map(product => (
-                        <ProductCard
-                          key={product.id}
-                          product={product}
-                          onEdit={handleEdit}
-                          onDelete={handleDelete}
-                          onUpdate={handleProductUpdate}
-                          selected={selectedProductIds.includes(product.id)}
-                          onToggleSelect={handleToggleSelect}
-                          onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
-                          categories={categories}
-                          subcategories={subcategories}
-                          supplierOptions={supplierOptions}
-                          variantCount={product.color_variants?.length || 0}
-                          variantColors={Array.from(new Set(
-                            (product.color_variants || [])
-                              .map((variant) => variant.color)
-                              .filter((color): color is string => Boolean(color)),
-                          ))}
-                          showAttributeSummary={false}
-                        />
-                      ))}
+                    <div className={viewMode === 'photos'
+                      ? `mb-8 grid grid-cols-4 gap-2.5 ${CARD_COLUMN_CLASS[cardColumns]}`
+                      : `mb-8 grid grid-cols-2 gap-4 ${CARD_COLUMN_CLASS[cardColumns]}`}>
+                      {products.map((product) => renderProductCard(product, viewMode === 'photos'))}
                     </div>
                   </div>
-                ) : (
-                  <ProductTableView
-                    products={products}
-                    selectedIds={selectedProductIds}
-                    supplierOptions={supplierOptions}
-                    onToggleSelect={handleToggleSelect}
-                    onToggleSelectAll={() => {
-                      if (selectedProductIds.length === products.length) {
-                        setSelectedProductIds([])
-                      } else {
-                        setSelectedProductIds(products.map(p => p.id))
-                      }
-                    }}
-                    onUpdateProduct={handleProductUpdate}
-                  />
                 )}
               </div>
+            ) : viewMode === 'photos' ? (
+              // Телефон: плотная сетка квадратов без подписей.
+              <div className="grid grid-cols-4 gap-1.5 lg:hidden">
+                {products.map((product) => renderProductCard(product, true))}
+              </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 lg:hidden">
-                {products.map(product => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onUpdate={handleProductUpdate}
-                    selected={selectedProductIds.includes(product.id)}
-                    onToggleSelect={handleToggleSelect}
-                    onSelectionClick={(event) => handleSelectionClick(product.id, event.shiftKey)}
-                    categories={categories}
-                    subcategories={subcategories}
-                    supplierOptions={supplierOptions}
-                    variantCount={product.color_variants?.length || 0}
-                    variantColors={Array.from(new Set(
-                      (product.color_variants || [])
-                        .map((variant) => variant.color)
-                        .filter((color): color is string => Boolean(color)),
-                    ))}
-                    showAttributeSummary={false}
-                  />
-                ))}
+              <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:hidden">
+                {products.map((product) => renderProductCard(product, false))}
               </div>
             )}
 
@@ -801,8 +825,8 @@ export default function ProductList({
   )
 }
 
-export function ProductSearchSkeleton({ viewMode }: { viewMode: 'grid' | 'list' }) {
-  const items = Array.from({ length: viewMode === 'grid' ? 10 : 7 })
+export function ProductSearchSkeleton({ viewMode }: { viewMode: ProductViewMode }) {
+  const items = Array.from({ length: viewMode === 'grid' ? 10 : viewMode === 'photos' ? 16 : 7 })
 
   return (
     <div role="status" aria-live="polite" aria-label="Поиск товаров" className="space-y-4">
@@ -814,8 +838,18 @@ export function ProductSearchSkeleton({ viewMode }: { viewMode: 'grid' | 'list' 
         Собираем подходящие товары...
       </div>
 
-      {viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+      {viewMode === 'photos' ? (
+        <div className="grid grid-cols-4 gap-1.5 lg:gap-2.5">
+          {items.map((_, index) => (
+            <div
+              key={index}
+              className="aspect-square animate-pulse rounded-xl border border-slate-700 bg-slate-800"
+              style={{ animationDelay: `${index * 40}ms` }}
+            />
+          ))}
+        </div>
+      ) : viewMode === 'grid' ? (
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {items.map((_, index) => (
             <div
               key={index}

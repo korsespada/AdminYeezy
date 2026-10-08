@@ -51,9 +51,11 @@ interface ProductCardProps {
     extraBadges?: React.ReactNode;
     extraFooter?: React.ReactNode;
     photosOnly?: boolean;
+    /** Квадратное превью для режима «только фото». */
+    squarePhoto?: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter, photosOnly = false }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter, photosOnly = false, squarePhoto = false }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -228,7 +230,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
         <Card className="group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 transition-all duration-300 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20">
             {/* Image area - clickable to edit */}
             <div
-                className="relative aspect-[4/3] cursor-pointer overflow-hidden bg-slate-900"
+                className={`relative cursor-pointer overflow-hidden bg-slate-900 ${squarePhoto ? 'aspect-square' : 'aspect-[4/3]'}`}
                 onClick={() => onEdit(product)}
                 title={photosOnly ? product.name : undefined}
             >
@@ -238,7 +240,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         alt={thumbAlt}
                         title={thumbAlt}
                         fill
-                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 25vw"
+                        sizes={squarePhoto ? '(max-width: 1024px) 25vw, 12vw' : '(max-width: 768px) 50vw, (max-width: 1200px) 50vw, 25vw'}
                         className="object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
                         unoptimized
                     />

@@ -54,7 +54,7 @@ export default function CategoryBrowser({
           Категории пока не созданы.
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 md:grid-cols-3 2xl:grid-cols-4">
           {categories.map((category) => {
             const children = subcategories.filter((subcategory) => subcategory.category === category.id)
             const childNames = children.map((subcategory) => subcategory.name)
@@ -71,18 +71,18 @@ export default function CategoryBrowser({
                 type="button"
                 variant="outline"
                 onClick={() => onCategorySelect(category.id)}
-                className="group h-auto min-h-20 justify-start rounded-lg border-slate-700 bg-slate-800/70 p-3 text-left text-slate-200 hover:border-indigo-500/60 hover:bg-slate-800 hover:text-white"
+                className="group h-auto min-h-16 justify-start rounded-lg border-slate-700 bg-slate-800/70 p-2.5 text-left text-slate-200 hover:border-indigo-500/60 hover:bg-slate-800 hover:text-white sm:min-h-20 sm:p-3"
               >
-                <span className="flex w-full items-center gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-indigo-500/10 text-indigo-400 transition-colors group-hover:bg-indigo-500/20">
+                <span className="flex w-full items-center gap-2 sm:gap-3">
+                  <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md bg-indigo-500/10 text-indigo-400 transition-colors group-hover:bg-indigo-500/20 sm:flex">
                     <FolderOpen className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-sm font-semibold">{category.name}</span>
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform group-hover:translate-x-0.5 group-hover:text-indigo-400" aria-hidden="true" />
+                    <span className="flex items-center justify-between gap-1 sm:gap-2">
+                      <span className="truncate text-xs font-semibold sm:text-sm">{category.name}</span>
+                      <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform group-hover:translate-x-0.5 group-hover:text-indigo-400 sm:block" aria-hidden="true" />
                     </span>
-                    <span className="mt-1 flex min-w-0 items-center gap-2 text-[11px] font-normal text-slate-500">
+                    <span className="mt-1 flex min-w-0 items-center gap-1 text-[10px] font-normal text-slate-500 sm:gap-2 sm:text-[11px]">
                       <span className="truncate">{childNames.length > 0 ? childNames.slice(0, 3).join(' · ') : 'Без подкатегорий'}</span>
                       {count > 0 && <span className="shrink-0 text-slate-400">{count.toLocaleString('ru-RU')}</span>}
                     </span>

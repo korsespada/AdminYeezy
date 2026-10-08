@@ -26,11 +26,15 @@ export default async function AdminHomePage() {
   let brandCount: number | null = null
   let categoryCount: number | null = null
 
-  if (railsConfigured && railsAuthConfigured) {
+  // Rails и scraping-БД проверяются параллельно: последовательные проверки
+  // складывали два ожидания и открывали главную заметно дольше.
+  const railsCheck = (async () => {
+    if (!railsConfigured || !railsAuthConfigured) return
     try {
       const [lookups, products] = await Promise.all([
         getRailsCatalogLookups(),
-        listRailsAdminProducts({ page: 1, perPage: 40 }),
+        // Для счётчика достаточно одной строки: страница показывает только total.
+        listRailsAdminProducts({ page: 1, perPage: 1 }),
       ])
       railsStatus = 'connected'
       productCount = products.totalItems
@@ -40,10 +44,10 @@ export default async function AdminHomePage() {
       console.warn('Admin home Rails status check failed:', error)
       railsStatus = 'unavailable'
     }
-  }
+  })()
 
-  const hasScrapingDatabase = scrapingConfigured
-  if (scrapingConfigured) {
+  const scrapingCheck = (async () => {
+    if (!scrapingConfigured) return
     try {
       await scrapingQuery('SELECT 1')
       scrapingStatus = 'connected'
@@ -51,12 +55,14 @@ export default async function AdminHomePage() {
       console.warn('Admin home scraping DB status check failed:', error)
       scrapingStatus = 'unavailable'
     }
-  }
+  })()
+
+  await Promise.all([railsCheck, scrapingCheck])
 
   return (
     <AdminLaunchpad
       railsConfigured={railsConfigured}
-      scrapingConfigured={hasScrapingDatabase}
+      scrapingConfigured={scrapingConfigured}
       railsStatus={railsStatus}
       scrapingStatus={scrapingStatus}
       productCount={productCount}

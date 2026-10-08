@@ -191,7 +191,7 @@ export default function AdminLaunchpad({
           </Card>
         </section>
 
-        <section className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <section className="grid min-w-0 grid-cols-2 gap-3 sm:gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {sections.map((section) => {
             const Icon = section.icon
             return (
@@ -199,19 +199,19 @@ export default function AdminLaunchpad({
                 key={section.href}
                 href={section.href}
                 aria-label={`Открыть раздел: ${section.title}`}
-                className="group rounded-lg border border-slate-800 bg-slate-900 p-5 transition hover:border-indigo-500/60 hover:bg-slate-800"
+                className="group rounded-lg border border-slate-800 bg-slate-900 p-3 transition hover:border-indigo-500/60 hover:bg-slate-800 sm:p-5"
               >
-                <div className="flex h-full min-h-[164px] min-w-0 flex-col">
+                <div className="flex h-full min-h-[124px] min-w-0 flex-col sm:min-h-[164px]">
                   <div className="flex items-center justify-between gap-3">
-                    <span className={`inline-flex h-10 w-10 items-center justify-center rounded-md bg-slate-950 ${section.tone}`}>
-                      <Icon className="h-5 w-5" />
+                    <span className={`inline-flex h-8 w-8 items-center justify-center rounded-md bg-slate-950 sm:h-10 sm:w-10 ${section.tone}`}>
+                      <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
                     </span>
-                    <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600 group-hover:text-indigo-300">
+                    <span className="hidden text-xs font-semibold uppercase tracking-[0.18em] text-slate-600 group-hover:text-indigo-300 sm:inline">
                       Открыть
                     </span>
                   </div>
-                  <h2 className="mt-5 text-xl font-semibold text-white">{section.title}</h2>
-                  <p className="mt-3 break-words text-sm leading-6 text-slate-400">{section.description}</p>
+                  <h2 className="mt-3 text-base font-semibold leading-tight text-white sm:mt-5 sm:text-xl">{section.title}</h2>
+                  <p className="mt-2 line-clamp-5 min-w-0 break-words text-xs leading-5 text-slate-400 sm:mt-3 sm:line-clamp-none sm:text-sm sm:leading-6">{section.description}</p>
                 </div>
               </Link>
             )

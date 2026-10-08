@@ -23,6 +23,7 @@ let pendingRailsAdminLogin: Promise<string> | null = null
 let cachedCategorySlugs: { expiresAt: number; byId: Map<string, string> } | null = null
 let cachedCatalogLookups: { expiresAt: number; value: { brands: Brand[]; categories: Category[]; subcategories: Subcategory[] } } | null = null
 let cachedSupplierFacets: { expiresAt: number; value: CatalogSlugFacet[] } | null = null
+let cachedUnfilteredFacets: { expiresAt: number; value: ProductFilterFacets } | null = null
 // Rails accepts up to 100 products per request. Keep the chunk aligned with
 // that limit so the 500-row view does not make thirteen sequential requests.
 const ADMIN_PRODUCTS_PAGE_CHUNK_SIZE = 100
@@ -844,6 +845,7 @@ export function invalidateRailsCatalogCaches() {
   cachedCatalogLookups = null
   cachedSupplierFacets = null
   cachedCategorySlugs = null
+  cachedUnfilteredFacets = null
 }
 
 export async function listRailsChromoffCategories(): Promise<RailsChromoffCategory[]> {
@@ -2259,6 +2261,56 @@ export async function getRailsCatalogLookupFacets(filters: Pick<
 }
 
 export async function getRailsProductFilterFacets(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
+  // Пустой фильтр — самая дорогая агрегация по всему каталогу, и её просит
+  // каждый вход в «Товары» без фильтров. Кэш живёт короткий TTL и сбрасывается
+  // писателями вместе с остальными справочниками каталога.
+  if (hasFacetFilters(filters)) {
+    return fetchRailsProductFilterFacetsUncached(filters)
+  }
+
+  if (cachedUnfilteredFacets && cachedUnfilteredFacets.expiresAt > Date.now()) {
+    return cloneFilterFacets(cachedUnfilteredFacets.value)
+  }
+
+  const facets = await fetchRailsProductFilterFacetsUncached(filters)
+  cachedUnfilteredFacets = { expiresAt: Date.now() + CATALOG_CACHE_TTL_MS, value: facets }
+  return cloneFilterFacets(facets)
+}
+
+function hasFacetFilters(filters: ProductFacetFilters) {
+  return Boolean(
+    filters.search
+    || filters.sku
+    || filters.name
+    || filters.description
+    || filters.priceMin
+    || filters.priceMax
+    || filters.brand
+    || filters.supplier
+    || filters.category
+    || filters.subcategory
+    || filters.categoryMissing
+    || filters.subcategoryMissing
+    || filters.gender
+    || filters.noGender
+    || filters.status
+    || filters.attributeKey
+    || filters.attributeValue
+  )
+}
+
+function cloneFilterFacets(facets: ProductFilterFacets): ProductFilterFacets {
+  return {
+    ...facets,
+    brandFacets: [...(facets.brandFacets || [])],
+    supplierFacets: [...(facets.supplierFacets || [])],
+    categoryFacets: [...(facets.categoryFacets || [])],
+    subcategoryFacets: [...(facets.subcategoryFacets || [])],
+    genderFacets: [...(facets.genderFacets || [])],
+  }
+}
+
+async function fetchRailsProductFilterFacetsUncached(filters: ProductFacetFilters): Promise<ProductFilterFacets> {
   const batchPayload = await fetchRailsProductFacetBatch(filters)
   if (batchPayload) {
     return mapRailsProductFilterFacets(batchPayload)

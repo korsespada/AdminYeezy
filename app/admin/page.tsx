@@ -93,7 +93,14 @@ export default async function AdminPage({
   }
 
   try {
-    const { brands, categories, subcategories } = await getRailsCatalogLookups()
+    // Справочники, схема атрибутов и поставщики не зависят друг от друга:
+    // раньше справочники ждали отдельным запросом и добавляли лишний круг к Rails.
+    const [lookups, attributeDefinitions, supplierOptionsResult] = await Promise.all([
+      getRailsCatalogLookups(),
+      getCatalogAttributeDefinitions(),
+      getProductSupplierOptionsAction(),
+    ])
+    const { brands, categories, subcategories } = lookups
     const brandSlug = brands.find((brand) => brand.id === brandFilter)?.slug || brandFilter
     const categorySlug = categories.find((category) => category.id === categoryFilter)?.slug || (categoryMissing ? '' : categoryFilter)
     const subcategorySlug = subcategories.find((subcategory) => subcategory.id === subcategoryFilter)?.slug || subcategoryFilter
@@ -127,7 +134,7 @@ export default async function AdminPage({
       attributeValue: attributeValueFilter,
     }
 
-    const [productPage, filterFacets, attributeDefinitions, supplierOptionsResult] = await Promise.all([
+    const [productPage, filterFacets] = await Promise.all([
       hasActiveFilters
         ? listRailsAdminProducts(productFilters)
         : Promise.resolve({ products: [], totalItems: 0, totalPages: 0 }),
@@ -150,8 +157,6 @@ export default async function AdminPage({
         attributeKey: attributeKeyFilter,
         attributeValue: attributeValueFilter,
       }),
-      getCatalogAttributeDefinitions(),
-      getProductSupplierOptionsAction(),
     ])
 
     const supplierOptions = supplierOptionsResult.success ? supplierOptionsResult.data || [] : []

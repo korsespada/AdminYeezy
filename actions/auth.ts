@@ -8,15 +8,27 @@ import type { ActionResponse } from '@/lib/types'
 
 const ADMIN_ENTRY_PATH = '/admin/home'
 
+/**
+ * Срок жизни cookie админки. Rails admin JWT (Auth::JwtService::ADMIN_EXPIRY,
+ * по умолчанию 90 дней) — верхняя граница: если cookie живёт меньше, оператора
+ * выбрасывает на логин раньше, чем истекает сам токен.
+ */
+function adminSessionMaxAgeSeconds() {
+  const days = Number(process.env.ADMIN_SESSION_TTL_DAYS || 90)
+  const safeDays = Number.isFinite(days) && days > 0 ? days : 90
+  return Math.round(safeDays * 24 * 60 * 60)
+}
+
 async function setAdminSession(admin: AdminSession, token?: string) {
   const cookieStore = await cookies()
   const sessionData = JSON.stringify(admin)
+  const maxAge = adminSessionMaxAgeSeconds()
 
   cookieStore.set(ADMIN_SESSION_COOKIE, sessionData, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7, // 1 неделя
+    maxAge,
     path: '/',
   })
 
@@ -25,7 +37,7 @@ async function setAdminSession(admin: AdminSession, token?: string) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24, // Rails admin JWT expires in 24 hours.
+      maxAge,
       path: '/',
     })
   }
