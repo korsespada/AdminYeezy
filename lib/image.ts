@@ -11,6 +11,11 @@ export interface ResizeImageOptions {
 
 export const imagePresets = {
   productGrid: { width: 420, height: 420, fit: 'cover', quality: 78 },
+  /**
+   * Плотная выдача «только фото»: плитка на телефоне ~100 px, поэтому 420 px
+   * на каждую из сотен карточек — лишняя память и рывки при прокрутке.
+   */
+  productPhotoGrid: { width: 260, height: 260, fit: 'cover', quality: 70 },
   productTable: { width: 96, height: 96, fit: 'cover', quality: 72 },
   productForm: { width: 420, height: 420, fit: 'cover', quality: 78 },
   avatar: { width: 112, height: 112, fit: 'cover', quality: 76 },

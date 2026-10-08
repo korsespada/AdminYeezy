@@ -53,16 +53,27 @@ interface ProductCardProps {
     photosOnly?: boolean;
     /** Квадратное превью для режима «только фото». */
     squarePhoto?: boolean;
+    /**
+     * Кнопки «В корзину» и «Дублировать» поверх фото. В каталоге они выключены:
+     * действия переехали в карточку товара, чтобы не мешать просмотру на телефоне.
+     */
+    quickActions?: boolean;
 }
 
-const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter, photosOnly = false, squarePhoto = false }) => {
+const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelete, onUpdate, selected, onToggleSelect, onSelectionClick, categories = [], subcategories = [], brands = [], supplierOptions = [], onInlineUpdate, allowDuplicate = true, aiProcessed = true, aiProcessing = false, onAiProcess, variantCount = 0, variantColors = [], showAttributeSummary = true, showDescription = true, sourceNumber, extraBadges, extraFooter, photosOnly = false, squarePhoto = false, quickActions = true }) => {
     const [editingField, setEditingField] = useState<'name' | 'price' | null>(null);
     const [editValue, setEditValue] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [isCopying, setIsCopying] = useState(false);
     const router = useRouter();
 
-    const thumb = useMemo(() => productImageUrl(product, imagePresets.productGrid), [product])
+    const thumb = useMemo(
+        () => productImageUrl(product, squarePhoto ? imagePresets.productPhotoGrid : imagePresets.productGrid),
+        [product, squarePhoto],
+    )
+    // В плотной выдаче «только фото» размытие фона и тени на каждой плитке
+    // стоят дорого при прокрутке: подложка и так полупрозрачная.
+    const overlayChrome = photosOnly ? '' : 'shadow-lg backdrop-blur-sm'
     const thumbAlt = useMemo(() => productImageAlt(product), [product])
     const brandLabel = useMemo(() => {
         const brand = product.expand?.brand
@@ -227,7 +238,15 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
     }
 
     return (
-        <Card className="group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 transition-all duration-300 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20">
+        <Card
+            className={photosOnly
+                // Плотная выдача: без transition/shadow на каждой плитке и с
+                // content-visibility, иначе сотни фото тормозят прокрутку на
+                // телефоне. Запасной размер подобран под плитку 4 в ряд на
+                // телефоне и под широкую сетку на desktop.
+                ? 'group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 [contain-intrinsic-size:auto_110px] [content-visibility:auto] lg:[contain-intrinsic-size:auto_260px]'
+                : 'group flex h-full flex-col overflow-hidden border-slate-700 bg-slate-800 transition-all duration-300 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20'}
+        >
             {/* Image area - clickable to edit */}
             <div
                 className={`relative cursor-pointer overflow-hidden bg-slate-900 ${squarePhoto ? 'aspect-square' : 'aspect-[4/3]'}`}
@@ -241,7 +260,7 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                         title={thumbAlt}
                         fill
                         sizes={squarePhoto ? '(max-width: 1024px) 25vw, 12vw' : '(max-width: 768px) 50vw, (max-width: 1200px) 50vw, 25vw'}
-                        className="object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100"
+                        className={photosOnly ? 'object-cover' : 'object-cover group-hover:scale-105 transition-transform duration-500 opacity-90 group-hover:opacity-100'}
                         unoptimized
                     />
                 ) : (
@@ -255,12 +274,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     <Checkbox
                         checked={selected}
                         onCheckedChange={() => { if (!onSelectionClick) onToggleSelect(product.id); }}
-                        className="h-5 w-5 border-slate-700 bg-slate-900/80 shadow-lg backdrop-blur-sm"
+                        className={`h-5 w-5 border-slate-700 bg-slate-900/80 ${overlayChrome}`}
                         onClick={(e) => { e.stopPropagation(); onSelectionClick?.(e); }}
                     />
                 </div>
-                {/* Delete button on hover */}
-                <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                {/* Delete and duplicate live in the product card; the photo stays clean. */}
+                {quickActions && <div className="absolute right-2 top-2 flex flex-col gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <Button
                         type="button"
                         variant="ghost"
@@ -282,12 +301,12 @@ const ProductCard: React.FC<ProductCardProps> = memo(({ product, onEdit, onDelet
                     >
                         <Copy className="w-4 h-4" />
                     </Button>}
-                </div>
+                </div>}
 
                 {/* Photo Count Tag */}
                 {((product.photos && product.photos.length > 0) || photosOnly) && (
-                    <Badge variant="outline" className="absolute bottom-2 right-2 z-10 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-300 backdrop-blur-sm">
-                        {product.photos?.length || 0} фото
+                    <Badge variant="outline" className={`absolute bottom-2 right-2 z-10 border-slate-700/50 bg-slate-900/80 px-1.5 py-0 text-[10px] text-slate-300 ${overlayChrome}`}>
+                        {product.photos?.length || 0}
                     </Badge>
                 )}
                 {!photosOnly && (sourceNumber || product.video_url) && (

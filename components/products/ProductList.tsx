@@ -192,18 +192,22 @@ export default function ProductList({
     }
   }, [handleEdit, products])
 
+  // Возвращает признак «товар действительно ушёл в корзину»: карточка товара
+  // по нему решает, закрываться ли после подтверждения оператора.
   const handleDelete = useCallback(async (id: string) => {
-    if (!confirm('Переместить этот товар в корзину?')) return
+    if (!confirm('Переместить этот товар в корзину?')) return false
 
     try {
       const result = await deleteProductAction(id)
       if (result.success) {
         setProducts(prev => prev.filter(p => p.id !== id))
-      } else {
-        alert(result.error || 'Ошибка при переносе товара в корзину')
+        return true
       }
+      alert(result.error || 'Ошибка при переносе товара в корзину')
+      return false
     } catch {
       alert('Ошибка при переносе товара в корзину')
+      return false
     }
   }, [])
 
@@ -402,6 +406,7 @@ export default function ProductList({
       showAttributeSummary={false}
       photosOnly={photosOnly}
       squarePhoto={photosOnly}
+      quickActions={false}
     />
   )
 

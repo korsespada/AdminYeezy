@@ -14,6 +14,7 @@ vi.mock('next/image', () => ({
 
 vi.mock('@/actions/products', () => ({
   createProductAction: vi.fn(),
+  deleteProductAction: vi.fn(),
   updateProductAction: vi.fn(),
 }))
 
@@ -427,5 +428,40 @@ describe('ProductForm save shortcut', () => {
     const saved = onSave.mock.calls[0][0] as Product
     expect(saved.category).toBe(otherCategory.id)
     expect(saved.expand?.category?.name).toBe('Обувь')
+  })
+
+  it('keeps duplicate and trash actions inside the product card', async () => {
+    render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: 'Изменить товар' })
+    expect(screen.getByRole('button', { name: /Дублировать/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /В корзину/ })).toBeInTheDocument()
+  })
+
+  it('does not offer product deletion for a Chromoff listing', async () => {
+    render(
+      <ProductForm
+        product={product}
+        brands={[brand]}
+        categories={[category]}
+        subcategories={[]}
+        isOpen
+        onClose={vi.fn()}
+        chromoffListing={{ id: 'listing-1', product_id: product.id } as any}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: 'Изменить товар' })
+    expect(screen.queryByRole('button', { name: /Дублировать/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /В корзину/ })).not.toBeInTheDocument()
   })
 })

@@ -4,9 +4,10 @@ import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory, type ProductSupplierOption } from '@/lib/types'
 import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
-import { createProductAction, rehostProductVideoAction, updateProductAction } from '@/actions/products'
+import { createProductAction, deleteProductAction, rehostProductVideoAction, updateProductAction } from '@/actions/products'
 import { updateChromoffListingAction } from '@/actions/chromoff'
-import { CloudUpload, Download, ExternalLink, Palette, Settings2, Upload } from 'lucide-react'
+import { buildDuplicateProductFormData } from '@/lib/product-duplicate'
+import { CloudUpload, Copy, Download, ExternalLink, Palette, Settings2, Trash2, Upload } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import BrandSelect from '@/components/inventory/BrandSelect'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -119,6 +120,8 @@ export default function ProductForm({
   const [supplierSelection, setSupplierSelection] = useState('')
   const [photoUrlsToAdd, setPhotoUrlsToAdd] = useState('')
   const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false)
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false)
+  const [isDuplicatingProduct, setIsDuplicatingProduct] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
   const [existingPhotos, setExistingPhotos] = useState<string[]>([])
   const [existingMedia, setExistingMedia] = useState<ProductMedia[]>([])
@@ -837,6 +840,48 @@ export default function ProductForm({
     })
   }
 
+  // Удаление и дублирование живут в карточке товара: на плитке каталога кнопки
+  // мешали просмотру фото, особенно на телефоне.
+  const handleDeleteProduct = async () => {
+    if (!product || isDeletingProduct || chromoffListing) return
+    if (!window.confirm('Переместить этот товар в корзину?')) return
+
+    setIsDeletingProduct(true)
+    try {
+      const result = await deleteProductAction(product.id)
+      if (result.success) {
+        onClose()
+        router.refresh()
+      } else {
+        window.alert(result.error || 'Ошибка при переносе товара в корзину')
+      }
+    } catch {
+      window.alert('Ошибка при переносе товара в корзину')
+    } finally {
+      setIsDeletingProduct(false)
+    }
+  }
+
+  const handleDuplicateProduct = async () => {
+    if (!product || isDuplicatingProduct || chromoffListing) return
+    if (!window.confirm('Дублировать этот товар?')) return
+
+    setIsDuplicatingProduct(true)
+    try {
+      const result = await createProductAction(buildDuplicateProductFormData(product, supplierOptions))
+      if (result.success) {
+        onClose()
+        router.refresh()
+      } else {
+        window.alert(result.error || 'Не удалось дублировать товар')
+      }
+    } catch {
+      window.alert('Не удалось дублировать товар')
+    } finally {
+      setIsDuplicatingProduct(false)
+    }
+  }
+
   useEffect(() => {
     if (!isOpen) return
 
@@ -1504,7 +1549,7 @@ export default function ProductForm({
 
           {/* Footer */}
           <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-gray-700 bg-gray-900 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:pb-3">
-            <div className="w-full sm:w-auto">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
               {supplierUrl ? (
                 <Button
                   asChild
@@ -1532,6 +1577,30 @@ export default function ProductForm({
                   <ExternalLink className="mr-2 h-4 w-4" />
                   Открыть у поставщика
                 </Button>
+              )}
+              {product && !chromoffListing && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleDuplicateProduct}
+                    disabled={isPending || isDeletingProduct || isDuplicatingProduct}
+                    className="w-full border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white sm:w-auto"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    {isDuplicatingProduct ? 'Дублирование…' : 'Дублировать'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDeleteProduct}
+                    disabled={isPending || isDeletingProduct || isDuplicatingProduct}
+                    className="w-full sm:w-auto"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {isDeletingProduct ? 'Переносим…' : 'В корзину'}
+                  </Button>
+                </>
               )}
             </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:space-x-3">

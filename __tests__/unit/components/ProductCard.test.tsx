@@ -189,9 +189,28 @@ describe('ProductCard grid presentation', () => {
       />,
     )
 
-    expect(screen.getByText('2 фото')).toBeInTheDocument()
+    // Бейдж показывает только число: слово «фото» рядом с фото избыточно.
+    expect(screen.getByText('2')).toBeInTheDocument()
+    expect(screen.queryByText('2 фото')).not.toBeInTheDocument()
     expect(screen.queryByText('Компактная карточка')).not.toBeInTheDocument()
     expect(screen.queryByText('Описание товара')).not.toBeInTheDocument()
     expect(screen.queryByText('42 000 ₽')).not.toBeInTheDocument()
+  })
+
+  it('hides the duplicate and trash actions when quickActions is off', () => {
+    render(
+      <ProductCard
+        product={product}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        selected={false}
+        onToggleSelect={vi.fn()}
+        quickActions={false}
+      />,
+    )
+
+    expect(screen.queryByTitle('В корзину')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('Дублировать')).not.toBeInTheDocument()
   })
 })
