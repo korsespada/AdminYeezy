@@ -58,6 +58,7 @@ const workspaces = [
 ] as const
 
 const statusLabels: Record<string, string> = {
+  manager_review: 'Ожидает подтверждения',
   payment_pending: 'Ожидает оплаты',
   paid: 'Оплачен',
   shipped: 'Отправлен',

@@ -551,6 +551,7 @@ export async function GET(request: Request) {
       aov: 0,
       status_counts: {
         paid: 0,
+        manager_review: 0,
         payment_pending: 0,
         shipped: 0,
         delivered: 0,
@@ -615,7 +616,7 @@ export async function GET(request: Request) {
                 newBuyers++;
               }
             }
-          } else if (st === "payment_pending") {
+          } else if (st === "payment_pending" || st === "manager_review") {
             pendingCount++;
           } else if (st === "cancelled") {
             cancelledCount++;

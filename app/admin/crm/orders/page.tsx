@@ -6,7 +6,7 @@ import { connection } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 const PER_PAGE = 30
-const statuses = new Set(['', 'payment_pending', 'paid', 'shipped', 'delivered', 'refund_pending', 'cancelled'])
+const statuses = new Set(['', 'manager_review', 'payment_pending', 'paid', 'shipped', 'delivered', 'refund_pending', 'cancelled'])
 
 export default async function CrmOrdersPage({
   searchParams,

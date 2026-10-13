@@ -18,6 +18,7 @@ interface CrmOrdersListProps {
 
 const statuses = [
   { label: 'Все статусы', value: '' },
+  { label: 'Ожидает подтверждения', value: 'manager_review' },
   { label: 'Ожидает оплаты', value: 'payment_pending' },
   { label: 'Оплачен', value: 'paid' },
   { label: 'Отправлен', value: 'shipped' },
@@ -36,7 +37,7 @@ export default function CrmOrdersList({ orders, totalItems, totalPages, page, se
           <div>
             <Link href="/admin/crm" className="text-sm font-medium text-sky-300 hover:text-sky-200">CRM</Link>
             <h1 className="mt-2 text-3xl font-bold text-white">Заказы</h1>
-            <p className="mt-2 text-sm text-slate-500">Здесь только заказы, созданные для оплаты. Заявки без оплаты находятся в сообщениях.</p>
+            <p className="mt-2 text-sm text-slate-500">Заявки без оплаты приходят со статусом «Ожидает подтверждения»: подтвердите цену и доставку, затем переведите заказ в «Ожидает оплаты».</p>
           </div>
           <form action="/admin/crm/orders" className="flex w-full flex-col gap-2 sm:flex-row lg:w-auto">
             <input type="hidden" name="status" value={status} />
