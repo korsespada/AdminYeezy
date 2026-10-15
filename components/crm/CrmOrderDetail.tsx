@@ -5,6 +5,7 @@ import { transitionOrderAction } from '@/actions/crm'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import CrmOrderShipment from '@/components/crm/CrmOrderShipment'
 import { type RailsCrmOrderDetail, type RailsCrmOrderItem } from '@/lib/rails-admin'
 
 const orderStatuses = ['manager_review', 'payment_pending', 'paid', 'shipped', 'delivered', 'refund_pending', 'cancelled']
@@ -24,7 +25,7 @@ export default function CrmOrderDetail({ order }: { order: RailsCrmOrderDetail; 
         <section className="grid gap-4 md:grid-cols-3"><Metric icon={CreditCard} label="Итого" value={formatMoney(order.total_cents, order.currency)} /><Metric icon={Package} label="Товаров" value={String(order.items?.length || 0)} /><Metric icon={Clock} label="Оплата" value={order.paid_at ? formatDate(order.paid_at) : 'Не оплачено'} /></section>
         <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="space-y-4"><Card className="border-slate-800 bg-slate-900 text-slate-100"><CardHeader><CardTitle className="text-base">Состав заказа</CardTitle></CardHeader><CardContent className="space-y-3">{(order.items || []).map((item) => <OrderItemCard key={item.id} item={item} currency={order.currency} />)}{!order.items?.length && <p className="text-sm text-slate-500">Товары не найдены</p>}</CardContent></Card><TimelineCard order={order} /></div>
-          <aside className="space-y-4"><CustomerCard order={order} /><CheckoutCard order={order} /><PaymentsCard order={order} /></aside>
+          <aside className="space-y-4"><CrmOrderShipment order={order} /><CustomerCard order={order} /><CheckoutCard order={order} /><PaymentsCard order={order} /></aside>
         </section>
       </div>
     </main>

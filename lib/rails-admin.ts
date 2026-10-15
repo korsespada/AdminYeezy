@@ -419,6 +419,42 @@ export interface RailsCrmOrderEvent {
   created_at?: string
 }
 
+export interface RailsCrmShipmentEvent {
+  time?: string | null
+  text?: string | null
+}
+
+export interface RailsCrmShipment {
+  id: string
+  provider: string
+  provider_name: string
+  tracking_number: string
+  status: 'created' | 'in_transit' | 'delivered'
+  created_at?: string
+  delivered_at?: string | null
+  events: RailsCrmShipmentEvent[]
+  local_order_number: string
+  external_number?: string | null
+  fast?: boolean
+  request_payload?: Record<string, string>
+  tracked_at?: string | null
+  tracking_error?: string | null
+}
+
+export interface RailsCrmShipmentInput {
+  province?: string
+  fast?: boolean
+  weight?: string
+  length?: string
+  width?: string
+  height?: string
+  goodsName?: string
+  goodsPrice?: string
+  address?: string
+  name?: string
+  phone?: string
+}
+
 export interface RailsCrmOrderDetail extends RailsCrmOrder {
   public_status?: string
   public_message?: string
@@ -446,6 +482,7 @@ export interface RailsCrmOrderDetail extends RailsCrmOrder {
   payments: RailsCrmPayment[]
   refunds: RailsCrmRefund[]
   timeline: RailsCrmOrderEvent[]
+  shipment?: RailsCrmShipment | null
 }
 
 export interface RailsCrmReplacementProductOption {
@@ -1336,6 +1373,34 @@ export async function transitionRailsCrmOrder(id: string, input: {
       to_status: input.toStatus,
       message: input.message || '',
     }),
+  })
+  return result.order
+}
+
+export async function createRailsCrmOrderShipment(id: string, input: RailsCrmShipmentInput) {
+  const body = Object.fromEntries(Object.entries({
+    province: input.province,
+    fast: input.fast,
+    weight: input.weight,
+    length: input.length,
+    width: input.width,
+    height: input.height,
+    goods_name: input.goodsName,
+    goods_price: input.goodsPrice,
+    address: input.address,
+    name: input.name,
+    phone: input.phone,
+  }).filter(([, value]) => value !== undefined && value !== ''))
+  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}/shipment`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  return result.order
+}
+
+export async function refreshRailsCrmOrderShipment(id: string) {
+  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}/shipment/refresh`, {
+    method: 'POST',
   })
   return result.order
 }

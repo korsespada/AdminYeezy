@@ -4,10 +4,12 @@ import { revalidatePath } from 'next/cache'
 import {
   approveRailsCrmRefund,
   approveRailsCrmWalletWithdrawal,
+  createRailsCrmOrderShipment,
   createRailsCrmReplacementOffer,
   createRailsCrmSupplierRequest,
   markRailsCrmWalletWithdrawalPaid,
   recordRailsCrmSupplierResponse,
+  refreshRailsCrmOrderShipment,
   rejectRailsCrmRefund,
   rejectRailsCrmWalletWithdrawal,
   transitionRailsCrmOrder,
@@ -44,6 +46,53 @@ export async function transitionOrderAction(formData: FormData) {
   const message = String(formData.get('message') || '').trim()
   await transitionRailsCrmOrder(orderId, { toStatus, message })
   revalidateCrm(orderId)
+}
+
+export interface ShipmentActionState {
+  ok: boolean
+  message: string
+}
+
+function optionalString(formData: FormData, key: string) {
+  return String(formData.get(key) || '').trim() || undefined
+}
+
+function actionErrorMessage(error: unknown) {
+  return error instanceof Error && error.message ? error.message : 'Не удалось выполнить запрос к Rails API'
+}
+
+export async function createOrderShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+  await requireAdmin()
+  const orderId = requiredString(formData, 'orderId')
+  try {
+    const order = await createRailsCrmOrderShipment(orderId, {
+      province: optionalString(formData, 'province'),
+      fast: formData.get('fast') === 'on',
+      weight: optionalString(formData, 'weight'),
+      length: optionalString(formData, 'length'),
+      width: optionalString(formData, 'width'),
+      height: optionalString(formData, 'height'),
+      goodsName: optionalString(formData, 'goodsName'),
+      goodsPrice: optionalString(formData, 'goodsPrice'),
+    })
+    revalidateCrm(orderId)
+    return { ok: true, message: `Передано в STD-Express, трек ${order.shipment?.tracking_number || '—'}` }
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) }
+  }
+}
+
+export async function refreshOrderShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+  await requireAdmin()
+  const orderId = requiredString(formData, 'orderId')
+  try {
+    const order = await refreshRailsCrmOrderShipment(orderId)
+    revalidateCrm(orderId)
+    const error = order.shipment?.tracking_error
+    return error ? { ok: false, message: error } : { ok: true, message: 'Трекинг обновлён' }
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) }
+  }
 }
 
 export async function transitionOrderItemAction(formData: FormData) {
