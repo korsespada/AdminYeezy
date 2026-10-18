@@ -17,6 +17,9 @@ const shipmentStatusLabels: Record<RailsCrmShipment['status'], string> = {
 const inputClassName = 'w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-500'
 
 export default function CrmOrderShipment({ order }: { order: RailsCrmOrderDetail }) {
+  const deliveryMethod = order.checkout?.delivery_method
+  if (!order.shipment && deliveryMethod && deliveryMethod !== 'cdek_to_door') return null
+
   return (
     <Card className="border-slate-800 bg-slate-900 text-slate-100">
       <CardHeader>

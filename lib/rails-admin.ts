@@ -467,6 +467,8 @@ export interface RailsCrmOrderDetail extends RailsCrmOrder {
   checkout?: {
     delivery_method?: string
     delivery_pricing?: string
+    country?: string
+    country_name?: string
     full_name?: string
     email?: string
     phone?: string
