@@ -24,6 +24,23 @@ function authorized(request: NextRequest) {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual))
 }
 
+type ScrapingClient = Awaited<ReturnType<typeof getScrapingClient>>
+
+// Колонки EN-перевода добавляет `npm run db:migrate:scraping`. Пока миграции нет,
+// worker сохраняет результат AI без EN-полей, а не падает на каждом товаре.
+// Кэшируется только положительный ответ: после миграции колонки подхватятся без рестарта.
+let translationColumnsReady = false
+async function hasTranslationColumns(client: ScrapingClient) {
+  if (translationColumnsReady) return true
+  const result = await client.query(`
+    SELECT COUNT(*)::int AS count FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'products' AND column_name IN ('translations', 'photo_alts_en')
+  `)
+  translationColumnsReady = Number(result.rows[0]?.count) === 2
+  if (!translationColumnsReady) console.warn('[batch-ai] translations/photo_alts_en columns are missing: run npm run db:migrate:scraping')
+  return translationColumnsReady
+}
+
 export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   try {
@@ -244,15 +261,18 @@ async function complete(body: any) {
         WHERE batch_id=$1 AND id=ANY($3::int[])
       `, [item.batch_id, JSON.stringify(applyMeasurementTableAttributes(null, recoveredMeasurements)), targetIds])
     } else if (!input.variantScanOnly) {
+      const withTranslations = await hasTranslationColumns(client)
       await client.query(`
         UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
           brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,photo_alts=$13::jsonb,attributes=$14::jsonb,
-          price=$15,price_source=$16,ai_processed=true,ai_error=NULL,ai_confidence=$17,updated_at=NOW()
+          price=$15,price_source=$16,ai_processed=true,ai_error=NULL,ai_confidence=$17,
+          ${withTranslations ? 'translations=$18::jsonb,photo_alts_en=$19::jsonb,' : ''}updated_at=NOW()
         WHERE id=$1
       `, [item.product_id, product.name, product.description, product.h1, product.seo_title,
         product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
         product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
-        Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence])
+        Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence,
+        ...(withTranslations ? [JSON.stringify(product.translations || {}), JSON.stringify(product.photo_alts_en || [])] : [])])
     }
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$3::jsonb,lease_token=NULL,

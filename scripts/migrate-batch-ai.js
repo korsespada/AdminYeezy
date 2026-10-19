@@ -53,6 +53,8 @@ async function migrate() {
         ADD COLUMN IF NOT EXISTS seo_description TEXT,
         ADD COLUMN IF NOT EXISTS slug TEXT,
         ADD COLUMN IF NOT EXISTS photo_alts JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS photo_alts_en JSONB NOT NULL DEFAULT '[]'::jsonb,
+        ADD COLUMN IF NOT EXISTS translations JSONB NOT NULL DEFAULT '{}'::jsonb,
         ADD COLUMN IF NOT EXISTS photo_slugs JSONB NOT NULL DEFAULT '[]'::jsonb,
         ADD COLUMN IF NOT EXISTS supplier_published_on DATE,
         ADD COLUMN IF NOT EXISTS price_source TEXT NOT NULL DEFAULT 'legacy',

@@ -1232,6 +1232,7 @@ function productToRailsJsonRow(product, lookups) {
     seo_title: product.seo_title || '',
     seo_description: product.seo_description || '',
     slug: product.slug || '',
+    ...(product.translations ? { translations: product.translations } : {}),
     price: product.price || 0,
     status: 'active',
     brand: lookupName(lookups.brands, product.brand, 'бренда'),
@@ -1245,6 +1246,9 @@ function productToRailsJsonRow(product, lookups) {
       preview_url: url,
       og_image_url: url,
       alt_text: Array.isArray(product.photo_alts) ? product.photo_alts[index] || product.name || '' : product.name || '',
+      ...(Array.isArray(product.photo_alts_en) && product.photo_alts_en[index]
+        ? { translations: { en: { alt_text: product.photo_alts_en[index] } } }
+        : {}),
       sort_order: index,
       processing_status: 'processed',
     })),

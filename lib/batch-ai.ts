@@ -230,6 +230,8 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 - Не сообщай покупателю, что факт неизвестен или не удалось определить: просто не упоминай его.
 - Не начинай текст словами «на фото видно», «на фотографиях представлено», «исходный текст» и подобными служебными фразами.
 - Не используй слова «оригинал», «официальный», «лучший», «премиальный» или «трендовый» и не делай заявлений о подлинности.
+- translations.en.name и translations.en.description — естественный английский перевод name и description. Не переводи бренд, модель, линейку и названия материалов (Birkin, Swift, GG Marmont). Тип изделия переводи: «Сумка Birkin 25 см Swift» → «Birkin 25 cm Swift bag».
+- photo_alts_en: если переданы фотографии, верни английские alt в том же порядке и количестве, что photo_alts, с теми же правилами длины.
 - Внутренние артикулы не являются моделью и не должны попадать в публичные тексты.
 - Каждый подтверждённый материал перенеси и в description, и в подходящий атрибут.
 - Бренд и категорию выбирай только из справочника. Не предлагай новые бренды или верхнеуровневые категории.
@@ -437,6 +439,8 @@ export function buildBatchAiUserPrompt(input: {
       },
       chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
       photo_alts: [],
+      photo_alts_en: [],
+      translations: { en: { name: '', description: '' } },
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
       color_family: null,
@@ -621,6 +625,8 @@ export function buildBatchAiColorSplitPrompt(input: {
         },
         chromoff_category: chromoffMode ? { id: 'existing-chromoff-category-id-or-empty', confidence: 0, reason: '' } : null,
         photo_alts: [],
+      photo_alts_en: [],
+      translations: { en: { name: '', description: '' } },
         cover_photo_index: null,
         media: { discard_indexes: [], size_chart_indexes: [] },
       }],
@@ -1364,6 +1370,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
     String(proposed.name || original.name || '').trim(),
   )
   const rawProcessing = raw?.ai_processing && typeof raw.ai_processing === 'object' ? raw.ai_processing : {}
+  const englishName = String(raw?.translations?.en?.name || '').trim().slice(0, 250)
+  const englishDescription = String(raw?.translations?.en?.description || '').trim().slice(0, 8000)
   const requestedCoverIndex = Number(rawProcessing.cover_photo_index)
   const coverPosition = processingOptions.reorderFirstPhoto
     ? retainedIndexes.indexOf(requestedCoverIndex)
@@ -1664,6 +1672,18 @@ export function normalizeBatchAiOutput(raw: any, input: {
       ...(proposedPrice !== null ? { price: proposedPrice, price_source: 'ai_instruction' } : {}),
       photos,
       photo_alts: photoAlts,
+      ...(Array.isArray(raw?.photo_alts_en) ? { photo_alts_en: raw.photo_alts_en } : {}),
+      ...(englishName || englishDescription
+        ? {
+          translations: {
+            en: {
+              ...(englishName ? { name: englishName } : {}),
+              ...(englishDescription ? { description: englishDescription } : {}),
+              status: 'machine',
+            },
+          },
+        }
+        : {}),
       attributes,
       ai_processed: true,
       ai_error: null,

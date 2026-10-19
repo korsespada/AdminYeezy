@@ -869,6 +869,13 @@ export default function CsvImportApp({
     [products],
   );
   const aiRemainingCount = products.length - aiReadyCount;
+  const enReadyCount = useMemo(
+    () => products.filter((product) => {
+      const english = (product as any).translations?.en
+      return english && Object.keys(english).some((key) => !["status", "source_digest", "translated_at"].includes(key))
+    }).length,
+    [products],
+  );
   const aiSampleCount = useMemo(
     () => products.filter((product) => product.ai_sampled === true).length,
     [products],
@@ -1930,6 +1937,11 @@ export default function CsvImportApp({
                   <span className="text-slate-600">/</span>
                   <span className="inline-flex items-center gap-1 text-amber-400"><AlertTriangle size={14} /> {aiRemainingCount} сырых</span>
                 </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">EN</span>
+                <span className="text-sm font-bold text-sky-300">{enReadyCount} из {products.length}</span>
               </div>
               
               {initialSupplierName && (
