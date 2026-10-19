@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback, useTransition } from
 import Image from 'next/image'
 import { type Product, type ProductMedia, type Brand, type Category, type Subcategory, type ProductSupplierOption } from '@/lib/types'
 import type { RailsChromoffCategory, RailsChromoffListing } from '@/lib/rails-admin'
-import { createProductAction, deleteProductAction, rehostProductVideoAction, updateProductAction } from '@/actions/products'
+import { createProductAction, deleteProductAction, rehostProductVideoAction, reviewTranslationAction, translateProductAction, updateProductAction } from '@/actions/products'
+import { canReviewTranslation, englishTranslationState, TRANSLATION_STATE_LABELS } from '@/lib/translation-state'
 import { updateChromoffListingAction } from '@/actions/chromoff'
 import { buildDuplicateProductFormData } from '@/lib/product-duplicate'
 import { CloudUpload, Copy, Download, ExternalLink, Palette, Settings2, Trash2, Upload } from 'lucide-react'
@@ -95,6 +96,9 @@ export default function ProductForm({
   const [isPending, startTransition] = useTransition()
   const formRef = useRef<HTMLFormElement>(null)
   const [error, setError] = useState('')
+  const [translating, setTranslating] = useState(false)
+  const [reviewing, setReviewing] = useState(false)
+  const [englishState, setEnglishState] = useState('missing')
 
   const [productId, setProductId] = useState('')
   const [sku, setSku] = useState('')
@@ -112,6 +116,13 @@ export default function ProductForm({
   const [seoTitle, setSeoTitle] = useState('')
   const [seoDescription, setSeoDescription] = useState('')
   const [h1, setH1] = useState('')
+  const [translationsEn, setTranslationsEn] = useState<Record<string, string>>({
+    name: '',
+    description: '',
+    seo_title: '',
+    seo_description: '',
+    h1: '',
+  })
   const [catalogAttributes, setCatalogAttributes] = useState<Record<string, any>>({})
   const [brandIds, setBrandIds] = useState<string[]>([])
   const [category, setCategory] = useState('')
@@ -375,6 +386,15 @@ export default function ProductForm({
         setSeoTitle(product.seo_title || product.name || '')
         setSeoDescription(product.seo_description || productDescription)
         setH1(product.h1 || product.name || '')
+        const english = (product.translations?.en || {}) as Record<string, unknown>
+        setEnglishState(englishTranslationState(product.translations))
+        setTranslationsEn({
+          name: String(english.name || ''),
+          description: String(english.description || ''),
+          seo_title: String(english.seo_title || ''),
+          seo_description: String(english.seo_description || ''),
+          h1: String(english.h1 || ''),
+        })
         setCatalogAttributes(product.catalog_attributes || product.attributes || {})
         // Handle brand as array or single value
         const b = product.brand || product.expand?.brand
@@ -464,6 +484,8 @@ export default function ProductForm({
         setSeoTitle('')
         setSeoDescription('')
         setH1('')
+        setTranslationsEn({ name: '', description: '', seo_title: '', seo_description: '', h1: '' })
+        setEnglishState('missing')
         setCatalogAttributes({})
         setBrandIds([])
         setCategory(categories[0]?.id || '')
@@ -554,6 +576,21 @@ export default function ProductForm({
     setExistingPhotos((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const updateMediaAlt = (url: string, field: 'alt_text' | 'alt_text_en', value: string) => {
+    setExistingMedia((prev) => prev.map((item) => {
+      const matches = item.original_url === url || item.preview_url === url || item.thumb_url === url || item.og_image_url === url
+      if (!matches) return item
+      if (field === 'alt_text') return { ...item, alt_text: value }
+      return {
+        ...item,
+        translations: {
+          ...(item.translations || {}),
+          en: { ...(item.translations?.en || {}), alt_text: value },
+        },
+      }
+    }))
+  }
+
   const buildMediaPayload = () => {
     return existingPhotos.map((url, index) => {
       const media = existingMedia.find((item) =>
@@ -562,12 +599,14 @@ export default function ProductForm({
         item.thumb_url === url ||
         item.og_image_url === url
       )
+      const englishAlt = media?.translations?.en?.alt_text?.trim()
       return {
         original_url: media?.original_url || url,
         thumb_url: media?.thumb_url || media?.preview_url || media?.original_url || url,
         preview_url: media?.preview_url || media?.original_url || url,
         og_image_url: media?.og_image_url || media?.preview_url || media?.original_url || url,
         alt_text: media?.alt_text || name.trim(),
+        ...(englishAlt ? { translations: { en: { alt_text: englishAlt } } } : {}),
         sort_order: index,
         processing_status: media?.processing_status || 'processed',
       }
@@ -606,6 +645,47 @@ export default function ProductForm({
     }).catch((uploadError) => {
       console.error('Product media upload request failed', uploadError)
     })
+  }
+
+  const handleTranslate = async () => {
+    if (!product?.id || translating) return
+    setTranslating(true)
+    setError('')
+    try {
+      const result = await translateProductAction(product.id)
+      const english = result.data?.translations?.en as Record<string, unknown> | undefined
+      if (!result.success || !english) {
+        setError(result.error || 'Не удалось получить перевод')
+        return
+      }
+      setEnglishState(englishTranslationState(result.data?.translations))
+      setTranslationsEn({
+        name: String(english.name || ''),
+        description: String(english.description || ''),
+        seo_title: String(english.seo_title || ''),
+        seo_description: String(english.seo_description || ''),
+        h1: String(english.h1 || ''),
+      })
+    } finally {
+      setTranslating(false)
+    }
+  }
+
+  // Перевод сверяется с сохранённым русским текстом: сначала сохраните правки формы.
+  const handleReview = async () => {
+    if (!product?.id || reviewing) return
+    setReviewing(true)
+    setError('')
+    try {
+      const result = await reviewTranslationAction('Product', product.id)
+      if (!result.success) {
+        setError(result.error || 'Не удалось отметить перевод проверенным')
+        return
+      }
+      setEnglishState(englishTranslationState(result.data?.translations))
+    } finally {
+      setReviewing(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -655,6 +735,11 @@ export default function ProductForm({
     formData.append('seo_title', seoTitle.trim())
     formData.append('seo_description', seoDescription.trim())
     formData.append('h1', h1.trim())
+    // Пустая строка очищает поле перевода; статус и отпечаток русского текста хранит Rails.
+    const englishPayload = Object.fromEntries(
+      Object.entries(translationsEn).map(([key, value]) => [key, value.trim()]),
+    )
+    formData.append('translations_en', JSON.stringify(englishPayload))
     formData.append('video_url', pendingVideoFile ? '' : videoUrl.trim())
     formData.append('video_poster_url', videoPosterUrl.trim())
     const normalizedCatalogAttributes = normalizeCatalogAttributes(catalogAttributes, {
@@ -1013,6 +1098,36 @@ export default function ProductForm({
                     onRemove={removeExistingPhoto}
                     onDownload={handleDownload}
                   />
+                </div>
+              )}
+
+              {existingPhotos.length > 0 && (
+                <div className="mb-3 space-y-2 rounded-lg border border-slate-700 bg-slate-900/35 p-3">
+                  <p className="text-xs font-semibold text-slate-300">Alt-тексты фото (RU / EN)</p>
+                  {existingPhotos.map((url, index) => {
+                    const media = existingMedia.find((item) =>
+                      item.original_url === url || item.preview_url === url || item.thumb_url === url || item.og_image_url === url
+                    )
+                    return (
+                      <div key={`${url}-${index}`} className="grid gap-2 sm:grid-cols-[2rem_1fr_1fr]">
+                        <span className="pt-1.5 text-xs text-slate-500">#{index + 1}</span>
+                        <input
+                          type="text"
+                          value={media?.alt_text || ''}
+                          onChange={(event) => updateMediaAlt(url, 'alt_text', event.target.value)}
+                          placeholder="Alt (RU)"
+                          className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
+                        />
+                        <input
+                          type="text"
+                          value={media?.translations?.en?.alt_text || ''}
+                          onChange={(event) => updateMediaAlt(url, 'alt_text_en', event.target.value)}
+                          placeholder="Alt (EN)"
+                          className="rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-200"
+                        />
+                      </div>
+                    )
+                  })}
                 </div>
               )}
 
@@ -1543,6 +1658,64 @@ export default function ProductForm({
                   SEO description
                 </label>
                 <textarea value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} rows={2} disabled={isPending} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white dark:bg-gray-700 dark:text-white" />
+              </div>
+            </div>
+
+            <div className="space-y-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4 dark:border-blue-900 dark:bg-blue-950/20">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">English translation</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Пустое поле — витрина покажет русский оригинал. Для индексации нужны название и описание.</p>
+                </div>
+                <span className="rounded-full border border-blue-300 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700 dark:border-blue-700 dark:text-blue-300">
+                  {TRANSLATION_STATE_LABELS[englishState]}
+                </span>
+                {canReviewTranslation(englishState) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReview}
+                    disabled={!product?.id || reviewing || isPending}
+                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300"
+                  >
+                    {reviewing ? 'Отмечаем…' : 'Отметить проверенным'}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTranslate}
+                  disabled={!product?.id || translating || isPending}
+                  className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300"
+                >
+                  {translating ? 'Переводим…' : 'Перевести AI'}
+                </Button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">Name (EN)</label>
+                  <input type="text" value={translationsEn.name} onChange={(e) => setTranslationsEn((current) => ({ ...current, name: e.target.value }))} disabled={isPending} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">H1 (EN)</label>
+                  <input type="text" value={translationsEn.h1} onChange={(e) => setTranslationsEn((current) => ({ ...current, h1: e.target.value }))} disabled={isPending} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">Description (EN)</label>
+                <textarea value={translationsEn.description} onChange={(e) => setTranslationsEn((current) => ({ ...current, description: e.target.value }))} rows={3} disabled={isPending} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">SEO title (EN)</label>
+                  <input type="text" value={translationsEn.seo_title} onChange={(e) => setTranslationsEn((current) => ({ ...current, seo_title: e.target.value }))} disabled={isPending} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-gray-300">SEO description (EN)</label>
+                  <textarea value={translationsEn.seo_description} onChange={(e) => setTranslationsEn((current) => ({ ...current, seo_description: e.target.value }))} rows={2} disabled={isPending} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white" />
+                </div>
               </div>
             </div>
           </form>

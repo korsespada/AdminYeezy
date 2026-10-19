@@ -659,6 +659,10 @@ function mapBrand(brand: any): Brand {
     name: brand.name || '',
     slug: brand.slug || '',
     description: brand.description || '',
+    seo_title: brand.seo_title || '',
+    seo_description: brand.seo_description || '',
+    seo_text: brand.seo_text || '',
+    translations: brand.translations && typeof brand.translations === 'object' ? brand.translations : {},
     created: brand.created_at || '',
     updated: brand.updated_at || '',
     collectionId: '',
@@ -676,6 +680,11 @@ function flattenCategories(items: any[], parentId = ''): { categories: Category[
       name: item.name || '',
       slug: item.slug || '',
       description: item.description || '',
+      seo_title: item.seo_title || '',
+      seo_description: item.seo_description || '',
+      seo_text_top: item.seo_text_top || '',
+      seo_text_bottom: item.seo_text_bottom || '',
+      translations: item.translations && typeof item.translations === 'object' ? item.translations : {},
       created: item.created_at || '',
       updated: item.updated_at || '',
       collectionId: '',
@@ -707,6 +716,7 @@ function normalizeRailsMedia(product: any): ProductMedia[] {
         preview_url: item.preview_url || item.original_url || item.thumb_url || '',
         og_image_url: item.og_image_url || item.preview_url || item.original_url || '',
         alt_text: item.alt_text || '',
+        translations: item.translations && typeof item.translations === 'object' ? item.translations : {},
         sort_order: Number.isFinite(Number(item.sort_order)) ? Number(item.sort_order) : index,
         processing_status: ['pending', 'processed', 'failed'].includes(String(item.processing_status))
           ? item.processing_status
@@ -725,6 +735,7 @@ function normalizeRailsMedia(product: any): ProductMedia[] {
     preview_url: String(url),
     og_image_url: String(url),
     alt_text: product.name || '',
+    translations: {},
     sort_order: index,
     processing_status: 'processed',
   }))
@@ -799,6 +810,7 @@ export function mapRailsProduct(product: any): Product {
     seo_title: product.seo_title || '',
     seo_description: product.seo_description || '',
     h1: product.h1 || '',
+    translations: product.translations && typeof product.translations === 'object' ? product.translations : {},
     canonical_url: product.canonical_url || '',
     published_at: product.published_at || null,
     metadata,
@@ -1227,6 +1239,7 @@ export async function listRailsAdminProducts(options: {
   noGender?: boolean
   attributeKey?: string
   attributeValue?: string
+  enStatus?: 'missing' | 'partial' | 'machine' | 'reviewed' | 'stale'
 }) {
   options = {
     ...options,
@@ -2130,6 +2143,7 @@ export function buildRailsAdminProductsParams(options: {
   genderExact?: boolean
   attributeKey?: string
   attributeValue?: string
+  enStatus?: 'missing' | 'partial' | 'machine' | 'reviewed' | 'stale'
 }) {
   const params = new URLSearchParams()
   params.set('page', String(options.page))
@@ -2162,6 +2176,7 @@ export function buildRailsAdminProductsParams(options: {
   if (priceMin) params.set('price_min', priceMin)
   if (priceMax) params.set('price_max', priceMax)
   if (options.brand) params.set('brand', options.brand)
+  if (options.enStatus) params.set('en_status', options.enStatus)
   if (options.supplier) params.set('supplier', options.supplier)
   if (options.category) params.set('category', options.category)
   if (options.categoryMissing) params.set('category_missing', 'true')
@@ -2672,6 +2687,9 @@ export function productFormDataToRailsPayload(formData: FormData, options: { app
   if (formData.has('seo_title')) product.seo_title = String(formData.get('seo_title') || '')
   if (formData.has('seo_description')) product.seo_description = String(formData.get('seo_description') || '')
   if (formData.has('h1')) product.h1 = String(formData.get('h1') || '')
+  if (formData.has('translations_en')) {
+    product.translations = { en: parseJsonObject(formData.get('translations_en')) }
+  }
   if (formData.has('canonical_url')) product.canonical_url = String(formData.get('canonical_url') || '')
   if (formData.has('video_url')) product.video_url = String(formData.get('video_url') || '').trim() || null
   if (formData.has('video_poster_url')) product.video_poster_url = String(formData.get('video_poster_url') || '').trim() || null
@@ -2789,6 +2807,56 @@ export async function updateRailsAdminProduct(id: string, formData: FormData) {
     body: JSON.stringify(productFormDataToRailsPayload(formData, { applyDefaults: false })),
   })
   return mapRailsProduct(result.product)
+}
+
+export async function translateRailsAdminProduct(id: string) {
+  return translateRailsAdminEntity('Product', id)
+}
+
+export async function translateRailsAdminEntity(entityType: string, id: string) {
+  return railsFetch<{ entity_type: string; id: string; status: string; translations: Record<string, any> }>(
+    '/admin/translations/translate',
+    {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: entityType, id }),
+    },
+  )
+}
+
+export async function reviewRailsAdminTranslation(entityType: string, id: string) {
+  return railsFetch<{ entity_type: string; id: string; status: string; translations: Record<string, any> }>(
+    '/admin/translations/review',
+    {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: entityType, id }),
+    },
+  )
+}
+
+export async function updateRailsAdminCategoryContent(id: string, payload: Record<string, any>) {
+  return railsFetch<{ category: any }>(`/admin/catalog_taxonomy/categories/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ category: payload }),
+  })
+}
+
+export async function updateRailsAdminBrandContent(id: string, payload: Record<string, any>) {
+  return railsFetch<{ brand: any }>(`/admin/catalog_taxonomy/brands/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ brand: payload }),
+  })
+}
+
+export async function updateRailsAdminAttributeTranslation(entityType: 'definition' | 'value', id: string, translations: Record<string, any>) {
+  const path = entityType === 'definition'
+    ? `/admin/catalog_attribute_registry/definitions/${encodeURIComponent(id)}`
+    : `/admin/catalog_attribute_registry/values/${encodeURIComponent(id)}`
+  return railsFetch<Record<string, any>>(path, {
+    method: 'PATCH',
+    body: JSON.stringify(entityType === 'definition'
+      ? { definition: { translations } }
+      : { value: { translations } }),
+  })
 }
 
 export async function patchRailsAdminProduct(id: string, data: Record<string, any>) {

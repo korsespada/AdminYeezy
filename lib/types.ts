@@ -1,11 +1,21 @@
 /**
  * Brand type matching PocketBase collection schema
  */
+export interface TranslationPayload {
+  status?: string
+  source_digest?: string
+  [field: string]: unknown
+}
+
 export interface Brand {
   id: string
   name: string
   slug?: string
   description: string
+  seo_title?: string
+  seo_description?: string
+  seo_text?: string
+  translations?: Record<string, TranslationPayload>
   created: string
   updated: string
   collectionId: string
@@ -20,6 +30,11 @@ export interface Category {
   name: string
   slug?: string
   description: string
+  seo_title?: string
+  seo_description?: string
+  seo_text_top?: string
+  seo_text_bottom?: string
+  translations?: Record<string, TranslationPayload>
   created: string
   updated: string
   collectionId: string
@@ -35,6 +50,11 @@ export interface Subcategory {
   slug?: string
   category: string // Category ID
   description: string
+  seo_title?: string
+  seo_description?: string
+  seo_text_top?: string
+  seo_text_bottom?: string
+  translations?: Record<string, TranslationPayload>
   created: string
   updated: string
   collectionId: string
@@ -71,6 +91,7 @@ export interface ProductMedia {
   preview_url?: string
   og_image_url?: string
   alt_text?: string
+  translations?: Record<string, { alt_text?: string; status?: string; [field: string]: unknown }>
   sort_order: number
   processing_status: 'pending' | 'processed' | 'failed'
 }
@@ -143,6 +164,7 @@ export interface Product {
   seo_title?: string
   seo_description?: string
   h1?: string
+  translations?: Record<string, { status?: string; source_digest?: string; [field: string]: unknown }>
   canonical_url?: string
   metadata?: Record<string, any>
   published_at?: string | null

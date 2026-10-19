@@ -8,6 +8,12 @@ import {
   moveRailsAdminProductToTrash,
   restoreRailsAdminProductFromTrash,
   updateRailsAdminProduct,
+  translateRailsAdminProduct,
+  translateRailsAdminEntity,
+  reviewRailsAdminTranslation,
+  updateRailsAdminCategoryContent,
+  updateRailsAdminBrandContent,
+  updateRailsAdminAttributeTranslation,
 } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
 import type { ActionResponse } from '@/lib/types'
@@ -41,8 +47,68 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   }
 }
 
-export async function getProductAction(id: string): Promise<ActionResponse> {
+export async function translateProductAction(id: string): Promise<ActionResponse> {
   try {
+    await requireAdmin()
+    const data = await translateRailsAdminProduct(id)
+    return { success: true, data }
+  } catch (error: any) {
+    console.error('Translate product error:', error)
+    return { success: false, error: error.message || 'Не удалось перевести товар' }
+  }
+}
+
+export async function translateEntityAction(formData: FormData): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const entityType = String(formData.get('entityType') || '')
+    const id = String(formData.get('id') || '')
+    if (!entityType || !id) return { success: false, error: 'Не указан объект перевода' }
+    const data = await translateRailsAdminEntity(entityType, id)
+    revalidatePath('/admin/translations')
+    return { success: true, data }
+  } catch (error: any) {
+    console.error('Translate entity error:', error)
+    return { success: false, error: error.message || 'Не удалось перевести запись' }
+  }
+}
+
+export async function reviewTranslationAction(entityType: string, id: string): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    if (!entityType || !id) return { success: false, error: 'Не указан объект перевода' }
+    const data = await reviewRailsAdminTranslation(entityType, id)
+    revalidatePath('/admin/translations')
+    return { success: true, data }
+  } catch (error: any) {
+    console.error('Review translation error:', error)
+    return { success: false, error: error.message || 'Не удалось отметить перевод проверенным' }
+  }
+}
+
+export async function saveEntityTranslationAction(formData: FormData): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const entityType = String(formData.get('entityType') || '')
+    const id = String(formData.get('id') || '')
+    const translations = JSON.parse(String(formData.get('translations_en') || '{}'))
+    const payload = { translations: { en: translations } }
+
+    if (entityType === 'Category') await updateRailsAdminCategoryContent(id, payload)
+    else if (entityType === 'Brand') await updateRailsAdminBrandContent(id, payload)
+    else if (entityType === 'CatalogAttributeDefinition') await updateRailsAdminAttributeTranslation('definition', id, { en: translations })
+    else if (entityType === 'CatalogAttributeValue') await updateRailsAdminAttributeTranslation('value', id, { en: translations })
+    else return { success: false, error: 'Неподдерживаемый тип' }
+
+    revalidatePath('/admin/translations')
+    return { success: true }
+  } catch (error: any) {
+    console.error('Save entity translation error:', error)
+    return { success: false, error: error.message || 'Не удалось сохранить перевод' }
+  }
+}
+
+export async function getProductAction(id: string): Promise<ActionResponse> {  try {
     await requireAdmin()
     return { success: true, data: await getRailsAdminProduct(id) }
   } catch (error: any) {
