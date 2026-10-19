@@ -96,6 +96,24 @@ Chromoff-витрина читает `ChromoffListing` независимо от
 подраздел не назначен, публичная витрина не включает карточку в каталог, пока
 оператор не укажет подраздел в форме товара или на странице разделов.
 
+### Состав раздела «Кольца»
+
+Раздел Chromoff «Кольца» (`koltsa`) — монобрендовый: в нём публикуются только
+товары бренда Chrome Hearts. Остальные разделы листинга тоже состоят только из
+Chrome Hearts.
+
+10.10.2026 из раздела убраны 243 кольца других брендов, которые попали туда
+легаси-импортом `YeezyUnique legacy catalog` 30.09.2026: Cartier 61, Bvlgari 50,
+Van Cleef & Arpels 50, Tiffany 26, Chaumet 12, Graff 11, Messika 7, Chanel 6,
+Chopard 5, Piaget 4, Harry Winston 3, Buccellati 3, Hermes 3, De Beers 2. Их
+Chromoff-листинги удалены, а сами товары опубликованы на yeezyunique
+(`products.chromoff_only = false`), где остаются с ценой по запросу.
+
+Запись товара заставила Rails пересчитать канонический slug, поэтому старые
+адреса `/product/cartier-97` отдают 301 на новый адрес вида
+`/product/cartier-koltso-iz-rozovogo-zolota-s-brilliantami-crt-44287`. На
+chromoff.store после удаления листинга те же адреса отвечают 404.
+
 ### Создание подразделов вручную
 
 Rails API не имеет отдельного POST-эндпоинта для `chromoff/categories`, поэтому
