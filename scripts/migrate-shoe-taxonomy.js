@@ -23,7 +23,8 @@ function railsApiUrl(pathname) {
 }
 
 async function loadShoeTaxonomy() {
-  const response = await fetch(railsApiUrl('/catalog/categories'), { signal: AbortSignal.timeout(20_000) })
+  const headers = process.env.STOREFRONT_API_KEY ? { 'X-Storefront-Key': process.env.STOREFRONT_API_KEY } : {}
+  const response = await fetch(railsApiUrl('/catalog/categories'), { headers, signal: AbortSignal.timeout(20_000) })
   if (!response.ok) throw new Error(`Rails catalog returned HTTP ${response.status}`)
   const payload = await response.json()
   const shoes = (payload.categories || []).find((item) => item.slug === 'obuv' || item.name === 'Обувь')

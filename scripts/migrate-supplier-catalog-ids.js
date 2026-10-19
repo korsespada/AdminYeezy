@@ -22,7 +22,8 @@ function key(value) {
 }
 
 async function fetchJson(pathname) {
-  const response = await fetch(`${lookupBase}${pathname}`)
+  const headers = process.env.STOREFRONT_API_KEY ? { 'X-Storefront-Key': process.env.STOREFRONT_API_KEY } : {}
+  const response = await fetch(`${lookupBase}${pathname}`, { headers })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     throw new Error(`${pathname}: ${payload.message || payload.error || response.status}`)

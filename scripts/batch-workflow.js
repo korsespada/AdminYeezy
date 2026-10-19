@@ -1078,10 +1078,17 @@ async function mappedCatalogLookups() {
   return lookups;
 }
 
+// Rails отдаёт публичный каталог только с ключом витрины STOREFRONT_API_KEY.
+function railsCatalogHeaders() {
+  const key = process.env.STOREFRONT_API_KEY;
+  return key ? { 'X-Storefront-Key': key } : {};
+}
+
 async function railsCatalogLookups() {
+  const init = { headers: railsCatalogHeaders() };
   const [brandsPayload, categoriesPayload] = await Promise.all([
-    fetchJsonWithRetry(railsApiUrl('/catalog/brands'), {}, 'Rails brands lookup'),
-    fetchJsonWithRetry(railsApiUrl('/catalog/categories'), {}, 'Rails categories lookup'),
+    fetchJsonWithRetry(railsApiUrl('/catalog/brands'), init, 'Rails brands lookup'),
+    fetchJsonWithRetry(railsApiUrl('/catalog/categories'), init, 'Rails categories lookup'),
   ]);
   const lookups = {
     brands: new Map(),
