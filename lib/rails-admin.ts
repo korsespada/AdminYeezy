@@ -246,6 +246,48 @@ export interface RailsChromoffListing {
   updated_at?: string
 }
 
+export interface RailsChromoffReviewItem {
+  name: string
+  href?: string
+  channel?: boolean
+}
+
+export interface RailsChromoffReviewPhoto {
+  src: string
+  alt: string
+  customer?: boolean
+  catalog?: boolean
+}
+
+/** Отзыв покупателя для блока «Отправки» на главной chromoff.store. */
+export interface RailsChromoffReview {
+  id: string
+  city: string
+  month: string
+  review: string
+  status: 'draft' | 'published'
+  featured: boolean
+  position: number
+  legacy_key?: string | null
+  items: RailsChromoffReviewItem[]
+  photo: RailsChromoffReviewPhoto | null
+  updated_at?: string
+}
+
+export interface RailsChromoffReviewInput {
+  city: string
+  month: string
+  review?: string
+  status: 'draft' | 'published'
+  featured?: boolean
+  position?: number
+  items: RailsChromoffReviewItem[]
+  photo_src?: string | null
+  photo_alt?: string | null
+  photo_customer?: boolean
+  photo_catalog?: boolean
+}
+
 export interface RailsChromoffImportCategory {
   source_id: string
   parent_source_id?: string | null
@@ -922,6 +964,31 @@ export async function updateRailsChromoffCategory(id: string, input: {
     body: JSON.stringify({ category }),
   })
   return result.category
+}
+
+export async function listRailsChromoffReviews(): Promise<RailsChromoffReview[]> {
+  const result = await railsFetch<{ reviews: RailsChromoffReview[] }>('/admin/chromoff/reviews')
+  return result.reviews || []
+}
+
+export async function createRailsChromoffReview(input: RailsChromoffReviewInput) {
+  const result = await railsFetch<{ review: RailsChromoffReview }>('/admin/chromoff/reviews', {
+    method: 'POST',
+    body: JSON.stringify({ review: input }),
+  })
+  return result.review
+}
+
+export async function updateRailsChromoffReview(id: string, input: Partial<RailsChromoffReviewInput>) {
+  const result = await railsFetch<{ review: RailsChromoffReview }>(`/admin/chromoff/reviews/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ review: input }),
+  })
+  return result.review
+}
+
+export async function deleteRailsChromoffReview(id: string) {
+  await railsFetch<unknown>(`/admin/chromoff/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export interface RailsChromoffListingList extends RailsCrmListResult<RailsChromoffListing> {
