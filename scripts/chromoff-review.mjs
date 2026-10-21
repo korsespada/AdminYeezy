@@ -19,8 +19,8 @@ import sharp from 'sharp'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-dotenv.config({ path: path.join(ROOT, '.env'), quiet: true })
 dotenv.config({ path: path.join(ROOT, '.env.local'), quiet: true })
+dotenv.config({ path: path.join(ROOT, '.env'), quiet: true })
 
 const WIDTH = 960
 const HEIGHT = 1280
