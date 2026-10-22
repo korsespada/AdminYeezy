@@ -7,6 +7,7 @@ import { applyMeasurementTableAttributes, measurementTemplateForProduct, normali
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
+import { alignColorFamiliesAfterRun } from '@/lib/color-family-alignment'
 import {
   applyShadeVariantsToSuggestion,
   normalizeShadeScanOutput,
@@ -366,6 +367,11 @@ async function finalizeCockpitRun(runId: string) {
       await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [run.batch_id])
     }
     if (run.mode === 'variants') return
+    try {
+      await alignColorFamiliesAfterRun(runId, String(run.batch_id))
+    } catch (error) {
+      console.error(`Не удалось выровнять цветовые семьи выгрузки ${run.batch_id}:`, error)
+    }
     const label = run.mode === 'sample' ? `AI-тест · ${run.id.slice(0, 8)}` : `${promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ'} · ${run.id.slice(0, 8)}`
     const existing = await scrapingQuery('SELECT 1 FROM batch_snapshots WHERE batch_id=$1 AND label=$2 LIMIT 1', [run.batch_id, label])
     if (!existing.rows[0]) await recordBatchSnapshot(run.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', label, run.settings_snapshot)

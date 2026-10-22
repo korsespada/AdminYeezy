@@ -11,6 +11,7 @@ const {
   finalizeBurberryPostProcess,
   restoreProtectedProducts,
 } = require('./lib/burberry-post-process');
+const { batchColorFamilyIssues } = require('./lib/color-family-alignment');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -2832,6 +2833,12 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const publicationTimestamp = new Date().toISOString();
 
   const lookups = await loadLegacyLookupMaps();
+  // Rails группирует витрину по variant_group_key, поэтому семья с разными
+  // брендом, классификацией, ценой или сеткой не должна уйти в каталог.
+  const familyIssues = batchColorFamilyIssues(products.map((product) => withoutBagSizes(product, lookups)));
+  if (familyIssues.length > 0) {
+    throw new Error(`Цветовые семьи не прошли проверку:\n${familyIssues.slice(0, 20).map((entry) => `«${entry.family}»: ${entry.message}`).join('\n')}`);
+  }
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
   await ensurePublicationPayloadHashes();
   if (onProgress) await onProgress({ phase: 'lookup', current: 0, total: products.length, success: 0, failed: 0 });

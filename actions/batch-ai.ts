@@ -90,6 +90,7 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib } from '@/lib/batch-ai-settings'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
+import { alignBatchColorFamilies, alignColorFamiliesAfterRun, colorFamilyAlignment } from '@/lib/color-family-alignment'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -2207,6 +2208,11 @@ async function finalizeRun(runId: string) {
           && normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
       }
       if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
+        try {
+          await alignColorFamiliesAfterRun(runId, String(currentRun.batch_id))
+        } catch (error) {
+          console.error(`Не удалось выровнять цветовые семьи выгрузки ${currentRun.batch_id}:`, error)
+        }
         await snapshotBatch(currentRun.batch_id, promoteBatch ? 'AI_PROCESSED' : 'SCRIPT_PROCESSED', promoteBatch ? 'Обработано ИИ' : 'Частично обработано ИИ', currentRun.settings_snapshot)
       }
     } finally {
@@ -2572,10 +2578,22 @@ async function reviewBatchAiSuggestion(
     if (row.affected_product_ids.length < 2) {
       return { success: false, error: 'Для цветового семейства нужны минимум два товара разных цветов' }
     }
-    const familyProducts = await scrapingQuery(
-      'SELECT id,attributes FROM products WHERE id=ANY($1::int[])',
-      [row.affected_product_ids.map(Number)],
-    )
+    const familyProducts = await scrapingQuery(`
+      SELECT id,external_id,batch_id,source_position,brand,category,subcategory,gender,price,price_source,attributes
+      FROM products WHERE id=ANY($1::int[])
+    `, [row.affected_product_ids.map(Number)])
+    // Семью из предложения ИИ сервер не «чинит»: разные бренд, классификация,
+    // цена или физические признаки означают разные товары. Сетку выровняет шаг ниже.
+    const familyIssues = [
+      ...colorFamilyAlignment().colorFamilyIssues(familyProducts.rows, { sizing: false, colors: false }),
+      ...colorFamilyAlignment().alignColorFamily(familyProducts.rows).issues.filter((entry) => entry.field === 'measurements'),
+    ]
+    if (familyIssues.length > 0) {
+      return {
+        success: false,
+        error: `Это не одна цветовая семья: ${familyIssues.map((entry) => entry.message).join('; ')}. Исправьте товары или исключите лишние.`,
+      }
+    }
     const resolvedColors = familyProducts.rows.map((product) => {
       const override = String(colorOverrides?.[String(product.id)] || '').trim().slice(0, 80)
       const suggested = String(row.payload?.suggested_colors?.[String(product.id)]?.color || '').trim().slice(0, 80)
@@ -2630,6 +2648,8 @@ async function reviewBatchAiSuggestion(
         [key, row.affected_product_ids.map(Number)],
       )
     }
+    const familyBatchId = String(familyProducts.rows[0]?.batch_id || '')
+    if (familyBatchId) await alignBatchColorFamilies(familyBatchId, row.affected_product_ids.map(Number))
   }
   if (decision === 'approved' && row.kind === 'subcategory') {
     const reconcileClient = await getScrapingClient()
