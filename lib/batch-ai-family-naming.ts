@@ -61,7 +61,8 @@ export function buildBatchAiFamilyNamingPrompt(products: any[], description = ''
     'Для каждого товара дай color — точное русское название оттенка. Внутри группы оттенки обязаны быть разными: если общий цвет одинаковый, различи по светлоте и подтону («Коричневый» и «Тёмно-коричневый», «Синий» и «Тёмно-синий», «Серый» и «Графитовый», «Белый» и «Молочный», «Бежевый» и «Песочный»). Не используй номера и слова «вариант», «оттенок 1».',
     'name — полное русское название товара: прилагательное цвета, согласованное по роду и числу с основой, и затем base_name без изменений. Например, color «Тёмно-коричневый» и base_name «кожаные ботинки с меховой подкладкой» дают name «Тёмно-коричневые кожаные ботинки с меховой подкладкой». name_en — то же по-английски: «Dark brown leather boots with shearling lining».',
     `base_color — общий цвет для фильтра каталога, строго один из: ${FAMILY_BASE_COLORS.join(', ')}.`,
-    'duplicate_of_index указывай только если два фото показывают один и тот же оттенок без видимой разницы (повторная публикация). Тогда name и color у дубля совпадают с оригиналом. Разные оттенки дублями не являются.',
+    'Даже если оттенки почти совпадают, названия обязаны быть разными: поставщик выкладывает разные цвета палитры, а не повторы. Выбери для каждого более точное слово: «Чёрный» и «Угольно-чёрный», «Тёмно-синий» и «Чернильно-синий», «Бежевый» и «Песочный».',
+    'duplicate_of_index указывай только если это буквально одна и та же фотография. Похожий оттенок дублем не является.',
     'Верни каждый товар ровно один раз. Верни строго JSON вида {"groups":[{"base_name":"","base_name_en":"","material":"","members":[{"product_index":1,"color":"","base_color":"","name":"","name_en":"","duplicate_of_index":null}]}]}.',
     ...(description ? [`Описание модели от поставщика: ${text(description, 1200)}`] : []),
     `Товары: ${JSON.stringify(candidates)}`,
@@ -103,10 +104,9 @@ export function buildBatchAiFamilyDuplicatePrompt(products: any[], groups: Famil
     }
   })
   return [
-    'По главным фото эти товары одной модели выглядели одним и тем же оттенком. Теперь у каждого товара несколько фотографий подряд: номера указаны в поле photos.',
-    'Сравни товары внимательно: оттенок при разном освещении, светлоту и подтон, цвет подошвы, подкладки, меха, ниток, фурнитуры, отделки. Если различие видно, дай каждому товару своё точное название цвета и полное название с той же основой base_name, например «Тёмно-синие … с белой подошвой» или «Чернильно-синие …».',
-    'duplicate_of_product_id указывай только если товары действительно неотличимы: тот же оттенок и те же детали на всех фото. Тогда name и color дубля совпадают с оригиналом.',
-    'Верни каждый товар ровно один раз строго JSON вида {"members":[{"product_id":1,"color":"","base_color":"","name":"","name_en":"","duplicate_of_product_id":null}]}.',
+    'По главным фото эти товары одной модели выглядели одним оттенком, но это разные цвета палитры поставщика, а не повторы. У каждого товара несколько фотографий подряд: номера указаны в поле photos.',
+    'Сравни оттенок при разном освещении, светлоту и подтон, цвет подошвы, подкладки, меха, ниток, фурнитуры и отделки. Дай каждому товару своё точное название цвета и полное название с той же основой base_name. Названия у всех товаров обязаны быть разными, даже если разница в оттенке едва заметна: «Чёрный» и «Угольно-чёрный», «Тёмно-синий» и «Чернильно-синий».',
+    'Верни каждый товар ровно один раз строго JSON вида {"members":[{"product_id":1,"color":"","base_color":"","name":"","name_en":""}]}.',
     `base_color — строго один из: ${FAMILY_BASE_COLORS.join(', ')}.`,
     `Товары: ${JSON.stringify(candidates)}`,
   ].join('\n\n')
@@ -128,23 +128,22 @@ export function applyFamilyDuplicateReview(groups: FamilyNamingGroup[], raw: any
       const name = text(review.name)
       const color = text(review.color, 100)
       if (!name || !color || !comparable(name).includes(comparable(group.baseName))) return member
-      const duplicateOf = review.duplicate_of_product_id == null ? Number.NaN : Number(review.duplicate_of_product_id)
+      // После повторной проверки дублей не бывает: оператор подтвердил, что
+      // поставщик выкладывает разные оттенки, а не повторы одного цвета.
       const baseColor = text(review.base_color, 40)
-      if (member.duplicateOfProductId && !Number.isInteger(duplicateOf)) resolved += 1
+      if (member.duplicateOfProductId) resolved += 1
       return {
         ...member,
         color,
         name: name.charAt(0).toUpperCase() + name.slice(1),
         nameEn: text(review.name_en) || member.nameEn,
         baseColor: FAMILY_BASE_COLORS.find((value) => comparable(value) === comparable(baseColor)) || member.baseColor,
-        duplicateOfProductId: Number.isInteger(duplicateOf) && duplicateOf !== member.productId && group.members.some((entry) => entry.productId === duplicateOf)
-          ? duplicateOf
-          : null,
+        duplicateOfProductId: null,
       }
     }),
   }))
   for (const group of next) {
-    const names = group.members.filter((member) => !member.duplicateOfProductId).map((member) => comparable(member.name))
+    const names = group.members.map((member) => comparable(member.name))
     if (new Set(names).size !== names.length) return { groups, resolved: 0 }
   }
   return { groups: next, resolved }
