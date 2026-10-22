@@ -14,7 +14,15 @@ type ColorFamilyAlignmentModule = {
     issues: ColorFamilyIssue[]
   }
   colorFamilyIssues: (members: any[], options?: { sizing?: boolean, colors?: boolean }) => ColorFamilyIssue[]
+  batchColorFamilyIssues: (products: any[], options?: { sizing?: boolean, colors?: boolean }) => ColorFamilyIssue[]
   familyLabel: (members: any[]) => string
+}
+
+export type ColorFamilyConflict = {
+  familyKey: string
+  family: string
+  message: string
+  products: Array<{ id: number, name: string }>
 }
 
 export function colorFamilyAlignment() {
@@ -90,6 +98,46 @@ export async function alignBatchColorFamilies(batchId: string, productIds: numbe
   } finally {
     client.release()
   }
+}
+
+/**
+ * Те же проверки, что выполнит публикация, по семьям, где все товары уже
+ * обработаны ИИ. У сумок `sizes` не сравнивается: публикация его удаляет.
+ */
+export async function batchColorFamilyConflicts(batchId: string): Promise<ColorFamilyConflict[]> {
+  const { batchColorFamilyIssues } = colorFamilyAlignment()
+  const result = await scrapingQuery(`
+    SELECT p.id,p.name,p.external_id,p.source_position,p.brand,p.category,p.subcategory,p.gender,p.price,
+      p.price_source,p.attributes,p.variant_group_key,p.variant_group_name,p.ai_processed,
+      LOWER(TRIM(COALESCE(m.name,''))) = 'сумки' AS is_bag
+    FROM products p
+    LEFT JOIN LATERAL (
+      SELECT name FROM catalog_id_mappings
+      WHERE entity_type='category' AND p.category IN (legacy_id, canonical_id)
+      LIMIT 1
+    ) m ON true
+    WHERE p.batch_id=$1 AND NULLIF(p.variant_group_key,'') IS NOT NULL
+    ORDER BY p.id
+  `, [batchId])
+  const unprocessed = new Set(result.rows.filter((row) => row.ai_processed !== true).map((row) => row.variant_group_key))
+  const products = result.rows
+    .filter((row) => !unprocessed.has(row.variant_group_key))
+    .map((row) => {
+      if (!row.is_bag || !row.attributes?.sizes) return row
+      const attributes = { ...row.attributes }
+      delete attributes.sizes
+      return { ...row, attributes }
+    })
+  const byId = new Map(products.map((row) => [Number(row.id), row]))
+  return batchColorFamilyIssues(products).map((entry) => {
+    const members = entry.productIds.map(Number).map((id) => byId.get(id)).filter(Boolean)
+    return {
+      familyKey: String(members[0]?.variant_group_key || ''),
+      family: entry.family || '',
+      message: entry.message,
+      products: members.map((row) => ({ id: Number(row.id), name: String(row.name || row.external_id || row.id) })),
+    }
+  })
 }
 
 /** Товары AI-запуска, по которым нужно выровнять семьи после его завершения. */

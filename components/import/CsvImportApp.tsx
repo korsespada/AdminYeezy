@@ -43,7 +43,9 @@ import {
   Unlink,
   FileText,
   Layers3,
+  ListChecks,
 } from "lucide-react";
+import type { ColorFamilyConflict } from "@/lib/color-family-alignment";
 import { useModalDismiss } from '@/components/ui/use-modal-dismiss';
 import {
   fetchLookupsAction,
@@ -66,6 +68,7 @@ import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
 import {
+  alignBatchColorFamiliesAction,
   getBatchAiRunAction,
   getBatchAiRunLogsAction,
   getBatchAiSuggestionsAction,
@@ -628,6 +631,8 @@ export default function CsvImportApp({
   const [cardColumns, setCardColumns] = useState(4);
   const [showVariantFamilies, setShowVariantFamilies] = useState(false);
   const [showBulkVariantFamily, setShowBulkVariantFamily] = useState(false);
+  const [isAligningFamilies, setIsAligningFamilies] = useState(false);
+  const [familyAlignment, setFamilyAlignment] = useState<FamilyAlignmentResult | null>(null);
   const [bulkBrand, setBulkBrand] = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
@@ -1789,6 +1794,23 @@ export default function CsvImportApp({
     }
   };
 
+  const handleAlignFamilies = async () => {
+    if (!batchId || isSnapshotSource || isDirty) return;
+    setIsAligningFamilies(true);
+    try {
+      const result = await alignBatchColorFamiliesAction(batchId);
+      if (!result.success || !result.data) {
+        setSaveMsg(`✗ ${result.error || "Не удалось выровнять цветовые семьи"}`);
+        return;
+      }
+      const reloaded = await getBatchProductsAction(batchId);
+      if (reloaded.success && reloaded.data) setProducts(reloaded.data.products);
+      setFamilyAlignment(result.data);
+    } finally {
+      setIsAligningFamilies(false);
+    }
+  };
+
   const handleUndoChanges = async () => {
     if (isSnapshotSource) return;
     if (previousProducts) {
@@ -2855,6 +2877,20 @@ export default function CsvImportApp({
                   <Layers3 className="h-3.5 w-3.5" />
                   Семейные группы{variantFamilyList.length ? ` · ${variantFamilyList.length}` : ""}
                 </button>
+                {batchId && !isSnapshotSource && (
+                  <button
+                    type="button"
+                    onClick={() => void handleAlignFamilies()}
+                    disabled={variantFamilyList.length === 0 || isAligningFamilies || isDirty}
+                    title={isDirty
+                      ? "Сначала сохраните правки"
+                      : "Без ИИ: общие поля, цена и размерная сетка цветов семьи берутся по большинству, затем показываются конфликты, которые остановят публикацию"}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-xs font-semibold text-violet-200 transition-colors hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isAligningFamilies ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}
+                    Выровнять семьи
+                  </button>
+                )}
                 <button
                   onClick={handleSelectFiltered}
                   disabled={filteredProducts.length === 0}
@@ -3181,6 +3217,15 @@ export default function CsvImportApp({
         }}
         onOpenProduct={(product) => {
           const nextIndex = products.indexOf(product);
+          if (nextIndex >= 0) setSelectedIdx(nextIndex);
+        }}
+      />
+
+      <FamilyAlignmentDialog
+        result={familyAlignment}
+        onClose={() => setFamilyAlignment(null)}
+        onOpenProduct={(productId) => {
+          const nextIndex = products.findIndex((product) => Number(product.id) === productId);
           if (nextIndex >= 0) setSelectedIdx(nextIndex);
         }}
       />
@@ -4268,6 +4313,90 @@ function TechnicalAttributeRow({ label, value }: { label: string; value: string 
     <div className="rounded-lg border border-slate-800 bg-slate-950/35 px-3 py-2 text-sm text-slate-500">{label}</div>
     <div className="break-all rounded-lg border border-slate-800 bg-slate-950/35 px-3 py-2 text-sm text-slate-300">{value}</div>
   </div>;
+}
+
+type FamilyAlignmentResult = {
+  families: number;
+  updated: number;
+  conflicts: ColorFamilyConflict[];
+};
+
+function FamilyAlignmentDialog({
+  result,
+  onClose,
+  onOpenProduct,
+}: {
+  result: FamilyAlignmentResult | null;
+  onClose: () => void;
+  onOpenProduct: (productId: number) => void;
+}) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  useModalDismiss(Boolean(result), onClose, contentRef);
+  if (!result) return null;
+
+  const byFamily = new Map<string, ColorFamilyConflict[]>();
+  for (const conflict of result.conflicts) {
+    byFamily.set(conflict.familyKey, [...(byFamily.get(conflict.familyKey) || []), conflict]);
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
+      <div ref={contentRef} className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Выравнивание цветовых семей">
+        <div className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
+          <div>
+            <h2 className="font-semibold text-white">Выравнивание цветовых семей</h2>
+            <p className="mt-1 text-xs text-slate-400">
+              Проверено семей: {result.families} · изменено товаров: {result.updated} · с конфликтами: {byFamily.size}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+          {byFamily.size === 0 ? (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+              <CheckCircle className="h-4 w-4 shrink-0" />
+              Конфликтов нет, семьи не остановят публикацию.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-slate-400">
+                Эти семьи остановят публикацию. Исправьте товары вручную или исключите лишний товар из семьи, затем выровняйте снова.
+              </p>
+              {[...byFamily.entries()].map(([familyKey, conflicts]) => {
+                const products = [...new Map(conflicts.flatMap((conflict) => conflict.products).map((product) => [product.id, product])).values()];
+                return (
+                  <div key={familyKey} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                    <div className="text-sm font-semibold text-white">{conflicts[0].family || "Семья без названия"}</div>
+                    <ul className="mt-1.5 space-y-1">
+                      {conflicts.map((conflict) => (
+                        <li key={conflict.message} className="flex gap-1.5 text-xs text-amber-200">
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span className="break-words">{conflict.message}</span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {products.map((product) => (
+                        <button
+                          type="button"
+                          key={product.id}
+                          onClick={() => { onOpenProduct(product.id); onClose(); }}
+                          className="max-w-full truncate rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:border-violet-400 hover:text-white"
+                        >
+                          {product.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 function VariantFamiliesDialog({

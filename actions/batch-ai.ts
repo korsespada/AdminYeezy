@@ -90,7 +90,12 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib } from '@/lib/batch-ai-settings'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
-import { alignBatchColorFamilies, alignColorFamiliesAfterRun, colorFamilyAlignment } from '@/lib/color-family-alignment'
+import {
+  alignBatchColorFamilies,
+  alignColorFamiliesAfterRun,
+  batchColorFamilyConflicts,
+  colorFamilyAlignment,
+} from '@/lib/color-family-alignment'
 
 const SETTINGS_KEYS = [
   'batch_ai_provider',
@@ -2523,6 +2528,30 @@ export async function reviewBatchAiSuggestionAction(
   } catch (error: any) {
     console.error('Failed to review batch AI suggestion', { id, decision, error })
     return { success: false, error: error?.message || 'Не удалось применить предложение ИИ' }
+  }
+}
+
+/**
+ * Выравнивает все цветовые семьи выгрузки без обращения к ИИ и возвращает
+ * конфликты, которые остановят публикацию.
+ */
+export async function alignBatchColorFamiliesAction(batchId: string) {
+  try {
+    await requireAdmin()
+    if (await activeBatchOperation(batchId)) {
+      return { success: false, error: 'Дождитесь завершения обработки выгрузки' }
+    }
+    const familyProducts = await scrapingQuery(
+      "SELECT id FROM products WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL",
+      [batchId],
+    )
+    const summary = await alignBatchColorFamilies(batchId, familyProducts.rows.map((row) => Number(row.id)))
+    const conflicts = await batchColorFamilyConflicts(batchId)
+    revalidatePath(`/admin/batches/${batchId}`)
+    return { success: true, data: { ...summary, conflicts } }
+  } catch (error: any) {
+    console.error('Failed to align batch color families', { batchId, error })
+    return { success: false, error: error?.message || 'Не удалось выровнять цветовые семьи' }
   }
 }
 

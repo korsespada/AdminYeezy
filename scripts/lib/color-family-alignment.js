@@ -105,12 +105,12 @@ function productRef(product) {
  * Группирует непустые значения. Побеждает самая частая группа; при равенстве —
  * группа, в которой раньше встречается якорь (группы создаются в порядке якоря).
  */
-function consensus(ordered, read) {
+function consensus(ordered, read, keyOf = valueKey) {
   const groups = new Map();
   for (const product of ordered) {
     const value = read(product);
     if (isEmptyValue(value)) continue;
-    const key = valueKey(value);
+    const key = keyOf(value);
     const group = groups.get(key) || { key, value, products: [] };
     group.products.push(product);
     groups.set(key, group);
@@ -140,14 +140,19 @@ function colorKey(product) {
   return normalizedText(color).replace(/[^a-zа-я0-9 ]+/g, ' ').split(' ').filter(Boolean).sort().join(' ');
 }
 
+/**
+ * В `colors` ИИ часто пишет базовый цвет: «Тёмно-серый» и «Светло-серый» оба
+ * становятся «Серый». Поэтому совпадение `colors` не ошибка; ошибка — одинаковое
+ * название, оно даёт одинаковые H1 и title у разных страниц.
+ */
 function colorIssues(ordered) {
   const missing = ordered.filter((product) => !colorKey(product));
-  const byColor = new Map();
+  const byName = new Map();
   for (const product of ordered) {
-    const key = colorKey(product);
-    if (key) byColor.set(key, [...(byColor.get(key) || []), product]);
+    const key = normalizedText(product.name);
+    if (key) byName.set(key, [...(byName.get(key) || []), product]);
   }
-  const duplicates = [...byColor.values()].filter((products) => products.length > 1);
+  const duplicates = [...byName.values()].filter((products) => products.length > 1);
   return [
     ...(missing.length ? [{
       field: 'colors',
@@ -155,8 +160,8 @@ function colorIssues(ordered) {
       productIds: missing.map((product) => product.id),
     }] : []),
     ...duplicates.map((products) => ({
-      field: 'colors',
-      message: `одинаковый цвет «${text(attributesOf(products[0]).colors?.[0] ?? attributesOf(products[0]).colors)}» (${products.map(productRef).join(', ')})`,
+      field: 'name',
+      message: `одинаковое название «${text(products[0].name)}» (${products.map(productRef).join(', ')})`,
       productIds: products.map((product) => product.id),
     })),
   ];
@@ -174,10 +179,80 @@ function measurementsOf(product) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+function tableRows(table) {
+  return (Array.isArray(table?.rows) ? table.rows : [])
+    .map((row) => ({
+      size: normalizedText(row?.size),
+      values: Object.fromEntries(Object.entries(row?.values || {})
+        .map(([key, value]) => [text(key), normalizedText(value)])
+        .filter(([key, value]) => key && value)),
+    }))
+    .filter((row) => Object.keys(row.values).length > 0);
+}
+
 function hasMeasurementTable(value) {
   if (!value) return false;
-  if (Array.isArray(value.tabs)) return value.tabs.some((tab) => Array.isArray(tab?.rows) && tab.rows.length > 0);
-  return Array.isArray(value.rows) && value.rows.length > 0;
+  if (Array.isArray(value.tabs)) return value.tabs.some((tab) => tableRows(tab).length > 0);
+  return tableRows(value).length > 0;
+}
+
+/**
+ * Сравнивает содержимое сетки: ИИ в каждой карточке может перечислить колонки
+ * в другом порядке или иначе подписать их, это одна и та же таблица.
+ */
+function measurementKey(value) {
+  const tableKey = (table) => stableJson({
+    unit: normalizedText(table?.unit),
+    rows: tableRows(table).sort((left, right) => left.size.localeCompare(right.size)),
+  });
+  if (Array.isArray(value?.tabs)) {
+    return stableJson(value.tabs.map((tab) => ({ label: normalizedText(tab?.label), table: tableKey(tab) })));
+  }
+  return tableKey(value);
+}
+
+function measurementsForComparison(product) {
+  const measurements = measurementsOf(product);
+  return hasMeasurementTable(measurements) ? measurements : null;
+}
+
+// Доля ячеек, которую ИИ может прочитать иначе в той же сетке (68 вместо 68.5).
+const MAX_MISREAD_CELL_SHARE = 0.2;
+
+function closeTables(left, right) {
+  const leftRows = new Map(tableRows(left).map((row) => [row.size, row.values]));
+  const rightRows = new Map(tableRows(right).map((row) => [row.size, row.values]));
+  if (leftRows.size === 0 || leftRows.size !== rightRows.size) return false;
+  let cells = 0;
+  let different = 0;
+  for (const [size, values] of leftRows) {
+    const other = rightRows.get(size);
+    if (!other) return false;
+    const keys = Object.keys(values);
+    if (keys.length !== Object.keys(other).length || keys.some((key) => !(key in other))) return false;
+    cells += keys.length;
+    different += keys.filter((key) => values[key] !== other[key]).length;
+  }
+  return different <= cells * MAX_MISREAD_CELL_SHARE;
+}
+
+/** Та же сетка, прочитанная с ошибкой в нескольких ячейках: те же размеры и колонки. */
+function sameChartMisread(left, right) {
+  if (Array.isArray(left?.tabs) || Array.isArray(right?.tabs)) {
+    const leftTabs = Array.isArray(left?.tabs) ? left.tabs : [];
+    const rightTabs = Array.isArray(right?.tabs) ? right.tabs : [];
+    return leftTabs.length > 0 && leftTabs.length === rightTabs.length
+      && leftTabs.every((tab, index) => closeTables(tab, rightTabs[index]));
+  }
+  return closeTables(left, right);
+}
+
+/** Группы таблиц, которые нельзя считать одной сеткой с самой частой. */
+function differentCharts(groups) {
+  const [main, ...rest] = [...groups].sort((left, right) => right.products.length - left.products.length);
+  if (!main) return [];
+  const foreign = rest.filter((group) => !sameChartMisread(main.value, group.value));
+  return foreign.length > 0 && !shareChartSource(groups.flatMap((group) => group.products)) ? [main, ...foreign] : [];
 }
 
 function chartSourceIds(product) {
@@ -279,15 +354,13 @@ function alignColorFamily(members) {
 function alignSizing(ordered) {
   const patches = new Map();
   const issues = [];
-  const tables = consensus(ordered, (product) => {
-    const measurements = measurementsOf(product);
-    return hasMeasurementTable(measurements) ? measurements : null;
-  });
+  const tables = consensus(ordered, measurementsForComparison, measurementKey);
   const recommendations = consensus(ordered, (product) => attributesOf(product).size_recommendation);
 
-  if (tables.groups.length > 1 && !shareChartSource(tables.groups.flatMap((group) => group.products))) {
+  const conflicting = differentCharts(tables.groups);
+  if (conflicting.length > 0) {
     // Разные сетки (например, чарт только от брюк комплекта) не угадываются.
-    issues.push(issue('measurements', 'размерная сетка', tables.groups, tables.groups.flatMap((group) => group.products)));
+    issues.push(issue('measurements', 'размерная сетка', conflicting, conflicting.flatMap((group) => group.products)));
     return { patches, issues };
   }
 
@@ -307,7 +380,8 @@ function alignSizing(ordered) {
   for (const product of ordered) {
     const attributes = attributesOf(product);
     const patch = {};
-    if (source && !sameValue(measurementsOf(product), measurementsOf(source))) patch.measurements = measurementsOf(source);
+    const own = measurementsForComparison(product);
+    if (source && (!own || measurementKey(own) !== tables.winner.key)) patch.measurements = measurementsOf(source);
     if (!isEmptyValue(sizes) && !sameValue(attributes.sizes, sizes)) patch.sizes = sizes;
     if (!isEmptyValue(recommendation) && !sameValue(attributes.size_recommendation, recommendation)) {
       patch.size_recommendation = recommendation;
@@ -317,11 +391,11 @@ function alignSizing(ordered) {
   return { patches, issues };
 }
 
-function strictGroups(ordered, read) {
+function strictGroups(ordered, read, keyOf = valueKey) {
   const groups = new Map();
   for (const product of ordered) {
     const value = read(product);
-    const key = valueKey(value);
+    const key = isEmptyValue(value) ? '' : keyOf(value);
     const group = groups.get(key) || { key, value, products: [] };
     group.products.push(product);
     groups.set(key, group);
@@ -352,11 +426,15 @@ function colorFamilyIssues(members, options = {}) {
   }
 
   if (options.sizing !== false) {
-    const tableGroups = strictGroups(ordered, (product) => {
-      const measurements = measurementsOf(product);
-      return hasMeasurementTable(measurements) ? measurements : null;
-    });
-    if (tableGroups.length > 1) issues.push(issue('measurements', 'размерная сетка', tableGroups, ordered));
+    // Ошибка прочтения нескольких ячеек той же сетки не останавливает публикацию,
+    // а отсутствие сетки у части цветов и другая сетка — останавливают.
+    const tableGroups = strictGroups(ordered, measurementsForComparison, measurementKey);
+    const withTables = tableGroups.filter((group) => group.key);
+    if (withTables.length > 0 && withTables.length < tableGroups.length) {
+      issues.push(issue('measurements', 'наличие размерной сетки', tableGroups, ordered));
+    } else if (differentCharts(withTables).length > 0) {
+      issues.push(issue('measurements', 'размерная сетка', differentCharts(withTables), ordered));
+    }
     const sizeGroups = strictGroups(ordered, (product) => attributesOf(product).sizes);
     if (sizeGroups.length > 1) issues.push(issue('sizes', 'размерный ряд', sizeGroups, ordered));
   }

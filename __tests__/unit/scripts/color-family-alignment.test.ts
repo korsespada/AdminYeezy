@@ -105,6 +105,31 @@ describe('alignColorFamily', () => {
     expect(updateFor(result, 2).attributes.measurements).toEqual(table('104'))
   })
 
+  it('compares size charts by content, not by column order or empty rows', () => {
+    const reordered = {
+      unit: 'см',
+      columns: [{ key: 'length', label: 'Длина' }, { key: 'chest', label: 'Грудь' }],
+      rows: [{ size: '50', values: { length: '70', chest: '108' } }, { size: '48', values: { chest: '104', length: '68' } }],
+    }
+    const original = {
+      unit: 'см',
+      columns: [{ key: 'chest', label: 'Обхват груди' }, { key: 'length', label: 'Длина' }],
+      rows: [{ size: '48', values: { chest: '104', length: '68' } }, { size: '50', values: { chest: '108', length: '70' } }],
+    }
+    const empty = { unit: 'см', columns: [], rows: [{ size: '48', values: {} }] }
+    const family = [
+      member(1, 'Чёрный', { attributes: { sizes: ['48', '50'], measurements: original } }),
+      member(2, 'Бежевый', { attributes: { sizes: ['48', '50'], measurements: reordered } }),
+      member(3, 'Зелёный', { attributes: { measurements: empty } }),
+    ]
+    const result = alignColorFamily(family)
+
+    expect(result.issues).toEqual([])
+    expect(updateFor(result, 2)).toBeUndefined()
+    expect(updateFor(result, 3).attributes).toMatchObject({ sizes: ['48', '50'], measurements: original })
+    expect(colorFamilyIssues(family.slice(0, 2))).toEqual([])
+  })
+
   it('blocks two different size charts', () => {
     const result = alignColorFamily([
       member(1, 'Чёрный', { attributes: { measurements: table('104') } }),
@@ -129,13 +154,42 @@ describe('alignColorFamily', () => {
     expect(conflict.issues.map((entry: any) => entry.field)).toEqual(['hardware_color'])
   })
 
-  it('reports a repeated or missing colour', () => {
-    const result = alignColorFamily([member(1, 'Чёрный'), member(2, 'чёрный'), member(3, '')])
+  it('reports a missing colour and a repeated name, but not a repeated base colour', () => {
+    const result = alignColorFamily([
+      member(1, 'Серый', { name: 'Тёмно-серый пуховик' }),
+      member(2, 'Серый', { name: 'Светло-серый пуховик' }),
+      member(3, 'Синий', { name: 'Синий пуховик' }),
+      member(4, 'Синий', { name: 'синий  пуховик' }),
+      member(5, '', { name: 'Пуховик' }),
+    ])
 
     expect(result.issues.map((entry: any) => entry.message)).toEqual([
-      'не указан цвет (ext-3)',
-      'одинаковый цвет «Чёрный» (ext-1, ext-2)',
+      'не указан цвет (ext-5)',
+      'одинаковое название «Синий пуховик» (ext-3, ext-4)',
     ])
+  })
+
+  it('takes the majority reading when one colour misread a few cells of the same chart', () => {
+    const chart = () => ({
+      unit: 'см',
+      columns: ['chest', 'length', 'shoulders', 'sleeve'].map((key) => ({ key, label: key })),
+      rows: ['48', '50', '52', '54', '56'].map((size, index) => ({
+        size,
+        values: { chest: String(110 + index * 4), length: String(67 + index), shoulders: String(48 + index), sleeve: String(63 + index) },
+      })),
+    })
+    const misread = chart()
+    misread.rows[4].values.sleeve = '68.5'
+    const family = [
+      member(1, 'Чёрный', { attributes: { measurements: chart() } }),
+      member(2, 'Бежевый', { attributes: { measurements: misread } }),
+      member(3, 'Зелёный', { attributes: { measurements: chart() } }),
+    ]
+    const result = alignColorFamily(family)
+
+    expect(result.issues).toEqual([])
+    expect(updateFor(result, 2).attributes.measurements).toEqual(chart())
+    expect(colorFamilyIssues(family)).toEqual([])
   })
 })
 
