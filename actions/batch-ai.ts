@@ -1928,14 +1928,13 @@ function shadeScanHasColorConflicts(variants: any[]) {
   return [...counts.values()].some((count) => count > 1)
 }
 
-async function batchHasColorFamilies(batchId: string) {
-  const result = await scrapingQuery(`
-    SELECT 1 FROM products
-    WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL
-    GROUP BY variant_group_key HAVING COUNT(*) > 1
-    LIMIT 1
+async function batchNeedsFamilyNaming(batchId: string) {
+  const products = await scrapingQuery(`
+    SELECT id,name,photos,attributes,source_position,variant_group_key,variant_group_name
+    FROM products
+    WHERE batch_id=$1 AND COALESCE(ai_processed,false)=true AND NULLIF(variant_group_key,'') IS NOT NULL
   `, [batchId])
-  return result.rows.length > 0
+  return (await familyNamingFamilies(batchId, products.rows)).length > 0
 }
 
 /** Семьи для согласования названий: все цвета обработаны ИИ и у каждого есть фото. */
@@ -2478,11 +2477,14 @@ async function finalizeRun(runId: string) {
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
         const sequenceScan = normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
-        // После полной обработки согласуются названия семей, затем при
-        // включённой настройке ищутся новые семьи среди соседних карточек.
-        if (currentRun?.mode === 'full') {
-          nextMode = await batchHasColorFamilies(String(currentRun.batch_id)) ? 'family_names' : sequenceScan ? 'variants' : null
-        } else if (currentRun?.mode === 'family_names' && sequenceScan) {
+        // Когда выгрузка обработана целиком — полной обработкой, повтором или
+        // по выбору, — согласуются названия семей; затем при включённой
+        // настройке ищутся новые семьи среди соседних карточек.
+        if (currentRun?.mode === 'family_names') {
+          nextMode = sequenceScan ? 'variants' : null
+        } else if (await batchNeedsFamilyNaming(String(currentRun.batch_id))) {
+          nextMode = 'family_names'
+        } else if (currentRun?.mode === 'full' && sequenceScan) {
           nextMode = 'variants'
         }
       }

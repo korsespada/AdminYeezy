@@ -3294,9 +3294,11 @@ export default function CsvImportApp({
           batchId={batchId}
           batchName={initialSupplierName || fileName}
           onReviewed={() => loadAiSuggestions(batchId)}
-          onClose={() => {
+          onClose={(familiesApproved) => {
             setShowAiSuggestions(false);
             loadAiSuggestions(batchId);
+            // Одобренные ИИ семьи сразу получают согласованные названия цветов.
+            if (familiesApproved) void handleAiProcess("family_names");
           }}
         />
       )}

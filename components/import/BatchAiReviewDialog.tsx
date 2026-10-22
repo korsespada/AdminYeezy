@@ -21,7 +21,8 @@ export default function BatchAiReviewDialog({
 }: {
   batchId: string
   batchName: string
-  onClose: () => void
+  /** familiesApproved — в окне одобрена хотя бы одна цветовая семья. */
+  onClose: (familiesApproved: boolean) => void
   onReviewed?: () => void | Promise<void>
 }) {
   const [items, setItems] = useState<any[]>([])
@@ -34,8 +35,10 @@ export default function BatchAiReviewDialog({
   const [rejectingAll, setRejectingAll] = useState(false)
   const [pending, startTransition] = useTransition()
   const contentRef = useRef<HTMLDivElement>(null)
+  const familiesApproved = useRef(false)
+  const close = useCallback(() => onClose(familiesApproved.current), [onClose])
 
-  useModalDismiss(true, onClose, contentRef)
+  useModalDismiss(true, close, contentRef)
 
   const loadSuggestions = useCallback(async () => {
     const result = await getBatchAiSuggestionsAction(batchId)
@@ -79,6 +82,7 @@ export default function BatchAiReviewDialog({
       item.kind === 'color_family' ? productColors[item.id] : undefined,
     )
     if (result.success) {
+      if (decision === 'approved' && item.kind === 'color_family') familiesApproved.current = true
       setItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, status: decision, payload } : entry))
       await onReviewed?.()
     }
@@ -128,8 +132,10 @@ export default function BatchAiReviewDialog({
           item.kind === 'color_family' ? selectedProductIds[item.id] : undefined,
           item.kind === 'color_family' ? productColors[item.id] : undefined,
         )
-        if (result.success) approved += 1
-        else failures.push(`${suggestionTitle(item)}: ${result.error}`)
+        if (result.success) {
+          approved += 1
+          if (item.kind === 'color_family') familiesApproved.current = true
+        } else failures.push(`${suggestionTitle(item)}: ${result.error}`)
       }
       await loadSuggestions()
       await onReviewed?.()
@@ -157,9 +163,9 @@ export default function BatchAiReviewDialog({
   }
 
   return (
-    <div className={`fixed inset-0 z-[125] overscroll-contain bg-slate-950/90 p-4 backdrop-blur-sm ${previewProduct ? 'overflow-hidden' : 'overflow-y-auto'}`} onMouseDown={onClose}>
+    <div className={`fixed inset-0 z-[125] overscroll-contain bg-slate-950/90 p-4 backdrop-blur-sm ${previewProduct ? 'overflow-hidden' : 'overflow-y-auto'}`} onMouseDown={close}>
       <div ref={contentRef} role="dialog" aria-modal="true" aria-label={`Предложения ИИ для ${batchName}`} className="mx-auto max-w-5xl rounded-xl border border-slate-700 bg-slate-900" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2">{items.some((item) => item.status === 'pending') && <><button onClick={acceptAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCheck className={`h-4 w-4 ${acceptingAll ? 'animate-pulse' : ''}`} />{acceptingAll ? 'Принимаем…' : 'Принять всё'}</button><button onClick={rejectAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 disabled:opacity-50"><XCircle className={`h-4 w-4 ${rejectingAll ? 'animate-pulse' : ''}`} />{rejectingAll ? 'Отклоняем…' : 'Отклонить всё'}</button></>}<button onClick={rebuild} disabled={rebuilding || acceptingAll || rejectingAll || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={onClose} disabled={acceptingAll || rejectingAll} className="rounded p-2 text-slate-400 hover:bg-slate-800 disabled:opacity-50"><X className="h-5 w-5" /></button></div></header>
+        <header className="flex items-center justify-between gap-4 border-b border-slate-700 px-5 py-4"><div><h2 className="text-lg font-bold text-white">Предложения ИИ</h2><p className="text-xs text-slate-400">{batchName}</p></div><div className="flex items-center gap-2">{items.some((item) => item.status === 'pending') && <><button onClick={acceptAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"><CheckCheck className={`h-4 w-4 ${acceptingAll ? 'animate-pulse' : ''}`} />{acceptingAll ? 'Принимаем…' : 'Принять всё'}</button><button onClick={rejectAll} disabled={acceptingAll || rejectingAll || rebuilding || pending} className="inline-flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 disabled:opacity-50"><XCircle className={`h-4 w-4 ${rejectingAll ? 'animate-pulse' : ''}`} />{rejectingAll ? 'Отклоняем…' : 'Отклонить всё'}</button></>}<button onClick={rebuild} disabled={rebuilding || acceptingAll || rejectingAll || pending} className="inline-flex items-center gap-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-sm font-semibold text-violet-200 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${rebuilding ? 'animate-spin' : ''}`} />{rebuilding ? 'Пересобираем…' : 'Пересобрать семьи'}</button><button onClick={close} disabled={acceptingAll || rejectingAll} className="rounded p-2 text-slate-400 hover:bg-slate-800 disabled:opacity-50"><X className="h-5 w-5" /></button></div></header>
         <div className="space-y-4 p-5">
           {items.map((item) => (
             <article key={item.id} className="rounded-lg border border-slate-700 bg-slate-950 p-4">

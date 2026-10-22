@@ -748,7 +748,16 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
       />
       {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
       {modelSupplier && <SupplierModelReferencesDialog supplierId={modelSupplier.id} supplierName={modelSupplier.name} batchId={modelSupplier.batchId} onClose={() => setModelSupplier(null)} />}
-      {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={() => setReviewBatch(null)} />}
+      {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={(familiesApproved) => {
+        const batchId = reviewBatch.id
+        setReviewBatch(null)
+        // Одобренные ИИ семьи сразу получают согласованные названия цветов.
+        if (familiesApproved) {
+          void startBatchAiAction(batchId, 'family_names').then((result) => {
+            if (!result.success) alert(`Согласование названий семей не запущено: ${result.error}`)
+          })
+        }
+      }} />}
     </div>
   )
 }
