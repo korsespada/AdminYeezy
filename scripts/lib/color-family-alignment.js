@@ -179,12 +179,33 @@ function measurementsOf(product) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
+/** «27.0», «27» и «27,0» — одно значение ячейки. */
+function cellValue(value) {
+  const normalized = normalizedText(value).replace(',', '.');
+  return /^-?\d+(\.\d+)?$/.test(normalized) ? String(Number(normalized)) : normalized;
+}
+
+/** «M(48)» и «M», «2XL» и «XXL» — одна строка сетки. */
+function sizeLabel(value) {
+  const label = normalizedText(value).replace(/\s*\([^)]*\)\s*/g, '').trim();
+  const multiple = label.match(/^([2-5])xl$/);
+  return multiple ? `${'x'.repeat(Number(multiple[1]))}l` : label;
+}
+
+/** ИИ иногда пишет длину стельки в миллиметрах при единице «см»: 268 и 26.8. */
+function sameCell(left, right) {
+  if (left === right) return true;
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0 && (a === b * 10 || b === a * 10);
+}
+
 function tableRows(table) {
   return (Array.isArray(table?.rows) ? table.rows : [])
     .map((row) => ({
-      size: normalizedText(row?.size),
+      size: sizeLabel(row?.size),
       values: Object.fromEntries(Object.entries(row?.values || {})
-        .map(([key, value]) => [text(key), normalizedText(value)])
+        .map(([key, value]) => [text(key), cellValue(value)])
         .filter(([key, value]) => key && value)),
     }))
     .filter((row) => Object.keys(row.values).length > 0);
@@ -216,27 +237,38 @@ function measurementsForComparison(product) {
   return hasMeasurementTable(measurements) ? measurements : null;
 }
 
-// Доля ячеек, которую ИИ может прочитать иначе в той же сетке (68 вместо 68.5).
+// Доля ячеек, которую ИИ может прочитать иначе в той же сетке: 68 вместо 68.5,
+// лишняя строка размера 46. Отсутствующая ячейка или строка тоже считается.
 const MAX_MISREAD_CELL_SHARE = 0.2;
 
+/**
+ * Значения строки сравниваются без ключей колонок: ИИ называет одну колонку
+ * то `insole_length`, то `insole`. Другой крой даёт другие числа в каждой строке.
+ */
 function closeTables(left, right) {
-  const leftRows = new Map(tableRows(left).map((row) => [row.size, row.values]));
-  const rightRows = new Map(tableRows(right).map((row) => [row.size, row.values]));
-  if (leftRows.size === 0 || leftRows.size !== rightRows.size) return false;
+  const leftRows = new Map(tableRows(left).map((row) => [row.size, Object.values(row.values)]));
+  const rightRows = new Map(tableRows(right).map((row) => [row.size, Object.values(row.values)]));
+  if (leftRows.size === 0 || rightRows.size === 0) return false;
   let cells = 0;
   let different = 0;
-  for (const [size, values] of leftRows) {
-    const other = rightRows.get(size);
-    if (!other) return false;
-    const keys = Object.keys(values);
-    if (keys.length !== Object.keys(other).length || keys.some((key) => !(key in other))) return false;
-    cells += keys.length;
-    different += keys.filter((key) => values[key] !== other[key]).length;
+  for (const size of new Set([...leftRows.keys(), ...rightRows.keys()])) {
+    const values = leftRows.get(size) || [];
+    const unmatched = [...(rightRows.get(size) || [])];
+    let matched = 0;
+    for (const value of values) {
+      const index = unmatched.findIndex((candidate) => sameCell(value, candidate));
+      if (index < 0) continue;
+      unmatched.splice(index, 1);
+      matched += 1;
+    }
+    const width = Math.max(values.length, matched + unmatched.length);
+    cells += width;
+    different += width - matched;
   }
   return different <= cells * MAX_MISREAD_CELL_SHARE;
 }
 
-/** Та же сетка, прочитанная с ошибкой в нескольких ячейках: те же размеры и колонки. */
+/** Та же сетка, прочитанная с ошибкой в нескольких ячейках. */
 function sameChartMisread(left, right) {
   if (Array.isArray(left?.tabs) || Array.isArray(right?.tabs)) {
     const leftTabs = Array.isArray(left?.tabs) ? left.tabs : [];
@@ -248,9 +280,27 @@ function sameChartMisread(left, right) {
 }
 
 /** Группы таблиц, которые нельзя считать одной сеткой с самой частой. */
+function largestCell(table) {
+  const values = (Array.isArray(table?.tabs) ? table.tabs : [table])
+    .flatMap((entry) => tableRows(entry).flatMap((row) => Object.values(row.values).map(Number)))
+    .filter(Number.isFinite);
+  return values.length ? Math.max(...values) : 0;
+}
+
+/**
+ * Основная сетка семьи: самая частая; при равенстве — с меньшими числами
+ * (сантиметры, а не миллиметры), затем по якорю.
+ */
+function mainTableGroup(groups) {
+  return [...groups].sort((left, right) => (
+    right.products.length - left.products.length || largestCell(left.value) - largestCell(right.value)
+  ))[0] || null;
+}
+
 function differentCharts(groups) {
-  const [main, ...rest] = [...groups].sort((left, right) => right.products.length - left.products.length);
+  const main = mainTableGroup(groups);
   if (!main) return [];
+  const rest = groups.filter((group) => group !== main);
   const foreign = rest.filter((group) => !sameChartMisread(main.value, group.value));
   return foreign.length > 0 && !shareChartSource(groups.flatMap((group) => group.products)) ? [main, ...foreign] : [];
 }
@@ -366,8 +416,9 @@ function alignSizing(ordered) {
 
   let source = null;
   let sizes = null;
-  if (tables.winner) {
-    source = tables.winner.products[0];
+  const mainTable = mainTableGroup(tables.groups);
+  if (mainTable) {
+    source = mainTable.products[0];
     sizes = attributesOf(source).sizes;
   } else {
     const sizeGroups = consensus(ordered, (product) => attributesOf(product).sizes);
@@ -381,7 +432,7 @@ function alignSizing(ordered) {
     const attributes = attributesOf(product);
     const patch = {};
     const own = measurementsForComparison(product);
-    if (source && (!own || measurementKey(own) !== tables.winner.key)) patch.measurements = measurementsOf(source);
+    if (source && (!own || measurementKey(own) !== mainTable.key)) patch.measurements = measurementsOf(source);
     if (!isEmptyValue(sizes) && !sameValue(attributes.sizes, sizes)) patch.sizes = sizes;
     if (!isEmptyValue(recommendation) && !sameValue(attributes.size_recommendation, recommendation)) {
       patch.size_recommendation = recommendation;

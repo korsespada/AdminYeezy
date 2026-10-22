@@ -130,6 +130,54 @@ describe('alignColorFamily', () => {
     expect(colorFamilyIssues(family.slice(0, 2))).toEqual([])
   })
 
+  it('treats one shoe chart written with other column names, number format or an extra size as the same chart', () => {
+    const shoe = (key: string, sizes: string[], format = (value: number) => value.toFixed(1)) => ({
+      unit: 'см',
+      columns: [{ key, label: 'Длина стельки' }],
+      rows: sizes.map((size, index) => ({ size, values: { [key]: format(26.5 + index * 0.5) } })),
+    })
+    const base = ['39', '40', '41', '42', '43', '44', '45']
+    const family = [
+      member(1, 'Коричневый'),
+      member(2, 'Серый', { attributes: { sizes: base, measurements: shoe('insole_length', base) } }),
+      member(3, 'Чёрный', { attributes: { sizes: [...base, '46'], measurements: shoe('insole_length', [...base, '46']) } }),
+      member(4, 'Синий', { attributes: { sizes: base, measurements: shoe('insole', base, String) } }),
+      member(5, 'Белый', { attributes: { sizes: base, measurements: shoe('insole_length', base) } }),
+    ]
+    const result = alignColorFamily(family)
+
+    expect(result.issues).toEqual([])
+    expect(updateFor(result, 1).attributes).toMatchObject({ sizes: base, measurements: shoe('insole_length', base) })
+    expect(updateFor(result, 3).attributes.sizes).toEqual(base)
+    expect(updateFor(result, 4).attributes.measurements).toEqual(shoe('insole_length', base))
+  })
+
+  it('prefers centimetres over the same chart read in millimetres and matches M(48) with M', () => {
+    const insole = (values: number[]) => ({
+      unit: 'см',
+      columns: [{ key: 'insole_length', label: 'Длина стельки' }],
+      rows: values.map((value, index) => ({ size: String(39 + index), values: { insole_length: String(value) } })),
+    })
+    const shoes = alignColorFamily([
+      member(1, 'Коричневый', { attributes: { measurements: insole([273, 278, 283]) } }),
+      member(2, 'Чёрный', { attributes: { measurements: insole([27.3, 27.8, 28.3]) } }),
+    ])
+    expect(shoes.issues).toEqual([])
+    expect(updateFor(shoes, 1).attributes.measurements).toEqual(insole([27.3, 27.8, 28.3]))
+
+    const knit = (labels: string[]) => ({
+      unit: 'см',
+      columns: [{ key: 'chest', label: 'Грудь' }],
+      rows: labels.map((size, index) => ({ size, values: { chest: String(49 + index * 2) } })),
+    })
+    const clothes = alignColorFamily([
+      member(1, 'Синий', { attributes: { measurements: knit(['M', 'L', 'XL', 'XXL', 'XXXL']) } }),
+      member(2, 'Белый', { attributes: { measurements: knit(['M(48)', 'L(50)', 'XL(52)', '2XL(54)', '3XL(56)']) } }),
+      member(3, 'Серый', { attributes: { measurements: knit(['M', 'L', 'XL', 'XXL', 'XXXL']) } }),
+    ])
+    expect(clothes.issues).toEqual([])
+  })
+
   it('blocks two different size charts', () => {
     const result = alignColorFamily([
       member(1, 'Чёрный', { attributes: { measurements: table('104') } }),
