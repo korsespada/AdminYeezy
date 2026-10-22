@@ -1284,7 +1284,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1322,6 +1322,8 @@ export default function CsvImportApp({
               ? "ИИ разделяет фотографии по цветам и сразу создаёт обработанные товары…"
               : mode === "variants"
               ? `Пересборка цветовых семейств: визуальных групп ${data.queued}, по артикулам ${data.deterministic || 0}…`
+              : mode === "family_names"
+              ? `Согласование названий семей: в очереди ${data.queued}…`
               : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -1342,6 +1344,8 @@ export default function CsvImportApp({
                 ? `Разделение по цветам: готово ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
                 : mode === "variants"
                 ? `Пересборка семейств: проверено ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}`
+                : mode === "family_names"
+                ? `Названия семей: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`
                 : `ИИ: готово ${finalRun.completed_count || 0} из ${finalRun.total_count || data.queued}, ошибок ${finalRun.failed_count || 0}`);
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
@@ -1357,6 +1361,8 @@ export default function CsvImportApp({
                 ? `✓ Товар разделён по цветам: варианты созданы, обработаны ИИ и объединены в одну семью`
                 : mode === "variants"
                 ? `✓ Цветовые семейства пересобраны: по артикулам ${data.deterministic || 0}, визуально ${finalRun.completed_count || 0}`
+                : mode === "family_names"
+                ? `✓ Названия семей согласованы: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}. Нажмите «Выровнять семьи», чтобы увидеть оставшиеся конфликты.`
                 : `✓ Обработано ИИ: ${finalRun.completed_count || 0}, ошибок ${finalRun.failed_count || 0}`
               : "ИИ не завершил обработку вовремя. Статус сохранён в истории.");
           }
@@ -2163,6 +2169,7 @@ export default function CsvImportApp({
                       {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Удалить товары, которых нет в партии</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Пересобрать цветовые семьи</button>}
+                      {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
                     </div>
                   )}
                 </div>

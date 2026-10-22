@@ -94,6 +94,13 @@ import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib } from '@/lib/b
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
+  BATCH_AI_FAMILY_NAMING_SYSTEM_PROMPT,
+  buildBatchAiFamilyNamingPrompt,
+  familyNamingPhotoUrls,
+  normalizeBatchAiFamilyNamingOutput,
+  type FamilyNamingGroup,
+} from '@/lib/batch-ai-family-naming'
+import {
   alignBatchColorFamilies,
   alignColorFamiliesAfterRun,
   batchColorFamilyConflicts,
@@ -659,7 +666,7 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'retry_selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'retry_selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors' | 'family_names'
 
 const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: подтверждённый бренд, товар, видимый ракурс и 1–2 различимые детали. Бренд товара обязателен в каждом alt. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
@@ -745,6 +752,9 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
     }
   }
   if (mode === 'variants') predicate = 'AND COALESCE(ai_processed,false)=true ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'family_names') {
+    predicate = "AND COALESCE(ai_processed,false)=true AND NULLIF(variant_group_key,'') IS NOT NULL ORDER BY source_position ASC NULLS LAST, id"
+  }
   if (mode === 'selection' || mode === 'retry_selection') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
     params.push(productIds)
@@ -1115,6 +1125,13 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
     if (mode === 'split_colors' && settings.provider === 'cockpit') {
       return { success: false, error: 'Разделение по цветам пока доступно через BYESU или OpenRouter' }
     }
+    if (mode === 'family_names' && settings.provider === 'cockpit') {
+      return { success: false, error: 'Согласование названий семей пока доступно через BYESU или OpenRouter' }
+    }
+    const familyNamingPlan = mode === 'family_names' ? await familyNamingFamilies(batchId, context.products) : []
+    if (mode === 'family_names' && familyNamingPlan.length === 0) {
+      return { success: false, error: 'Нет цветовых семей, где все цвета обработаны ИИ и у каждого есть фото' }
+    }
     if (mode === 'split_colors' && (!Array.isArray(context.products[0]?.photos) || context.products[0].photos.length < 2)) {
       return { success: false, error: 'Для разделения по цветам нужно минимум две фотографии' }
     }
@@ -1218,6 +1235,8 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
         ? MEDIA_SEO_SYSTEM_PROMPT
         : mode === 'variants'
         ? 'Ты сравниваешь фотографии товаров и находишь только точные цветовые варианты одной физической модели. Не изменяй товары. Не объединяй по одному бренду или общему названию. Верни строго запрошенный JSON.'
+        : mode === 'family_names'
+        ? BATCH_AI_FAMILY_NAMING_SYSTEM_PROMPT
         : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
       processingOptions: normalizedProcessingOptions,
@@ -1226,7 +1245,13 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       await snapshotBatch(
         batchId,
         context.batch.stage || 'SCRAPED',
-        mode === 'reprocess' ? 'До повторной AI-обработки' : mode === 'recover_measurements' ? 'До восстановления замеров' : `До AI · ${mode}`,
+        mode === 'reprocess'
+          ? 'До повторной AI-обработки'
+          : mode === 'recover_measurements'
+          ? 'До восстановления замеров'
+          : mode === 'family_names'
+          ? 'До согласования названий семей'
+          : `До AI · ${mode}`,
         snapshot,
       )
     }
@@ -1241,6 +1266,8 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       JSON.stringify(snapshot),
       mode === 'variants'
         ? (variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0)
+        : mode === 'family_names'
+        ? familyNamingPlan.length
         : context.products.length,
     ])
 
@@ -1313,6 +1340,38 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
         throw error
       } finally {
         client.release()
+      }
+    } else if (mode === 'family_names') {
+      for (const family of familyNamingPlan) {
+        const anchor = family.products[0]
+        await scrapingQuery(`
+          INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
+          VALUES($1,$2,$3,$4,$5::jsonb)
+        `, [crypto.randomUUID(), runId, anchor.id, `family-names-${family.key.slice(0, 12)}`, JSON.stringify({
+          product: anchor,
+          familyNamingOnly: true,
+          familyKey: family.key,
+          familyName: family.name,
+          candidateProducts: family.products.map((product: any) => ({
+            id: product.id,
+            external_id: product.external_id,
+            name: product.name,
+            photos: (product.photos || []).slice(0, 1),
+            attributes: {
+              colors: product.attributes?.colors || [],
+              materials: product.attributes?.materials || [],
+              upper_material: product.attributes?.upper_material || '',
+              model_name: product.attributes?.model_name || '',
+            },
+          })),
+          userPrompt: buildBatchAiFamilyNamingPrompt(family.products, anchor.description),
+          systemPrompt: snapshot.systemPrompt,
+          variantScanOnly: false,
+          photoUrls: familyNamingPhotoUrls(family.products),
+          photoEnabled: true,
+          fullSizeRefinementEnabled: false,
+          priceReferenceUrls: [],
+        })])
       }
     } else {
       for (const product of context.products) {
@@ -1431,6 +1490,8 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
 
     const queuedCount = mode === 'variants'
       ? (variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0)
+      : mode === 'family_names'
+      ? familyNamingPlan.length
       : context.products.length
     if (mode === 'variants' && queuedCount === 0) {
       await scrapingQuery(`
@@ -1676,6 +1737,26 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
     })
     rawOutput = raw
+    if (input.familyNamingOnly) {
+      const candidates = input.candidateProducts || []
+      let groups: FamilyNamingGroup[]
+      try {
+        groups = normalizeBatchAiFamilyNamingOutput(raw, candidates)
+      } catch (error: any) {
+        raw = await runBatchAiOpenRouter({
+          settings,
+          systemPrompt: input.systemPrompt,
+          userPrompt: `${input.userPrompt}
+
+Предыдущий ответ отклонён: ${error.message}. Исправь это и верни полный JSON заново.`,
+          contactSheets: sheets,
+        })
+        rawOutput = raw
+        groups = normalizeBatchAiFamilyNamingOutput(raw, candidates)
+      }
+      await applyCompletedFamilyNaming(item, groups)
+      return
+    }
     const initialMeasurementPhotoIndexes = batchAiMeasurementPhotoIndexes(raw, input.photoUrls || [])
     const requestedInspectionIndexes = input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes)
       ? raw.inspect_full_size_indexes
@@ -1780,7 +1861,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
       RETURNING i.product_id
     `, [item.id, String(error.message || error).slice(0, 4000), JSON.stringify(rawOutput ?? null)])
-    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly && !item.input_snapshot?.mediaSeoOnly) {
+    if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly && !item.input_snapshot?.mediaSeoOnly && !item.input_snapshot?.familyNamingOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
   } finally {
@@ -1824,6 +1905,110 @@ function shadeScanHasColorConflicts(variants: any[]) {
     if (color) counts.set(color, (counts.get(color) || 0) + 1)
   }
   return [...counts.values()].some((count) => count > 1)
+}
+
+async function batchHasColorFamilies(batchId: string) {
+  const result = await scrapingQuery(`
+    SELECT 1 FROM products
+    WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL
+    GROUP BY variant_group_key HAVING COUNT(*) > 1
+    LIMIT 1
+  `, [batchId])
+  return result.rows.length > 0
+}
+
+/** Семьи для согласования названий: все цвета обработаны ИИ и у каждого есть фото. */
+async function familyNamingFamilies(batchId: string, products: any[]) {
+  const unprocessed = await scrapingQuery(`
+    SELECT DISTINCT variant_group_key FROM products
+    WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL AND COALESCE(ai_processed,false)=false
+  `, [batchId])
+  const skipped = new Set(unprocessed.rows.map((row) => String(row.variant_group_key)))
+  const families = new Map<string, any[]>()
+  for (const product of products) {
+    const key = String(product.variant_group_key || '')
+    if (key && !skipped.has(key)) families.set(key, [...(families.get(key) || []), product])
+  }
+  return [...families.entries()]
+    .filter(([, members]) => members.length > 1 && members.every((product) => String(product.photos?.[0] || '').trim()))
+    .map(([key, members]) => ({
+      key,
+      name: String(members.find((product) => product.variant_group_name)?.variant_group_name || ''),
+      products: [...members].sort((left, right) => (
+        Number(left.attributes?.album_colour_index ?? Infinity) - Number(right.attributes?.album_colour_index ?? Infinity)
+        || Number(left.source_position ?? Infinity) - Number(right.source_position ?? Infinity)
+        || Number(left.id) - Number(right.id)
+      )),
+    }))
+}
+
+/**
+ * Записывает согласованные названия и оттенки. Группа с якорем (первым цветом)
+ * сохраняет ключ семьи, остальные группы становятся отдельными семьями;
+ * группа из одного товара — обычный товар без семьи.
+ */
+async function applyCompletedFamilyNaming(item: any, groups: FamilyNamingGroup[]) {
+  const input = item.input_snapshot || {}
+  const familyKey = String(input.familyKey || '')
+  const familyName = String(input.familyName || '')
+  const anchorId = Number(input.candidateProducts?.[0]?.id)
+  const ordered = [...groups].sort((left, right) => (
+    Number(right.members.some((member) => member.productId === anchorId)) - Number(left.members.some((member) => member.productId === anchorId))
+  ))
+  const client = await getScrapingClient()
+  try {
+    await client.query('BEGIN')
+    const run = await client.query('SELECT status,batch_id FROM batch_ai_runs WHERE id=$1 FOR UPDATE', [item.run_id])
+    if (!run.rows[0] || run.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK')
+      return
+    }
+    const withTranslations = await hasProductTranslationColumns(client)
+    for (const [index, group] of ordered.entries()) {
+      const key = group.members.length < 2
+        ? null
+        : index === 0
+        ? familyKey
+        : crypto.createHash('md5').update(`${familyKey}:${group.baseName.toLowerCase()}`).digest('hex')
+      const name = key ? (index === 0 ? familyName : `${familyName} · ${group.material || group.baseName}`) : null
+      for (const member of group.members) {
+        const current = await client.query(
+          `SELECT attributes,${withTranslations ? 'translations' : 'NULL::jsonb AS translations'} FROM products WHERE id=$1 AND batch_id=$2 FOR UPDATE`,
+          [member.productId, run.rows[0].batch_id],
+        )
+        if (!current.rows[0]) continue
+        const attributes = {
+          ...(current.rows[0].attributes || {}),
+          colors: [member.color],
+          ...(member.baseColor ? { base_colors: [member.baseColor] } : {}),
+        }
+        const translations = member.nameEn
+          ? {
+              ...(current.rows[0].translations || {}),
+              en: { ...(current.rows[0].translations?.en || {}), name: member.nameEn, status: 'machine' },
+            }
+          : current.rows[0].translations
+        await client.query(`
+          UPDATE products SET name=$2,h1=$2,attributes=$3::jsonb,variant_group_key=$4,variant_group_name=$5,
+            ${withTranslations ? 'translations=$6::jsonb,' : ''}updated_at=NOW()
+          WHERE id=$1
+        `, [
+          member.productId, member.name, JSON.stringify(attributes), key, name,
+          ...(withTranslations ? [JSON.stringify(translations || {})] : []),
+        ])
+      }
+    }
+    await client.query(`
+      UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
+      WHERE id=$1
+    `, [item.id, JSON.stringify({ groups })])
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    client.release()
+  }
 }
 
 async function applyCompletedVariantScan(item: any, normalized: any) {
@@ -2234,7 +2419,7 @@ async function finalizeRun(runId: string) {
   if (status === 'completed') {
     const run = await scrapingQuery('SELECT * FROM batch_ai_runs WHERE id=$1', [runId])
     const currentRun = run.rows[0]
-    let shouldStartSequentialFamilyScan = false
+    let nextMode: BatchAiRunMode | null = null
     try {
       if (currentRun?.mode === 'recover_measurements') {
         await snapshotBatch(currentRun.batch_id, 'PUSHED', 'Замеры восстановлены', currentRun.settings_snapshot)
@@ -2251,8 +2436,14 @@ async function finalizeRun(runId: string) {
       }
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
-        shouldStartSequentialFamilyScan = currentRun?.mode === 'full'
-          && normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
+        const sequenceScan = normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
+        // После полной обработки согласуются названия семей, затем при
+        // включённой настройке ищутся новые семьи среди соседних карточек.
+        if (currentRun?.mode === 'full') {
+          nextMode = await batchHasColorFamilies(String(currentRun.batch_id)) ? 'family_names' : sequenceScan ? 'variants' : null
+        } else if (currentRun?.mode === 'family_names' && sequenceScan) {
+          nextMode = 'variants'
+        }
       }
       if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
         try {
@@ -2265,12 +2456,14 @@ async function finalizeRun(runId: string) {
     } finally {
       await releaseBatchOperation(String(currentRun.batch_id), runId)
     }
-    if (shouldStartSequentialFamilyScan) {
+    if (nextMode) {
+      const mode = nextMode
       after(async () => {
         try {
-          await startBatchAiRun(String(currentRun.batch_id), 'variants')
+          const started = await startBatchAiRun(String(currentRun.batch_id), mode)
+          if (!started.success) console.error(`Не удалось автоматически запустить ${mode} для выгрузки ${currentRun.batch_id}: ${started.error}`)
         } catch (error) {
-          console.error(`Не удалось автоматически найти цветовые семьи для выгрузки ${currentRun.batch_id}:`, error)
+          console.error(`Не удалось автоматически запустить ${mode} для выгрузки ${currentRun.batch_id}:`, error)
         }
       })
     }

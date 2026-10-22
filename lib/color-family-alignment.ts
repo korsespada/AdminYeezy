@@ -148,11 +148,16 @@ export async function batchColorFamilyConflicts(batchId: string): Promise<ColorF
 
 /** Товары AI-запуска, по которым нужно выровнять семьи после его завершения. */
 export async function alignColorFamiliesAfterRun(runId: string, batchId: string) {
-  const items = await scrapingQuery(
-    "SELECT product_id FROM batch_ai_items WHERE run_id=$1 AND status='completed' AND product_id IS NOT NULL",
-    [runId],
-  )
-  const summary = await alignBatchColorFamilies(batchId, items.rows.map((row) => Number(row.product_id)))
+  // Запрос семейного шага привязан к якорю, но меняет все цвета семьи.
+  const items = await scrapingQuery(`
+    SELECT i.product_id, ARRAY(
+      SELECT (candidate->>'id')::int FROM jsonb_array_elements(COALESCE(i.input_snapshot->'candidateProducts','[]'::jsonb)) candidate
+    ) AS candidate_ids
+    FROM batch_ai_items i
+    WHERE i.run_id=$1 AND i.status='completed' AND i.product_id IS NOT NULL
+  `, [runId])
+  const productIds = items.rows.flatMap((row) => [Number(row.product_id), ...(row.candidate_ids || []).map(Number)])
+  const summary = await alignBatchColorFamilies(batchId, productIds)
   if (summary.families > 0) {
     console.info('[color-family-alignment]', JSON.stringify({ runId, batchId, ...summary }))
   }
