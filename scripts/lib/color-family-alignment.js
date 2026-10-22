@@ -409,8 +409,11 @@ function alignSizing(ordered) {
   const recommendations = consensus(ordered, (product) => attributesOf(product).size_recommendation);
 
   const conflicting = differentCharts(tables.groups);
-  if (conflicting.length > 0) {
-    // Разные сетки (например, чарт только от брюк комплекта) не угадываются.
+  const [mainChart, ...foreignCharts] = conflicting;
+  // Сетка большинства цветов побеждает: другую таблицу у одного цвета ИИ
+  // обычно прочитал не из той колонки (длина стопы вместо длины стельки).
+  // Угадывать нельзя только при равенстве, например один цвет против одного.
+  if (conflicting.length > 0 && foreignCharts.some((group) => group.products.length >= mainChart.products.length)) {
     issues.push(issue('measurements', 'размерная сетка', conflicting, conflicting.flatMap((group) => group.products)));
     return { patches, issues };
   }

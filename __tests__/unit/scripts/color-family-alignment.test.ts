@@ -178,7 +178,7 @@ describe('alignColorFamily', () => {
     expect(clothes.issues).toEqual([])
   })
 
-  it('blocks two different size charts', () => {
+  it('blocks two different size charts on a tie', () => {
     const result = alignColorFamily([
       member(1, 'Чёрный', { attributes: { measurements: table('104') } }),
       member(2, 'Бежевый', { attributes: { measurements: table('120') } }),
@@ -186,6 +186,20 @@ describe('alignColorFamily', () => {
 
     expect(result.issues.map((entry: any) => entry.field)).toEqual(['measurements'])
     expect(updateFor(result, 2)).toBeUndefined()
+  })
+
+  it('takes the majority chart when one colour has a different one', () => {
+    const family = [
+      member(1, 'Светло-серый'),
+      member(2, 'Чёрный', { attributes: { measurements: table('104') } }),
+      member(3, 'Бежевый', { attributes: { measurements: table('120') } }),
+      member(4, 'Синий', { attributes: { measurements: table('104') } }),
+    ]
+    const result = alignColorFamily(family)
+
+    expect(result.issues).toEqual([])
+    expect(updateFor(result, 1).attributes.measurements).toEqual(table('104'))
+    expect(updateFor(result, 3).attributes.measurements).toEqual(table('104'))
   })
 
   it('fills missing physical values but reports a real difference', () => {

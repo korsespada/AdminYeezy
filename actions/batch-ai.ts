@@ -95,7 +95,12 @@ import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from 
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
   BATCH_AI_FAMILY_NAMING_SYSTEM_PROMPT,
+  FAMILY_DUPLICATE_REVIEW_PHOTOS,
+  applyFamilyDuplicateReview,
+  buildBatchAiFamilyDuplicatePrompt,
   buildBatchAiFamilyNamingPrompt,
+  familyDuplicateReviewPhotoUrls,
+  familyDuplicateReviewProducts,
   familyNamingPhotoUrls,
   normalizeBatchAiFamilyNamingOutput,
   type FamilyNamingGroup,
@@ -1130,7 +1135,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
     }
     const familyNamingPlan = mode === 'family_names' ? await familyNamingFamilies(batchId, context.products) : []
     if (mode === 'family_names' && familyNamingPlan.length === 0) {
-      return { success: false, error: 'Нет цветовых семей, где все цвета обработаны ИИ и у каждого есть фото' }
+      return { success: false, error: 'Все цветовые семьи уже согласованы, либо в них есть цвета без обработки ИИ или без фото' }
     }
     if (mode === 'split_colors' && (!Array.isArray(context.products[0]?.photos) || context.products[0].photos.length < 2)) {
       return { success: false, error: 'Для разделения по цветам нужно минимум две фотографии' }
@@ -1356,7 +1361,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
             id: product.id,
             external_id: product.external_id,
             name: product.name,
-            photos: (product.photos || []).slice(0, 1),
+            photos: (product.photos || []).slice(0, FAMILY_DUPLICATE_REVIEW_PHOTOS),
             attributes: {
               colors: product.attributes?.colors || [],
               materials: product.attributes?.materials || [],
@@ -1754,6 +1759,22 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
         rawOutput = raw
         groups = normalizeBatchAiFamilyNamingOutput(raw, candidates)
       }
+      // По одному главному фото близкие оттенки выглядят одинаково: дубли
+      // перепроверяются по нескольким фото каждого товара.
+      const reviewProducts = familyDuplicateReviewProducts(groups, candidates)
+      if (reviewProducts.length) {
+        try {
+          const reviewRaw = await runBatchAiOpenRouter({
+            settings,
+            systemPrompt: input.systemPrompt,
+            userPrompt: buildBatchAiFamilyDuplicatePrompt(reviewProducts, groups),
+            contactSheets: await buildBatchAiContactSheets(familyDuplicateReviewPhotoUrls(reviewProducts)),
+          })
+          groups = applyFamilyDuplicateReview(groups, reviewRaw).groups
+        } catch (error: any) {
+          console.warn(`Повторная проверка дублей семьи ${input.familyName}: ${error?.message || error}`)
+        }
+      }
       await applyCompletedFamilyNaming(item, groups)
       return
     }
@@ -1924,6 +1945,22 @@ async function familyNamingFamilies(batchId: string, products: any[]) {
     WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL AND COALESCE(ai_processed,false)=false
   `, [batchId])
   const skipped = new Set(unprocessed.rows.map((row) => String(row.variant_group_key)))
+  // Цвет уже согласован, если семейный шаг завершился позже его последней
+  // AI-обработки. Повторный запуск берёт только несогласованные семьи.
+  const named = await scrapingQuery(`
+    SELECT p.id FROM products p
+    WHERE p.batch_id=$1 AND NULLIF(p.variant_group_key,'') IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM batch_ai_items i JOIN batch_ai_runs r ON r.id=i.run_id
+        WHERE r.batch_id=$1 AND r.mode='family_names' AND i.status='completed'
+          AND i.input_snapshot->'candidateProducts' @> jsonb_build_array(jsonb_build_object('id', p.id))
+          AND i.completed_at > COALESCE((
+            SELECT MAX(card.completed_at) FROM batch_ai_items card JOIN batch_ai_runs card_run ON card_run.id=card.run_id
+            WHERE card.product_id=p.id AND card.status='completed' AND card_run.mode NOT IN ('family_names','variants','media_seo')
+          ), '-infinity'::timestamptz)
+      )
+  `, [batchId])
+  const namedIds = new Set(named.rows.map((row) => Number(row.id)))
   const families = new Map<string, any[]>()
   for (const product of products) {
     const key = String(product.variant_group_key || '')
@@ -1931,6 +1968,10 @@ async function familyNamingFamilies(batchId: string, products: any[]) {
   }
   return [...families.entries()]
     .filter(([, members]) => members.length > 1 && members.every((product) => String(product.photos?.[0] || '').trim()))
+    .filter(([, members]) => {
+      const names = members.map((product) => String(product.name || '').trim().toLowerCase().replace(/ё/g, 'е'))
+      return new Set(names).size !== names.length || !members.every((product) => namedIds.has(Number(product.id)))
+    })
     .map(([key, members]) => ({
       key,
       name: String(members.find((product) => product.variant_group_name)?.variant_group_name || ''),

@@ -35,6 +35,9 @@ function comparable(value: unknown) {
   return text(value, 1000).normalize('NFKC').toLowerCase().replace(/ё/g, 'е')
 }
 
+// Сколько фото каждого цвета показывать при повторной проверке дублей.
+export const FAMILY_DUPLICATE_REVIEW_PHOTOS = 4
+
 /** Фото для contact sheet: по одному главному на цвет, номер совпадает с номером товара. */
 export function familyNamingPhotoUrls(products: any[]) {
   // Якорь у URL нужен, чтобы одинаковые фото двух цветов не схлопнулись в одно.
@@ -63,6 +66,88 @@ export function buildBatchAiFamilyNamingPrompt(products: any[], description = ''
     ...(description ? [`Описание модели от поставщика: ${text(description, 1200)}`] : []),
     `Товары: ${JSON.stringify(candidates)}`,
   ].join('\n\n')
+}
+
+/** Товары, которые ИИ по главному фото счёл одним оттенком, вместе с оригиналами. */
+export function familyDuplicateReviewProducts(groups: FamilyNamingGroup[], products: any[]) {
+  const ids = new Set<number>()
+  for (const member of groups.flatMap((group) => group.members)) {
+    if (!member.duplicateOfProductId) continue
+    ids.add(member.productId)
+    ids.add(member.duplicateOfProductId)
+  }
+  return products.filter((product) => ids.has(Number(product.id)))
+}
+
+/** Фото повторной проверки: до четырёх кадров каждого товара подряд. */
+export function familyDuplicateReviewPhotoUrls(products: any[]) {
+  return products.flatMap((product) => (product.photos || [])
+    .slice(0, FAMILY_DUPLICATE_REVIEW_PHOTOS)
+    .map((url: string) => `${url}#family-duplicate-${product.id}`))
+}
+
+export function buildBatchAiFamilyDuplicatePrompt(products: any[], groups: FamilyNamingGroup[]) {
+  let photoNumber = 0
+  const members = groups.flatMap((group) => group.members.map((member) => ({ member, group })))
+  const candidates = products.map((product) => {
+    const photos = (product.photos || []).slice(0, FAMILY_DUPLICATE_REVIEW_PHOTOS)
+    const first = photoNumber + 1
+    photoNumber += photos.length
+    const entry = members.find(({ member }) => member.productId === Number(product.id))
+    return {
+      product_id: Number(product.id),
+      photos: photos.length ? `${first}–${photoNumber}` : '',
+      base_name: entry?.group.baseName || '',
+      color: entry?.member.color || '',
+      name: entry?.member.name || '',
+    }
+  })
+  return [
+    'По главным фото эти товары одной модели выглядели одним и тем же оттенком. Теперь у каждого товара несколько фотографий подряд: номера указаны в поле photos.',
+    'Сравни товары внимательно: оттенок при разном освещении, светлоту и подтон, цвет подошвы, подкладки, меха, ниток, фурнитуры, отделки. Если различие видно, дай каждому товару своё точное название цвета и полное название с той же основой base_name, например «Тёмно-синие … с белой подошвой» или «Чернильно-синие …».',
+    'duplicate_of_product_id указывай только если товары действительно неотличимы: тот же оттенок и те же детали на всех фото. Тогда name и color дубля совпадают с оригиналом.',
+    'Верни каждый товар ровно один раз строго JSON вида {"members":[{"product_id":1,"color":"","base_color":"","name":"","name_en":"","duplicate_of_product_id":null}]}.',
+    `base_color — строго один из: ${FAMILY_BASE_COLORS.join(', ')}.`,
+    `Товары: ${JSON.stringify(candidates)}`,
+  ].join('\n\n')
+}
+
+/**
+ * Применяет повторную проверку дублей к группам. Возвращает исходные группы,
+ * если ответ не проходит проверку: дубль лучше, чем испорченное название.
+ */
+export function applyFamilyDuplicateReview(groups: FamilyNamingGroup[], raw: any): { groups: FamilyNamingGroup[], resolved: number } {
+  const reviewed = new Map<number, any>((Array.isArray(raw?.members) ? raw.members : [])
+    .map((member: any) => [Number(member?.product_id), member]))
+  let resolved = 0
+  const next = groups.map((group) => ({
+    ...group,
+    members: group.members.map((member) => {
+      const review = reviewed.get(member.productId)
+      if (!review) return member
+      const name = text(review.name)
+      const color = text(review.color, 100)
+      if (!name || !color || !comparable(name).includes(comparable(group.baseName))) return member
+      const duplicateOf = review.duplicate_of_product_id == null ? Number.NaN : Number(review.duplicate_of_product_id)
+      const baseColor = text(review.base_color, 40)
+      if (member.duplicateOfProductId && !Number.isInteger(duplicateOf)) resolved += 1
+      return {
+        ...member,
+        color,
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        nameEn: text(review.name_en) || member.nameEn,
+        baseColor: FAMILY_BASE_COLORS.find((value) => comparable(value) === comparable(baseColor)) || member.baseColor,
+        duplicateOfProductId: Number.isInteger(duplicateOf) && duplicateOf !== member.productId && group.members.some((entry) => entry.productId === duplicateOf)
+          ? duplicateOf
+          : null,
+      }
+    }),
+  }))
+  for (const group of next) {
+    const names = group.members.filter((member) => !member.duplicateOfProductId).map((member) => comparable(member.name))
+    if (new Set(names).size !== names.length) return { groups, resolved: 0 }
+  }
+  return { groups: next, resolved }
 }
 
 /**

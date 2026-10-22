@@ -1628,6 +1628,11 @@ describe('batch AI retry classification', () => {
     expect(isBatchAiRequestTimeout(connection)).toBe(false)
   })
 
+  it('повторяет «сервис занят» от BYESU на китайском', () => {
+    expect(isRetryableBatchAiError(new Error('文本服务繁忙，请稍后重试'))).toBe(true)
+    expect(isRetryableBatchAiError(new Error('Service busy, try again later'))).toBe(true)
+  })
+
   it('не повторяет содержательные ошибки', () => {
     expect(isRetryableBatchAiError(new Error('BYESU вернул некорректный JSON (200)'))).toBe(false)
     expect(isRetryableBatchAiError(new Error('Ответ BYESU превышает допустимый размер'))).toBe(false)

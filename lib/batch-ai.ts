@@ -938,7 +938,8 @@ export function isRetryableBatchAiError(error: unknown) {
     if (typeof value === 'string' && networkCodePattern.test(value)) return true
   }
   const message = String((error as Error)?.message || error || '').toLowerCase()
-  return /temporarily unavailable|rate limit|retry later|upstream|overloaded|cpu overload|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection|тайм-аут|не ответил за/.test(message)
+  // BYESU отвечает по-китайски: «文本服务繁忙，请稍后重试» — сервис занят, повторите позже.
+  return /temporarily unavailable|rate limit|retry later|try again later|busy|upstream|overloaded|cpu overload|\b429\b|\b5\d\d\b|timeout|timed out|econn|socket|fetch failed|connection|тайм-аут|не ответил за|繁忙|稍后重试|请稍后/.test(message)
 }
 
 async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
