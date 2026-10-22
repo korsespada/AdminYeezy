@@ -1,231 +1,328 @@
-"""Post-process the `CH Одежда` Szwego all-timeline feed.
+"""Post-process the `CH Одежда` Szwego all-timeline feed (supplier 5).
 
-The supplier publishes each product in reverse order: service albums (detail
-photos and a video) normally appear immediately *before* the actual product
-card.  `➨` is useful as a loose boundary but is not present for every product,
-so a product description is the only record that commits an accumulated block.
+Feed evidence (immutable raw ``SCRAPED`` snapshot of batch
+``b2446b7d-0fe8-4434-988b-c3bb9dfd02b4``, 493 albums, complete batch):
+
+* 112 albums are a bare ``➨`` without photos; they delimit product blocks.
+* 54 albums are the real product cards: a brand (``Chrome Hearts``/``克罗心``),
+  a full description and 4 photos (one card has 6).  A card is always the last
+  album of its own service run, and no block holds albums after its last card.
+* The supplier publishes the service albums of a product *before* its card:
+  ``尺码表`` (32), ``实拍视频`` (47), on-model/look albums such as
+  ``上身图参考``, ``搭配``, ``look``, ``张韶涵同款`` (45 cards), packaging
+  ``标配：配套YB雪梨纸 手提袋+6`` (48) and ``局部细节参考`` (52 cards).
+* 46 blocks consist of a single album: stock/ad posts (``‼️今日份资讯分享‼️``,
+  ``‼️原版开发‼️…``, ``一系列 齐码现货``, ``三色``, ``原版级绣花一致``).  They
+  never contain a card and must not become catalogue products.
+* The same model is republished per colour, and the colours are split either
+  inside one block (63/68/74, 110/114/118, 210/216/222/228, 386/392,
+  449/454) or over adjacent blocks (82/90, 97/103, 142/149/156, 256/263/270,
+  344/349/353).  Models that differ in garment type are different products
+  (179 短裤 / 186 长裤; 440 短裤 / 461 卫裤 / 468 套头卫衣 / 475 连帽卫衣).
+
+Rules implemented here:
+
+1. ``➨`` closes the block of one product run.
+2. The product card is the album that carries the brand and a full
+   description; everything between the previous card and it belongs to it.
+3. The card keeps photos 1 and 3 of its cover album: the 2nd and 4th photo are
+   the same shots taken at an angle (verified on the raw pictures of #7).
+4. Gallery order: cover → ``局部细节`` → on-model photos → ``尺码表`` last.
+   Packaging albums and single-photo text albums are dropped.
+5. Video: the card's own ``实拍视频`` album wins.  When a colour family has
+   exactly one video (or one size chart) in total, every card of the family
+   gets it — the operator confirmed one shared video belongs to all colours.
+6. Cards whose descriptions match after removing colour words form one colour
+   family even across ``➨``, with a stable md5 ``variant_group_key``; a lone
+   card gets no key.
+7. The processor is idempotent: produced cards carry
+   ``attributes.album_merge_version`` and a second run returns the input.
 """
 
 from __future__ import annotations
 
 import copy
-import json
+import hashlib
 import re
 from typing import Any
 
+MERGE_VERSION = "ch-clothing-timeline-2"
+SUPPLIER_KEY = "ch-clothing"
 
-SEPARATOR_RE = re.compile(r"^\s*➨\s*$")
-SIZE_RE = re.compile(r"尺码表|尺寸表|size\s*(?:chart|guide|table)", re.IGNORECASE)
-MODEL_RE = re.compile(r"上身图|上身照|模特|真人|穿搭|试穿", re.IGNORECASE)
-PACKAGING_RE = re.compile(r"标配|雪梨纸|手提袋|包装|配套", re.IGNORECASE)
-OUTFIT_RE = re.compile(r"搭(?:配|短裙|工装裤)|配工装裤|配短裙|穿搭", re.IGNORECASE)
-# Do not match the ordinary word 细节 in a product description, such as
-# "版型细节全部还原". Only album-style captions belong to this category.
-DETAIL_RE = re.compile(r"局部细节|细节(?:参考|图)", re.IGNORECASE)
-VIDEO_RE = re.compile(r"(?:实拍|上身)?视频", re.IGNORECASE)
-COLLECTION_RE = re.compile(r"集合图|图集|拼图|上新(?:预告|合集)?|新品推荐", re.IGNORECASE)
-# `中古` (vintage) and `男女同款` are common parts of actual CH product
-# descriptions.  Treat references as service content only with an explicit
-# model/celebrity signal.
-REFERENCE_RE = re.compile(r"(?:上身图|上身照|模特|真人).*(?:同款|参考)|(?:虞书欣|钟欣潼).*(?:同款|参考)", re.IGNORECASE)
-HARDWARE_RE = re.compile(r"原版五金|925\s*(?:制银|银)|纯银|纽扣|拉链|百达灵|百灵达", re.IGNORECASE)
+SEPARATOR = "➨"
 BRAND_RE = re.compile(r"chrome\s*hearts|克罗心", re.IGNORECASE)
-PROMO_RE = re.compile(
-    r"面料像缎子|显白天花板|真的太帅|哪个颜色都好看|随便搭配|"
-    r"谁能拒绝.*?配色|暗黑系公主.*?(?:内搭|完美)|"
-    r"荧光绿色.*?(?:冲击力|好看)",
+# The double exclamation glyph marks supplier stock/ad posts, never a card.
+BANG_RE = re.compile("\u203c")
+SIZE_RE = re.compile(r"尺码表|尺寸表|尺码标|尺寸标", re.IGNORECASE)
+PACK_RE = re.compile(r"标配|雪梨纸|手提袋|包装|配套")
+DETAIL_RE = re.compile(r"局部细节|细节参考|细节图|细节")
+COLLAGE_RE = re.compile(r"集合|合集|图集|拼图")
+# A service caption stays a service caption even when it names the brand
+# ("𝗖𝗵𝗿𝗼𝗺𝗲 𝗛𝗲𝗮𝗿𝘁𝘀上身图参考", "上身图参考 灰色卫衣太好穿了").
+SERVICE_CAPTION_RE = re.compile(
+    r"上身图|上身参考|上身照|上身效果|模特|搭配|look|试穿|"
+    r"尺码表|尺寸表|标配|雪梨纸|手提袋|局部细节|细节参考",
     re.IGNORECASE,
 )
-# For this supplier the double-exclamation glyph marks a service, stock or
-# factory album, never a useful product description. Drop the whole album,
-# including variants with an emoji variation selector.
-EXCLAMATION_PROMO_RE = re.compile(r"‼")
-# These are supplier-wide advertising albums, not product cards.  Require the
-# announcement marker, but not a second marker: this supplier uses both forms
-# (`‼️原版开发‼️` and `‼️原版开发克罗心…`).  A normal description such as
-# `原版：5500购入开发` is deliberately not matched.
-DEVELOPMENT_PROMO_RE = re.compile(r"‼\ufe0f?\s*原版\s*开发", re.IGNORECASE)
-# Keep these narrow and caption-shaped.  For example, a genuine long product
-# description may mention `热固油材质印花` or `全码现货秒发`.
-STANDALONE_PROMO_RE = re.compile(
-    r"^(?:"
-    r"顶级\s*(?:长袖|短袖)\s*现货\s*秒发|"
-    r"发货\s*发到过年.*?(?:新款.*?在仓|在仓).*?现货\s*秒发|"
-    r"真正顶级工艺[：:].*?热固油材质印花|"
-    r"自然光下.*?原版暗纹面料|"
-    r"手工制作工艺.*?热固油|"
-    r"正品原厂.*?(?:面料供应|原版一致)|"
-    r"直线距离.*?感受一下|"
-    r"真正的手工制作工艺.*?热固油"
-    r")",
+EMOJI_RE = re.compile("[\U0001F000-\U0001FAFF\u2190-\u2BFF\uFE0F\U0001F1E6-\U0001F1FF]+")
+# Colour words are removed before two descriptions are compared: the supplier
+# republishes the same model card for every colour with an otherwise identical
+# text, and splits those cards over several ➨ blocks.
+COLOUR_RE = re.compile(
+    r"黑|白|红|蓝|绿|紫|粉|灰|黄|棕|橙|藏青|藏蓝|卡其|奶茶|米|咖|银|金|彩|色|"
+    r"black|white|red|blue|green|purple|pink|grey|gray|yellow|brown|orange|"
+    r"beige|khaki|silver|gold|cream|ivory",
     re.IGNORECASE,
 )
-# Text-only shop/factory/lifestyle posts which contain neither a concrete item
-# nor a usable product presentation.  Keep this separate from product-copy
-# terms such as `热固油材质印花`, which can be part of a real description.
-SHOWCASE_PROMO_RE = re.compile(
-    r"(?:显白.*?打光|打光.*?显白)|"
-    r"YB展示.*?(?:最后一次联名|Mattyboy)|"
-    r"YB开发.*?(?:颜色定染对色|区别市场货)|"
-    r"季度热门.*?mattyboy",
-    re.IGNORECASE,
-)
-COLOR_RE = re.compile(r"黑|白|红|蓝|绿|紫|粉|灰|黄|棕|橙")
+NON_WORD_RE = re.compile(r"[\W_]+", re.UNICODE)
+# A card occasionally repeats the colour and the size line at the very end
+# ("… 单穿内搭都能打。 黑色 / S M L"), which is not part of the model text.
+TRAILING_SIZE_RE = re.compile(r"(?:[smlx]{1,5}|\d{1,3}|均码|码|号)+$", re.IGNORECASE)
+FAMILY_NAME_CUT_RE = re.compile(r"[，。！,\.!（(]")
+# 1-based positions 2 and 4 of the cover album: the angled repeat of the 1st
+# and 3rd shot.
+COVER_DROP_INDEXES = frozenset({1, 3})
 
 
-def _description(product: dict[str, Any]) -> str:
-    return " ".join(str(product.get("description") or "").split())
+def _text(value: Any) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
 def _photos(product: dict[str, Any]) -> list[str]:
     photos = product.get("photos") or []
-    if isinstance(photos, list):
-        return [str(photo) for photo in photos if photo]
-    try:
-        parsed = json.loads(photos)
-    except (TypeError, json.JSONDecodeError):
+    if not isinstance(photos, list):
         return []
-    return [str(photo) for photo in parsed] if isinstance(parsed, list) else []
+    return [str(photo) for photo in photos if photo]
+
+
+def _position(product: dict[str, Any], fallback: int = 0) -> int:
+    try:
+        return int(product.get("source_position", fallback))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _video(product: dict[str, Any]) -> tuple[str | None, str | None]:
-    attrs = product.get("attributes") or {}
-    if not isinstance(attrs, dict):
+    attributes = product.get("attributes") or {}
+    if not isinstance(attributes, dict):
         return None, None
-    url = attrs.get("szwego_video_url") or attrs.get("video_url")
-    poster = attrs.get("szwego_video_poster_url") or attrs.get("video_poster_url")
-    return (
-        str(url).strip() if url else None,
-        str(poster).strip() if poster else None,
+    url = _text(attributes.get("szwego_video_url") or attributes.get("video_url"))
+    poster = _text(
+        attributes.get("szwego_video_poster_url") or attributes.get("video_poster_url")
     )
+    return (url or None, poster or None)
 
 
-def _is_primary(product: dict[str, Any], description: str) -> bool:
-    """A real card has a substantive description, not a service-caption."""
-    if len(description) < 12 or not (_photos(product) or _video(product)[0]):
+def _unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _is_card(product: dict[str, Any], description: str) -> bool:
+    """A catalogue card: brand, full description, more than one photo."""
+    if len(_photos(product)) < 2 or len(description) < 12:
         return False
-    if any(pattern.search(description) for pattern in (
-        SIZE_RE, MODEL_RE, OUTFIT_RE, DETAIL_RE, VIDEO_RE, COLLECTION_RE, REFERENCE_RE,
-        PROMO_RE, EXCLAMATION_PROMO_RE, DEVELOPMENT_PROMO_RE, STANDALONE_PROMO_RE,
-        SHOWCASE_PROMO_RE,
-    )):
+    if not BRAND_RE.search(description):
         return False
-    # Product descriptions often mention the included packaging or 925 hardware.
-    # Those words mean "service album" only when the card does not identify CH.
-    if (PACKAGING_RE.search(description) or HARDWARE_RE.search(description)) and not BRAND_RE.search(description):
+    if BANG_RE.search(description) or COLLAGE_RE.search(description):
+        return False
+    if SIZE_RE.search(description) or SERVICE_CAPTION_RE.search(description):
         return False
     return True
 
 
-def _unique(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    return [item for item in items if not (item in seen or seen.add(item))]
+def _role(product: dict[str, Any], description: str) -> str:
+    photos = _photos(product)
+    if not photos and description == SEPARATOR:
+        return "separator"
+    if _is_card(product, description):
+        return "card"
+    if _video(product)[0]:
+        return "video"
+    if SIZE_RE.search(description):
+        return "size"
+    if PACK_RE.search(description):
+        return "pack"
+    if DETAIL_RE.search(description):
+        return "detail"
+    if len(photos) >= 2:
+        return "model"
+    return "noise"
 
 
-def _shared_chinese_phrase(left: str, right: str) -> str:
-    """Return a meaningful common Chinese product-name fragment, if any."""
-    best = ""
-    for phrase in re.findall(r"[\u4e00-\u9fff]{5,}", left):
-        for offset in range(len(phrase) - 4):
-            candidate = phrase[offset:]
-            if candidate in right and len(candidate) > len(best):
-                best = candidate
-    return best
+def _cover_photos(product: dict[str, Any]) -> list[str]:
+    return [
+        photo
+        for index, photo in enumerate(_photos(product))
+        if index not in COVER_DROP_INDEXES
+    ]
 
 
-def _can_merge_adjacent_primary(previous: dict[str, Any], current: dict[str, Any]) -> bool:
-    """Recognise a long presentation album immediately followed by its set."""
-    previous_photos = _photos(previous)
-    current_photos = _photos(current)
-    if len(previous_photos) < 8 or not current_photos or len(current_photos) > 6:
-        return False
-    previous_description = _description(previous)
-    current_description = _description(current)
-    # Do not fold separate explicitly coloured variants into one record.
-    previous_colours = set(COLOR_RE.findall(previous_description))
-    current_colours = set(COLOR_RE.findall(current_description))
-    if previous_colours and current_colours and previous_colours != current_colours:
-        return False
-    return len(_shared_chinese_phrase(previous_description, current_description)) >= 5
+def _build_card(
+    card: dict[str, Any], owned: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the product card with its service albums attached."""
+    merged = copy.deepcopy(card)
+    cover = _cover_photos(card)
+    details: list[str] = []
+    models: list[str] = []
+    sizes: list[str] = []
+    videos: list[tuple[str, str | None, dict[str, Any]]] = []
+    positions = [_position(card)]
+    attached = {"detail": 0, "model": 0, "size": 0, "video": 0}
+    size_source: dict[str, Any] | None = None
+
+    for album in owned:
+        role = _role(album, _text(album.get("description")))
+        if role == "detail":
+            details.extend(_photos(album))
+            attached["detail"] += 1
+        elif role == "model":
+            models.extend(_photos(album))
+            attached["model"] += 1
+        elif role == "size":
+            sizes.extend(_photos(album))
+            attached["size"] += 1
+            size_source = album
+        elif role == "video":
+            url, poster = _video(album)
+            if url:
+                videos.append((url, poster, album))
+                attached["video"] += 1
+        else:
+            # Packaging, single-photo text albums and noise are dropped.
+            continue
+        positions.append(_position(album))
+
+    merged["photos"] = _unique(cover + details + models + sizes)
+    attributes = dict(merged.get("attributes") or {})
+    video_meta: tuple[str, str | None, dict[str, Any]] | None = videos[0] if videos else None
+    if video_meta is not None:
+        url, poster, album = video_meta
+        attributes.setdefault("szwego_video_url", url)
+        if poster:
+            attributes.setdefault("szwego_video_poster_url", poster)
+        attributes["album_video_source_id"] = str(album.get("external_id") or "")
+    if size_source is not None:
+        attributes["size_chart_source_id"] = str(size_source.get("external_id") or "")
+    attributes["album_merge_version"] = MERGE_VERSION
+    attributes["album_source_positions"] = sorted(set(positions))
+    attributes["album_attached"] = {key: value for key, value in attached.items() if value}
+    merged["attributes"] = attributes
+    meta = {
+        "sizes": sizes,
+        "size_source_id": str(size_source.get("external_id") or "") if size_source else None,
+        "video": video_meta,
+    }
+    return merged, meta
 
 
-def _merge_primary_albums(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
-    merged = copy.deepcopy(previous)
-    merged["photos"] = _unique(_photos(previous) + _photos(current))
-    previous_attributes = dict(merged.get("attributes") or {})
-    current_video, current_poster = _video(current)
-    if current_video:
-        previous_attributes.setdefault("szwego_video_url", current_video)
-        if current_poster:
-            previous_attributes.setdefault("szwego_video_poster_url", current_poster)
-    merged["attributes"] = previous_attributes
-    return merged
+def _family_text(description: str) -> str:
+    text = EMOJI_RE.sub("", description)
+    text = COLOUR_RE.sub("", text)
+    text = NON_WORD_RE.sub("", text).lower()
+    return TRAILING_SIZE_RE.sub("", text)
 
 
-def _merge_pending(primary: dict[str, Any], pending_photos: list[str], video: tuple[str | None, str | None]) -> dict[str, Any]:
-    merged = copy.deepcopy(primary)
-    merged["photos"] = _unique(_photos(primary) + pending_photos)
-    video_url, poster_url = video
-    if video_url:
-        attributes = dict(merged.get("attributes") or {})
-        # A genuine video attached to the product itself has priority.
-        attributes.setdefault("szwego_video_url", video_url)
-        if poster_url:
-            attributes.setdefault("szwego_video_poster_url", poster_url)
-        merged["attributes"] = attributes
-    return merged
+def _family_name(descriptions: list[str]) -> str:
+    """A colour-neutral readable name: the common prefix of the family."""
+    texts = [_text(EMOJI_RE.sub("", description)) for description in descriptions]
+    name = texts[0] if texts else ""
+    for other in texts[1:]:
+        limit = min(len(name), len(other))
+        index = 0
+        while index < limit and name[index] == other[index]:
+            index += 1
+        name = name[:index]
+    cut = FAMILY_NAME_CUT_RE.search(name)
+    if cut:
+        name = name[: cut.start()]
+    return name.strip()[:80] or "Chrome Hearts"
+
+
+def _apply_families(cards: list[tuple[dict[str, Any], dict[str, Any]]]) -> None:
+    groups: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for card, meta in cards:
+        groups.setdefault(_family_text(_text(card.get("description"))), []).append((card, meta))
+
+    for members in groups.values():
+        if len(members) < 2:
+            card = members[0][0]
+            card["variant_group_key"] = None
+            card["variant_group_name"] = None
+            continue
+        family_key = hashlib.md5(
+            f"{SUPPLIER_KEY}|{_family_text(_text(members[0][0].get('description')))}".encode("utf-8")
+        ).hexdigest()
+        family_name = _family_name([_text(card.get("description")) for card, _meta in members])
+        videos = {meta["video"][0]: meta["video"] for _, meta in members if meta["video"]}
+        charts = {
+            tuple(meta["sizes"]): meta for _, meta in members if meta["sizes"]
+        }
+        for card, meta in members:
+            card["variant_group_key"] = family_key
+            card["variant_group_name"] = family_name
+            attributes = card["attributes"]
+            attributes["album_family_key"] = family_key
+            attributes["album_family_name"] = family_name
+            attributes["album_family_size"] = len(members)
+            if not attributes.get("szwego_video_url") and len(videos) == 1:
+                url, poster, album = next(iter(videos.values()))
+                attributes["szwego_video_url"] = url
+                if poster:
+                    attributes["szwego_video_poster_url"] = poster
+                attributes["album_video_source_id"] = str(album.get("external_id") or "")
+                attributes["album_video_shared"] = True
+            if not meta["sizes"] and len(charts) == 1:
+                shared = next(iter(charts.values()))
+                card["photos"] = _unique(_photos(card) + list(shared["sizes"]))
+                attributes["size_chart_source_id"] = shared["size_source_id"]
+                attributes["album_size_chart_shared"] = True
 
 
 def process_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep CH product cards and attach preceding detail/video albums to them."""
+    if not isinstance(products, list):
+        raise ValueError("products должен быть массивом")
     ordered = sorted(
         (copy.deepcopy(product) for product in products),
-        key=lambda product: product.get("source_position", 0),
+        key=lambda product: _position(product),
     )
-    result: list[dict[str, Any]] = []
-    pending_photos: list[str] = []
-    pending_videos: list[tuple[str | None, str | None]] = []
-    separator_since_primary = True
+    if any(
+        isinstance(product.get("attributes"), dict)
+        and product["attributes"].get("album_merge_version") == MERGE_VERSION
+        for product in ordered
+    ):
+        return ordered
 
+    blocks: list[list[dict[str, Any]]] = []
+    block: list[dict[str, Any]] = []
     for product in ordered:
-        description = _description(product)
-        if SEPARATOR_RE.match(description):
-            # Never carry an incomplete service block into the next explicit one.
-            pending_photos = []
-            pending_videos = []
-            separator_since_primary = True
+        description = _text(product.get("description"))
+        if not _photos(product) and description == SEPARATOR:
+            if block:
+                blocks.append(block)
+            block = []
             continue
+        block.append(product)
+    if block:
+        blocks.append(block)
 
-        if _is_primary(product, description):
-            # A supplier can publish several videos before several colour/product
-            # cards. Keep their source order instead of overwriting the previous URL.
-            pending_video = pending_videos.pop(0) if pending_videos else (None, None)
-            primary = _merge_pending(product, pending_photos, pending_video)
-            # Some adjacent album pairs have no `局部细节` caption: a large
-            # presentation gallery is followed by a short gallery with the
-            # same product-name core.  Merge only this asymmetric shape so
-            # ordinary colour cards (usually 4+4 photos) stay independent.
-            if result and not separator_since_primary and _can_merge_adjacent_primary(result[-1], primary):
-                result[-1] = _merge_primary_albums(result[-1], primary)
-            else:
-                result.append(primary)
-            pending_photos = []
-            separator_since_primary = False
-            continue
+    cards: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for block in blocks:
+        card_indexes = [
+            index
+            for index, product in enumerate(block)
+            if _role(product, _text(product.get("description"))) == "card"
+        ]
+        previous = -1
+        for index in card_indexes:
+            cards.append(_build_card(block[index], block[previous + 1 : index]))
+            previous = index
 
-        video = _video(product)
-        if video[0] or VIDEO_RE.search(description):
-            # The video card is usually before the primary card, including when
-            # the supplier omitted a `➨` separator.
-            if video[0]:
-                pending_videos.append(video)
-            continue
-
-        if DETAIL_RE.search(description) or (HARDWARE_RE.search(description) and not BRAND_RE.search(description)):
-            pending_photos.extend(_photos(product))
-            continue
-
-        # Size tables, model shots, packaging/lifestyle collages and captions
-        # are intentionally discarded; they must not become catalogue products.
-
-    return result
+    _apply_families(cards)
+    return [card for card, _meta in cards]
