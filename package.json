@@ -34,7 +34,6 @@
     "db:repair:gender": "node scripts/repair-canonical-gender.js",
     "db:repair:measurements": "node scripts/repair-encoded-measurements.js",
     "db:normalize-result-paths": "node scripts/normalize-result-paths.js",
-    "ai:batch-worker": "node scripts/batch-ai-worker.js",
     "lint": "eslint .",
     "test": "vitest",
     "test:ui": "vitest --ui",

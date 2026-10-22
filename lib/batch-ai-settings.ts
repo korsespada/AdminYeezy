@@ -47,7 +47,7 @@ export async function loadBatchAiSettingsCore(): Promise<BatchAiSettings> {
   const active = providers.rows.find((row: any) => String(row.id) === activeProviderId)
   const provider = active
     ? active.kind as BatchAiProvider
-    : (['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider) ? values.batch_ai_provider as BatchAiProvider : 'openrouter')
+    : (['openrouter', 'byesu'].includes(values.batch_ai_provider) ? values.batch_ai_provider as BatchAiProvider : 'openrouter')
   const number = (value: string | undefined, fallback: number) => {
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : fallback

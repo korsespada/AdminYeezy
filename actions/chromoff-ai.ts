@@ -199,9 +199,6 @@ async function ensureProviderReady(settings: ChromoffAiSettings) {
   if (settings.provider === 'openrouter' && !settings.providerApiKey && !process.env.OPENROUTER_API_KEY?.trim()) {
     throw new Error('OPENROUTER_API_KEY не задан')
   }
-  if (settings.provider === 'cockpit' && (!process.env.COCKPIT_API_URL?.trim() || !process.env.COCKPIT_API_KEY?.trim())) {
-    throw new Error('COCKPIT_API_URL и COCKPIT_API_KEY не заданы')
-  }
 }
 
 export async function startChromoffAiRunAction(listingIds: string[]) {
@@ -356,14 +353,12 @@ async function processChromoffAiItem(
     const input = { ...listing, media: listing.media || photos.map((original_url) => ({ original_url })) }
     const userPrompt = buildChromoffAiUserPrompt(input, categoryPrompts, attributeDefinitions)
     const contactSheets = await buildBatchAiContactSheets(photos, { additionalHosts: chromoffMediaHosts() })
-    const raw = settings.provider === 'cockpit'
-      ? await runChromoffCockpit(settings, userPrompt, contactSheets)
-      : await runBatchAiOpenRouter({
-          settings,
-          systemPrompt: settings.systemPrompt,
-          userPrompt,
-          contactSheets,
-        })
+    const raw = await runBatchAiOpenRouter({
+      settings,
+      systemPrompt: settings.systemPrompt,
+      userPrompt,
+      contactSheets,
+    })
     const normalized = normalizeChromoffAiOutput(raw, input, attributeDefinitions)
     if (!normalized.seoDescription) throw new Error('ИИ не вернул уникальное SEO-описание Chromoff')
     const updated = await applyRailsChromoffAiContent(item.listing_id, {
@@ -422,36 +417,4 @@ async function updateChromoffAiRunCounts(runId: string) {
     FROM counts
     WHERE r.id=$1
   `, [runId])
-}
-
-async function runChromoffCockpit(settings: ChromoffAiSettings, userPrompt: string, contactSheets: string[]) {
-  const url = process.env.COCKPIT_API_URL?.trim()
-  const apiKey = process.env.COCKPIT_API_KEY?.trim()
-  if (!url || !apiKey) throw new Error('Cockpit не настроен')
-  const content: any[] = [{ type: 'text', text: userPrompt }]
-  contactSheets.forEach((sheet, index) => {
-    content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
-    content.push({ type: 'image_url', image_url: { url: sheet } })
-  })
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: process.env.COCKPIT_MODEL || 'gpt-5.6-luna',
-      messages: [{ role: 'system', content: settings.systemPrompt }, { role: 'user', content }],
-      temperature: settings.temperature,
-      max_tokens: settings.maxTokens,
-      response_format: { type: 'json_object' },
-      stream: false,
-    }),
-    signal: AbortSignal.timeout(180_000),
-  })
-  if (!response.ok) throw new Error(`Cockpit HTTP ${response.status}: ${await response.text()}`)
-  const payload = await response.json()
-  const message = payload?.choices?.[0]?.message?.content
-  const text = Array.isArray(message)
-    ? message.map((part) => typeof part === 'string' ? part : part?.text || '').join('')
-    : String(message || '')
-  const clean = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim()
-  return JSON.parse(clean.match(/\{[\s\S]*\}/)?.[0] || clean)
 }

@@ -260,7 +260,7 @@ batch и сохранённым snapshot используют те же canonica
 | URL | Назначение | Источник |
 |---|---|---|
 | `/admin/video-matches` | Сопоставление альбомов с видео из выгрузки поставщика с товарами каталога, апрув и перенос видео в S3 | scraping `product_video_matches` + Rails CRM `/admin/products` |
-| `/admin/ai-rules` | Глобальные настройки batch AI: OpenRouter/Cockpit, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` + Cockpit heartbeat |
+| `/admin/ai-rules` | Глобальные настройки batch AI: BYESU/OpenRouter/сохранённые провайдеры, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` |
 | `/admin/analytics` | Аналитика каталога, трафика и коммерческих показателей: разделение каналов (Сайт десктоп/мобайл, TG Mini App), мультиканальная сегментация источников (Яндекс Органика, Google Поиск, TG Mini App, внешний трафик), поисковый спрос покупателей на витрине, сквозная воронка конверсии, выручка CRM, средний чек, топ товаров, произвольные даты и хаб 4 платформ (Яндекс.Метрика с поддержкой прямого API, Google Search Console, Google Merchant Center, Яндекс.Вебмастер, GA4) | AdminYeezy `analytics_events` + Rails CRM `/admin/orders` |
 
 SEO landings, redirects и audits относятся к Rails CRM/API. Прямые записи в CRM-БД запрещены.

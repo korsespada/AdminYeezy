@@ -312,7 +312,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
           setBatches((items) => items.map((item) => item.id === batch.id ? {
             ...item,
             ai_run_id: data.runId,
-            ai_run_status: data.provider === 'cockpit' ? 'queued' : 'running',
+            ai_run_status: 'running',
           } : item))
           let finalRun: any = null
           for (let attempt = 0; attempt < 200; attempt += 1) {

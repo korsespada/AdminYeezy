@@ -108,7 +108,7 @@ function normalizeCategoryRules(value: unknown): ChromoffAiCategoryRule[] {
 
 export function hydrateChromoffAiSettings(data: unknown): ChromoffAiSettings {
   const source = data && typeof data === 'object' ? data as Record<string, unknown> : {}
-  const provider = ['openrouter', 'byesu', 'cockpit'].includes(String(source.provider))
+  const provider = ['openrouter', 'byesu'].includes(String(source.provider))
     ? source.provider as BatchAiProvider
     : DEFAULT_CHROMOFF_AI_SETTINGS.provider
   return {

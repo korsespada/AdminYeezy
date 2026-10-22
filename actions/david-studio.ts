@@ -267,9 +267,7 @@ export async function startDavidPhotoCleaningBatchAction(handles: string[]): Pro
 /**
  * Считает черновик моделью из «Выгрузок» → «Настройки ИИ» (сейчас BYESU).
  *
- * Вызов серверный: BYESU — публичный API, ключи к нему настроены в окружении
- * прода. Провайдер Cockpit доступен только с локального воркера, поэтому при
- * нём возвращаем понятную ошибку, а не непонятный таймаут.
+ * Вызов серверный: BYESU — публичный API, ключи к нему настроены в окружении прода.
  */
 export async function generateDavidDraftAction(handle: string, targetProductId: string | null = null) {
   const settingsResult = await getBatchAiSettingsAction()
@@ -281,13 +279,6 @@ export async function generateDavidDraftAction(handle: string, targetProductId: 
 
   const prepared = await prepareDavidDraft({ handle, targetProductId, settings })
   if (!prepared.success) return prepared
-
-  if (provider === 'cockpit') {
-    const error = 'Выбран провайдер Cockpit: он работает только через локальный воркер. Выберите BYESU или OpenRouter в «Выгрузках» → «Настройки ИИ».'
-    await markDavidDraftError(handle, error)
-    revalidatePath('/admin/chromoff/david-studio')
-    return { success: false as const, error }
-  }
 
   const model = provider === 'byesu' ? String(settings.byesuModel || '') : String(settings.openrouterModel || '')
   try {

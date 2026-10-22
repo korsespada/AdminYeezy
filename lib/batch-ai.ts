@@ -21,7 +21,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeMeasurementTable, normalizeProductMeasurements, normalizeSizeRecommendation, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
-export type BatchAiProvider = 'openrouter' | 'byesu' | 'cockpit'
+export type BatchAiProvider = 'openrouter' | 'byesu'
 
 export type BatchAiProcessingOptions = {
   colorFamilyByArticle: boolean

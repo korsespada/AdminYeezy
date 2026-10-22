@@ -155,16 +155,9 @@ export async function getBatchAiSettingsAction() {
   const activeConfigured = configuredProviders.rows.find((row) => String(row.id) === activeProviderId)
   const provider: BatchAiProvider = activeConfigured
     ? activeConfigured.kind as BatchAiProvider
-    : ['openrouter', 'byesu', 'cockpit'].includes(values.batch_ai_provider)
+    : ['openrouter', 'byesu'].includes(values.batch_ai_provider)
     ? values.batch_ai_provider as BatchAiProvider
     : 'openrouter'
-  const worker = await scrapingQuery(`
-    SELECT worker_id, provider, model, heartbeat_at, metadata,
-           heartbeat_at > NOW() - INTERVAL '30 seconds' AS available
-    FROM batch_ai_worker_state
-    WHERE provider='cockpit'
-    ORDER BY heartbeat_at DESC LIMIT 1
-  `).catch(() => ({ rows: [] }))
   const byesuKeys = byesuApiKeyStatus()
   const fetchedByesuModels = await getByesuModels()
   const byesuModels = fetchedByesuModels.length > 0 ? fetchedByesuModels : FALLBACK_BYESU_MODELS
@@ -192,7 +185,6 @@ export async function getBatchAiSettingsAction() {
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
       systemPrompt: values.batch_ai_system_prompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       categoryRules: normalizeBatchAiCategoryRules(safeJsonParse(values.batch_ai_category_rules)),
-      cockpitWorker: worker.rows[0] || null,
       credentials: {
         openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
         byesuGemini: byesuKeys.gemini,
@@ -215,7 +207,7 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
   if (requestedProviderId && !configured) return { success: false, error: 'Провайдер не найден' }
   const provider: BatchAiProvider = configured
     ? configured.kind as BatchAiProvider
-    : ['openrouter', 'byesu', 'cockpit'].includes(settings.provider)
+    : ['openrouter', 'byesu'].includes(settings.provider)
     ? settings.provider
     : 'openrouter'
   const values: Record<string, string> = {
@@ -1127,12 +1119,6 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
     if (active.rows[0]) return { success: false, error: 'Для этой выгрузки уже выполняется AI-обработка' }
     let settings = await loadSettings()
     const context = await batchContext(batchId, mode, productId)
-    if (mode === 'split_colors' && settings.provider === 'cockpit') {
-      return { success: false, error: 'Разделение по цветам пока доступно через BYESU или OpenRouter' }
-    }
-    if (mode === 'family_names' && settings.provider === 'cockpit') {
-      return { success: false, error: 'Согласование названий семей пока доступно через BYESU или OpenRouter' }
-    }
     const familyNamingPlan = mode === 'family_names' ? await familyNamingFamilies(batchId, context.products) : []
     if (mode === 'family_names' && familyNamingPlan.length === 0) {
       return { success: false, error: 'Все цветовые семьи уже согласованы, либо в них есть цвета без обработки ИИ или без фото' }
@@ -1211,18 +1197,6 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       context.batch.ai_processing_options || DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
     )
     settings = { ...settings, processingOptions: normalizedProcessingOptions }
-    if (normalizedProcessingOptions.splitAlbumColors && settings.provider === 'cockpit') {
-      return { success: false, error: 'Разделение цветов в точечной настройке доступно через BYESU или OpenRouter' }
-    }
-
-    if (needsAiProvider && settings.provider === 'cockpit') {
-      const worker = await scrapingQuery(`
-        SELECT * FROM batch_ai_worker_state
-        WHERE provider='cockpit' AND heartbeat_at > NOW() - INTERVAL '30 seconds'
-        ORDER BY heartbeat_at DESC LIMIT 1
-      `)
-      if (!worker.rows[0]) return { success: false, error: 'Cockpit worker недоступен: heartbeat старше 30 секунд' }
-    }
 
     operationClaimed = Boolean(await claimBatchOperation(batchId, 'ai', runId))
     if (!operationClaimed) return { success: false, error: 'Для этой выгрузки уже выполняется другое действие' }
@@ -1516,26 +1490,21 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       }
     }
 
-    await scrapingQuery(
-      'UPDATE batch_ai_runs SET status=$2,updated_at=NOW() WHERE id=$1',
-      [runId, settings.provider === 'cockpit' ? 'queued' : 'running'],
-    )
+    await scrapingQuery("UPDATE batch_ai_runs SET status='running',updated_at=NOW() WHERE id=$1", [runId])
 
     revalidatePath('/admin/batches')
-    if (settings.provider !== 'cockpit') {
-      after(async () => {
-        try {
-          await processOpenRouterRun(runId, context, settings)
-        } catch (error) {
-          await scrapingQuery(`
-            UPDATE batch_ai_runs SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
-            WHERE id=$1 AND status IN ('queued','running')
-          `, [runId, String((error as any)?.message || error).slice(0, 4000)]).catch(() => undefined)
-          await releaseBatchOperation(batchId, runId).catch(() => undefined)
-          throw error
-        }
-      })
-    }
+    after(async () => {
+      try {
+        await processOpenRouterRun(runId, context, settings)
+      } catch (error) {
+        await scrapingQuery(`
+          UPDATE batch_ai_runs SET status='failed',error_message=$2,completed_at=NOW(),updated_at=NOW()
+          WHERE id=$1 AND status IN ('queued','running')
+        `, [runId, String((error as any)?.message || error).slice(0, 4000)]).catch(() => undefined)
+        await releaseBatchOperation(batchId, runId).catch(() => undefined)
+        throw error
+      }
+    })
     return {
       success: true,
       data: {

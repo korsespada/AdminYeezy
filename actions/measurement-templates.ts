@@ -140,7 +140,6 @@ async function measurementRecognitionSettings(): Promise<BatchAiSettings> {
   if (!settingsResult.success || !settingsResult.data) throw new Error('Настройки AI недоступны')
   const settings = settingsResult.data as any
   const provider = String(settings.provider || '')
-  if (provider === 'cockpit') throw new Error('Для распознавания таблиц выберите OpenRouter или BYESU в настройках AI')
   if (provider !== 'openrouter' && provider !== 'byesu') throw new Error('Не выбран совместимый AI-провайдер')
 
   let providerBaseUrl = ''

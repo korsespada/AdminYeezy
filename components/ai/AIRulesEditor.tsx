@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
-import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, Server, ShieldAlert, Trash2, X } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, ShieldAlert, Trash2, X } from 'lucide-react'
 import { createAiProviderAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
@@ -10,15 +10,8 @@ import { byesuApiKeyEnvName, byesuGroupLabel, byesuModelGroup, type ByesuModelOp
 import type { AiProviderRecord } from '@/lib/ai-providers'
 import type { Category, Subcategory } from '@/lib/types'
 
-type WorkerState = {
-  available?: boolean
-  model?: string | null
-  heartbeat_at?: string | null
-} | null
-
 type Props = {
   initialSettings: BatchAiSettings & {
-    cockpitWorker?: WorkerState
     credentials?: {
       openrouter?: boolean
       byesuGemini?: boolean
@@ -70,7 +63,6 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSubcategoryName, setNewSubcategoryName] = useState('')
   const [newSubcategoryParentId, setNewSubcategoryParentId] = useState(initialCategories[0]?.id || '')
-  const worker = initialSettings.cockpitWorker
   const credentials = initialSettings.credentials
   const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
   const activeSavedProvider = providers.find((provider) => provider.id === settings.activeProviderId)
@@ -222,11 +214,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
       ? {
           type: 'success',
           text: `Настройки сохранены. Новые тесты используют ${
-            settings.provider === 'byesu'
-              ? settings.byesuModel
-              : settings.provider === 'openrouter'
-                ? settings.openrouterModel
-                : worker?.model || 'модель Cockpit worker'
+            settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel
           }; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
         }
       : { type: 'error', text: result.error || 'Не удалось сохранить настройки' })
@@ -260,7 +248,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
         <div className="grid gap-5 p-6 lg:grid-cols-2">
           <div className="space-y-3">
             <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдер</span>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <ProviderButton
                 active={!settings.activeProviderId && settings.provider === 'byesu'}
                 title="BYESU API"
@@ -272,12 +260,6 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                 title="OpenRouter"
                 description={credentials?.openrouter ? 'Ключ подключён' : 'Ключ не задан'}
                 onClick={() => selectLegacyProvider('openrouter')}
-              />
-              <ProviderButton
-                active={!settings.activeProviderId && settings.provider === 'cockpit'}
-                title="Cockpit локальный"
-                description="Обработка локальным worker"
-                onClick={() => selectLegacyProvider('cockpit')}
               />
             </div>
           </div>
@@ -397,18 +379,6 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
               </>
             )}
 
-            {settings.provider === 'cockpit' && (
-              <div className={`rounded-xl border p-3 text-sm ${
-                worker?.available
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : 'border-slate-700 bg-slate-950/60 text-slate-400'
-              }`}>
-                <div className="flex items-center gap-2 font-semibold"><Server size={16} /> Cockpit worker</div>
-                <p className="mt-1">
-                  {worker?.available ? `Онлайн · ${worker.model || 'модель не сообщена'}` : 'Не подключён · запуск Cockpit будет отклонён после 30 секунд без heartbeat'}
-                </p>
-              </div>
-            )}
           </div>
 
           <label className="space-y-2 text-sm text-slate-300">
@@ -446,7 +416,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
               onChange={(event) => update('concurrency', Number(event.target.value))}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
             />
-            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter, BYESU и Cockpit. Поставщик может запретить параллельную обработку.</span>
+            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter и BYESU. Поставщик может запретить параллельную обработку.</span>
           </label>
         </div>
       </section>
