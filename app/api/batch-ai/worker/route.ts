@@ -1,13 +1,14 @@
 import crypto from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
-import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, priceFromAiInstructions, shouldPreserveExistingPrice } from '@/lib/batch-ai'
+import { calculatePriceRulePrice, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, choosePriceFromAiInstructions, shouldPreserveExistingPrice, textSizesMissingFromMeasurements, batchAiSizeWarning } from '@/lib/batch-ai'
 import { normalizeMediaSeoOutput } from '@/lib/product-media-seo'
 import { applyMeasurementTableAttributes, measurementTemplateForProduct, normalizeMeasurementTable, type MeasurementTemplate } from '@/lib/measurement-templates'
 import { buildProductSeoSlug } from '@/lib/product-media-seo'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
 import { releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { alignColorFamiliesAfterRun } from '@/lib/color-family-alignment'
+import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
   applyShadeVariantsToSuggestion,
   normalizeShadeScanOutput,
@@ -25,22 +26,6 @@ function authorized(request: NextRequest) {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(actual))
 }
 
-type ScrapingClient = Awaited<ReturnType<typeof getScrapingClient>>
-
-// Колонки EN-перевода добавляет `npm run db:migrate:scraping`. Пока миграции нет,
-// worker сохраняет результат AI без EN-полей, а не падает на каждом товаре.
-// Кэшируется только положительный ответ: после миграции колонки подхватятся без рестарта.
-let translationColumnsReady = false
-async function hasTranslationColumns(client: ScrapingClient) {
-  if (translationColumnsReady) return true
-  const result = await client.query(`
-    SELECT COUNT(*)::int AS count FROM information_schema.columns
-    WHERE table_schema = current_schema() AND table_name = 'products' AND column_name IN ('translations', 'photo_alts_en')
-  `)
-  translationColumnsReady = Number(result.rows[0]?.count) === 2
-  if (!translationColumnsReady) console.warn('[batch-ai] translations/photo_alts_en columns are missing: run npm run db:migrate:scraping')
-  return translationColumnsReady
-}
 
 export async function POST(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -185,6 +170,13 @@ async function complete(body: any) {
     })
     if (template) product.attributes = applyMeasurementTableAttributes(product.attributes, template.measurements)
   }
+  const missingSizes = measurementRecoveryOnly || input.mediaSeoOnly || input.variantScanOnly
+    ? []
+    : textSizesMissingFromMeasurements(input.product?.description, product?.attributes?.measurements)
+  if (missingSizes.length && Array.isArray(product.attributes?.sizes)) {
+    product.attributes.sizes = [...new Set([...product.attributes.sizes, ...missingSizes])]
+  }
+  const sizeWarning = batchAiSizeWarning(missingSizes)
   if (!input.mediaSeoOnly && !input.variantScanOnly && input.preserveExistingPrice && shouldPreserveExistingPrice(input.product)) {
     product.price = Number(input.product?.price || 0)
     product.price_source = input.product?.price_source || 'legacy'
@@ -206,10 +198,11 @@ async function complete(body: any) {
       ].filter(Boolean).join('\n'))
       : null
     const instructionPrice = !input.mediaSeoOnly && !input.variantScanOnly
-      ? priceFromAiInstructions(input.priceAiInstructions, priceSourceText)
-      : null
-    const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
-      ? Number(product.price)
+      ? choosePriceFromAiInstructions(
+        input.priceAiInstructions,
+        priceSourceText,
+        product.price_source === 'ai_instruction' ? product.price : null,
+      )
       : null
     // A zero-valued catch-all rule means "no configured price" in practice;
     // let the supplier's explicit category price fill that gap.
@@ -218,9 +211,6 @@ async function complete(body: any) {
       product.price_source = 'rule'
     } else if (instructionPrice !== null) {
       product.price = instructionPrice
-      product.price_source = 'ai_instruction'
-    } else if (explicitAiPrice !== null) {
-      product.price = explicitAiPrice
       product.price_source = 'ai_instruction'
     } else if (calculatedPrice !== null) {
       product.price = calculatedPrice
@@ -262,17 +252,17 @@ async function complete(body: any) {
         WHERE batch_id=$1 AND id=ANY($3::int[])
       `, [item.batch_id, JSON.stringify(applyMeasurementTableAttributes(null, recoveredMeasurements)), targetIds])
     } else if (!input.variantScanOnly) {
-      const withTranslations = await hasTranslationColumns(client)
+      const withTranslations = await hasProductTranslationColumns(client)
       await client.query(`
         UPDATE products SET name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
           brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,photo_alts=$13::jsonb,attributes=$14::jsonb,
-          price=$15,price_source=$16,ai_processed=true,ai_error=NULL,ai_confidence=$17,
-          ${withTranslations ? 'translations=$18::jsonb,photo_alts_en=$19::jsonb,' : ''}updated_at=NOW()
+          price=$15,price_source=$16,ai_processed=true,ai_error=$18,ai_confidence=$17,
+          ${withTranslations ? 'translations=$19::jsonb,photo_alts_en=$20::jsonb,' : ''}updated_at=NOW()
         WHERE id=$1
       `, [item.product_id, product.name, product.description, product.h1, product.seo_title,
         product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
         product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
-        Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence,
+        Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence, sizeWarning,
         ...(withTranslations ? [JSON.stringify(product.translations || {}), JSON.stringify(product.photo_alts_en || [])] : [])])
     }
     await client.query(`

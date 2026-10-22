@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, calculatePriceRulePrice, canonicalBatchSuggestionKey, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -555,6 +555,55 @@ describe('batch AI normalization', () => {
       'Футболки — 21000',
       'Кожаная юбка',
     )).toBeNull()
+  })
+
+  it('moves down and feather from materials into the filling attribute', () => {
+    const codes = new Set(['materials', 'filling'])
+    const goose: Record<string, any> = { materials: ['Шерсть', 'Пух'] }
+    moveInsulationToFilling(goose, codes, 'Наполнитель из высококачественного гусиного пуха и пера')
+    expect(goose).toEqual({ materials: ['Шерсть'], filling: ['Гусиный пух'] })
+
+    const mixed: Record<string, any> = { materials: ['Полиэстер', 'Пух', 'Перо'] }
+    moveInsulationToFilling(mixed, codes, 'Утеплитель: пух и перо')
+    expect(mixed).toEqual({ materials: ['Полиэстер'], filling: ['Пухо-перо'] })
+
+    const filled: Record<string, any> = { materials: ['Пух'], filling: ['Утиный пух'] }
+    moveInsulationToFilling(filled, codes, '')
+    expect(filled).toEqual({ materials: ['Пух'], filling: ['Утиный пух'] })
+
+    const noSchema: Record<string, any> = { materials: ['Пух'] }
+    moveInsulationToFilling(noSchema, new Set(['materials']), '')
+    expect(noSchema).toEqual({ materials: ['Пух'] })
+  })
+
+  it('finds text sizes that the measurement table lost', () => {
+    const table = {
+      unit: 'см',
+      columns: [{ key: 'chest', label: 'Грудь' }],
+      rows: ['M', 'L', 'XL', 'XXL'].map((size, index) => ({ size, values: { chest: String(116 + index * 4) } })),
+      note: '',
+    }
+
+    expect(textSizesMissingFromMeasurements('▫️Размеры: M•L•XL•XXL•XXXL ▫️Цена: 1130¥', table)).toEqual(['XXXL'])
+    expect(textSizesMissingFromMeasurements('Sizes: M•L•XL•2XL•3XL', table)).toEqual(['XXXL'])
+    expect(textSizesMissingFromMeasurements('Размеры: M•L•XL•2XL', table)).toEqual([])
+    expect(textSizesMissingFromMeasurements('Размеры: M•L•XL•XXL•XXXL', null)).toEqual([])
+    expect(batchAiSizeWarning(['XXXL'])).toBe('Размеры: в тексте указаны XXXL, а в таблице замеров их нет. Проверьте фото размерной сетки.')
+  })
+
+  it('prefers the AI price from the instruction and ignores sentence-style lines in word matching', () => {
+    const instructions = [
+      'Футболки и поло из 100% хлопка - 21000',
+      'Футболка или поло из кашемира, шерсти, шёлка, льна, модала либо мягкого смесового материала; не 100% хлопок. - 24000',
+      'Объёмная утеплённая, пуховая или явно зимняя куртка. - 60000',
+    ].join('\n')
+    const downJacket = 'Тёмно-серый шерстяной пуховик. Наполнитель из гусиного пуха. Состав материала: 100% шерсть'
+
+    expect(priceFromAiInstructions(instructions, downJacket)).toBeNull()
+    expect(choosePriceFromAiInstructions(instructions, downJacket, 60000)).toBe(60_000)
+    expect(choosePriceFromAiInstructions(instructions, 'Белая хлопковая футболка', null)).toBe(21_000)
+    expect(choosePriceFromAiInstructions(instructions, downJacket, 33000)).toBe(33_000)
+    expect(choosePriceFromAiInstructions('Футболки — 21000', 'Белая футболка', 25000)).toBe(21_000)
   })
 
   it('applies a shared supplier pricing instruction to an explicit AI price', () => {

@@ -899,7 +899,19 @@ function normalizeProduct(row) {
     ai_confidence: row.ai_confidence == null ? null : Number(row.ai_confidence),
     source_position: row.source_position == null ? null : Number(row.source_position),
     supplier_published_on: row.supplier_published_on || null,
+    // EN-перевод и EN-alt уходят в Rails при создании и обновлении товара.
+    ...(englishTranslations(row.translations) ? { translations: englishTranslations(row.translations) } : {}),
+    photo_alts_en: Array.isArray(row.photo_alts_en) ? row.photo_alts_en.map(String) : [],
   };
+}
+
+function englishTranslations(value) {
+  const en = value && typeof value === 'object' && !Array.isArray(value) ? value.en : null;
+  if (!en || typeof en !== 'object') return null;
+  const name = String(en.name || '').trim();
+  const description = String(en.description || '').trim();
+  if (!name && !description) return null;
+  return { en: { ...en, ...(name ? { name } : {}), ...(description ? { description } : {}) } };
 }
 
 function serializeProductsToCsv(products, columns = PRODUCT_COLUMNS, delimiter = ';') {
@@ -1601,7 +1613,8 @@ async function getBatchProducts(batchId, limit, offset = 0) {
   }
 
   const res = await scrapingPool.query(`
-    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, variant_group_name, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at
+    SELECT id, external_id, name, description, h1, seo_title, seo_description, slug, price, price_source, status, brand, category, subcategory, gender, photos, photo_alts, photo_slugs, attributes, batch_id, ai_processed, variant_group_key, variant_group_name, ai_error, ai_confidence, source_position, supplier_published_on, created_at, updated_at,
+      to_jsonb(products)->'translations' AS translations, to_jsonb(products)->'photo_alts_en' AS photo_alts_en
     FROM products
     WHERE batch_id=$1
     ORDER BY source_position ASC NULLS LAST, id ASC
@@ -2635,6 +2648,7 @@ function railsUpdatePayload(product) {
       seo_title: product.seo_title || '',
       seo_description: product.seo_description || '',
       slug: product.slug || '',
+      ...(product.translations ? { translations: product.translations } : {}),
       price_cents: priceCents,
       status: 'active',
       primary_supplier_name: product.supplier_name || null,
@@ -2654,6 +2668,9 @@ function railsUpdatePayload(product) {
         preview_url: url,
         og_image_url: url,
         alt_text: Array.isArray(product.photo_alts) ? product.photo_alts[index] || product.name || '' : product.name || '',
+        ...(Array.isArray(product.photo_alts_en) && product.photo_alts_en[index]
+          ? { translations: { en: { alt_text: product.photo_alts_en[index] } } }
+          : {}),
         sort_order: index,
         processing_status: 'processed',
       })),
@@ -2803,6 +2820,9 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
         ? railsProduct.metadata
         : undefined,
+      // Обновление в Rails записывает translations как есть, без защиты
+      // проверенного перевода, поэтому проверенный перевод не отправляем.
+      ...(railsProduct?.translations?.en?.status === 'reviewed' ? { translations: undefined } : {}),
       ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(publicationProduct, lookups, railsProduct) } : {}),
       attributes: {
         ...normalizeAttributes(publicationProduct.attributes),

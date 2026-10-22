@@ -19,6 +19,7 @@ import { activeBatchOperation, claimBatchOperation, releaseBatchOperation, updat
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 import { normalizeProductsCatalogReferences, type CatalogIdMapping } from '@/lib/catalog-reference-normalizer'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
+import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import type { ActionResponse } from '@/lib/types'
 
 export interface CsvProduct {
@@ -50,6 +51,8 @@ export interface CsvProduct {
     ai_confidence?: number | null
     source_position?: number | null
     supplier_published_on?: string | null
+    translations?: Record<string, any>
+    photo_alts_en?: string[]
 }
 
 export interface Lookups {
@@ -146,6 +149,8 @@ function normalizeBatchProduct(row: any): CsvProduct {
     supplier_published_on: normalizeSupplierPublishedOn(row.supplier_published_on)
       || supplierPublishedOnFromAttributes(row.attributes)
       || null,
+    translations: row.translations && typeof row.translations === 'object' && !Array.isArray(row.translations) ? row.translations : {},
+    photo_alts_en: Array.isArray(row.photo_alts_en) ? row.photo_alts_en.map(String) : [],
   }
 }
 
@@ -651,6 +656,7 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
         p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.variant_group_name, p.ai_error,
         p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
+        to_jsonb(p)->'translations' AS translations, to_jsonb(p)->'photo_alts_en' AS photo_alts_en,
         EXISTS (
           SELECT 1 FROM batch_ai_items i
           JOIN batch_ai_runs r ON r.id=i.run_id
@@ -677,6 +683,21 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
 }
 
 async function upsertBatchProduct(client: any, batchId: string, product: any, position: number) {
+  const id = await upsertBatchProductRow(client, batchId, product, position)
+  // Перевод пишем, только если его прислал редактор: скрипты и импорт его не
+  // знают и не должны стирать перевод, полученный от ИИ.
+  if (id && (product?.translations !== undefined || product?.photo_alts_en !== undefined)
+    && await hasProductTranslationColumns(client)) {
+    const normalized = normalizeBatchProduct(product)
+    await client.query(
+      'UPDATE products SET translations=$2::jsonb,photo_alts_en=$3::jsonb WHERE id=$1',
+      [id, JSON.stringify(normalized.translations || {}), JSON.stringify(normalized.photo_alts_en || [])],
+    )
+  }
+  return id
+}
+
+async function upsertBatchProductRow(client: any, batchId: string, product: any, position: number) {
   const normalized = normalizeBatchProduct({
     ...product,
     batch_id: batchId,

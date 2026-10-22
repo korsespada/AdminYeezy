@@ -1,3 +1,4 @@
+import { BATCH_AI_SIZE_WARNING_PREFIX } from '@/lib/batch-ai'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 
 export type ColorFamilyIssue = {
@@ -69,12 +70,17 @@ export async function alignBatchColorFamilies(batchId: string, productIds: numbe
       for (const member of members) {
         const update = changes.get(Number(member.id))
         const memberIssues = issues.filter((entry) => entry.productIds.map(Number).includes(Number(member.id)))
-        const ownError = !member.ai_error || String(member.ai_error).startsWith(FAMILY_ERROR_PREFIX)
-        const aiError = !ownError
+        // ai_error может содержать служебные предупреждения построчно; ошибку
+        // самого AI-ответа (строку без известного префикса) шаг не трогает.
+        const lines = String(member.ai_error || '').split('\n').filter(Boolean)
+        const serviceLines = lines.filter((line) => line.startsWith(FAMILY_ERROR_PREFIX) || line.startsWith(BATCH_AI_SIZE_WARNING_PREFIX))
+        const familyLine = memberIssues.length > 0
+          ? `${FAMILY_ERROR_PREFIX}«${label}»: ${memberIssues.map((entry) => entry.message).join('; ')}`
+          : null
+        const aiError = lines.length !== serviceLines.length
           ? member.ai_error
-          : memberIssues.length > 0
-            ? `${FAMILY_ERROR_PREFIX}«${label}»: ${memberIssues.map((entry) => entry.message).join('; ')}`.slice(0, 4000)
-            : null
+          : [...serviceLines.filter((line) => !line.startsWith(FAMILY_ERROR_PREFIX)), familyLine]
+            .filter(Boolean).join('\n').slice(0, 4000) || null
         if (!update && aiError === (member.ai_error || null)) continue
         const next = { ...member, ...(update?.fields || {}) }
         await client.query(`

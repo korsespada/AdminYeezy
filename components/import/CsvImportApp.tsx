@@ -93,6 +93,7 @@ import MeasurementImageRecognizer from "@/components/catalog-attributes/Measurem
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
 import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
 import { formatImportAttributeValue, isGenericImportAttribute } from "@/lib/catalog-attribute-display";
+import { getCatalogAttributeDefinition } from "@/lib/catalog-attribute-schema";
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from "@/lib/supplier-publication";
 
 const DEFAULT_PRODUCT_COLUMNS = [
@@ -2596,8 +2597,9 @@ export default function CsvImportApp({
         {/* Filters */}
         {products.length > 0 && (
             <div
-              className="sticky z-20 mb-4 grid grid-cols-1 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/95 p-2 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-3 lg:flex lg:flex-wrap"
-              style={{ top: actionBarHeight + 8 }}
+              // На телефоне фильтры занимают полэкрана, поэтому закрепляются только с md.
+              className="z-20 mb-4 grid grid-cols-1 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/95 p-2 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-3 md:sticky md:top-[var(--filters-top)] lg:flex lg:flex-wrap"
+              style={{ "--filters-top": `${actionBarHeight + 8}px` } as React.CSSProperties}
             >
               <div className="flex items-center gap-1.5 text-slate-500 mr-1">
                 <Filter className="h-3.5 w-3.5" />
@@ -3706,6 +3708,7 @@ function CsvProductDrawer({
   const [local, setLocal] = useState<CsvProduct | null>(null);
   const [photoUrlInput, setPhotoUrlInput] = useState("");
   const [photoUrlError, setPhotoUrlError] = useState<string | null>(null);
+  const [language, setLanguage] = useState<"ru" | "en">("ru");
 
   useEffect(() => {
     setLocal(product ? { ...product } : null);
@@ -3740,6 +3743,15 @@ function CsvProductDrawer({
   const change = (field: keyof CsvProduct, value: any) => {
     setLocal((prev) => (prev ? { ...prev, [field]: value } : null));
     onUpdate(index, field, value);
+  };
+
+  const english = (local.translations?.en || {}) as { name?: string; description?: string; status?: string };
+  const changeEnglish = (field: "name" | "description", value: string) => {
+    // Ручная правка остаётся машинным переводом, пока его не отметят проверенным в Rails.
+    change("translations", {
+      ...(local.translations || {}),
+      en: { ...english, status: english.status || "machine", [field]: value },
+    });
   };
 
   const addPhotoByUrl = () => {
@@ -3898,6 +3910,21 @@ function CsvProductDrawer({
               <h2 className="break-words text-base font-semibold text-white sm:text-lg">
                 Редактирование #{index + 1}
               </h2>
+              <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5" role="group" aria-label="Язык карточки">
+                {(["ru", "en"] as const).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setLanguage(code)}
+                    aria-pressed={language === code}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold uppercase transition-colors ${
+                      language === code ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {onRollbackAi && (
@@ -3990,13 +4017,6 @@ function CsvProductDrawer({
                   placeholder="Вставить или заменить ссылку на видео"
                   className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
                 />
-                <input
-                  type="url"
-                  value={String(attributes.manual_video_poster_url || "")}
-                  onChange={(event) => updateManualVideo("manual_video_poster_url", event.target.value)}
-                  placeholder="Ссылка на постер видео (необязательно)"
-                  className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none placeholder:text-slate-500 focus:border-cyan-500"
-                />
                 {video.url && <p className="break-all text-[10px] text-slate-600">{video.url}</p>}
               </section>
 
@@ -4056,20 +4076,23 @@ function CsvProductDrawer({
 
             {/* Fields */}
             <section className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs text-slate-500">Название</label>
-                <input
-                  type="text"
-                  value={local.name}
-                  onChange={(e) => change("name", e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="space-y-1">
+              <div className="flex items-end gap-3">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <label className="text-xs text-slate-500">{language === "en" ? "Название (EN)" : "Название"}</label>
+                  <input
+                    type="text"
+                    value={language === "en" ? english.name || "" : local.name}
+                    onChange={(e) => (language === "en" ? changeEnglish("name", e.target.value) : change("name", e.target.value))}
+                    placeholder={language === "en" ? "Перевода пока нет" : undefined}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none placeholder:text-slate-600"
+                  />
+                </div>
+                <div className="w-28 shrink-0 space-y-1">
                   <label className="text-xs text-slate-500">Цена</label>
                   <input
                     type="number"
+                    inputMode="numeric"
+                    max={999999}
                     value={local.price}
                     onChange={(e) =>
                       change("price", parseFloat(e.target.value) || 0)
@@ -4079,12 +4102,13 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs text-slate-500">Описание</label>
+                <label className="text-xs text-slate-500">{language === "en" ? "Описание (EN)" : "Описание"}</label>
                 <textarea
                   rows={5}
-                  value={local.description}
-                  onChange={(e) => change("description", e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm"
+                  value={language === "en" ? english.description || "" : local.description}
+                  onChange={(e) => (language === "en" ? changeEnglish("description", e.target.value) : change("description", e.target.value))}
+                  placeholder={language === "en" ? "Перевода пока нет" : undefined}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:border-indigo-500 outline-none text-sm placeholder:text-slate-600"
                 />
               </div>
               <div className="grid grid-cols-1 gap-4 pt-4 border-t border-slate-800 md:grid-cols-2">
@@ -4182,7 +4206,7 @@ function CsvProductDrawer({
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="text-xs text-slate-500">Характеристики товара</label>
-                    <p className="mt-1 text-[11px] text-slate-600">Публичные характеристики карточки. Ключи сохраняются в JSON.</p>
+                    <p className="mt-1 text-[11px] text-slate-600">Публичные характеристики карточки. Код характеристики виден при наведении на название.</p>
                   </div>
                   <button
                     type="button"
@@ -4200,12 +4224,22 @@ function CsvProductDrawer({
                   <div className="space-y-2">
                     {publicAttributes.map(([key, value]) => (
                       <div key={key} className="flex items-center gap-2">
-                        <input
-                          value={key}
-                          onChange={(event) => updateAttribute(key, event.target.value, formatImportAttributeValue(value))}
-                          placeholder="Ключ"
-                          className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
-                        />
+                        {getCatalogAttributeDefinition(key) ? (
+                          // Известную характеристику показываем по-русски; код остаётся ключом JSON.
+                          <div
+                            title={key}
+                            className="w-1/3 truncate rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-200"
+                          >
+                            {getCatalogAttributeDefinition(key)?.label}
+                          </div>
+                        ) : (
+                          <input
+                            value={key}
+                            onChange={(event) => updateAttribute(key, event.target.value, formatImportAttributeValue(value))}
+                            placeholder="Ключ"
+                            className="w-1/3 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white outline-none focus:border-indigo-500"
+                          />
+                        )}
                         <input
                           value={formatImportAttributeValue(value)}
                           onChange={(event) => updateAttribute(key, key, event.target.value)}

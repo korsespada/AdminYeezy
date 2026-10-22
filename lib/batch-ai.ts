@@ -868,12 +868,13 @@ export async function runBatchAiOpenRouterRefinement(input: {
   photoUrls: unknown[]
   indexes: unknown[]
   measurementFocus?: boolean
+  note?: string
 }) {
   const originals = allowedOriginalPhotoUrls(input.photoUrls, input.indexes)
   if (!originals.length) return input.previousOutput
   const content: any[] = [{
     type: 'text',
-    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
+    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''}${input.note ? ` ${input.note}` : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
   }]
   originals.forEach(({ index, url }) => {
     content.push({ type: 'text', text: `Оригинал фото ${index}` })
@@ -1259,6 +1260,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
     }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
+  moveInsulationToFilling(attributes, input.attributeCodes, [original.description, proposed.description].filter(Boolean).join('\n'))
   if (attributes.measurements !== undefined) {
     const normalizedMeasurements = normalizeMeasurementTable(attributes.measurements)
     attributes.measurements = normalizeMeasurementRowSizes(normalizedMeasurements || attributes.measurements)
@@ -1813,6 +1815,50 @@ function extractExplicitNumericClothingSizes(value: unknown): string[] {
   return result
 }
 
+const INSULATION_MATERIAL_RE = /(?:пух|пер[оа]|down|feather)/iu
+
+/**
+ * Модель часто пишет пух и перо в материалы, хотя для этого есть отдельное поле
+ * «Наполнитель». Переносим их туда, когда поле есть в схеме и пустое.
+ */
+export function moveInsulationToFilling(attributes: Record<string, any>, attributeCodes: Set<string>, sourceText: string) {
+  if (!attributeCodes.has('filling')) return
+  const filling = attributes.filling
+  if (Array.isArray(filling) ? filling.some((value) => String(value || '').trim()) : String(filling || '').trim()) return
+  const materials = Array.isArray(attributes.materials) ? attributes.materials : []
+  if (!materials.some((material) => INSULATION_MATERIAL_RE.test(String(material)))) return
+  const text = [sourceText, ...materials].join(' ').toLowerCase().replace(/ё/g, 'е')
+  const value = /гусин|goose|鹅/u.test(text)
+    ? 'Гусиный пух'
+    : /утин|duck|鸭/u.test(text)
+      ? 'Утиный пух'
+      : /(?:пух|down).*(?:перо|пера|feather)|(?:перо|пера|feather).*(?:пух|down)/u.test(text)
+        ? 'Пухо-перо'
+        : 'Пух'
+  attributes.filling = [value]
+  attributes.materials = materials.filter((material) => !INSULATION_MATERIAL_RE.test(String(material)))
+}
+
+/**
+ * Буквенные размеры, явно перечисленные в тексте («Размеры: M•L•XL•2XL•3XL»),
+ * которых нет в строках таблицы замеров. Модель может не дочитать крайнюю
+ * колонку широкой таблицы, а размерный ряд берётся из таблицы.
+ */
+export function textSizesMissingFromMeasurements(sourceText: unknown, measurements: unknown): string[] {
+  const tableSizes = new Set(measurementRowSizes(measurements).map(canonicalClothingSize).filter(Boolean))
+  if (tableSizes.size === 0) return []
+  const textSizes = [...new Set(extractExplicitClothingSizes(sourceText).map(canonicalClothingSize).filter(Boolean))]
+  return textSizes.filter((size) => !tableSizes.has(size))
+}
+
+export const BATCH_AI_SIZE_WARNING_PREFIX = 'Размеры: '
+
+export function batchAiSizeWarning(missingSizes: string[]) {
+  return missingSizes.length
+    ? `${BATCH_AI_SIZE_WARNING_PREFIX}в тексте указаны ${missingSizes.join(', ')}, а в таблице замеров их нет. Проверьте фото размерной сетки.`
+    : null
+}
+
 function canonicalClothingSize(value: unknown) {
   const size = String(value || '').trim().toUpperCase().replace(/\s+/g, '').replace(',', '.')
   const numericXl = size.match(/^([2-6])XL$/)
@@ -1936,22 +1982,44 @@ export function calculatePriceRulePrice(rule: any, sourceText: unknown): number 
  * against the supplier's Chinese purchase prices.
  */
 export function priceFromAiInstructions(instructions: unknown, sourceText: unknown): number | null {
-  const source = normalizePriceInstructionText(sourceText)
-  if (!source) return null
+  const sourceWords = normalizePriceInstructionText(sourceText).split(/\s+/u).filter(Boolean)
+  if (sourceWords.length === 0) return null
 
-  for (const line of String(instructions || '').split(/\r?\n/)) {
-    const match = line.trim().match(/^(.+?)\s*[-–—:]\s*([\d\s]+(?:[.,]\d+)?)\s*(?:₽|руб(?:лей|ля)?|р\.)?\s*$/iu)
-    if (!match) continue
-    const price = Number(String(match[2]).replace(/\s+/g, '').replace(',', '.'))
-    if (!Number.isFinite(price) || price < 0) continue
-
-    const terms = match[1]
-      .split(/\s*(?:[,;/]|\bи\b)\s*/iu)
+  for (const { label, price } of priceInstructionLines(instructions)) {
+    // Фразы вроде «Футболка или поло из кашемира, шерсти; не 100% хлопок»
+    // описывают условие словами: их понимает только ИИ, поиск по словам на них
+    // ошибается («шерсти» есть у любой шерстяной вещи).
+    if (label.length > 40 || /[;()]|(?:^|\s)не\s/iu.test(label)) continue
+    const terms = label
+      .split(/\s*[,/]\s*|\s+(?:и|или)\s+/iu)
       .map((term) => normalizePriceInstructionText(term))
       .filter(Boolean)
-    if (terms.some((term) => priceInstructionTermMatches(term, source))) return Math.round(price)
+    if (terms.some((term) => priceInstructionTermMatches(term, sourceWords))) return price
   }
   return null
+}
+
+function priceInstructionLines(instructions: unknown) {
+  return String(instructions || '').split(/\r?\n/).flatMap((line) => {
+    const match = line.trim().match(/^(.+?)\s*[-–—:]\s*([\d\s]+(?:[.,]\d+)?)\s*(?:₽|руб(?:лей|ля)?|р\.)?\s*$/iu)
+    if (!match) return []
+    const price = Number(String(match[2]).replace(/\s+/g, '').replace(',', '.'))
+    return Number.isFinite(price) && price >= 0 ? [{ label: match[1].trim(), price: Math.round(price) }] : []
+  })
+}
+
+/**
+ * Цена по инструкции поставщика. ИИ видит всю инструкцию и выбирает строку по
+ * смыслу, поэтому его цена из этой инструкции важнее поиска по словам; поиск
+ * остаётся запасным путём для коротких строк вида «Футболки — 21000».
+ */
+export function choosePriceFromAiInstructions(instructions: unknown, sourceText: unknown, aiPrice: unknown): number | null {
+  const proposed = Number(aiPrice)
+  const listed = new Set(priceInstructionLines(instructions).map((line) => line.price))
+  if (proposed > 0 && listed.has(Math.round(proposed))) return Math.round(proposed)
+  const matched = priceFromAiInstructions(instructions, sourceText)
+  if (matched !== null) return matched
+  return proposed > 0 ? Math.round(proposed) : null
 }
 
 function normalizePriceInstructionText(value: unknown) {
@@ -1962,12 +2030,17 @@ function normalizePriceInstructionText(value: unknown) {
     .trim()
 }
 
-function priceInstructionTermMatches(term: string, source: string) {
-  if (source.includes(term)) return true
-  return term.split(/\s+/u).some((word) => {
-    if (word.length < 3) return false
-    const stem = /[аяыиэоеё]$/u.test(word) ? word.slice(0, -1) : word
-    return source.includes(stem)
+const PRICE_INSTRUCTION_STOP_WORDS = new Set(['для', 'без', 'при', 'из', 'на', 'под', 'над', 'любая', 'любой', 'любые', 'явно', 'только'])
+
+/** Все значимые слова условия должны начинать слова товара: «пол» не находит «наполнитель». */
+function priceInstructionTermMatches(term: string, sourceWords: string[]) {
+  const words = term.split(/\s+/u).filter((word) => word.length >= 3 && !/^\d+$/u.test(word) && !PRICE_INSTRUCTION_STOP_WORDS.has(word))
+  if (words.length === 0) return false
+  return words.every((word) => {
+    const stem = /[аяыиэоеёйь]$/u.test(word) ? word.slice(0, -1) : word
+    return stem.length >= 4
+      ? sourceWords.some((sourceWord) => sourceWord.startsWith(stem))
+      : sourceWords.includes(word)
   })
 }
 

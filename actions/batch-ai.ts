@@ -25,8 +25,10 @@ import {
   calculatePriceRulePrice,
   matchingPriceRule,
   normalizePriceRulesCatalogReferences,
-  priceFromAiInstructions,
+  choosePriceFromAiInstructions,
+  batchAiSizeWarning,
   restoreRetryProductsFromSnapshots,
+  textSizesMissingFromMeasurements,
   shouldPreserveExistingPrice,
   shouldRunBatchAiVisualSetCorrection,
   normalizeBatchAiOutput,
@@ -90,6 +92,7 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib } from '@/lib/batch-ai-settings'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
+import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
   alignBatchColorFamilies,
   alignColorFamiliesAfterRun,
@@ -1720,6 +1723,36 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
           ...batchAiNormalizationOptions(input, context),
           measurementPhotoIndexes,
         })
+    const missingSizes = !input.mediaSeoOnly && !input.colorSplitOnly && !input.variantScanOnly && measurementPhotoIndexes.length
+      ? textSizesMissingFromMeasurements(input.product?.description, normalized.product?.attributes?.measurements)
+      : []
+    if (missingSizes.length) {
+      // Широкая таблица в contact sheet мелкая, и модель теряет крайнюю колонку
+      // даже на оригинале; явная подсказка, каких размеров не хватает, помогает.
+      const rereadRaw = await runBatchAiOpenRouterRefinement({
+        settings,
+        systemPrompt: input.systemPrompt,
+        userPrompt: input.userPrompt,
+        previousOutput: raw,
+        photoUrls: input.photoUrls || [],
+        indexes: measurementPhotoIndexes,
+        measurementFocus: true,
+        note: `В исходном тексте указаны размеры, которых нет в твоей таблице measurements: ${missingSizes.join(', ')}. Перечитай таблицу размеров целиком, включая крайние колонки и строки, и верни каждый размер с его замерами.`,
+      })
+      const reread = normalizeBatchAiOutput(rereadRaw, {
+        ...batchAiNormalizationOptions(input, context),
+        measurementPhotoIndexes,
+      })
+      const rereadMeasurements = reread.product?.attributes?.measurements
+      if (textSizesMissingFromMeasurements(input.product?.description, rereadMeasurements).length < missingSizes.length) {
+        // Из повторного ответа берём только сетку: остальное уже проверено.
+        normalized.product.attributes = {
+          ...normalized.product.attributes,
+          measurements: rereadMeasurements,
+          ...(reread.product?.attributes?.size_recommendation ? { size_recommendation: reread.product.attributes.size_recommendation } : {}),
+        }
+      }
+    }
     if (input.shadeFamilyScan && shadeScanHasColorConflicts(normalized.shadeVariants)) {
       const repairedRaw = await runBatchAiOpenRouter({
         settings,
@@ -1896,18 +1929,16 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
           product.description,
         ].filter(Boolean).join('\n'))
         : null
-      const instructionPrice = priceFromAiInstructions(context.batch.price_ai_instructions, priceSourceText)
-      const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
-        ? Number(product.price)
-        : null
+      const instructionPrice = choosePriceFromAiInstructions(
+        context.batch.price_ai_instructions,
+        priceSourceText,
+        product.price_source === 'ai_instruction' ? product.price : null,
+      )
       if (calculatedPrice !== null && calculatedPrice > 0) {
         product.price = calculatedPrice
         product.price_source = 'rule'
       } else if (instructionPrice !== null) {
         product.price = instructionPrice
-        product.price_source = 'ai_instruction'
-      } else if (explicitAiPrice !== null) {
-        product.price = explicitAiPrice
         product.price_source = 'ai_instruction'
       } else if (calculatedPrice !== null) {
         product.price = calculatedPrice
@@ -1983,6 +2014,12 @@ async function applyCompletedColorSplit(item: any, normalized: any, context: any
           context.batch.id, familyKey, familyName, product.ai_confidence, source.source_position ?? null,
           source.supplier_published_on || null,
         ])
+      }
+      if (await hasProductTranslationColumns(client)) {
+        await client.query(
+          'UPDATE products SET translations=$3::jsonb,photo_alts_en=$4::jsonb WHERE batch_id=$1 AND external_id=$2',
+          [context.batch.id, externalId, JSON.stringify(product.translations || {}), JSON.stringify(product.photo_alts_en || [])],
+        )
       }
     }
     await client.query(`
@@ -2080,21 +2117,16 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
         product.description,
       ].filter(Boolean).join('\n'))
       : null
-    const instructionPrice = priceFromAiInstructions(
+    const instructionPrice = choosePriceFromAiInstructions(
       item.input_snapshot?.priceAiInstructions || context.batch.price_ai_instructions,
       priceSourceText,
+      product.price_source === 'ai_instruction' ? product.price : null,
     )
-    const explicitAiPrice = product.price_source === 'ai_instruction' && Number(product.price) > 0
-      ? Number(product.price)
-      : null
     if (calculatedPrice !== null && calculatedPrice > 0) {
       product.price = calculatedPrice
       product.price_source = 'rule'
     } else if (instructionPrice !== null) {
       product.price = instructionPrice
-      product.price_source = 'ai_instruction'
-    } else if (explicitAiPrice !== null) {
-      product.price = explicitAiPrice
       product.price_source = 'ai_instruction'
     } else if (calculatedPrice !== null) {
       product.price = calculatedPrice
@@ -2117,6 +2149,12 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
   } else if (template) {
     product.attributes = applyMeasurementTableAttributes(product.attributes, template.measurements)
   }
+  const missingSizes = textSizesMissingFromMeasurements(item.input_snapshot?.product?.description, product?.attributes?.measurements)
+  if (missingSizes.length && Array.isArray(product.attributes?.sizes)) {
+    // Размер из текста поставщика не теряем, даже если таблица прочитана не полностью.
+    product.attributes.sizes = [...new Set([...product.attributes.sizes, ...missingSizes])]
+  }
+  const sizeWarning = batchAiSizeWarning(missingSizes)
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
@@ -2145,18 +2183,22 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
       await client.query('COMMIT')
       return
     }
+    const withTranslations = await hasProductTranslationColumns(client)
     await client.query(`
       UPDATE products SET
         name=$2,description=$3,h1=$4,seo_title=$5,seo_description=$6,slug=$7,
         brand=$8,category=$9,subcategory=$10,gender=$11,photos=$12::jsonb,
         photo_alts=$13::jsonb,attributes=$14::jsonb,price=$15,price_source=$16,ai_processed=true,
-        ai_error=NULL,ai_confidence=$17,supplier_published_on=COALESCE($18,supplier_published_on),updated_at=NOW()
+        ai_error=$19,ai_confidence=$17,supplier_published_on=COALESCE($18,supplier_published_on),
+        ${withTranslations ? 'translations=$20::jsonb,photo_alts_en=$21::jsonb,' : ''}updated_at=NOW()
       WHERE id=$1
     `, [
       item.product_id, product.name, product.description, product.h1, product.seo_title,
       product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
       product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
       Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence, product.supplier_published_on || null,
+      sizeWarning,
+      ...(withTranslations ? [JSON.stringify(product.translations || {}), JSON.stringify(product.photo_alts_en || [])] : []),
     ])
     await client.query(`
       UPDATE batch_ai_items SET status='completed',output=$2::jsonb,error_message=NULL,completed_at=NOW(),updated_at=NOW()
