@@ -792,6 +792,7 @@ function catalogAttributes(value) {
       && !normalized.startsWith('manual_video_')
       && !normalized.startsWith('chromoff_')
       && normalized !== 'video_transfer_error'
+      && normalized !== 'size_chart_photo_urls'
       && normalized !== 'video_url'
       && normalized !== 'video_poster_url'
       && normalized !== 'source_parent_external_id';

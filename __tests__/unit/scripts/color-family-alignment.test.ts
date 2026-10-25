@@ -178,6 +178,38 @@ describe('alignColorFamily', () => {
     expect(clothes.issues).toEqual([])
   })
 
+  it('treats a chart with a missing column as the same chart and keeps the fuller one', () => {
+    const full = {
+      unit: 'см',
+      columns: [],
+      rows: ['S', 'M', 'L'].map((size, index) => ({ size, values: { hips: String(78 + index * 4), length: String(27 + index), waist: String(64 + index * 4) } })),
+    }
+    const partial = {
+      unit: 'см',
+      columns: [],
+      rows: ['S', 'M', 'L'].map((size, index) => ({ size, values: { length: String(27 + index), waist: String(64 + index * 4) } })),
+    }
+    const result = alignColorFamily([
+      member(1, 'Белый', { attributes: { measurements: partial } }),
+      member(2, 'Чёрный', { attributes: { measurements: full } }),
+    ])
+
+    expect(result.issues).toEqual([])
+    expect(updateFor(result, 1).attributes.measurements).toEqual(full)
+  })
+
+  it('keeps each colour its own chart when the charts come from different photos', () => {
+    const family = [
+      member(1, 'Зелёный', { attributes: { sizes: ['M', 'L'], measurements: table('112'), size_chart_photo_urls: ['https://x/a.jpg'] } }),
+      member(2, 'Коричневый', { attributes: { sizes: ['S', 'M', 'L'], measurements: table('130'), size_chart_photo_urls: ['https://x/b.jpg'] } }),
+    ]
+
+    expect(alignColorFamily(family)).toEqual({ updates: [], issues: [] })
+    expect(colorFamilyIssues(family)).toEqual([])
+    const samePhoto = family.map((entry) => ({ ...entry, attributes: { ...entry.attributes, size_chart_photo_urls: ['https://x/a.jpg'] } }))
+    expect(alignColorFamily(samePhoto).issues.map((entry: any) => entry.field)).toEqual(['measurements'])
+  })
+
   it('blocks two different size charts on a tie', () => {
     const result = alignColorFamily([
       member(1, 'Чёрный', { attributes: { measurements: table('104') } }),

@@ -17,6 +17,8 @@ type ColorFamilyAlignmentModule = {
   colorFamilyIssues: (members: any[], options?: { sizing?: boolean, colors?: boolean }) => ColorFamilyIssue[]
   batchColorFamilyIssues: (products: any[], options?: { sizing?: boolean, colors?: boolean }) => ColorFamilyIssue[]
   familyLabel: (members: any[]) => string
+  mainMeasurementReading: (values: unknown[]) => unknown
+  measurementContentKey: (value: unknown) => string
 }
 
 export type ColorFamilyConflict = {
@@ -147,7 +149,11 @@ export async function batchColorFamilyConflicts(batchId: string): Promise<ColorF
 }
 
 /** Товары AI-запуска, по которым нужно выровнять семьи после его завершения. */
-export async function alignColorFamiliesAfterRun(runId: string, batchId: string) {
+export async function alignColorFamiliesAfterRun(
+  runId: string,
+  batchId: string,
+  beforeAlign?: (productIds: number[]) => Promise<unknown>,
+) {
   // Запрос семейного шага привязан к якорю, но меняет все цвета семьи.
   const items = await scrapingQuery(`
     SELECT i.product_id, ARRAY(
@@ -157,6 +163,13 @@ export async function alignColorFamiliesAfterRun(runId: string, batchId: string)
     WHERE i.run_id=$1 AND i.status='completed' AND i.product_id IS NOT NULL
   `, [runId])
   const productIds = items.rows.flatMap((row) => [Number(row.product_id), ...(row.candidate_ids || []).map(Number)])
+  if (beforeAlign) {
+    try {
+      await beforeAlign(productIds)
+    } catch (error) {
+      console.error(`[color-family-alignment] подготовка семей выгрузки ${batchId} не выполнена:`, error)
+    }
+  }
   const summary = await alignBatchColorFamilies(batchId, productIds)
   if (summary.families > 0) {
     console.info('[color-family-alignment]', JSON.stringify({ runId, batchId, ...summary }))

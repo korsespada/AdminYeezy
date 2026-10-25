@@ -105,6 +105,7 @@ import {
   normalizeBatchAiFamilyNamingOutput,
   type FamilyNamingGroup,
 } from '@/lib/batch-ai-family-naming'
+import { syncFamilySizeCharts } from '@/lib/family-size-charts'
 import {
   alignBatchColorFamilies,
   alignColorFamiliesAfterRun,
@@ -2459,7 +2460,9 @@ async function finalizeRun(runId: string) {
       }
       if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
         try {
-          await alignColorFamiliesAfterRun(runId, String(currentRun.batch_id))
+          await alignColorFamiliesAfterRun(runId, String(currentRun.batch_id), (productIds) => (
+            syncFamilySizeCharts(String(currentRun.batch_id), productIds, loadSettings)
+          ))
         } catch (error) {
           console.error(`Не удалось выровнять цветовые семьи выгрузки ${currentRun.batch_id}:`, error)
         }
@@ -2792,7 +2795,10 @@ export async function alignBatchColorFamiliesAction(batchId: string) {
       "SELECT id FROM products WHERE batch_id=$1 AND NULLIF(variant_group_key,'') IS NOT NULL",
       [batchId],
     )
-    const summary = await alignBatchColorFamilies(batchId, familyProducts.rows.map((row) => Number(row.id)))
+    const familyProductIds = familyProducts.rows.map((row) => Number(row.id))
+    // Одна картинка сетки у нескольких цветов читается один раз и пишется всем.
+    await syncFamilySizeCharts(batchId, familyProductIds, loadSettings)
+    const summary = await alignBatchColorFamilies(batchId, familyProductIds)
     const conflicts = await batchColorFamilyConflicts(batchId)
     revalidatePath(`/admin/batches/${batchId}`)
     return { success: true, data: { ...summary, conflicts } }

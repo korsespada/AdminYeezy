@@ -252,9 +252,14 @@ function closeTables(left, right) {
   if (leftRows.size === 0 || rightRows.size === 0) return false;
   let cells = 0;
   let different = 0;
+  // Пропущенная колонка или строка — не другая сетка: если каждая ячейка
+  // меньшей таблицы есть в большей, это та же таблица, прочитанная не полностью.
+  let leftInsideRight = true;
+  let rightInsideLeft = true;
   for (const size of new Set([...leftRows.keys(), ...rightRows.keys()])) {
     const values = leftRows.get(size) || [];
-    const unmatched = [...(rightRows.get(size) || [])];
+    const others = rightRows.get(size) || [];
+    const unmatched = [...others];
     let matched = 0;
     for (const value of values) {
       const index = unmatched.findIndex((candidate) => sameCell(value, candidate));
@@ -262,11 +267,13 @@ function closeTables(left, right) {
       unmatched.splice(index, 1);
       matched += 1;
     }
-    const width = Math.max(values.length, matched + unmatched.length);
+    if (matched < values.length) leftInsideRight = false;
+    if (matched < others.length) rightInsideLeft = false;
+    const width = Math.max(values.length, others.length);
     cells += width;
     different += width - matched;
   }
-  return different <= cells * MAX_MISREAD_CELL_SHARE;
+  return leftInsideRight || rightInsideLeft || different <= cells * MAX_MISREAD_CELL_SHARE;
 }
 
 /** Та же сетка, прочитанная с ошибкой в нескольких ячейках. */
@@ -281,6 +288,11 @@ function sameChartMisread(left, right) {
 }
 
 /** Группы таблиц, которые нельзя считать одной сеткой с самой частой. */
+function tableCellCount(table) {
+  return (Array.isArray(table?.tabs) ? table.tabs : [table])
+    .reduce((sum, entry) => sum + tableRows(entry).reduce((count, row) => count + Object.keys(row.values).length, 0), 0);
+}
+
 function largestCell(table) {
   const values = (Array.isArray(table?.tabs) ? table.tabs : [table])
     .flatMap((entry) => tableRows(entry).flatMap((row) => Object.values(row.values).map(Number)))
@@ -289,21 +301,51 @@ function largestCell(table) {
 }
 
 /**
- * Основная сетка семьи: самая частая; при равенстве — с меньшими числами
- * (сантиметры, а не миллиметры), затем по якорю.
+ * Основная сетка семьи: самая частая; при равенстве — более полная, затем
+ * с меньшими числами (сантиметры, а не миллиметры), затем по якорю.
  */
 function mainTableGroup(groups) {
   return [...groups].sort((left, right) => (
-    right.products.length - left.products.length || largestCell(left.value) - largestCell(right.value)
+    right.products.length - left.products.length
+    || tableCellCount(right.value) - tableCellCount(left.value)
+    || largestCell(left.value) - largestCell(right.value)
   ))[0] || null;
+}
+
+/** Картинки сетки, с которых ИИ прочитал таблицу товара (без якоря URL). */
+function chartPhotoUrls(product) {
+  const urls = attributesOf(product).size_chart_photo_urls;
+  return new Set((Array.isArray(urls) ? urls : []).map((url) => text(url).split('#')[0]).filter(Boolean));
+}
+
+/**
+ * Таблицы прочитаны с разных картинок сетки: поставщик дал цветам разные
+ * сетки, и каждый цвет оставляет свою. Нужно знать картинки всех товаров.
+ */
+function fromDifferentPhotos(leftProducts, rightProducts) {
+  const left = leftProducts.map(chartPhotoUrls);
+  const right = rightProducts.map(chartPhotoUrls);
+  if ([...left, ...right].some((urls) => urls.size === 0)) return false;
+  const leftUrls = new Set(left.flatMap((urls) => [...urls]));
+  return right.every((urls) => [...urls].every((url) => !leftUrls.has(url)));
 }
 
 function differentCharts(groups) {
   const main = mainTableGroup(groups);
   if (!main) return [];
   const rest = groups.filter((group) => group !== main);
-  const foreign = rest.filter((group) => !sameChartMisread(main.value, group.value));
+  const foreign = rest.filter((group) => !sameChartMisread(main.value, group.value)
+    && !fromDifferentPhotos(main.products, group.products));
   return foreign.length > 0 && !shareChartSource(groups.flatMap((group) => group.products)) ? [main, ...foreign] : [];
+}
+
+/** Товары с собственной сеткой с другой картинки: им не переписывается таблица и размерный ряд. */
+function ownPhotoChartProducts(groups) {
+  const main = mainTableGroup(groups);
+  if (!main) return new Set();
+  return new Set(groups
+    .filter((group) => group !== main && !sameChartMisread(main.value, group.value) && fromDifferentPhotos(main.products, group.products))
+    .flatMap((group) => group.products.map((product) => product.id)));
 }
 
 function chartSourceIds(product) {
@@ -432,7 +474,9 @@ function alignSizing(ordered) {
     ? attributesOf(source).size_recommendation
     : recommendations.groups.length === 1 ? recommendations.winner.value : null;
 
+  const keepOwn = ownPhotoChartProducts(tables.groups);
   for (const product of ordered) {
+    if (keepOwn.has(product.id)) continue;
     const attributes = attributesOf(product);
     const patch = {};
     const own = measurementsForComparison(product);
@@ -490,8 +534,11 @@ function colorFamilyIssues(members, options = {}) {
     } else if (differentCharts(withTables).length > 0) {
       issues.push(issue('measurements', 'размерная сетка', differentCharts(withTables), ordered));
     }
-    const sizeGroups = strictGroups(ordered, (product) => attributesOf(product).sizes);
-    if (sizeGroups.length > 1) issues.push(issue('sizes', 'размерный ряд', sizeGroups, ordered));
+    // Цвет со своей сеткой с другой картинки сохраняет и свой размерный ряд.
+    const keepOwn = ownPhotoChartProducts(withTables);
+    const sharedSizing = ordered.filter((product) => !keepOwn.has(product.id));
+    const sizeGroups = strictGroups(sharedSizing, (product) => attributesOf(product).sizes);
+    if (sizeGroups.length > 1) issues.push(issue('sizes', 'размерный ряд', sizeGroups, sharedSizing));
   }
   return issues;
 }
@@ -516,10 +563,24 @@ function batchColorFamilyIssues(products, options = {}) {
     })));
 }
 
+/** Ключ содержимого таблицы: одинаковый у одинаково прочитанных сеток. */
+function measurementContentKey(value) {
+  return hasMeasurementTable(value) ? measurementKey(value) : '';
+}
+
+/** Основное из нескольких прочтений одной картинки сетки: самое частое, затем более полное. */
+function mainMeasurementReading(values) {
+  const entries = values.map((value, index) => ({ id: index, value }));
+  const { groups } = consensus(entries, (entry) => (hasMeasurementTable(entry.value) ? entry.value : null), measurementKey);
+  return mainTableGroup(groups)?.value || null;
+}
+
 module.exports = {
   FAMILY_ERROR_PREFIX,
   alignColorFamily,
   batchColorFamilyIssues,
   colorFamilyIssues,
   familyLabel,
+  mainMeasurementReading,
+  measurementContentKey,
 };
