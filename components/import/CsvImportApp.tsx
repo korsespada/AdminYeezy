@@ -661,7 +661,7 @@ export default function CsvImportApp({
   const [showAiLogs, setShowAiLogs] = useState(false);
   const [showAiErrors, setShowAiErrors] = useState(false);
   const [isLoadingAiLogs, setIsLoadingAiLogs] = useState(false);
-  const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
+  const [supplierData, setSupplierData] = useState<{album_id: string, post_process_script: string | null, post_process_enabled?: boolean, first_photo_screenshot_filter?: boolean, ai_parallel_enabled?: boolean, ai_parallel_count?: number} | null>(null);
   const [isRunningCustomScript, setIsRunningCustomScript] = useState(false);
   const [scriptProgress, setScriptProgress] = useState<BatchScriptProgress | null>(null);
 

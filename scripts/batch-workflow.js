@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 const sharp = require('sharp');
 const { runSupplierJsonProcess } = require('./lib/supplier-json-process');
+const { filterFirstPhotoScreenshots } = require('./lib/first-photo-screenshot-filter');
 const {
   finalizeBurberryPostProcess,
   restoreProtectedProducts,
@@ -2236,6 +2237,11 @@ async function runBatchPostProcessScript(batchId, sourceInputPath = null) {
     finalProducts = deduplicateForSupplier
       ? deduplicatePostProcessedProducts(processedProducts, protectedExternalIds)
       : processedProducts;
+  }
+  if (supplier.first_photo_screenshot_filter) {
+    const filtered = await filterFirstPhotoScreenshots(finalProducts, { concurrency: 8 });
+    finalProducts = filtered.products;
+    console.log(`[batch ${batchId}] first-photo filter: checked=${filtered.checked} removed=${filtered.removed} failed=${filtered.failed} skipped=${filtered.skipped} aborted=${filtered.aborted}`);
   }
   if (finalProducts.length === 0) throw new Error('Скрипт вернул пустой массив товаров');
 

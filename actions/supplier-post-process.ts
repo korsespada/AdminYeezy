@@ -137,12 +137,13 @@ export async function previewSupplierPostProcessVersionAction(supplierId: number
   try {
     await requireAdmin()
     if (await activeBatchOperation(batchId)) throw new Error('Дождитесь завершения текущей операции с выгрузкой')
-    const [versionResult, batchResult] = await Promise.all([
+    const [versionResult, batchResult, supplierResult] = await Promise.all([
       scrapingQuery(`
         SELECT id,version,name,source,is_active,created_at FROM supplier_post_process_scripts
         WHERE id=$1 AND supplier_id=$2
       `, [versionId, supplierId]),
       scrapingQuery('SELECT id FROM scraping_batches WHERE id=$1 AND supplier_id=$2', [batchId, supplierId]),
+      scrapingQuery('SELECT first_photo_screenshot_filter FROM suppliers WHERE id=$1', [supplierId]),
     ])
     const version = versionResult.rows[0] as ScriptVersion | undefined
     if (!version || !batchResult.rows[0]) throw new Error('Версия или выгрузка не найдена у этого поставщика')
@@ -188,15 +189,27 @@ export async function previewSupplierPostProcessVersionAction(supplierId: number
           ? (await workflow.finalizeBvPostProcessRemote(output, protectedExternalIds)).products
           : workflow.deduplicatePostProcessedProducts(output, protectedExternalIds)
         : output
+    let finalOutput = postProcessedOutput
+    let photosRemoved = 0
+    if (supplierResult.rows[0]?.first_photo_screenshot_filter) {
+      const { filterFirstPhotoScreenshots } = require('../scripts/lib/first-photo-screenshot-filter') as {
+        filterFirstPhotoScreenshots: (items: any[], options?: any) => Promise<{ products: any[]; removed: number; checked: number; failed: number; skipped: number; aborted: boolean }>
+      }
+      const filtered = await filterFirstPhotoScreenshots(finalOutput, { concurrency: 8 })
+      finalOutput = filtered.products
+      photosRemoved = filtered.removed
+      console.log(`[supplier-post-process] preview first-photo filter: checked=${filtered.checked} removed=${photosRemoved} failed=${filtered.failed} aborted=${filtered.aborted}`)
+    }
     const before = new Map(products.map((item: any) => [String(item.external_id), item]))
-    const changed = postProcessedOutput.filter((item: any) => JSON.stringify(before.get(String(item.external_id))) !== JSON.stringify(item)).length
+    const changed = finalOutput.filter((item: any) => JSON.stringify(before.get(String(item.external_id))) !== JSON.stringify(item)).length
     return {
       success: true,
       data: {
         inputCount: products.length,
-        outputCount: postProcessedOutput.length,
-        removedCount: Math.max(0, products.length - postProcessedOutput.length),
+        outputCount: finalOutput.length,
+        removedCount: Math.max(0, products.length - finalOutput.length),
         changedCount: changed,
+        photosRemoved,
       },
     }
   } catch (error: any) {

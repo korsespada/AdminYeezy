@@ -46,6 +46,7 @@ async function init() {
         post_process_script TEXT,
         post_process_description TEXT NOT NULL DEFAULT '',
         post_process_enabled BOOLEAN DEFAULT FALSE,
+        first_photo_screenshot_filter BOOLEAN NOT NULL DEFAULT FALSE,
         avatar_url TEXT,
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()

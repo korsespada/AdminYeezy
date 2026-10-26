@@ -99,6 +99,7 @@ interface Supplier {
   cookie?: string | null
   post_process_script?: string | null
   post_process_enabled: boolean
+  first_photo_screenshot_filter: boolean
   ai_photo_models?: string | null
   ai_parallel_enabled: boolean
   ai_parallel_count: number
@@ -329,6 +330,7 @@ export default function SupplierList({
         ai_parallel_count: 5,
         parse_tags_enabled: false,
         post_process_enabled: false,
+        first_photo_screenshot_filter: false,
         is_favorite: false
       })
       setModalTags([])
@@ -410,6 +412,7 @@ export default function SupplierList({
     const aiResizeValue = editingSupplier?.ai_resize_enabled ? 'on' : 'off'
     const parseTagsValue = editingSupplier?.parse_tags_enabled ? 'on' : 'off'
     const postProcessValue = editingSupplier?.post_process_enabled ? 'on' : 'off'
+    const firstPhotoScreenshotValue = editingSupplier?.first_photo_screenshot_filter ? 'on' : 'off'
     
     formData.set('ai_photo_enabled', aiPhotoValue)
     formData.set('ai_cache_enabled', aiCacheValue)
@@ -417,6 +420,7 @@ export default function SupplierList({
     formData.set('ai_resize_enabled', aiResizeValue)
     formData.set('parse_tags_enabled', parseTagsValue)
     formData.set('post_process_enabled', postProcessValue)
+    formData.set('first_photo_screenshot_filter', firstPhotoScreenshotValue)
     formData.set('default_attributes', JSON.stringify(editingSupplier?.default_attributes || []))
     formData.set('allowed_category_ids', JSON.stringify(editingSupplier?.allowed_category_ids || []))
     formData.set('allowed_subcategory_ids', JSON.stringify(editingSupplier?.allowed_subcategory_ids || []))
@@ -1090,6 +1094,19 @@ export default function SupplierList({
                       </label>
                     </div>
                     <p className="mt-2 text-[11px] text-slate-500">Выкл. по умолчанию: можно продолжать запускать скрипт вручную.</p>
+                    <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 text-sm text-slate-300" title="Проверяет уменьшенное превью первого фото через CDN. Если кадр выше ширины, он считается скриншотом и удаляется; при ошибке фото остаётся.">
+                      <input
+                        type="checkbox"
+                        name="first_photo_screenshot_filter"
+                        checked={editingSupplier?.first_photo_screenshot_filter || false}
+                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, first_photo_screenshot_filter: event.target.checked })}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-sky-500 focus:ring-sky-500"
+                      />
+                      <span>
+                        <b className="block text-slate-100">Убирать вертикальные скриншоты из первого фото</b>
+                        <small className="text-xs text-slate-500">Применяется при запуске постобработки. Запрашивает превью 64 px на товар и удаляет первый кадр, если он выше ширины. Ошибки CDN не блокируют обработку.</small>
+                      </span>
+                    </label>
                   </div>
                   {editingSupplier?.id && <SupplierPostProcessEditor supplierId={editingSupplier.id} legacyScript={editingSupplier.post_process_script} />}
 

@@ -1059,7 +1059,8 @@ export async function getSupplierDataAction(supplierId: number) {
         const res = await scrapingQuery(`
           SELECT s.album_id,
             COALESCE(active_script.name, s.post_process_script) AS post_process_script,
-            s.post_process_enabled,s.ai_parallel_enabled,s.ai_parallel_count
+            s.post_process_enabled,s.ai_parallel_enabled,s.ai_parallel_count,
+            s.first_photo_screenshot_filter
           FROM suppliers s
           LEFT JOIN LATERAL (
             SELECT name FROM supplier_post_process_scripts
@@ -1147,6 +1148,12 @@ async function executeCustomSupplierScript(
         burberry.restoreProtectedProducts(processedProducts, sourceProducts, protectedExternalIds),
         protectedExternalIds,
       );
+    }
+    if (supplierData.first_photo_screenshot_filter) {
+      const { filterFirstPhotoScreenshots } = require('../scripts/lib/first-photo-screenshot-filter');
+      const filtered = await filterFirstPhotoScreenshots(finalProducts, { concurrency: 8 });
+      finalProducts = filtered.products;
+      console.log(`[supplier ${supplierId}] first-photo filter: checked=${filtered.checked} removed=${filtered.removed} failed=${filtered.failed} skipped=${filtered.skipped} aborted=${filtered.aborted}`);
     }
   } finally {
     clearInterval(heartbeat)

@@ -291,6 +291,7 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const cookie = formData.get('cookie') as string || null
     const post_process_script = formData.get('post_process_script') as string || null
     const post_process_enabled = formData.get('post_process_enabled') === 'on'
+    const first_photo_screenshot_filter = formData.get('first_photo_screenshot_filter') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
@@ -300,9 +301,9 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const ai_processing_options = normalizeSupplierAiProcessingOptions(formData.get('ai_processing_options'))
 
     const res = await scrapingQuery(
-      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options, ai_visual_examples)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb) RETURNING id`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples)]
+      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options, ai_visual_examples, first_photo_screenshot_filter)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb,$35) RETURNING id`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter]
     )
 
     revalidatePath('/admin/suppliers')
@@ -359,6 +360,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const cookie = formData.get('cookie') as string || null
     const post_process_script = formData.get('post_process_script') as string || null
     const post_process_enabled = formData.get('post_process_enabled') === 'on'
+    const first_photo_screenshot_filter = formData.get('first_photo_screenshot_filter') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = ''
     const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
@@ -373,9 +375,9 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
        allowed_category_ids=$8::jsonb,allowed_subcategory_ids=$9::jsonb,allowed_brand_ids=$10::jsonb,
        min_photos=$11,max_on_model_media=$12,min_desc_len=$13,brand_tags=$14,
        default_price=$15,default_gender=$16,
-       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,ai_visual_examples=$34::jsonb,updated_at=NOW()
-       WHERE id=$35`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), id]
+       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,ai_visual_examples=$34::jsonb,first_photo_screenshot_filter=$35,updated_at=NOW()
+       WHERE id=$36`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter, id]
     )
 
     revalidatePath('/admin/suppliers')
