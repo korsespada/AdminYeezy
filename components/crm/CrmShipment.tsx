@@ -128,7 +128,7 @@ export function ShipmentPanel({ shipment, orderId, customerId, showOrder = false
           </form>
         </div>
       )}
-      <ActionMessage state={refreshState?.ok ? null : refreshState} />
+      <ActionMessage state={refreshState && !refreshState.ok && refreshState.message !== shipment.tracking_error ? refreshState : null} />
       <ActionMessage state={deleteState} />
     </div>
   )
