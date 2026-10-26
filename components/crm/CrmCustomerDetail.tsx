@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
+import { ShipmentAddForm, ShipmentPanel } from '@/components/crm/CrmShipment'
 import { Badge } from '@/components/ui/badge'
 import { type RailsCrmCustomerDetail } from '@/lib/rails-admin'
 
@@ -19,8 +20,32 @@ export default function CrmCustomerDetail({ customer }: { customer: RailsCrmCust
         </section>
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4 sm:p-6"><h2 className="text-xl font-semibold text-white">Адреса</h2>{customer.addresses?.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2">{customer.addresses.map((address) => <div key={address.id} className="rounded-md border border-slate-800 bg-slate-950/40 p-4 text-sm"><div className="break-words font-medium text-slate-200">{address.recipient_name || 'Получатель не указан'}{address.is_default ? ' · Основной' : ''}</div><div className="mt-2 break-words text-slate-400">{address.address_line || [address.city, address.street, address.house, address.apartment].filter(Boolean).join(', ') || 'Адрес не заполнен'}</div><div className="mt-1 break-words text-slate-500">{address.phone || ''}</div></div>)}</div> : <p className="mt-3 text-sm text-slate-500">Адреса не заполнены</p>}</section>
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4 sm:p-6"><h2 className="text-xl font-semibold text-white">Заказы</h2>{customer.orders?.length ? <div className="mt-4 divide-y divide-slate-800">{customer.orders.map((order) => <Link key={order.id} href={`/admin/crm/orders/${order.id}`} className="flex min-h-11 flex-wrap items-center justify-between gap-2 py-3 hover:text-sky-300"><span className="break-words">{order.public_number}</span><span className="text-sm text-slate-400">{statusLabel(order.status)} · {formatMoney(order.total_cents, order.currency)}</span></Link>)}</div> : <p className="mt-3 text-sm text-slate-500">Заказов нет</p>}</section>
+        <ParcelsSection customer={customer} />
       </div>
     </main>
+  )
+}
+
+// Посылки клиента: треки заказов сайта и треки без заказа в CRM (заказ
+// оплачен менеджеру лично). Такой трек клиент видит в ЛК во вкладке «Посылки».
+function ParcelsSection({ customer }: { customer: RailsCrmCustomerDetail }) {
+  const customerId = String(customer.id)
+  const shipments = customer.shipments || []
+  return (
+    <section className="rounded-lg border border-slate-800 bg-slate-900 p-4 sm:p-6">
+      <h2 className="text-xl font-semibold text-white">Посылки</h2>
+      <p className="mt-1 text-sm text-slate-500">Трек STD для заказа, оплаченного лично. Трек заказа с сайта добавляйте в карточке заказа.</p>
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {shipments.map((shipment) => (
+          <div key={shipment.id} className="rounded-md border border-slate-800 bg-slate-950/40 p-4">
+            <ShipmentPanel shipment={shipment} customerId={customerId} orderId={shipment.order_id || undefined} showOrder />
+          </div>
+        ))}
+        <div className="rounded-md border border-dashed border-slate-700 p-4">
+          <ShipmentAddForm customerId={customerId} />
+        </div>
+      </div>
+    </section>
   )
 }
 

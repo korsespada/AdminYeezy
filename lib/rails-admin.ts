@@ -169,6 +169,7 @@ export interface RailsCrmCustomerDetail extends RailsCrmCustomerSummary {
     verified_at?: string | null
     created_at?: string
   }>
+  shipments?: RailsCrmShipment[]
 }
 
 export interface RailsTelegramNotificationRecipient {
@@ -461,40 +462,32 @@ export interface RailsCrmOrderEvent {
   created_at?: string
 }
 
-export interface RailsCrmShipmentEvent {
-  time?: string | null
-  text?: string | null
+// Снимок публичной страницы трекинга STD, который Rails сохраняет у посылки.
+export interface RailsCrmTracking {
+  number: string
+  fetched_at: string
+  stage: 'created' | 'shipped' | 'customs' | 'sorting' | 'delivered' | null
+  destination?: string | null
+  recipient?: string | null
+  cdek_number?: string | null
+  events: Array<{ time: string; text: string }>
 }
 
+// Трек-номер STD (SF…), который ввёл менеджер: у заказа сайта или у клиента
+// без заказа в CRM.
 export interface RailsCrmShipment {
   id: string
-  provider: string
-  provider_name: string
   tracking_number: string
   status: 'created' | 'in_transit' | 'delivered'
-  created_at?: string
-  delivered_at?: string | null
-  events: RailsCrmShipmentEvent[]
-  local_order_number: string
-  external_number?: string | null
-  fast?: boolean
-  request_payload?: Record<string, string>
-  tracked_at?: string | null
-  tracking_error?: string | null
-}
-
-export interface RailsCrmShipmentInput {
-  province?: string
-  fast?: boolean
-  weight?: string
-  length?: string
-  width?: string
-  height?: string
-  goodsName?: string
-  goodsPrice?: string
-  address?: string
-  name?: string
-  phone?: string
+  order_id: string | null
+  order_public_number: string | null
+  customer_id: string
+  tracking: RailsCrmTracking | null
+  tracking_failed: boolean
+  tracking_error: string | null
+  tracked_at: string | null
+  created_at: string
+  delivered_at: string | null
 }
 
 export interface RailsCrmOrderDetail extends RailsCrmOrder {
@@ -1459,32 +1452,32 @@ export async function transitionRailsCrmOrder(id: string, input: {
   return result.order
 }
 
-export async function createRailsCrmOrderShipment(id: string, input: RailsCrmShipmentInput) {
-  const body = Object.fromEntries(Object.entries({
-    province: input.province,
-    fast: input.fast,
-    weight: input.weight,
-    length: input.length,
-    width: input.width,
-    height: input.height,
-    goods_name: input.goodsName,
-    goods_price: input.goodsPrice,
-    address: input.address,
-    name: input.name,
-    phone: input.phone,
-  }).filter(([, value]) => value !== undefined && value !== ''))
-  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}/shipment`, {
+export async function createRailsCrmShipment(input: { trackingNumber: string; orderId?: string; customerId?: string }) {
+  const result = await railsFetch<{ shipment: RailsCrmShipment }>('/admin/shipments', {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify({ tracking_number: input.trackingNumber, order_id: input.orderId, customer_id: input.customerId }),
   })
-  return result.order
+  return result.shipment
 }
 
-export async function refreshRailsCrmOrderShipment(id: string) {
-  const result = await railsFetch<{ order: RailsCrmOrderDetail }>(`/admin/orders/${encodeURIComponent(id)}/shipment/refresh`, {
+export async function updateRailsCrmShipment(id: string, trackingNumber: string) {
+  const result = await railsFetch<{ shipment: RailsCrmShipment }>(`/admin/shipments/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ tracking_number: trackingNumber }),
+  })
+  return result.shipment
+}
+
+export async function deleteRailsCrmShipment(id: string) {
+  await railsFetch<Record<string, never>>(`/admin/shipments/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Rails запрашивает статус на сайте STD (ответ кэшируется на 20 минут). */
+export async function refreshRailsCrmShipment(id: string) {
+  const result = await railsFetch<{ shipment: RailsCrmShipment }>(`/admin/shipments/${encodeURIComponent(id)}/refresh`, {
     method: 'POST',
   })
-  return result.order
+  return result.shipment
 }
 
 export async function transitionRailsCrmOrderItem(id: string, input: {

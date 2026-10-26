@@ -193,19 +193,24 @@ CRM-экраны живут в `AdminYeezy` и работают через Rails
 GET  /api/v1/admin/orders
 GET  /api/v1/admin/orders/:id
 POST /api/v1/admin/orders/:id/transitions
-POST /api/v1/admin/orders/:id/shipment
-POST /api/v1/admin/orders/:id/shipment/refresh
 GET  /api/v1/admin/customers
 GET  /api/v1/admin/customers/:id
+POST   /api/v1/admin/shipments
+PATCH  /api/v1/admin/shipments/:id
+DELETE /api/v1/admin/shipments/:id
+POST   /api/v1/admin/shipments/:id/refresh
 GET  /api/v1/admin/telegram_notification_recipients
 POST /api/v1/admin/telegram_notification_recipients
 ```
 
-`shipment` и `shipment/refresh` — интеграция Rails со службой доставки
-STD-Express (`createRailsCrmOrderShipment`, `refreshRailsCrmOrderShipment`).
-AdminYeezy не хранит ключи STD и не обращается к STD напрямую; блок `shipment`
-приходит в `GET /admin/orders/:id`. Контракт и флоу описаны в
-`Yeezy-Site/docs/DELIVERY_STD_EXPRESS.md`.
+`/admin/shipments` — трек-номера STD, которые вводит менеджер
+(`createRailsCrmShipment`, `updateRailsCrmShipment`, `deleteRailsCrmShipment`,
+`refreshRailsCrmShipment`). `POST` принимает `tracking_number` и либо
+`order_id` (заказ сайта), либо `customer_id` (заказ оплачен лично, заказа в
+CRM нет). `refresh` просит Rails прочитать статус на публичной странице STD.
+AdminYeezy не обращается к STD напрямую; посылка приходит в `shipment` у
+`GET /admin/orders/:id` и в `shipments` у `GET /admin/customers/:id`. Контракт и
+флоу описаны в `Yeezy-Site/docs/DELIVERY_STD_EXPRESS.md`.
 
 Получатель CRM может быть включён отдельно для `notify_site` (регистрации и
 заказы сайта от auth-бота) и `notify_telegram_mini_app` (заявки Mini App от

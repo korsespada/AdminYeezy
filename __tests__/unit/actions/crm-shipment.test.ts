@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  createRailsCrmOrderShipment: vi.fn(),
-  refreshRailsCrmOrderShipment: vi.fn(),
+  createRailsCrmShipment: vi.fn(),
+  updateRailsCrmShipment: vi.fn(),
+  deleteRailsCrmShipment: vi.fn(),
+  refreshRailsCrmShipment: vi.fn(),
   requireAdmin: vi.fn(),
   revalidatePath: vi.fn(),
 }))
@@ -10,22 +12,24 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/rails-admin', () => ({
   approveRailsCrmRefund: vi.fn(),
   approveRailsCrmWalletWithdrawal: vi.fn(),
-  createRailsCrmOrderShipment: mocks.createRailsCrmOrderShipment,
   createRailsCrmReplacementOffer: vi.fn(),
+  createRailsCrmShipment: mocks.createRailsCrmShipment,
   createRailsCrmSupplierRequest: vi.fn(),
+  deleteRailsCrmShipment: mocks.deleteRailsCrmShipment,
   markRailsCrmWalletWithdrawalPaid: vi.fn(),
   recordRailsCrmSupplierResponse: vi.fn(),
-  refreshRailsCrmOrderShipment: mocks.refreshRailsCrmOrderShipment,
+  refreshRailsCrmShipment: mocks.refreshRailsCrmShipment,
   rejectRailsCrmRefund: vi.fn(),
   rejectRailsCrmWalletWithdrawal: vi.fn(),
   transitionRailsCrmOrder: vi.fn(),
   transitionRailsCrmOrderItem: vi.fn(),
+  updateRailsCrmShipment: mocks.updateRailsCrmShipment,
 }))
 
 vi.mock('@/lib/admin-session', () => ({ requireAdmin: mocks.requireAdmin }))
 vi.mock('next/cache', () => ({ revalidatePath: mocks.revalidatePath }))
 
-import { createOrderShipmentAction, refreshOrderShipmentAction } from '@/actions/crm'
+import { deleteShipmentAction, refreshShipmentAction, saveShipmentAction } from '@/actions/crm'
 
 function formData(values: Record<string, string>) {
   const data = new FormData()
@@ -33,50 +37,57 @@ function formData(values: Record<string, string>) {
   return data
 }
 
-describe('STD-Express shipment actions', () => {
+describe('STD tracking number actions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.requireAdmin.mockResolvedValue({ id: 'admin-1' })
   })
 
-  it('sends only filled overrides and reports the tracking number', async () => {
-    mocks.createRailsCrmOrderShipment.mockResolvedValue({ shipment: { tracking_number: 'STD-777' } })
+  it('adds a track to an order and refreshes the order and customer pages', async () => {
+    mocks.createRailsCrmShipment.mockResolvedValue({ tracking_number: 'SF1577439750829' })
 
-    const result = await createOrderShipmentAction(null, formData({
-      orderId: 'order-1', province: ' Московская обл ', weight: '1.2', length: '', fast: 'on', goodsName: '',
-    }))
+    const result = await saveShipmentAction(null, formData({ orderId: 'order-1', customerId: 'customer-1', trackingNumber: ' sf1577439750829 ' }))
 
-    expect(result).toEqual({ ok: true, message: 'Передано в STD-Express, трек STD-777' })
-    expect(mocks.createRailsCrmOrderShipment).toHaveBeenCalledWith('order-1', {
-      province: 'Московская обл',
-      fast: true,
-      weight: '1.2',
-      length: undefined,
-      width: undefined,
-      height: undefined,
-      goodsName: undefined,
-      goodsPrice: undefined,
-    })
+    expect(result).toEqual({ ok: true, message: 'Трек SF1577439750829 сохранён' })
+    expect(mocks.createRailsCrmShipment).toHaveBeenCalledWith({ trackingNumber: 'sf1577439750829', orderId: 'order-1', customerId: 'customer-1' })
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/crm/orders/order-1')
+    expect(mocks.revalidatePath).toHaveBeenCalledWith('/admin/crm/customers/customer-1')
   })
 
-  it('returns the Rails/STD error instead of throwing', async () => {
-    mocks.createRailsCrmOrderShipment.mockRejectedValue(new Error('STD-Express: город не найден'))
+  it('changes the number of an existing parcel', async () => {
+    mocks.updateRailsCrmShipment.mockResolvedValue({ tracking_number: 'SF1569167781472' })
 
-    const result = await createOrderShipmentAction(null, formData({ orderId: 'order-1' }))
+    const result = await saveShipmentAction(null, formData({ shipmentId: 'shipment-1', customerId: 'customer-1', trackingNumber: 'SF1569167781472' }))
 
-    expect(result).toEqual({ ok: false, message: 'STD-Express: город не найден' })
-    expect(mocks.createRailsCrmOrderShipment.mock.calls[0][1].fast).toBe(false)
+    expect(result.ok).toBe(true)
+    expect(mocks.updateRailsCrmShipment).toHaveBeenCalledWith('shipment-1', 'SF1569167781472')
+    expect(mocks.createRailsCrmShipment).not.toHaveBeenCalled()
+  })
+
+  it('returns the Rails validation error instead of throwing', async () => {
+    mocks.createRailsCrmShipment.mockRejectedValue(new Error('Трек-номер STD должен быть вида SF1234567890123'))
+
+    const result = await saveShipmentAction(null, formData({ customerId: 'customer-1', trackingNumber: '123' }))
+
+    expect(result).toEqual({ ok: false, message: 'Трек-номер STD должен быть вида SF1234567890123' })
     expect(mocks.revalidatePath).not.toHaveBeenCalled()
   })
 
-  it('surfaces the stored tracking error after refresh', async () => {
-    mocks.refreshRailsCrmOrderShipment.mockResolvedValueOnce({ shipment: { tracking_error: 'STD-Express: заказ не найден в службе доставки' } })
-    mocks.refreshRailsCrmOrderShipment.mockResolvedValueOnce({ shipment: { tracking_error: null } })
+  it('deletes a parcel', async () => {
+    mocks.deleteRailsCrmShipment.mockResolvedValue(undefined)
 
-    expect(await refreshOrderShipmentAction(null, formData({ orderId: 'order-1' })))
-      .toEqual({ ok: false, message: 'STD-Express: заказ не найден в службе доставки' })
-    expect(await refreshOrderShipmentAction(null, formData({ orderId: 'order-1' })))
-      .toEqual({ ok: true, message: 'Трекинг обновлён' })
+    expect(await deleteShipmentAction(null, formData({ shipmentId: 'shipment-1', customerId: 'customer-1' })))
+      .toEqual({ ok: true, message: 'Трек удалён' })
+    expect(mocks.deleteRailsCrmShipment).toHaveBeenCalledWith('shipment-1')
+  })
+
+  it('surfaces the stored tracking error after refresh', async () => {
+    mocks.refreshRailsCrmShipment.mockResolvedValueOnce({ tracking_error: 'STD-Express недоступен' })
+    mocks.refreshRailsCrmShipment.mockResolvedValueOnce({ tracking_error: null })
+
+    expect(await refreshShipmentAction(null, formData({ shipmentId: 'shipment-1' })))
+      .toEqual({ ok: false, message: 'STD-Express недоступен' })
+    expect(await refreshShipmentAction(null, formData({ shipmentId: 'shipment-1' })))
+      .toEqual({ ok: true, message: 'Статус обновлён' })
   })
 })

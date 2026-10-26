@@ -4,16 +4,18 @@ import { revalidatePath } from 'next/cache'
 import {
   approveRailsCrmRefund,
   approveRailsCrmWalletWithdrawal,
-  createRailsCrmOrderShipment,
   createRailsCrmReplacementOffer,
+  createRailsCrmShipment,
   createRailsCrmSupplierRequest,
+  deleteRailsCrmShipment,
   markRailsCrmWalletWithdrawalPaid,
   recordRailsCrmSupplierResponse,
-  refreshRailsCrmOrderShipment,
+  refreshRailsCrmShipment,
   rejectRailsCrmRefund,
   rejectRailsCrmWalletWithdrawal,
   transitionRailsCrmOrder,
   transitionRailsCrmOrderItem,
+  updateRailsCrmShipment,
 } from '@/lib/rails-admin'
 import { requireAdmin } from '@/lib/admin-session'
 
@@ -61,35 +63,51 @@ function actionErrorMessage(error: unknown) {
   return error instanceof Error && error.message ? error.message : 'Не удалось выполнить запрос к Rails API'
 }
 
-export async function createOrderShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+// Посылка живёт у заказа (orderId) или у клиента (customerId): обновляем обе
+// страницы, на которых её видно.
+function revalidateShipment(formData: FormData) {
+  const orderId = optionalString(formData, 'orderId')
+  const customerId = optionalString(formData, 'customerId')
+  revalidateCrm(orderId)
+  if (customerId) revalidatePath(`/admin/crm/customers/${customerId}`)
+}
+
+export async function saveShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
   await requireAdmin()
-  const orderId = requiredString(formData, 'orderId')
+  const shipmentId = optionalString(formData, 'shipmentId')
   try {
-    const order = await createRailsCrmOrderShipment(orderId, {
-      province: optionalString(formData, 'province'),
-      fast: formData.get('fast') === 'on',
-      weight: optionalString(formData, 'weight'),
-      length: optionalString(formData, 'length'),
-      width: optionalString(formData, 'width'),
-      height: optionalString(formData, 'height'),
-      goodsName: optionalString(formData, 'goodsName'),
-      goodsPrice: optionalString(formData, 'goodsPrice'),
-    })
-    revalidateCrm(orderId)
-    return { ok: true, message: `Передано в STD-Express, трек ${order.shipment?.tracking_number || '—'}` }
+    const trackingNumber = requiredString(formData, 'trackingNumber')
+    const shipment = shipmentId
+      ? await updateRailsCrmShipment(shipmentId, trackingNumber)
+      : await createRailsCrmShipment({
+        trackingNumber,
+        orderId: optionalString(formData, 'orderId'),
+        customerId: optionalString(formData, 'customerId'),
+      })
+    revalidateShipment(formData)
+    return { ok: true, message: `Трек ${shipment.tracking_number} сохранён` }
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) }
   }
 }
 
-export async function refreshOrderShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+export async function deleteShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
   await requireAdmin()
-  const orderId = requiredString(formData, 'orderId')
   try {
-    const order = await refreshRailsCrmOrderShipment(orderId)
-    revalidateCrm(orderId)
-    const error = order.shipment?.tracking_error
-    return error ? { ok: false, message: error } : { ok: true, message: 'Трекинг обновлён' }
+    await deleteRailsCrmShipment(requiredString(formData, 'shipmentId'))
+    revalidateShipment(formData)
+    return { ok: true, message: 'Трек удалён' }
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) }
+  }
+}
+
+export async function refreshShipmentAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+  await requireAdmin()
+  try {
+    const shipment = await refreshRailsCrmShipment(requiredString(formData, 'shipmentId'))
+    revalidateShipment(formData)
+    return shipment.tracking_error ? { ok: false, message: shipment.tracking_error } : { ok: true, message: 'Статус обновлён' }
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) }
   }
