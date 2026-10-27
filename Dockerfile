@@ -20,7 +20,10 @@ RUN if [ "$(nproc)" -gt 1 ]; then \
     else \
       nice -n 10 npm run build; \
     fi
-RUN npm prune --omit=dev
+# SWC нужен только для сборки, а runtime-образ на glibc: musl-сборки sharp лишние.
+# Вместе это ~270 МБ, которые иначе копируются в итоговый образ.
+RUN npm prune --omit=dev && \
+    rm -rf node_modules/@next/swc-* node_modules/@img/*musl*
 
 FROM ${RUNTIME_IMAGE} AS runner
 
