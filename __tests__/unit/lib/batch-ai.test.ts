@@ -1611,7 +1611,7 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('sweaters')
   })
 
-  it('assigns the men-only outerwear subcategory to a male sheepskin coat', () => {
+  it('assigns the outerwear subcategory to a male sheepskin coat', () => {
     const result = normalizeBatchAiOutput({
       product: {
         category: 'clothes',
@@ -1633,7 +1633,7 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('dublenki')
   })
 
-  it('keeps a female sheepskin coat out of the men-only subcategory', () => {
+  it('assigns the outerwear subcategory to a female sheepskin coat', () => {
     const result = normalizeBatchAiOutput({
       product: {
         category: 'clothes',
@@ -1652,24 +1652,7 @@ describe('batch AI normalization', () => {
       attributeCodes: new Set(),
     })
 
-    expect(result.product.subcategory).toBe('shuby')
-  })
-
-  it('clears the men-only clothing subcategory when AI returns it for a female item', () => {
-    const result = normalizeBatchAiOutput({
-      product: { category: 'clothes', subcategory: 'dublenki', gender: 'female', name: 'Неопределённая модель' },
-    }, {
-      product: { name: '', category: 'clothes', subcategory: 'dublenki', photos: [], attributes: {} },
-      brandIds: new Set(),
-      categoryIds: new Set(['clothes']),
-      categoryNames: new Map([['clothes', 'Одежда']]),
-      subcategoryIds: new Set(['dublenki']),
-      subcategoryParents: new Map([['dublenki', 'clothes']]),
-      subcategoryNames: new Map([['dublenki', 'Дублёнки']]),
-      attributeCodes: new Set(),
-    })
-
-    expect(result.product.subcategory).toBe('')
+    expect(result.product.subcategory).toBe('dublenki')
   })
 
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {

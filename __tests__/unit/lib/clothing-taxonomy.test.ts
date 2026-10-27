@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   canonicalClothingSubcategoryName,
   inferClothingSubcategoryName,
-  isClothingSubcategoryAllowedForGender,
 } from '@/lib/clothing-taxonomy'
 
 describe('clothing taxonomy', () => {
@@ -73,13 +72,5 @@ describe('clothing taxonomy', () => {
 
   it('recognizes diminutive sock names', () => {
     expect(inferClothingSubcategoryName('Носочки из хлопка')).toBe('Носки')
-  })
-
-  it('allows the male-only sheepskin coat subcategory only for men', () => {
-    expect(isClothingSubcategoryAllowedForGender('Дублёнки', 'male')).toBe(true)
-    expect(isClothingSubcategoryAllowedForGender('Дублёнки', 'female')).toBe(false)
-    expect(isClothingSubcategoryAllowedForGender('Дублёнки', 'unisex')).toBe(false)
-    expect(isClothingSubcategoryAllowedForGender('Дублёнки', '')).toBe(false)
-    expect(isClothingSubcategoryAllowedForGender('Шубы', 'female')).toBe(true)
   })
 })
