@@ -13,6 +13,7 @@ import {
 import {
   canonicalClothingSubcategoryName,
   inferClothingSubcategoryName,
+  isClothingSubcategoryAllowedForGender,
   isLegacyClothingSubcategory,
 } from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
@@ -1485,6 +1486,12 @@ export function normalizeBatchAiOutput(raw: any, input: {
     : raw?.subcategory_suggestion || null
   if (normalizedName(input.categoryNames?.get(category)) === 'одежда') {
     const currentClothingSubcategoryIsLegacy = isLegacyClothingSubcategory(input.subcategoryNames?.get(subcategory))
+    // «Дублёнки» — единственная гендерно ограниченная подкатегория одежды:
+    // AI может вернуть её для женской модели, поэтому сервер не сохраняет
+    // мужскую подкатегорию без подтверждённого gender=male.
+    const clothingGender = ['male', 'female', 'unisex'].includes(String(proposed.gender))
+      ? String(proposed.gender)
+      : String(original.gender || '')
     const inferredAiName = [proposed.name, proposed.h1]
       .map(inferClothingSubcategoryName)
       .find(Boolean)
@@ -1509,10 +1516,19 @@ export function normalizeBatchAiOutput(raw: any, input: {
         && (!input.subcategoryParents?.get(id) || input.subcategoryParents.get(id) === category)
       ))
       : undefined
-    if (canonicalEntry) {
+    if (canonicalEntry && isClothingSubcategoryAllowedForGender(input.subcategoryNames?.get(canonicalEntry[0]), clothingGender)) {
       subcategory = canonicalEntry[0]
     } else if (currentClothingSubcategoryIsLegacy) {
       subcategory = ''
+    }
+    if (subcategory && !isClothingSubcategoryAllowedForGender(input.subcategoryNames?.get(subcategory), clothingGender)) {
+      const originalSubcategory = String(original.subcategory || '')
+      const originalParent = input.subcategoryParents?.get(originalSubcategory)
+      subcategory = input.subcategoryIds.has(originalSubcategory)
+        && (!originalParent || originalParent === category)
+        && isClothingSubcategoryAllowedForGender(input.subcategoryNames?.get(originalSubcategory), clothingGender)
+        ? originalSubcategory
+        : ''
     }
     // Таксономия одежды закрыта: известные синонимы нормализованы выше,
     // неизвестные типы остаются без подкатегории для ручной классификации.

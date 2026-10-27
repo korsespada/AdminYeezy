@@ -1611,6 +1611,67 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('sweaters')
   })
 
+  it('assigns the men-only outerwear subcategory to a male sheepskin coat', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'jackets',
+        gender: 'male',
+        name: 'Мужская дублёнка из овчины',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['jackets', 'dublenki']),
+      subcategoryParents: new Map([['jackets', 'clothes'], ['dublenki', 'clothes']]),
+      subcategoryNames: new Map([['jackets', 'Куртки'], ['dublenki', 'Дублёнки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('dublenki')
+  })
+
+  it('keeps a female sheepskin coat out of the men-only subcategory', () => {
+    const result = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'dublenki',
+        gender: 'female',
+        name: 'Женская дублёнка из овчины',
+      },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: 'shuby', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['shuby', 'dublenki']),
+      subcategoryParents: new Map([['shuby', 'clothes'], ['dublenki', 'clothes']]),
+      subcategoryNames: new Map([['shuby', 'Шубы'], ['dublenki', 'Дублёнки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('shuby')
+  })
+
+  it('clears the men-only clothing subcategory when AI returns it for a female item', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothes', subcategory: 'dublenki', gender: 'female', name: 'Неопределённая модель' },
+    }, {
+      product: { name: '', category: 'clothes', subcategory: 'dublenki', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['dublenki']),
+      subcategoryParents: new Map([['dublenki', 'clothes']]),
+      subcategoryNames: new Map([['dublenki', 'Дублёнки']]),
+      attributeCodes: new Set(),
+    })
+
+    expect(result.product.subcategory).toBe('')
+  })
+
   it('matches numeric ranges and gives an exact visual rule precedence over fallback size', () => {
     const product = {
       category: 'bags', price_rule_key: 'visual-1',
