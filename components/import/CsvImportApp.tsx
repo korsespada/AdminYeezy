@@ -69,6 +69,7 @@ import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAc
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
+import { withoutProductVideoAttributes } from "@/lib/product-video";
 import {
   alignBatchColorFamiliesAction,
   getBatchAiRunAction,
@@ -3855,6 +3856,11 @@ function CsvProductDrawer({
     change("attributes", next);
   };
 
+  const removeVideo = () => {
+    if (readOnly) return;
+    change("attributes", withoutProductVideoAttributes(attributes));
+  };
+
   const removePhoto = (i: number) => {
     if (readOnly) return;
     const photos = local.photos.filter((_, j) => j !== i);
@@ -4022,9 +4028,22 @@ function CsvProductDrawer({
             <section className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">Видео товара</h3>
-                  {video.url && <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">
-                    {video.url === String(attributes.manual_video_url || '').trim() ? 'Вручную' : video.url === String(attributes.hosted_video_url || '').trim() ? 'S3' : 'Источник'}
-                  </span>}
+                  <div className="flex items-center gap-2">
+                    {video.url && <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-1 text-[10px] font-semibold text-cyan-300">
+                      {video.url === String(attributes.manual_video_url || '').trim() ? 'Вручную' : video.url === String(attributes.hosted_video_url || '').trim() ? 'S3' : 'Источник'}
+                    </span>}
+                    {video.url && (
+                      <button
+                        type="button"
+                        onClick={removeVideo}
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-rose-300 transition-colors hover:bg-rose-500/20"
+                        title="Убрать видео из карточки и публикации"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Убрать видео
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {video.url && <video
                   className="max-h-[420px] w-full rounded-xl border border-slate-700 bg-black object-contain"
