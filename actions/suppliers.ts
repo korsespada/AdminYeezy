@@ -1524,16 +1524,13 @@ export async function previewBatchPublishAction(
     const existing = await workflow.existingRailsProducts(externalIds)
     const existingCount = existing.size
     const newCount = Math.max(0, externalIds.length - existingCount)
-    const known = await scrapingQuery(`
-      SELECT external_id FROM batch_publications WHERE batch_id=$1
-      UNION
-      SELECT external_id FROM products WHERE batch_id=$1 AND external_id IS NOT NULL
-    `, [batchId])
-    const knownIds = new Set(known.rows.map((row) => String(row.external_id).trim()).filter(Boolean))
+    // publishedMissing — товары, которые партия уже отдала в каталог, но которых
+    // больше нет в текущей версии. Даже в режиме «Обновить изменённые» они
+    // остаются на сайте, поэтому предпросмотр называет их отдельным числом.
+    const knownIds: string[] = await workflow.getBatchKnownExternalIds(batchId)
     const targetIds = new Set(externalIds)
-    const deleteCount = replaceMissing
-      ? [...knownIds].filter((externalId) => !targetIds.has(externalId)).length
-      : 0
+    const publishedMissing = knownIds.filter((externalId) => !targetIds.has(externalId)).length
+    const deleteCount = replaceMissing ? publishedMissing : 0
     const videoCount = productRows.filter((row: any) => {
       const externalId = String(row.external_id || '').trim()
       return workflow.needsVideoTransfer(row, existing.get(externalId))
@@ -1546,6 +1543,8 @@ export async function previewBatchPublishAction(
         updateCount: mode === 'upsert' ? existingCount : 0,
         skippedCount: mode === 'add' ? existingCount : 0,
         deleteCount,
+        missingCount: publishedMissing,
+        replaceMissing,
         videoCount,
       },
     }

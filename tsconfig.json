@@ -41,6 +41,7 @@
   ],
   "exclude": [
     "node_modules",
+    "tmp",
     "vitest.config.ts",
     "vitest.setup.ts",
     "adminpro",

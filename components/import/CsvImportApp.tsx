@@ -69,6 +69,7 @@ import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAc
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
 import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
+import { batchPublishPreviewMessage } from "@/lib/batch-publish-preview";
 import { withoutProductVideoAttributes } from "@/lib/product-video";
 import {
   alignBatchColorFamiliesAction,
@@ -1215,14 +1216,16 @@ export default function CsvImportApp({
         }
         const data = preview.data as any;
         const shouldContinue = window.confirm(
-          `Предпросмотр публикации\n\n` +
-          `Всего в партии: ${data.total}\n` +
-          `Новых: ${data.newCount}\n` +
-          `Будет обновлено: ${data.updateCount}\n` +
-          `Будет пропущено: ${data.skippedCount}\n` +
-          `Будет удалено из каталога: ${data.deleteCount}\n` +
-          `Видео к переносу в S3: ${data.videoCount}\n\n` +
-          `Продолжить публикацию?`,
+          batchPublishPreviewMessage({
+            total: Number(data.total || 0),
+            newCount: Number(data.newCount || 0),
+            updateCount: Number(data.updateCount || 0),
+            skippedCount: Number(data.skippedCount || 0),
+            deleteCount: Number(data.deleteCount || 0),
+            missingCount: Number(data.missingCount || 0),
+            videoCount: Number(data.videoCount || 0),
+            replaceMissing,
+          }),
         );
         if (!shouldContinue) return;
       }
@@ -1668,7 +1671,10 @@ export default function CsvImportApp({
       .map((index) => products[index])
       .filter((product): product is CsvProduct => Boolean(product));
     if (!selectedProducts.length) return;
-    if (!window.confirm(`Удалить выбранные товары (${selectedProducts.length})? Это действие нельзя отменить.`)) return;
+    const publishedWarning = batchStage === "PUSHED"
+      ? "\n\nВыбранные товары уже опубликованы: в каталоге они останутся, пока не запустишь «Заменить каталог текущей версией»."
+      : "";
+    if (!window.confirm(`Удалить выбранные товары (${selectedProducts.length})? Это действие нельзя отменить.${publishedWarning}`)) return;
 
     setIsBulkDeleting(true);
     try {
