@@ -17,7 +17,6 @@ import {
   FolderPlus,
   RotateCcw,
   BadgeRussianRuble,
-  BookOpen,
   Sparkles,
   Square,
 } from 'lucide-react'
@@ -43,7 +42,6 @@ import {
   stopBatchAiRunAction,
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
-import SupplierModelReferencesDialog from './SupplierModelReferencesDialog'
 import BatchAiReviewDialog from './BatchAiReviewDialog'
 import { canDeletePublishedCatalog, shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
@@ -109,7 +107,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [modalState, setModalState] = useState<ModalState | null>(null)
   const [priceSupplier, setPriceSupplier] = useState<{ id: number; name: string } | null>(null)
-  const [modelSupplier, setModelSupplier] = useState<{ id: number; name: string; batchId: string } | null>(null)
   const [reviewBatch, setReviewBatch] = useState<ExportHistoryBatch | null>(null)
 
   const refresh = async () => {
@@ -302,10 +299,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     else alert((result as any).error)
   }
 
-  const startAi = async (batch: ExportHistoryBatch, mode: 'sample' | 'full') => {
+  const startAi = async (batch: ExportHistoryBatch) => {
     setPendingAction(`ai-${batch.id}`)
     try {
-      const result = await startBatchAiAction(batch.id, mode)
+      const result = await startBatchAiAction(batch.id, 'full')
       if (result.success) {
         const data: any = result.data
         if (data?.runId) {
@@ -332,7 +329,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
           alert(finalRun?.status === 'cancelled'
             ? 'Обработка ИИ остановлена. Уже завершённые товары сохранены.'
             : finalRun?.status === 'completed'
-            ? `${mode === 'sample' ? 'Тест' : 'Обработка'} ИИ завершён. Успешно: ${finalRun.completed_count || 0}, ошибок: ${finalRun.failed_count || 0}`
+            ? `Обработка ИИ завершена. Успешно: ${finalRun.completed_count || 0}, ошибок: ${finalRun.failed_count || 0}`
             : 'ИИ не завершил обработку вовремя. Текущий статус сохранён в истории.')
         }
         await refresh()
@@ -403,7 +400,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
           const aiProductCount = Number(batch.ai_product_count || 0)
           const productCount = Number(batch.product_count || batch.items_count || 0)
           const hasAiRemaining = productCount > 0 && aiProductCount < productCount
-          const aiMode = aiProductCount > 0 ? 'full' : 'sample'
           const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
           const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
           const publishing = Boolean(batch.active_operation?.includes('publish'))
@@ -436,7 +432,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => toggleBatch(batch.id)} className="min-h-11 rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-medium text-slate-200 hover:bg-slate-700">{isExpanded ? 'Скрыть этапы' : 'Показать этапы'}</button>
                   {canPublish && <button type="button" onClick={() => router.push(`/admin/batches/${encodeURIComponent(batch.id)}`)} className="min-h-11 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-medium text-emerald-200 hover:bg-emerald-500/20">Открыть партию</button>}
-                  {!canPublish && hasAiRemaining && <button type="button" onClick={() => startAi(batch, aiMode)} disabled={isBusy || aiRunning} className="min-h-11 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 text-sm font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50">{aiMode === 'full' ? 'Продолжить ИИ' : 'Тест ИИ'}</button>}
+                  {!canPublish && hasAiRemaining && <button type="button" onClick={() => startAi(batch)} disabled={isBusy || aiRunning} className="min-h-11 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 text-sm font-medium text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50">{aiProductCount > 0 ? 'Продолжить ИИ' : 'Обработать ИИ'}</button>}
                 </div>
                 {isExpanded && (
                   <div className="space-y-2 border-t border-slate-700 pt-3">
@@ -479,7 +475,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 const aiProductCount = Number(batch.ai_product_count || 0)
                 const productCount = Number(batch.product_count || batch.items_count || 0)
                 const hasAiRemaining = productCount > 0 && aiProductCount < productCount
-                const aiMode = aiProductCount > 0 ? 'full' : 'sample'
                 // A previously published batch may need a safe retry when the
                 // catalog import was interrupted after the stage was marked
                 // PUSHED. Both publication modes are idempotent by external_id.
@@ -540,9 +535,8 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       <td className="relative px-3 py-3 text-right">
                         <div className="ml-auto flex w-fit flex-nowrap items-center justify-end gap-0.5 whitespace-nowrap rounded-lg bg-slate-900/35 p-0.5">
                           {!batch.isSynthetic && hasAiRemaining && batch.status !== 'Удалено из БД' && (
-                            <button onClick={(event) => { event.stopPropagation(); startAi(batch, aiMode) }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={aiMode === 'full' ? 'Продолжить обработку остальных' : 'Проверить ИИ на первых 10 товарах'} aria-label={aiMode === 'full' ? 'Продолжить ИИ' : 'Тест ИИ на 10 товарах'}>
+                            <button onClick={(event) => { event.stopPropagation(); startAi(batch) }} disabled={pendingAction === `ai-${batch.id}` || ['queued','running'].includes(batch.ai_run_status || '')} className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-indigo-300 hover:bg-indigo-500/10 disabled:opacity-50" title={aiProductCount > 0 ? 'Продолжить обработку остальных' : 'Обработать ИИ'} aria-label={aiProductCount > 0 ? 'Продолжить ИИ' : 'Обработать ИИ'}>
                               {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-                              {aiMode === 'sample' && <span className="absolute -right-0.5 -top-0.5 rounded bg-indigo-500 px-0.5 text-[8px] font-bold leading-3 text-white">10</span>}
                             </button>
                           )}
                           {!batch.isSynthetic && ['queued', 'running'].includes(batch.ai_run_status || '') && (
@@ -558,9 +552,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           )}
                           {!batch.isSynthetic && batch.supplier_id && (
                             <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика" aria-label="Правила цен"><BadgeRussianRuble className="h-4 w-4" /></button>
-                          )}
-                          {!batch.isSynthetic && batch.supplier_id && (
-                            <button onClick={(event) => { event.stopPropagation(); setModelSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик', batchId: batch.id }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-cyan-300 hover:bg-cyan-500/10" title="Справочник моделей по этой выгрузке" aria-label="Справочник моделей"><BookOpen className="h-4 w-4" /></button>
                           )}
                           {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
                             <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ" aria-label="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
@@ -747,7 +738,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         forceFileMode={modalState?.forceFileMode}
       />
       {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
-      {modelSupplier && <SupplierModelReferencesDialog supplierId={modelSupplier.id} supplierName={modelSupplier.name} batchId={modelSupplier.batchId} onClose={() => setModelSupplier(null)} />}
       {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={(familiesApproved) => {
         const batchId = reviewBatch.id
         setReviewBatch(null)

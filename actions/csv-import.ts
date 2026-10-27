@@ -43,7 +43,6 @@ export interface CsvProduct {
     attributes?: ProductAttributes
     batchId?: string
     ai_processed?: boolean | string
-    ai_sampled?: boolean
     price_source?: string
     variant_group_key?: string | null
     variant_group_name?: string | null
@@ -139,7 +138,6 @@ function normalizeBatchProduct(row: any): CsvProduct {
     // clothing/shoe variant size every time the page is opened.
     attributes: normalizeProductAttributes(row.attributes),
     ai_processed: row.ai_processed === true || row.ai_processed === 'true',
-    ai_sampled: row.ai_sampled === true || row.ai_sampled === 'true',
     price_source: row.price_source || 'legacy',
     variant_group_key: row.variant_group_key || null,
     variant_group_name: row.variant_group_name || null,
@@ -656,12 +654,7 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
         p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
         p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.variant_group_name, p.ai_error,
         p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
-        to_jsonb(p)->'translations' AS translations, to_jsonb(p)->'photo_alts_en' AS photo_alts_en,
-        EXISTS (
-          SELECT 1 FROM batch_ai_items i
-          JOIN batch_ai_runs r ON r.id=i.run_id
-          WHERE i.product_id=p.id AND r.batch_id=p.batch_id AND r.mode='sample'
-        ) AS ai_sampled
+        to_jsonb(p)->'translations' AS translations, to_jsonb(p)->'photo_alts_en' AS photo_alts_en
       FROM products p
       WHERE p.batch_id = $1
       ORDER BY p.source_position ASC NULLS LAST, p.id ASC
@@ -675,6 +668,49 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
         columns: BATCH_PRODUCT_COLUMNS,
         delimiter: ';',
         stage: batch.rows[0]?.stage || 'SCRAPED',
+      },
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Версия одного товара до AI-обработки для просмотра в карточке. Ищется в
+// последнем снимке партии, где этот товар ещё не обработан; товары,
+// созданные разделением по цветам, находятся по исходному external_id.
+export async function getBatchProductBeforeAiAction(batchId: string, productId: number) {
+  try {
+    await requireAdmin()
+    const id = Number(productId)
+    if (!batchId || !Number.isInteger(id)) throw new Error('Не указан товар')
+    const current = await scrapingQuery(`
+      SELECT external_id, attributes->>'source_parent_external_id' AS parent_external_id
+      FROM products WHERE id=$1 AND batch_id=$2
+    `, [id, batchId])
+    if (!current.rows[0]) throw new Error('Товар не найден в партии')
+    const externalIds = [current.rows[0].external_id, current.rows[0].parent_external_id]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+    const res = await scrapingQuery(`
+      SELECT s.label, s.created_at, item.value AS product
+      FROM batch_snapshots s
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(s.products)='array' THEN s.products ELSE '[]'::jsonb END
+      ) AS item(value)
+      WHERE s.batch_id=$1
+        AND COALESCE(item.value->>'ai_processed','false')<>'true'
+        AND (item.value->>'id'=$2 OR item.value->>'external_id'=ANY($3::text[]))
+      ORDER BY (item.value->>'id'=$2) DESC, s.created_at DESC
+      LIMIT 1
+    `, [batchId, String(id), externalIds])
+    const row = res.rows[0]
+    if (!row) return { success: true, data: null }
+    return {
+      success: true,
+      data: {
+        product: normalizeBatchProduct(row.product),
+        label: String(row.label || ''),
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
       },
     }
   } catch (err: any) {

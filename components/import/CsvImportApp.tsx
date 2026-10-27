@@ -16,7 +16,6 @@ import {
   CheckCircle,
   AlertTriangle,
   X,
-  Edit3,
   Save,
   HardDrive,
   RefreshCw,
@@ -31,12 +30,14 @@ import {
   Database,
   LayoutGrid,
   Rows3,
+  Images,
   Sparkles,
   Settings2,
   Users,
   MoreHorizontal,
   ChevronDown,
   Undo2,
+  BadgeRussianRuble,
   Palette,
   Link2,
   Search,
@@ -51,6 +52,7 @@ import {
   fetchLookupsAction,
   readLocalCsvAction,
   saveLocalCsvAction,
+  getBatchProductBeforeAiAction,
   getBatchProductsAction,
   saveBatchProductsAction,
   updateBatchProductAction,
@@ -73,8 +75,6 @@ import {
   getBatchAiRunLogsAction,
   getBatchAiSuggestionsAction,
   getLatestBatchAiRunAction,
-  getBatchSnapshotsAction,
-  rollbackBatchAction,
   rollbackBatchProductAiAction,
   startBatchAiAction,
   startBatchMediaSeoAction,
@@ -88,6 +88,7 @@ import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
 import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
 import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
+import SupplierPriceRulesDialog from "@/components/import/SupplierPriceRulesDialog";
 import { MeasurementsField, SizeRecommendationField } from "@/components/catalog-attributes/CatalogAttributeFields";
 import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
@@ -580,6 +581,7 @@ export default function CsvImportApp({
   const [sourceLabel, setSourceLabel] = useState<string | null>(initialSourceLabel);
   const [batchStage, setBatchStage] = useState("SCRAPED");
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [showPriceRules, setShowPriceRules] = useState(false);
   const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [publishProgress, setPublishProgress] = useState<{
@@ -628,7 +630,7 @@ export default function CsvImportApp({
   const [filterVideo, setFilterVideo] = useState<"" | "with" | "without">("");
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [visibleProductCount, setVisibleProductCount] = useState(PRODUCTS_PER_LAZY_PAGE);
-  const [viewMode, setViewMode] = useState<"cards" | "rows">("cards");
+  const [viewMode, setViewMode] = useState<"cards" | "photos" | "rows">("cards");
   const [cardColumns, setCardColumns] = useState(4);
   const [showVariantFamilies, setShowVariantFamilies] = useState(false);
   const [showBulkVariantFamily, setShowBulkVariantFamily] = useState(false);
@@ -649,7 +651,6 @@ export default function CsvImportApp({
   const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
   const [isProcessing, setIsProcessing] = useState(false)
-  const [isRollingBackAiSample, setIsRollingBackAiSample] = useState(false)
   const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
   const [showAiSuggestions, setShowAiSuggestions] = useState(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number, failed: number} | null>(null);
@@ -882,10 +883,6 @@ export default function CsvImportApp({
     }).length,
     [products],
   );
-  const aiSampleCount = useMemo(
-    () => products.filter((product) => product.ai_sampled === true).length,
-    [products],
-  );
   const aiErrorProducts = useMemo(
     () => products.filter((product) => !(product.ai_processed === true || product.ai_processed === "true") && Boolean(product.ai_error)),
     [products],
@@ -935,16 +932,7 @@ export default function CsvImportApp({
   // other active filters, so each select narrows the available values.
   const filteredProducts = facetProducts.all;
 
-  const sampleProducts = useMemo(
-    () => filteredProducts.filter((product) => product.ai_sampled === true),
-    [filteredProducts],
-  );
-  const displayedProducts = useMemo(
-    () => sampleProducts.length > 0
-      ? [...sampleProducts, ...filteredProducts.filter((product) => product.ai_sampled !== true)]
-      : filteredProducts,
-    [filteredProducts, sampleProducts],
-  );
+  const displayedProducts = filteredProducts;
   const visibleProducts = useMemo(
     () => displayedProducts.slice(0, visibleProductCount),
     [displayedProducts, visibleProductCount],
@@ -1284,7 +1272,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "sample" | "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1306,8 +1294,7 @@ export default function CsvImportApp({
           setActiveSnapshotId(null);
           await handleLoadBatch(targetBatchId);
         }
-        const alreadyProcessed = products.some((product) => product.ai_processed === true || product.ai_processed === "true");
-        const mode = requestedMode || (alreadyProcessed ? "full" : "sample");
+        const mode = requestedMode || "full";
         setActiveAiRunMode(mode);
         const result = mode === "media_seo"
           ? await startBatchMediaSeoAction(targetBatchId, selectedProductIds)
@@ -1628,40 +1615,6 @@ export default function CsvImportApp({
   const handleRecoverMeasurements = async () => {
     setShowMoreActions(false);
     await handleAiProcess("recover_measurements");
-  };
-
-  const handleRollbackAiSample = async () => {
-    const targetBatchId = batchId || initialBatchId;
-    if (!targetBatchId || isRollingBackAiSample) return;
-    if (!window.confirm(
-      `Отменить тестовую AI-обработку ${aiSampleCount || 10} товаров?\n\n` +
-      "Партия вернётся к снимку перед последним тестом ИИ. Ручные изменения, сделанные после теста, тоже будут отменены.",
-    )) return;
-
-    setIsRollingBackAiSample(true);
-    try {
-      const snapshotsResult = await getBatchSnapshotsAction(targetBatchId);
-      const snapshot = snapshotsResult.success
-        ? snapshotsResult.data?.find((item: any) => item.label === "До AI · sample")
-        : null;
-      if (!snapshot) {
-        setSaveMsg("Не найден снимок перед тестом ИИ. Используйте откат из истории выгрузки.");
-        return;
-      }
-
-      const rollbackResult = await rollbackBatchAction(targetBatchId, snapshot.id);
-      if (!rollbackResult.success) {
-        setSaveMsg(`Ошибка отката: ${rollbackResult.error}`);
-        return;
-      }
-
-      await handleLoadBatch(targetBatchId);
-      setSaveMsg("✓ Тестовая AI-обработка отменена, партия восстановлена из снимка.");
-    } catch (error: any) {
-      setSaveMsg(`Ошибка отката: ${error?.message || "не удалось восстановить снимок"}`);
-    } finally {
-      setIsRollingBackAiSample(false);
-    }
   };
 
   const handleBulkApply = () => {
@@ -2052,18 +2005,6 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {!isSnapshotSource && isBatchSource && aiSampleCount > 0 && batchStage !== "PUSHED" && !isProcessing && (
-                <button
-                  onClick={handleRollbackAiSample}
-                  disabled={isRollingBackAiSample}
-                  className="flex items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm font-bold text-amber-200 transition-all hover:bg-amber-500/20 disabled:opacity-50"
-                  title="Вернуть партию к снимку перед последним тестом ИИ"
-                >
-                  {isRollingBackAiSample ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
-                  Отменить тест ИИ · {aiSampleCount}
-                </button>
-              )}
-
               {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -2098,24 +2039,12 @@ export default function CsvImportApp({
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
-                    {isBatchSource && aiReadyCount > 0 && aiRemainingCount > 0 && (
-                      <button
-                        onClick={() => handleAiProcess("sample")}
-                        className="flex items-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-500/20"
-                        title="Обработать 10 ещё сырых товаров с текущими глобальными настройками"
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        Новый тест · 10
-                      </button>
-                    )}
                     <button
-                        onClick={() => handleAiProcess(aiReadyCount > 0 ? "full" : "sample")}
+                        onClick={() => handleAiProcess("full")}
                         className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
                     >
                         <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                        {aiReadyCount > 0
-                          ? "Обработать с ИИ остальные"
-                          : "Тест ИИ · 10 товаров"}
+                        {aiReadyCount > 0 ? "Обработать ИИ остальные" : "Обработать ИИ"}
                     </button>
                   </div>
                 )
@@ -2162,13 +2091,13 @@ export default function CsvImportApp({
                     <div className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Настройки</div>
                       {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
+                      {supplierId && <button onClick={() => { setShowMoreActions(false); setShowPriceRules(true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-amber-200 hover:bg-slate-800"><BadgeRussianRuble className="h-4 w-4" />Правила цен</button>}
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
                       {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Удалить товары, которых нет в партии</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
-                      {aiReadyCount >= 2 && <button onClick={() => handleAiProcess("variants")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Merge className="h-4 w-4" />Пересобрать цветовые семьи</button>}
                       {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
                     </div>
                   )}
@@ -2840,7 +2769,7 @@ export default function CsvImportApp({
                 из {filteredProducts.length} показанных
               </div>
               <div className="flex items-center gap-2">
-                {viewMode === "cards" && (
+                {viewMode !== "rows" && (
                   <label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-400 xl:flex">
                     <span className="whitespace-nowrap">В ряд: {cardColumns}</span>
                     <input
@@ -2875,6 +2804,16 @@ export default function CsvImportApp({
                   >
                     <LayoutGrid className="h-3.5 w-3.5" />
                     Карточки
+                  </button>
+                  <button
+                    onClick={() => setViewMode("photos")}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      viewMode === "photos" ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                    }`}
+                    title="Только фото"
+                  >
+                    <Images className="h-3.5 w-3.5" />
+                    Фото
                   </button>
                 </div>
                 <button
@@ -2918,9 +2857,9 @@ export default function CsvImportApp({
               </div>
             </div>
             <div
-              className={viewMode === "cards"
-                ? `grid grid-cols-1 gap-5 pb-48 sm:grid-cols-2 ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
-                : "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
+              className={viewMode === "rows"
+                ? "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
+                : `grid pb-48 ${viewMode === "photos" ? "grid-cols-4 gap-1.5 sm:gap-2.5" : "grid-cols-1 gap-5 sm:grid-cols-2"} ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
               }
             >
               {viewMode === "rows" && (
@@ -2935,7 +2874,7 @@ export default function CsvImportApp({
                   <div />
                 </div>
               )}
-              {visibleProducts.map((product, displayedIndex) => {
+              {visibleProducts.map((product) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
@@ -2959,14 +2898,6 @@ export default function CsvImportApp({
                 const variants = variantGroups.get(approvedVariantGroupKey(product)) || [];
                 const variantColors = [...new Set(variants.flatMap((variant) => attributeValues(variant.attributes?.colors ?? variant.attributes?.color)))];
                 return <React.Fragment key={`${product.external_id}-${realIndex}`}>
-                  {sampleProducts.length > 0 && displayedIndex === 0 && (
-                    <div className={`${viewMode === "rows" ? "min-w-[1120px] rounded-none border-x-0" : "col-span-full rounded-xl"} flex items-center justify-between border border-indigo-500/30 bg-indigo-500/10 px-4 py-3`}>
-                      <div><div className="font-semibold text-indigo-200">Тест ИИ</div><div className="text-xs text-slate-400">Первые для проверки · {sampleProducts.length} товаров</div></div>
-                    </div>
-                  )}
-                  {sampleProducts.length > 0 && displayedIndex === sampleProducts.length && (
-                    <div className={`${viewMode === "rows" ? "min-w-[1120px] px-4 py-3" : "col-span-full mt-2 pt-4"} border-t border-slate-700 text-sm font-semibold text-slate-300`}>Остальные товары · {filteredProducts.length - sampleProducts.length}</div>
-                  )}
                 {viewMode === "rows" ? (
                   <>
                     <div className="hidden lg:block">
@@ -3020,6 +2951,22 @@ export default function CsvImportApp({
                       )}
                     </div>
                   </>
+                ) : viewMode === "photos" ? (
+                  // Плотная сетка квадратов без подписей, как в «Товарах» и Chromoff.
+                  <AdminProductCard
+                    product={adminProduct}
+                    showAttributeSummary={false}
+                    photosOnly
+                    squarePhoto
+                    quickActions={false}
+                    onEdit={() => setSelectedIdx(realIndex)}
+                    onDelete={() => handleRemove(realIndex)}
+                    onUpdate={() => undefined}
+                    selected={selectionOrder !== -1}
+                    onToggleSelect={() => toggleMergeSelection(realIndex)}
+                    onSelectionClick={(event) => toggleMergeSelection(realIndex, event.shiftKey)}
+                    allowDuplicate={false}
+                  />
                 ) : isBatchSource ? (
                   <AdminProductCard
                     product={adminProduct}
@@ -3289,6 +3236,9 @@ export default function CsvImportApp({
         supplierName={initialSupplierName || undefined}
         supplierId={supplierId}
       />
+      {showPriceRules && supplierId && (
+        <SupplierPriceRulesDialog supplierId={supplierId} supplierName={initialSupplierName || "Поставщик"} onClose={() => setShowPriceRules(false)} />
+      )}
       {showAiSuggestions && batchId && (
         <BatchAiReviewDialog
           batchId={batchId}
@@ -3714,16 +3664,25 @@ function CsvProductDrawer({
   supplierName,
   supplierId,
 }: CsvProductDrawerProps) {
-  const [local, setLocal] = useState<CsvProduct | null>(null);
+  const [draft, setLocal] = useState<CsvProduct | null>(null);
   const [photoUrlInput, setPhotoUrlInput] = useState("");
   const [photoUrlError, setPhotoUrlError] = useState<string | null>(null);
   const [language, setLanguage] = useState<"ru" | "en">("ru");
+  const [showBeforeAi, setShowBeforeAi] = useState(false);
+  const [beforeAi, setBeforeAi] = useState<{ productId: unknown; product: CsvProduct | null; label: string } | null>(null);
+  const [beforeAiLoading, setBeforeAiLoading] = useState(false);
+  const [beforeAiError, setBeforeAiError] = useState<string | null>(null);
 
   useEffect(() => {
     setLocal(product ? { ...product } : null);
     setPhotoUrlInput("");
     setPhotoUrlError(null);
   }, [product, isOpen]);
+
+  useEffect(() => {
+    setShowBeforeAi(false);
+    setBeforeAiError(null);
+  }, [product?.id, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -3747,9 +3706,40 @@ function CsvProductDrawer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen || !local) return null;
+  if (!isOpen || !draft) return null;
+
+  const isAiProcessed = draft.ai_processed === true || draft.ai_processed === "true";
+  const canShowBeforeAi = Boolean(batchId && isAiProcessed && draft.id !== undefined && draft.id !== null);
+  const loadedBeforeAi = beforeAi && beforeAi.productId === draft.id ? beforeAi : null;
+  // Версия до ИИ только для просмотра: все поля и действия карточки отключены.
+  const readOnly = showBeforeAi && Boolean(loadedBeforeAi?.product);
+  const local: CsvProduct = readOnly && loadedBeforeAi?.product ? loadedBeforeAi.product : draft;
+
+  const toggleBeforeAi = async (next: boolean) => {
+    setShowBeforeAi(next);
+    setBeforeAiError(null);
+    if (!next || loadedBeforeAi || !batchId) return;
+    // Исходная версия грузится только по запросу и только для этого товара.
+    setBeforeAiLoading(true);
+    try {
+      const result = await getBatchProductBeforeAiAction(batchId, Number(draft.id));
+      if (!result.success) {
+        setBeforeAiError(result.error || "Не удалось загрузить версию до ИИ");
+        setShowBeforeAi(false);
+        return;
+      }
+      setBeforeAi({ productId: draft.id, product: (result.data?.product as CsvProduct | undefined) || null, label: result.data?.label || "" });
+      if (!result.data) {
+        setBeforeAiError("Версия до ИИ не сохранилась в снимках партии");
+        setShowBeforeAi(false);
+      }
+    } finally {
+      setBeforeAiLoading(false);
+    }
+  };
 
   const change = (field: keyof CsvProduct, value: any) => {
+    if (readOnly) return;
     setLocal((prev) => (prev ? { ...prev, [field]: value } : null));
     onUpdate(index, field, value);
   };
@@ -3764,6 +3754,7 @@ function CsvProductDrawer({
   };
 
   const addPhotoByUrl = () => {
+    if (readOnly) return;
     const url = photoUrlInput.trim();
     if (!url) {
       setPhotoUrlError("Вставьте ссылку на изображение");
@@ -3865,6 +3856,7 @@ function CsvProductDrawer({
   };
 
   const removePhoto = (i: number) => {
+    if (readOnly) return;
     const photos = local.photos.filter((_, j) => j !== i);
     const currentPhotoAlts = Array.from(
       { length: local.photos.length },
@@ -3882,6 +3874,7 @@ function CsvProductDrawer({
   };
 
   const movePhoto = (fromIndex: number, toIndex: number) => {
+    if (readOnly) return;
     const photos = [...local.photos];
     const [photo] = photos.splice(fromIndex, 1);
     photos.splice(toIndex, 0, photo);
@@ -3912,13 +3905,29 @@ function CsvProductDrawer({
       <div className="fixed inset-y-0 right-0 z-50 flex h-[100dvh] w-full max-w-none flex-col overflow-hidden overscroll-contain border-l border-slate-700 bg-slate-900 shadow-2xl lg:max-w-2xl">
         <div className="h-full flex flex-col">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-4 py-3 sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg">
-                <Edit3 className="w-5 h-5 text-indigo-400" />
-              </div>
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
               <h2 className="break-words text-base font-semibold text-white sm:text-lg">
-                Редактирование #{index + 1}
+                Товар №{index + 1}
               </h2>
+              {canShowBeforeAi && (
+                <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5" role="group" aria-label="Версия карточки">
+                  {([[false, "После ИИ"], [true, "До ИИ"]] as const).map(([value, label]) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => toggleBeforeAi(value)}
+                      disabled={beforeAiLoading}
+                      aria-pressed={showBeforeAi === value}
+                      className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                        showBeforeAi === value ? "bg-indigo-600 text-white" : "text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {value && beforeAiLoading && <RefreshCw className="h-3 w-3 animate-spin" />}
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex rounded-lg border border-slate-700 bg-slate-900 p-0.5" role="group" aria-label="Язык карточки">
                 {(["ru", "en"] as const).map((code) => (
                   <button
@@ -3936,7 +3945,7 @@ function CsvProductDrawer({
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {onRollbackAi && (
+              {onRollbackAi && !readOnly && (
                 <button
                   onClick={onRollbackAi}
                   disabled={aiBusy}
@@ -3946,9 +3955,9 @@ function CsvProductDrawer({
                   Откатить ИИ
                 </button>
               )}
-              {onRetryAi && (
+              {onRetryAi && !readOnly && (
                 <button onClick={onRetryAi} disabled={aiBusy} className="rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3 py-2 text-xs font-semibold text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-50">
-                  {local.ai_processed || local.ai_error ? "Повторить ИИ из исходника" : "Обработать ИИ"}
+                  {draft.ai_processed || draft.ai_error ? "Повторить ИИ из исходника" : "Обработать ИИ"}
                 </button>
               )}
               <button
@@ -3960,6 +3969,12 @@ function CsvProductDrawer({
             </div>
           </div>
 
+          {(readOnly || beforeAiError) && (
+            <div className={`shrink-0 border-b px-4 py-2 text-xs sm:px-6 ${beforeAiError ? "border-rose-500/30 bg-rose-500/10 text-rose-200" : "border-amber-500/30 bg-amber-500/10 text-amber-200"}`}>
+              {beforeAiError || `Карточка до обработки ИИ${loadedBeforeAi?.label ? ` · снимок «${loadedBeforeAi.label}»` : ""} · только просмотр`}
+            </div>
+          )}
+          <fieldset disabled={readOnly} className="m-0 flex min-h-0 min-w-0 flex-1 flex-col border-0 p-0">
           <div className="min-h-0 flex-1 space-y-8 overflow-y-auto p-4 pb-32 sm:p-6">
             {/* Photos */}
             <section className="space-y-3">
@@ -4290,6 +4305,7 @@ function CsvProductDrawer({
               </div>
             </section>
           </div>
+          </fieldset>
         </div>
       </div>
     </>

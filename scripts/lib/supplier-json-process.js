@@ -3,6 +3,13 @@ const fs = require('fs');
 const { spawn } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 
+// Парсер сохраняет переносы строк в описании, а скрипты постобработки написаны
+// под однострочный текст ленты Szwego: отдаём им описание одной строкой.
+function flattenDescription(product) {
+  if (!product || typeof product.description !== 'string' || !/[\r\n]/.test(product.description)) return product;
+  return { ...product, description: product.description.split(/\s+/).filter(Boolean).join(' ') };
+}
+
 function runSupplierJsonProcess(script, products, options = {}) {
   const runnerPath = path.join(process.cwd(), 'scripts', 'parser', 'json_postprocess_runner.py');
   const workspacePython = process.platform === 'win32'
@@ -51,7 +58,7 @@ function runSupplierJsonProcess(script, products, options = {}) {
     child.stdin.end(JSON.stringify({
       script: scriptName,
       source: source || undefined,
-      products,
+      products: products.map(flattenDescription),
       force_legacy: options.forceLegacy === true,
       validate_only: options.validateOnly === true,
     }));

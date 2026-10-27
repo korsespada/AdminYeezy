@@ -162,15 +162,6 @@ export type BatchAiPriceRuleHint = {
   priority?: number
 }
 
-export type BatchAiModelReference = {
-  model_key: string
-  model_name: string
-  aliases?: string[]
-  visual_hint?: string | null
-  reference_images?: string[]
-  reference_photo_numbers?: number[]
-}
-
 type SupplierPriceFormula = {
   source_price?: 'max' | 'min'
   multiplier?: number
@@ -370,14 +361,13 @@ export function buildBatchAiUserPrompt(input: {
   attributes: BatchAiAttributeDefinition[]
   priceRules?: BatchAiPriceRuleHint[]
   priceAiInstructions?: string | null
-  modelReferences?: BatchAiModelReference[]
   visualExamples?: SupplierAiVisualExample[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
   categoryRules?: BatchAiCategoryRule[]
   processingOptions?: BatchAiProcessingOptions
 }) {
-  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, modelReferences = [], chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
+  const { product, supplierInstructions, brands, categories, subcategories, attributes, priceRules = [], priceAiInstructions, chromoffMode = false, chromoffCategories = [], processingOptions = DEFAULT_BATCH_AI_PROCESSING_OPTIONS } = input
   const visualExamples = normalizeSupplierAiVisualExamples(input.visualExamples)
   const configuredCategoryRules = normalizeBatchAiCategoryRules(input.categoryRules)
   const selectedCategory = categories.find((category) => String(category.id) === String(product.category))
@@ -395,7 +385,6 @@ export function buildBatchAiUserPrompt(input: {
     : 'Для категории товара дополнительные автоматические правила пока не заданы.'
   let referenceOffset = 0
   const catalogAttributesShape = {
-    model_reference_key: '',
     measurements: null,
     size_recommendation: null,
     ...(processingOptions.preserveAllPhotos ? { dimensions: '', weight: null } : {}),
@@ -409,18 +398,6 @@ export function buildBatchAiUserPrompt(input: {
       conditions: rule.conditions,
       price: rule.price,
       visual_hint: rule.visual_hint || '',
-      reference_photo_numbers: references,
-    }
-  })
-  let modelReferenceOffset = 0
-  const modelReferencePrompt = modelReferences.map((reference) => {
-    const references = (reference.reference_images || []).map((_, index) => modelReferenceOffset + index + 1)
-    modelReferenceOffset += references.length
-    return {
-      model_key: reference.model_key,
-      model_name: reference.model_name,
-      aliases: reference.aliases || [],
-      visual_hint: reference.visual_hint || '',
       reference_photo_numbers: references,
     }
   })
@@ -475,8 +452,6 @@ export function buildBatchAiUserPrompt(input: {
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
     `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
-    `Визуальный справочник моделей Chanel: ${JSON.stringify(modelReferencePrompt)}`,
-    'После contact sheet товара приложен отдельный лист «Эталоны моделей Chanel». Сопоставляй текущий товар с этими эталонами прежде всего по силуэту, конструкции, клапану, ручкам, цепи, застёжке и пропорциям. Китайские aliases и visual_hint — только подсказка, не доказательство. Если уверенно совпал эталон, верни его model_key в catalog_attributes.model_reference_key; затем используй каноническое model_name этого эталона. Если совпадения нет, оставь model_reference_key пустым и выбери точный тип товара по фотографиям. Не переноси модель только из текста.',
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
     'Общую инструкцию поставщика по ценам используй как дополнительную подсказку для выбора price_rule_key. Она может содержать несколько товаров и цен; сопоставляй товар по смыслу, но не выдумывай цену и не помещай её в публичные поля.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
@@ -762,7 +737,6 @@ export async function runBatchAiOpenRouter(input: {
   referenceSheets?: string[]
   /** Подпись эталонных листов: у сверки колец эталоны — модели, а не цены. */
   referenceSheetsLabel?: string
-  modelReferenceSheets?: string[]
   visualExampleSheets?: string[]
   extraImages?: Array<{ label: string; url: string; detail?: 'low' | 'high' | 'auto' }>
 }) {
@@ -773,10 +747,6 @@ export async function runBatchAiOpenRouter(input: {
   })
   ;(input.referenceSheets || []).forEach((url, index) => {
     content.push({ type: 'text', text: `${input.referenceSheetsLabel || 'Эталоны цен'} ${index + 1}. Это не фотографии текущего товара.` })
-    content.push({ type: 'image_url', image_url: { url } })
-  })
-  ;(input.modelReferenceSheets || []).forEach((url, index) => {
-    content.push({ type: 'text', text: `Эталоны моделей Chanel ${index + 1}. Это отдельный лист справочника, не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
   ;(input.visualExampleSheets || []).forEach((url, index) => {
@@ -1160,7 +1130,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }>
   priceRuleKeys?: Set<string>
   priceAiInstructions?: string | null
-  modelReferences?: BatchAiModelReference[]
   chromoffMode?: boolean
   chromoffCategories?: BatchAiChromoffCategory[]
   /** Chart indexes inferred from the contact-sheet response, not just media.size_chart_indexes. */
@@ -1253,7 +1222,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   for (const [code, value] of Object.entries(proposed.catalog_attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
-    if (canonicalCode === 'model_reference_key') continue
     if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(resolveDictionaryValue(canonicalCode, value))
     else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = resolveDictionaryValue(canonicalCode, value)
     else if (processingOptions.suggestAttributes && !input.knownAttributeCodes?.has(canonicalCode)) {
@@ -1384,11 +1352,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
     photos.unshift(coverPhoto)
     const [coverAlt] = photoAlts.splice(coverPosition, 1)
     photoAlts.unshift(coverAlt)
-  }
-  const requestedModelReferenceKey = String(proposed.catalog_attributes?.model_reference_key || '').trim()
-  const matchedModelReference = (input.modelReferences || []).find((reference) => reference.model_key === requestedModelReferenceKey)
-  if (matchedModelReference) {
-    attributes.model_name = matchedModelReference.model_name
   }
   let subcategory = choose(proposed.subcategory, input.subcategoryIds, original.subcategory)
   const proposedCategory = choose(proposed.category, input.categoryIds, original.category)

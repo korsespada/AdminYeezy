@@ -389,6 +389,9 @@ def _find_video_url(value):
 
 def _find_video_poster(value):
     if isinstance(value, dict):
+        # Миниатюра обычного фото из sourceList — не обложка видео.
+        if str(value.get("type", "")).upper() == "IMAGE":
+            return ""
         for key in POSTER_URL_KEYS:
             candidate = _normalize_media_url(value.get(key))
             if candidate and re.search(r"\.(?:jpe?g|png|webp)(?:$|[?#])", candidate, re.IGNORECASE):
@@ -403,6 +406,44 @@ def _find_video_poster(value):
             if candidate:
                 return candidate
     return ""
+
+def _clean_text(text):
+    """Текст поста с переносами строк: пробелы схлопываются внутри строки, пустые строки — до одной."""
+    lines = [" ".join(line.split()) for line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+def _media_key(url):
+    """Имя файла без cmp_-префикса и параметров: одно фото приходит и в imgsSrc, и в sourceList."""
+    name = url.split("?", 1)[0].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return name.removeprefix("cmp_")
+
+def _source_list_media(item):
+    """Блоки карточки поста из `sourceList`.
+
+    Карточка Szwego (theme_detail) собирает пост из нескольких блоков: основная
+    галерея, видео, детали, фото на модели, размерная сетка. В `imgsSrc` лента
+    отдаёт только основную галерею, остальные блоки приходят в
+    `sourceList[].medias` с собственными подписями.
+    """
+    captions, photos = [], []
+    video_url = video_poster = ""
+    for block in item.get("sourceList") or []:
+        if not isinstance(block, dict):
+            continue
+        caption = block.get("title")
+        if isinstance(caption, str) and caption.strip():
+            captions.append(caption)
+        for media in block.get("medias") or []:
+            if not isinstance(media, dict):
+                continue
+            url = _normalize_media_url(media.get("url"))
+            media_type = str(media.get("type", "")).upper()
+            if url and media_type == "IMAGE":
+                photos.append(url)
+            elif url and media_type == "VIDEO" and not video_url:
+                video_url = url
+                video_poster = _normalize_media_url(media.get("cover") or media.get("thumbnail"))
+    return {"captions": captions, "photos": photos, "video_url": video_url, "video_poster": video_poster}
 
 def evaluate_item(item, args, session, headers, album_id, seen_photo_keys=None):
     """Правила выбранного режима для одной публикации.
@@ -421,7 +462,15 @@ def evaluate_item(item, args, session, headers, album_id, seen_photo_keys=None):
     if args.parse_mode == "images" and "集合图" in raw_text:
         return None, "collection_image", None
 
-    description = " ".join(raw_text.replace("\r", " ").replace("\n", " ").split())
+    source = _source_list_media(item)
+    # Подписи блоков карточки дописываются к тексту поста: у части поставщиков
+    # описание модели лежит только в них. Подпись, уже входящая в текст поста
+    # (обычно первый блок повторяет его), не дублируется.
+    description = _clean_text(raw_text)
+    for caption in source["captions"]:
+        caption = _clean_text(caption)
+        if " ".join(caption.split()) not in " ".join(description.split()):
+            description = f"{description}\n{caption}".strip()
 
     tags_list = []
     if args.parse_tags:
@@ -449,8 +498,17 @@ def evaluate_item(item, args, session, headers, album_id, seen_photo_keys=None):
 
     imgs_src = item.get("imgsSrc", []) or item.get("imgs", []) or []
     photos = [u.strip() for u in imgs_src if u and u.strip()]
+    # Остальные блоки карточки идут после основной галереи в порядке Szwego.
+    photo_keys = {_media_key(u) for u in photos}
+    for url in source["photos"]:
+        if _media_key(url) not in photo_keys:
+            photo_keys.add(_media_key(url))
+            photos.append(url)
     video_url = _find_video_url(item)
-    video_poster_url = _find_video_poster(item)
+    if video_url and video_url == source["video_url"] and source["video_poster"]:
+        video_poster_url = source["video_poster"]
+    else:
+        video_poster_url = _find_video_poster(item)
 
     # Szwego может вернуть обычные фотографии и videoUrl в одной публикации.
     # Сохраняем изображения, а само видео передаём отдельно в технических
