@@ -69,4 +69,16 @@ describe('SzwegoParser sourceList', () => {
     expect(result.attributes.szwego_video_url).toBeUndefined()
     expect(result.attributes.szwego_video_poster_url).toBeUndefined()
   })
+
+  it('saves the sale price of the attached product card', () => {
+    const base = { title: 'card', time_stamp: 1793084134355, imgsSrc: Array.from({ length: 9 }, (_, index) => `https://x.szwego.com/img/a/p${index}.jpg`) }
+    const priced = evaluate({ ...base, goods_id: 'priced', optimaPrice: '1680', priceArr: [{ priceType: 2, value: 1680 }] })
+    expect(priced.attributes.szwego_price).toBe(1680)
+
+    const fallback = evaluate({ ...base, goods_id: 'fallback', optimaPrice: '2100.5', priceArr: [] })
+    expect(fallback.attributes.szwego_price).toBe(2100.5)
+
+    const unpriced = evaluate({ ...base, goods_id: 'unpriced', optimaPrice: '', priceArr: [] })
+    expect(unpriced.attributes.szwego_price).toBeUndefined()
+  })
 })

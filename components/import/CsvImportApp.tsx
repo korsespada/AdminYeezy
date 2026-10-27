@@ -4341,6 +4341,7 @@ function technicalAttributeLabel(key: string) {
     size_class: "Размерный класс для правил цены",
     source_parent_external_id: "Исходный ID альбома",
     szwego_parse_mode: "Режим парсинга Szwego",
+    szwego_price: "Цена в карточке Szwego",
     szwego_tags: "Теги Szwego",
     szwego_timestamp: "Время в Szwego",
     szwego_video_url: "Видео Szwego",
@@ -4350,6 +4351,9 @@ function technicalAttributeLabel(key: string) {
 }
 
 function formatTechnicalAttributeValue(key: string, value: unknown) {
+  if (key === "szwego_price" && Number.isFinite(Number(value))) {
+    return `¥${Number(value).toLocaleString("ru-RU")}`;
+  }
   if (key === "szwego_timestamp") {
     const text = String(value ?? "").trim();
     if (/^\d{10,13}$/.test(text)) {

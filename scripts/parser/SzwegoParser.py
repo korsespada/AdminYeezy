@@ -407,6 +407,28 @@ def _find_video_poster(value):
                 return candidate
     return ""
 
+def _price_number(value):
+    try:
+        price = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if price <= 0:
+        return None
+    return int(price) if price.is_integer() else round(price, 2)
+
+def _card_price(item):
+    """Цена из прикреплённой к посту карточки товара (售价, юани).
+
+    Поставщик указывает её не у каждого поста. `priceArr` с priceType 2 — цена
+    продажи из карточки «购买»; `optimaPrice` повторяет её и служит запасным полем.
+    """
+    for entry in item.get("priceArr") or []:
+        if isinstance(entry, dict) and str(entry.get("priceType")) == "2":
+            price = _price_number(entry.get("value"))
+            if price:
+                return price
+    return _price_number(item.get("optimaPrice"))
+
 def _clean_text(text):
     """Текст поста с переносами строк: пробелы схлопываются внутри строки, пустые строки — до одной."""
     lines = [" ".join(line.split()) for line in str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")]
@@ -535,6 +557,9 @@ def evaluate_item(item, args, session, headers, album_id, seen_photo_keys=None):
         "szwego_parse_mode": args.parse_mode,
         "szwego_timestamp": item.get("time_stamp") or item.get("update_time") or item.get("new_send_time"),
     }
+    card_price = _card_price(item)
+    if card_price:
+        attributes["szwego_price"] = card_price
     if video_url:
         attributes["szwego_video_url"] = video_url
     if video_poster_url:

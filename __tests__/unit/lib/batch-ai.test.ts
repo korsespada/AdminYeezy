@@ -103,6 +103,21 @@ describe('batch AI normalization', () => {
     expect(sparsePrompt).toContain('Не выдумывай точный состав')
   })
 
+  it('gives AI the Szwego card price only when the supplier saved one', () => {
+    const withPrice = { external_id: 'lv-1', photos: ['1.jpg'], attributes: { szwego_price: 1680 } }
+    const priceInstructions = 'Цена = szwego_price × 13 × 2.5, округлить до 100'
+    const prompt = buildBatchAiUserPrompt({ product: withPrice, brands: [], categories: [], subcategories: [], attributes: [], priceAiInstructions: priceInstructions })
+    expect(prompt).toContain('Цена товара в карточке поставщика Szwego: ¥1680')
+    expect(prompt).toContain('рассчитанную по её правилу от attributes.szwego_price')
+    const splitPrompt = buildBatchAiColorSplitPrompt({ product: withPrice, brands: [], categories: [], subcategories: [], attributes: [], priceAiInstructions: priceInstructions })
+    expect(splitPrompt).toContain('¥1680')
+
+    const withoutPrice = buildBatchAiUserPrompt({ product: { external_id: 'lv-2', photos: ['1.jpg'], attributes: {} }, brands: [], categories: [], subcategories: [], attributes: [] })
+    expect(withoutPrice).not.toContain('Цена товара в карточке поставщика Szwego')
+    // Посчитанная ИИ цена принимается, хотя её нет среди строк инструкции.
+    expect(choosePriceFromAiInstructions(priceInstructions, 'LV куртка', 54600)).toBe(54600)
+  })
+
   it('asks for a video color only when a separate video preview is available', () => {
     const prompt = buildBatchAiColorSplitPrompt({
       product: { external_id: 'album-1', photos: ['1.jpg', '2.jpg'] },

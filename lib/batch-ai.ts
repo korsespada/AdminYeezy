@@ -352,6 +352,20 @@ export function buildBatchAiDescriptionEvidencePrompt(product: any) {
   ].join('\n')
 }
 
+/** Цена из карточки товара поставщика в Szwego (юани), сохранённая парсером. */
+export function szwegoCardPrice(product: any): number | null {
+  const price = Number(product?.attributes?.szwego_price)
+  return Number.isFinite(price) && price > 0 ? price : null
+}
+
+function szwegoCardPricePrompt(product: any): string[] {
+  const price = szwegoCardPrice(product)
+  if (price === null) return []
+  return [
+    `Цена товара в карточке поставщика Szwego: ¥${price} (attributes.szwego_price, юани, цена продажи у поставщика). Если общая инструкция поставщика по ценам задаёт расчёт от этой цены, посчитай итоговую цену строго по инструкции, включая округление, и верни её в product.price целым числом в рублях. Если инструкция расчёт от неё не задаёт, не используй её как цену товара.`,
+  ]
+}
+
 export function buildBatchAiUserPrompt(input: {
   product: any
   supplierInstructions?: string | null
@@ -452,7 +466,8 @@ export function buildBatchAiUserPrompt(input: {
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
     `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
-    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
+    ...szwegoCardPricePrompt(product),
+    'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара или цену, рассчитанную по её правилу от attributes.szwego_price, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
     'Общую инструкцию поставщика по ценам используй как дополнительную подсказку для выбора price_rule_key. Она может содержать несколько товаров и цен; сопоставляй товар по смыслу, но не выдумывай цену и не помещай её в публичные поля.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
     ...(visualExamples.length ? [
@@ -622,7 +637,8 @@ export function buildBatchAiColorSplitPrompt(input: {
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRules)}`,
     `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
-    'Если заполнена общая инструкция поставщика по ценам, верни в каждом product.price только явно указанную этой инструкцией цену для текущего варианта; иначе оставь product.price равным null. Не помещай цену в тексты товаров.',
+    ...szwegoCardPricePrompt(product),
+    'Если заполнена общая инструкция поставщика по ценам, верни в каждом product.price только явно указанную этой инструкцией цену для текущего варианта или цену, рассчитанную по её правилу от attributes.szwego_price; иначе оставь product.price равным null. Не помещай цену в тексты товаров.',
   ].join('\n\n')
 }
 
