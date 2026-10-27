@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import { withoutProductVideoAttributes } from '@/lib/product-video'
 
 const workflow = require('../../../scripts/batch-workflow')
 
@@ -24,6 +25,26 @@ describe('batch workflow CSV compatibility adapter', () => {
     expect(csv.split('\n')[0]).toContain('details')
     expect(csv.split('\n')[0]).toContain('hardware')
     expect(csv).toContain('кожа')
+  })
+
+  it('sends a null video when the card video is removed', () => {
+    const lookups = { brands: [], categories: [], subcategories: [] }
+    const product = {
+      external_id: '1',
+      name: 'Куртка',
+      description: '',
+      photos: [],
+      attributes: {
+        manual_video_url: 'https://example.com/manual.mp4',
+        hosted_video_url: 'https://static.example.com/hosted.mp4',
+      },
+    }
+
+    expect(workflow.productToRailsJsonRow(product, lookups).video_url).toBe('https://static.example.com/hosted.mp4')
+    expect(workflow.productToRailsJsonRow({
+      ...product,
+      attributes: withoutProductVideoAttributes(product.attributes),
+    }, lookups).video_url).toBeNull()
   })
 
   it('converts legacy script catalog IDs to current Rails IDs', () => {
