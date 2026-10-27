@@ -1489,6 +1489,44 @@ describe('batch AI normalization', () => {
     expect(result.product.subcategory).toBe('jeans')
   })
 
+  it('does not let a clothing mention in the description override the outerwear type', () => {
+    const input = {
+      product: { name: '', category: 'clothes', subcategory: '', photos: [], attributes: {} },
+      brandIds: new Set<string>(),
+      categoryIds: new Set(['clothes']),
+      categoryNames: new Map([['clothes', 'Одежда']]),
+      subcategoryIds: new Set(['tees', 'leather-jackets', 'jackets']),
+      subcategoryParents: new Map([['tees', 'clothes'], ['leather-jackets', 'clothes'], ['jackets', 'clothes']]),
+      subcategoryNames: new Map([
+        ['tees', 'Футболки и майки'],
+        ['leather-jackets', 'Кожаные куртки'],
+        ['jackets', 'Куртки'],
+      ]),
+      attributeCodes: new Set<string>(),
+    }
+    const description = 'Модель гармонично сочетается как с базовыми футболками, так и с трикотажем.'
+
+    const leatherBomber = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'tees',
+        name: 'Кожаный бомбер с пиксельным узором',
+        description,
+      },
+    }, input)
+    expect(leatherBomber.product.subcategory).toBe('leather-jackets')
+
+    const unnamed = normalizeBatchAiOutput({
+      product: {
+        category: 'clothes',
+        subcategory: 'tees',
+        name: 'Damoflage',
+        description,
+      },
+    }, input)
+    expect(unnamed.product.subcategory).toBe('tees')
+  })
+
   it('does not let a wearing-comfort phrase override the clothing type in the title', () => {
     const result = normalizeBatchAiOutput({
       product: {

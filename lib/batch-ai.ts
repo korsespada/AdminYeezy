@@ -13,6 +13,7 @@ import {
 import {
   canonicalClothingSubcategoryName,
   inferClothingSubcategoryName,
+  inferClothingSubcategoryNameFromProse,
   isLegacyClothingSubcategory,
 } from '@/lib/clothing-taxonomy'
 import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
@@ -1488,17 +1489,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const inferredAiName = [proposed.name, proposed.h1]
       .map(inferClothingSubcategoryName)
       .find(Boolean)
-      || inferClothingSubcategoryName([
+      || inferClothingSubcategoryNameFromProse([
         proposed.description,
         proposed.seo_title,
         proposed.seo_description,
       ].filter(Boolean).join('\n'))
     const inferredSourceName = inferClothingSubcategoryName(original.name)
-      || inferClothingSubcategoryName(original.description)
+      || inferClothingSubcategoryNameFromProse(original.description)
     // The model's generated name/description are its visual interpretation of
     // the complete photo series. Prefer that evidence over a contradictory ID
     // (for example, a jacket returned with the pants ID). Fall back to source
     // text only when the generated fields do not identify a garment type.
+    // Описание разбирается только как последняя подсказка и только по
+    // самостоятельному упоминанию типа: иначе фраза «сочетается с футболками»
+    // переводила кожаный бомбер в «Футболки и майки».
     const canonicalName = inferredAiName
       || inferredSourceName
       || canonicalClothingSubcategoryName(subcategorySuggestion?.name)
