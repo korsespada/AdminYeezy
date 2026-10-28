@@ -679,12 +679,21 @@ describe('batch workflow CSV compatibility adapter', () => {
   it('uses production-safe defaults for publish concurrency and Rails chunks', () => {
     const previousChunkSize = process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
     const previousMediaConcurrency = process.env.MEDIA_UPLOAD_CONCURRENCY
+    const previousVideoConcurrency = process.env.MEDIA_VIDEO_CONCURRENCY
     delete process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
     delete process.env.MEDIA_UPLOAD_CONCURRENCY
+    delete process.env.MEDIA_VIDEO_CONCURRENCY
     try {
       expect(workflow.railsImportChunkSize()).toBe(50)
-      expect(workflow.mediaUploadConcurrency()).toBe(4)
+      expect(workflow.mediaUploadConcurrency()).toBe(8)
+      expect(workflow.videoUploadConcurrency()).toBe(2)
+      process.env.MEDIA_UPLOAD_CONCURRENCY = '64'
+      process.env.MEDIA_VIDEO_CONCURRENCY = '64'
+      expect(workflow.mediaUploadConcurrency()).toBe(16)
+      expect(workflow.videoUploadConcurrency()).toBe(4)
     } finally {
+      if (previousVideoConcurrency === undefined) delete process.env.MEDIA_VIDEO_CONCURRENCY
+      else process.env.MEDIA_VIDEO_CONCURRENCY = previousVideoConcurrency
       if (previousChunkSize === undefined) delete process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE
       else process.env.RAILS_BATCH_PUBLISH_CHUNK_SIZE = previousChunkSize
       if (previousMediaConcurrency === undefined) delete process.env.MEDIA_UPLOAD_CONCURRENCY
@@ -789,5 +798,79 @@ describe('batch workflow CSV compatibility adapter', () => {
 
     expect(result).toEqual([6, 1, 4, 2])
     expect(peak).toBe(2)
+  })
+
+  describe('media transfer pipeline', () => {
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    it('shares one photo pool across products and finishes each product once', async () => {
+      let active = 0
+      let peak = 0
+      const done: number[] = []
+      const items = [
+        { photos: ['a1', 'a2', 'a3'], video: false },
+        { photos: [], video: false },
+        { photos: ['c1', 'c2'], video: false },
+      ]
+      await workflow.runMediaTransfer(items, {
+        photoConcurrency: 4,
+        videoConcurrency: 1,
+        transferPhoto: async () => {
+          active += 1
+          peak = Math.max(peak, active)
+          await wait(10)
+          active -= 1
+        },
+        transferVideo: async () => undefined,
+        onItemDone: async (index: number) => { done.push(index) },
+      })
+
+      expect(peak).toBe(4)
+      expect([...done].sort()).toEqual([0, 1, 2])
+    })
+
+    it('does not hold photos of later products behind a slow video', async () => {
+      const events: string[] = []
+      const items = [
+        { photos: ['a1'], video: true },
+        { photos: ['b1'], video: false },
+        { photos: ['c1'], video: false },
+      ]
+      await workflow.runMediaTransfer(items, {
+        photoConcurrency: 1,
+        videoConcurrency: 1,
+        transferPhoto: async (_index: number, photo: string) => {
+          await wait(5)
+          events.push(photo)
+        },
+        transferVideo: async () => {
+          await wait(60)
+          events.push('video')
+        },
+        onItemDone: async (index: number) => { events.push(`done-${index}`) },
+      })
+
+      expect(events.indexOf('done-2')).toBeLessThan(events.indexOf('video'))
+      expect(events.indexOf('done-0')).toBeGreaterThan(events.indexOf('video'))
+    })
+
+    it('stops starting new transfers after the publication is cancelled', async () => {
+      const transferred: string[] = []
+      const items = Array.from({ length: 6 }, (_, index) => ({ photos: [`p${index}`], video: false }))
+      await expect(workflow.runMediaTransfer(items, {
+        photoConcurrency: 1,
+        videoConcurrency: 1,
+        transferPhoto: async (_index: number, photo: string) => {
+          await wait(1)
+          transferred.push(photo)
+        },
+        transferVideo: async () => undefined,
+        onItemDone: async (index: number) => {
+          if (index === 1) throw new Error('Публикация остановлена пользователем')
+        },
+      })).rejects.toThrow('Публикация остановлена пользователем')
+
+      expect(transferred).toEqual(['p0', 'p1'])
+    })
   })
 })

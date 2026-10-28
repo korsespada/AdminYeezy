@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawn } from 'node:child_process'
 import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
 import { bucketName, getS3PublicUrl, s3Client } from '@/lib/s3'
@@ -104,17 +103,11 @@ export async function uploadProductPhotoFromBuffer(source: string, buffer: Buffe
   return uploadPhotoBuffer(source, buffer)
 }
 
-function runProcess(command: string, args: string[]) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] })
-    let stderr = ''
-    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8000) })
-    child.on('error', reject)
-    child.on('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`${command} завершился с кодом ${code}: ${stderr.trim()}`))
-    })
-  })
+function videoTranscode() {
+  // Общий модуль нужен и публикации выгрузок (scripts/batch-workflow.js), поэтому он на CommonJS.
+  return require('../scripts/lib/video-transcode') as {
+    transcodeVideoForWeb: (sourcePath: string, outputPath: string, posterJpegPath: string) => Promise<{ mode: 'remux' | 'transcode' }>
+  }
 }
 
 export async function uploadProductVideoFromBuffer(source: string, buffer: Buffer): Promise<ProductVideoUpload> {
@@ -136,19 +129,7 @@ export async function uploadProductVideoFromBuffer(source: string, buffer: Buffe
 
   try {
     writeFileSync(sourcePath, buffer)
-    const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg'
-    await runProcess(ffmpeg, [
-      '-y', '-i', sourcePath,
-      '-map', '0:v:0', '-map', '0:a?',
-      // Второй scale выравнивает стороны до чётных: у вертикальных роликов
-      // первый scale даёт нечётную ширину, а libx264 с yuv420p её не принимает.
-      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
-      '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputPath,
-    ])
-    await runProcess(ffmpeg, [
-      '-y', '-ss', '0.5', '-i', outputPath, '-frames:v', '1', '-q:v', '3', posterJpegPath,
-    ])
+    await videoTranscode().transcodeVideoForWeb(sourcePath, outputPath, posterJpegPath)
 
     const video = readFileSync(outputPath)
     const poster = await sharp(readFileSync(posterJpegPath)).webp({ quality: 84, effort: 4 }).toBuffer()

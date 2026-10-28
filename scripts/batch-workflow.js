@@ -13,6 +13,7 @@ const {
   restoreProtectedProducts,
 } = require('./lib/burberry-post-process');
 const { batchColorFamilyIssues } = require('./lib/color-family-alignment');
+const { downloadVideoToFile, transcodeVideoForWeb } = require('./lib/video-transcode');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -1006,10 +1007,18 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+// Общий пул фото всей партии: скачивание, WebP и PutObject.
 function mediaUploadConcurrency() {
-  const configured = Number(process.env.MEDIA_UPLOAD_CONCURRENCY || 4);
-  if (!Number.isFinite(configured) || configured < 1) return 4;
-  return Math.min(8, Math.floor(configured));
+  const configured = Number(process.env.MEDIA_UPLOAD_CONCURRENCY || 8);
+  if (!Number.isFinite(configured) || configured < 1) return 8;
+  return Math.min(16, Math.floor(configured));
+}
+
+// Отдельная очередь видео: ffmpeg сам занимает все ядра.
+function videoUploadConcurrency() {
+  const configured = Number(process.env.MEDIA_VIDEO_CONCURRENCY || 2);
+  if (!Number.isFinite(configured) || configured < 1) return 2;
+  return Math.min(4, Math.floor(configured));
 }
 
 async function mapWithConcurrency(items, concurrency, mapper) {
@@ -1023,6 +1032,51 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   });
   await Promise.all(workers);
   return results;
+}
+
+/**
+ * Переносит медиа товаров: фото всех товаров идут через один общий пул, а видео
+ * через отдельную очередь, поэтому перекодирование ролика не задерживает фото
+ * следующих товаров. `onItemDone` вызывается один раз, когда у товара завершены
+ * все фото и видео. Ошибка `transfer*` или `onItemDone` (например, остановка
+ * публикации) не даёт начать новые задачи, ждёт уже запущенные и пробрасывается.
+ */
+async function runMediaTransfer(items, options) {
+  const pending = items.map((item) => item.photos.length + (item.video ? 1 : 0));
+  let stopError = null;
+  const finishUnit = async (itemIndex) => {
+    pending[itemIndex] -= 1;
+    if (pending[itemIndex] === 0) await options.onItemDone(itemIndex);
+  };
+  const runUnit = async (itemIndex, work) => {
+    if (stopError) return;
+    try {
+      await work();
+      await finishUnit(itemIndex);
+    } catch (error) {
+      stopError = stopError || error;
+    }
+  };
+
+  for (let itemIndex = 0; itemIndex < items.length && !stopError; itemIndex += 1) {
+    if (pending[itemIndex] > 0) continue;
+    try {
+      await options.onItemDone(itemIndex);
+    } catch (error) {
+      stopError = error;
+    }
+  }
+  const photoJobs = items.flatMap((item, itemIndex) => item.photos.map((photo, photoIndex) => ({ itemIndex, photo, photoIndex })));
+  const videoJobs = items.flatMap((item, itemIndex) => (item.video ? [itemIndex] : []));
+  await Promise.all([
+    mapWithConcurrency(photoJobs, options.photoConcurrency, (job) => (
+      runUnit(job.itemIndex, () => options.transferPhoto(job.itemIndex, job.photo, job.photoIndex))
+    )),
+    mapWithConcurrency(videoJobs, options.videoConcurrency, (itemIndex) => (
+      runUnit(itemIndex, () => options.transferVideo(itemIndex))
+    )),
+  ]);
+  if (stopError) throw stopError;
 }
 
 function validationDetailsMessage(details) {
@@ -2348,6 +2402,9 @@ function ownedS3Key(url) {
   }
 }
 
+// Оригиналы поставщика бывают 4000+ px: витрине хватает 2000 px по длинной стороне.
+const PHOTO_MAX_SIDE = 2000;
+
 async function uploadPhotoIfNeeded(url, key, options = {}) {
   if (!url) throw new Error('пустая ссылка на фото');
   // Ссылка уже ведет на наш S3: не скачиваем ее и не делаем HEAD
@@ -2389,14 +2446,18 @@ async function uploadPhotoAttempt(url, key, options = {}) {
     const source = Buffer.from(await response.arrayBuffer());
     if (!source.length) throw new Error('источник вернул пустой файл');
     if (source.length > 30 * 1024 * 1024) throw new Error('файл больше 30 МБ');
-    const buffer = await sharp(source).rotate().webp({ quality: 88, effort: 4 }).toBuffer();
+    const buffer = await sharp(source)
+      .rotate()
+      .resize({ width: PHOTO_MAX_SIDE, height: PHOTO_MAX_SIDE, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 88, effort: 4 })
+      .toBuffer();
+    // Успешный PutObject уже означает, что объект сохранён: отдельный HEAD не нужен.
     await s3Client.send(new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key,
       Body: buffer,
       ContentType: 'image/webp',
     }));
-    await s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key }));
     const hostedUrl = getS3PublicUrl(key);
     if (!isAlreadyHosted(hostedUrl)) throw new Error('полученная ссылка не относится к настроенному S3');
     return hostedUrl;
@@ -2419,70 +2480,33 @@ async function findStoredS3Photo(key) {
   }
 }
 
-function runProcess(command, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8000); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} завершился с кодом ${code}: ${stderr.trim()}`));
-    });
-  });
-}
-
 async function uploadVideoIfNeeded(url, videoKey, posterKey) {
   if (!url) return { url: null, posterUrl: null };
   if (!process.env.S3_BUCKET) throw new Error('S3_BUCKET не настроен для видео');
 
-  const storedVideo = await findStoredS3Photo(videoKey);
-  const storedPoster = await findStoredS3Photo(posterKey);
+  const [storedVideo, storedPoster] = await Promise.all([
+    findStoredS3Photo(videoKey),
+    findStoredS3Photo(posterKey),
+  ]);
   if (storedVideo && storedPoster) return { url: storedVideo, posterUrl: storedPoster };
-
-  const parsed = new URL(String(url));
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('для видео разрешены только HTTP(S) ссылки');
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yeezy-video-'));
   const sourcePath = path.join(tempDir, 'source-video');
   const outputPath = path.join(tempDir, 'video.mp4');
   const posterJpegPath = path.join(tempDir, 'poster.jpg');
   try {
-    const response = await fetch(parsed, { signal: AbortSignal.timeout(60_000) });
-    if (!response.ok) throw new Error(`источник видео вернул HTTP ${response.status}`);
-    const declaredSize = Number(response.headers.get('content-length') || 0);
-    if (declaredSize > 150 * 1024 * 1024) throw new Error('видео больше 150 МБ');
-    const source = Buffer.from(await response.arrayBuffer());
-    if (!source.length) throw new Error('источник вернул пустое видео');
-    if (source.length > 150 * 1024 * 1024) throw new Error('видео больше 150 МБ');
-    fs.writeFileSync(sourcePath, source);
+    await downloadVideoToFile(url, sourcePath);
+    await transcodeVideoForWeb(sourcePath, outputPath, posterJpegPath);
 
-    await runProcess(process.env.FFMPEG_PATH || 'ffmpeg', [
-      '-y', '-i', sourcePath,
-      '-map', '0:v:0', '-map', '0:a?',
-      // Второй scale выравнивает стороны до чётных: у вертикальных роликов
-      // (например 1080x1770) первый scale даёт 659 пикселей ширины, а libx264
-      // с yuv420p отказывается работать с нечётными размерами.
-      '-vf', "scale=w='min(1080,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '26',
-      '-c:a', 'aac', '-b:a', '128k',
-      '-movflags', '+faststart', outputPath,
-    ]);
-    await runProcess(process.env.FFMPEG_PATH || 'ffmpeg', [
-      '-y', '-ss', '0.5', '-i', outputPath, '-frames:v', '1', '-q:v', '3', posterJpegPath,
-    ]);
-
-    const video = fs.readFileSync(outputPath);
     const poster = await sharp(fs.readFileSync(posterJpegPath)).webp({ quality: 84, effort: 4 }).toBuffer();
-    await s3Client.send(new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET, Key: videoKey, Body: video, ContentType: 'video/mp4',
-    }));
-    await s3Client.send(new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET, Key: posterKey, Body: poster, ContentType: 'image/webp',
-    }));
+    // Успешный PutObject уже означает, что объект сохранён: отдельный HEAD не нужен.
     await Promise.all([
-      s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: videoKey })),
-      s3Client.send(new HeadObjectCommand({ Bucket: process.env.S3_BUCKET, Key: posterKey })),
+      s3Client.send(new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET, Key: videoKey, Body: fs.readFileSync(outputPath), ContentType: 'video/mp4',
+      })),
+      s3Client.send(new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET, Key: posterKey, Body: poster, ContentType: 'image/webp',
+      })),
     ]);
     return { url: getS3PublicUrl(videoKey), posterUrl: getS3PublicUrl(posterKey) };
   } finally {
@@ -2922,15 +2946,10 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
 
   if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0 });
 
-  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
-    const { product: sourceProduct, index: productIndex } = candidates[candidateIndex];
+  const mediaPlans = candidates.map(({ product: sourceProduct, index: productIndex }) => {
     const product = { ...sourceProduct, batchId };
     const existingRailsProduct = existingProducts.get(String(product.external_id || '').trim());
-    const photos = [];
-    let productFailed = false;
-    const existingPhotoUrls = existingRailsPhotoMap(
-      existingProducts.get(String(product.external_id || '').trim()),
-    );
+    const existingPhotoUrls = existingRailsPhotoMap(existingRailsProduct);
     const requestedPhotos = normalizePhotos(product.photos);
     const safeExternalId = String(product.external_id || product.id || `row-${productIndex + 1}`).replace(/[^a-zA-Z0-9_.-]+/g, '_');
     const isExistingRailsProduct = existingProducts.has(String(product.external_id || '').trim());
@@ -2949,34 +2968,6 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     // Старая партия может хранить Szwego URL, хотя Rails уже имеет S3-галерею.
     // При upsert берем готовые фото Rails и обновляем только остальные поля.
     const publicationPhotos = rewriteSeoMedia ? requestedPhotos : (preserveExistingRailsPhotos ? existingCanonicalPhotos : requestedPhotos);
-    const photoResults = await mapWithConcurrency(
-      publicationPhotos,
-      mediaUploadConcurrency(),
-      async (sourceUrl, photoIndex) => {
-      const existingRailsUrl = existingPhotoUrls.get(String(sourceUrl || '').trim());
-      if (existingRailsUrl && !rewriteSeoMedia) {
-        return { url: existingRailsUrl };
-      }
-      const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
-      const photoSlug = String(product.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`)
-        .replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || `foto-${photoIndex + 1}`;
-      const key = rewriteSeoMedia
-        ? `batches/${batchId}/${safeSlug}-${photoSlug}.webp`
-        : `batches/${batchId}/${safeExternalId}_${photoIndex}.webp`;
-      try {
-        return { url: await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }) };
-      } catch (error) {
-        return { url: sourceUrl, error, photoIndex };
-      }
-      },
-    );
-    for (const result of photoResults) {
-      photos.push(result.url);
-      if (!result.error) continue;
-      productFailed = true;
-      errors.push(`${product.external_id || product.name}, фото ${result.photoIndex + 1}: ${result.error.message}`);
-    }
-    product.photos = photos.filter(Boolean);
     const sourceAttributes = normalizeAttributes(product.attributes);
     const sourceVideoUrl = sourceVideo(product);
     const existingHostedVideo = hostedVideo(product, existingRailsProduct);
@@ -2991,47 +2982,107 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       };
       batchProductsChanged = true;
     }
-    if (sourceVideoUrl && !hostedVideo(product).url) {
+    return {
+      sourceProduct,
+      productIndex,
+      product,
+      existingPhotoUrls,
+      safeExternalId,
+      rewriteSeoMedia,
+      sourceAttributes,
+      sourceVideoUrl,
+      photos: publicationPhotos,
+      photoResults: new Array(publicationPhotos.length),
+      video: Boolean(sourceVideoUrl && !hostedVideo(product).url),
+    };
+  });
+
+  // Один ролик бывает у нескольких товаров цветовой семьи: переносим его один раз.
+  const videoUploads = new Map();
+  const uploadSharedVideo = (sourceUrl) => {
+    if (!videoUploads.has(sourceUrl)) {
+      const videoKeys = videoStorageKeys(sourceUrl);
+      videoUploads.set(sourceUrl, uploadVideoIfNeeded(sourceUrl, videoKeys.videoKey, videoKeys.posterKey));
+    }
+    return videoUploads.get(sourceUrl);
+  };
+  let completedProducts = 0;
+
+  await runMediaTransfer(mediaPlans, {
+    photoConcurrency: mediaUploadConcurrency(),
+    videoConcurrency: videoUploadConcurrency(),
+    transferPhoto: async (planIndex, sourceUrl, photoIndex) => {
+      const plan = mediaPlans[planIndex];
+      const { product, safeExternalId, rewriteSeoMedia } = plan;
+      const existingRailsUrl = plan.existingPhotoUrls.get(String(sourceUrl || '').trim());
+      if (existingRailsUrl && !rewriteSeoMedia) {
+        plan.photoResults[photoIndex] = { url: existingRailsUrl };
+        return;
+      }
+      const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
+      const photoSlug = String(product.photo_slugs?.[photoIndex] || `foto-${photoIndex + 1}`)
+        .replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || `foto-${photoIndex + 1}`;
+      const key = rewriteSeoMedia
+        ? `batches/${batchId}/${safeSlug}-${photoSlug}.webp`
+        : `batches/${batchId}/${safeExternalId}_${photoIndex}.webp`;
       try {
-        const videoKeys = videoStorageKeys(sourceVideoUrl);
-        const uploaded = await uploadVideoIfNeeded(
-          sourceVideoUrl,
-          videoKeys.videoKey,
-          videoKeys.posterKey,
-        );
+        plan.photoResults[photoIndex] = { url: await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }) };
+      } catch (error) {
+        plan.photoResults[photoIndex] = { url: sourceUrl, error, photoIndex };
+      }
+    },
+    transferVideo: async (planIndex) => {
+      const plan = mediaPlans[planIndex];
+      const { product, sourceAttributes } = plan;
+      try {
+        const uploaded = await uploadSharedVideo(plan.sourceVideoUrl);
         product.attributes = {
           ...sourceAttributes,
           hosted_video_url: uploaded.url,
           hosted_video_poster_url: uploaded.posterUrl,
         };
-        batchProductsChanged = true;
       } catch (error) {
         videoWarnings.push(`${product.external_id || product.name}: ${error.message}`);
         product.attributes = { ...sourceAttributes, video_transfer_error: String(error.message || error).slice(0, 1000) };
+      }
+      batchProductsChanged = true;
+    },
+    onItemDone: async (planIndex) => {
+      const plan = mediaPlans[planIndex];
+      const { product } = plan;
+      let productFailed = false;
+      for (const result of plan.photoResults) {
+        if (!result.error) continue;
+        productFailed = true;
+        errors.push(`${product.external_id || product.name}, фото ${result.photoIndex + 1}: ${result.error.message}`);
+      }
+      product.photos = plan.photoResults.map((result) => result.url).filter(Boolean);
+      if (JSON.stringify(product.photos) !== JSON.stringify(normalizePhotos(plan.sourceProduct.photos))) {
         batchProductsChanged = true;
       }
-    }
-    if (JSON.stringify(product.photos) !== JSON.stringify(normalizePhotos(sourceProduct.photos))) {
-      batchProductsChanged = true;
-    }
-    updatedProducts[productIndex] = product;
-    if ((candidateIndex + 1) % 10 === 0 || candidateIndex + 1 === candidates.length) {
-      await scrapingPool.query(
-        'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
-        [batchId, operationOwnerId],
-      );
-    }
-    if (!productFailed) prepared += 1;
-
-    if (onProgress) await onProgress({ phase: 'media', current: candidateIndex + 1, total: candidates.length, success: prepared, failed: errors.length });
-  }
+      updatedProducts[plan.productIndex] = product;
+      completedProducts += 1;
+      if (!productFailed) prepared += 1;
+      const progress = { phase: 'media', current: completedProducts, total: candidates.length, success: prepared, failed: errors.length };
+      if (completedProducts % 10 === 0 || completedProducts === candidates.length) {
+        await scrapingPool.query(
+          'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
+          [batchId, operationOwnerId],
+        );
+      }
+      if (onProgress) await onProgress(progress);
+    },
+  });
 
   if (batchProductsChanged) await saveBatchProducts(batchId, updatedProducts);
   reportPhaseTiming('media', {
     candidates: candidates.length,
     prepared,
     failed: errors.length,
+    videos: mediaPlans.filter((plan) => plan.video).length,
+    videoSources: videoUploads.size,
     concurrency: mediaUploadConcurrency(),
+    videoConcurrency: videoUploadConcurrency(),
   });
   if (errors.length > 0) {
     throw new Error(`Пуш остановлен: не все фотографии перенесены в ваш S3.\n${errors.slice(0, 20).join('\n')}`);
@@ -3230,6 +3281,8 @@ module.exports = {
   productToRailsJsonRow,
   mapWithConcurrency,
   mediaUploadConcurrency,
+  runMediaTransfer,
+  videoUploadConcurrency,
   parseRailsImportErrors,
   railsImportAsyncEnabled,
   railsImportChunkSize,
