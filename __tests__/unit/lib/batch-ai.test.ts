@@ -272,7 +272,7 @@ describe('batch AI normalization', () => {
 
     expect(prompt).toContain('Шаль — растянутая')
     expect(prompt).toContain('не фотографии текущего товара')
-    expect(prompt).toContain('отдельный лист «Визуальные эталоны поставщика»')
+    expect(prompt).toContain('приложен лист «Визуальные эталоны поставщика»')
   })
 
   it('keeps supplier publication date out of AI attributes and on the product', () => {

@@ -3,6 +3,7 @@ import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { isProviderTimeoutError, providerProtocol } from '@/lib/ai-providers'
+import { resizeImageUrl } from '@/lib/image'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
 import {
   canonicalShoeSubcategoryName,
@@ -113,9 +114,24 @@ function anthropicImageContent(url: string) {
   return { type: 'image', source: { type: 'url', url } }
 }
 
+/**
+ * Заголовок части промпта о конкретном товаре. Всё до него одинаково для всех
+ * товаров запуска (схема ответа, правила, справочники брендов и категорий) и
+ * отправляется первым, чтобы провайдер мог закэшировать этот префикс.
+ */
+export const BATCH_AI_PRODUCT_SECTION = 'ДАННЫЕ ТЕКУЩЕГО ТОВАРА. Всё выше — общие правила и справочники выгрузки, одинаковые для всех её товаров; ниже — сведения только об этом товаре.'
+
+const BATCH_AI_PROMPT_CACHE_CONTROL = { type: 'ephemeral' } as const
+
+export function splitBatchAiPrompt(prompt: string) {
+  const index = prompt.indexOf(`\n\n${BATCH_AI_PRODUCT_SECTION}`)
+  if (index < 0) return { shared: '', product: prompt }
+  return { shared: prompt.slice(0, index), product: prompt.slice(index + 2) }
+}
+
 function toAnthropicContent(content: any[]) {
   return content.flatMap((item): any[] => {
-    if (item?.type === 'text') return [{ type: 'text', text: String(item.text || '') }]
+    if (item?.type === 'text') return [{ type: 'text', text: String(item.text || ''), ...(item.cache_control ? { cache_control: item.cache_control } : {}) }]
     if (item?.type === 'image_url' && item.image_url?.url) return [anthropicImageContent(String(item.image_url.url))]
     return []
   })
@@ -445,16 +461,11 @@ export function buildBatchAiUserPrompt(input: {
     'Индексы фотографий начинаются с 1 и подписаны на contact sheet.',
     'inspect_full_size_indexes: не более 3 номеров фото, которые нужно запросить в оригинальном размере для уточнения плохо читаемого бренда, модели, обеих таблиц размера или конфликта между исходным текстом и фотографиями.',
     'До заполнения product сначала внутренне проверь согласованность текста и всей серии фотографий. Исходный текст может принадлежать другой карточке; противоречащие фотографиям сведения не используй.',
-    buildBatchAiDescriptionEvidencePrompt(product),
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
     ...(processingOptions.preserveAllPhotos ? [
       'Для этого поставщика запрещено удалять фотографии: не добавляй номера в media.discard_indexes или media.size_chart_indexes. Сохраняй в галерее все исходные фотографии, включая технические фото с габаритами, размерами и весом.',
       'На каждом техническом фото обязательно распознай все подтверждённые числовые факты до заполнения description. Габариты запиши в catalog_attributes.dimensions, вес — в catalog_attributes.weight в граммах, а оба факта дополнительно включи в description в явном виде. Не округляй значения и не заменяй их догадками.',
     ] : []),
-    categoryRules.length > 1
-      ? `Автоматические правила категорий. Выбери правило после определения верхней категории; эти правила важнее особенностей поставщика:\n${categoryRulePrompt}`
-      : categoryRulePrompt,
-    `Товар: ${JSON.stringify(product)}`,
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
@@ -464,16 +475,13 @@ export function buildBatchAiUserPrompt(input: {
       'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
       `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
     ] : []),
-    `Схема атрибутов: ${JSON.stringify(attributes)}`,
-    `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
     `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
-    ...szwegoCardPricePrompt(product),
     'Номера визуальных эталонов относятся к отдельному листу «Эталоны цен», а не к фотографиям товара. Выбирай price_rule_key только по условиям правила. Для правила с price_formula следуй price_instruction и найди в исходном описании нужную цену или диапазон, но не вычисляй итоговую цену сам: сервер применит формулу и округление. Цена будет применена сервером после ответа AI; если заполнена общая инструкция поставщика по ценам, верни в product.price только явно указанную этой инструкцией цену для текущего товара или цену, рассчитанную по её правилу от attributes.szwego_price, иначе оставь product.price равным null. Не помещай цену в тексты товара.',
     'Общую инструкцию поставщика по ценам используй как дополнительную подсказку для выбора price_rule_key. Она может содержать несколько товаров и цен; сопоставляй товар по смыслу, но не выдумывай цену и не помещай её в публичные поля.',
     'Не возвращай attribute_suggestions или subcategory_suggestion: новые атрибуты и подкатегории не предлагаются.',
     ...(visualExamples.length ? [
       `Визуальные эталоны ракурсов поставщика: ${JSON.stringify(visualExamplePrompt)}`,
-      'После фотографий текущего товара приложен отдельный лист «Визуальные эталоны поставщика». Это не фотографии текущего товара и не доказательство бренда, цвета или материала. Используй его только для понимания качества и типа ракурса, который требуется выбрать первым или исключить.',
+      'Отдельно от фотографий текущего товара приложен лист «Визуальные эталоны поставщика». Это не фотографии текущего товара и не доказательство бренда, цвета или материала. Используй его только для понимания качества и типа ракурса, который требуется выбрать первым или исключить.',
     ] : []),
     'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
     ...(processingOptions.colorFamilyByArticle ? [
@@ -485,6 +493,15 @@ export function buildBatchAiUserPrompt(input: {
     ...(processingOptions.skipModelOnlyAlbum ? [
       'Если весь альбом состоит только из фотографий моделей/людей и на них нельзя уверенно оценить сам товар, верни ai_processing.skip_product=true. Это исключит весь товар из текущей версии, а не отдельные фотографии. Если товар показан хотя бы на одном информативном кадре, skip_product=false.',
     ] : []),
+    BATCH_AI_PRODUCT_SECTION,
+    `Схема атрибутов: ${JSON.stringify(attributes)}`,
+    categoryRules.length > 1
+      ? `Автоматические правила категорий. Выбери правило после определения верхней категории; эти правила важнее особенностей поставщика:\n${categoryRulePrompt}`
+      : categoryRulePrompt,
+    `Ценовые правила поставщика: ${JSON.stringify(priceRulePrompt)}`,
+    buildBatchAiDescriptionEvidencePrompt(product),
+    `Товар: ${JSON.stringify(product)}`,
+    ...szwegoCardPricePrompt(product),
   ].join('\n\n')
 }
 
@@ -597,9 +614,6 @@ export function buildBatchAiColorSplitPrompt(input: {
     ...(processingOptions.colorFamilyByArticle ? [
       `При определении общей семьи используй пример артикула «${processingOptions.articleExample || 'SP001 blue'}»: SP001 blue и SP001 green имеют общую основу SP001, цвет не включай в family_name/group_signature.`,
     ] : []),
-    ...(videoPreviewAvailable ? [
-      'После contact sheet приложен отдельный кадр-превью исходного видео. Он не является фотографией товара, не включай его в photo_indexes. Верни video_color_key: точный color_key одного варианта, если по этому кадру цвет виден однозначно; иначе пустую строку. Если на видео несколько цветов, тоже верни пустую строку.',
-    ] : []),
     'У каждого варианта должно быть собственное name без бренда, но с его точным цветом; например, «Чёрная сумка 22 Mini» и «Белая сумка 22 Mini». color_key и attributes.colors дублируют цвет как структурированные данные. family_name содержит общую основу без бренда и цвета. Каждый product должен содержать название, описание, классификацию, пол, атрибуты, ценовое правило и confidence. H1 и SEO не возвращай: сервер и Rails формируют их после сохранения.',
     'Верни строго JSON без markdown следующей формы:',
     JSON.stringify({
@@ -623,9 +637,7 @@ export function buildBatchAiColorSplitPrompt(input: {
       }],
     }),
     'photo_indexes и номера фотографий начинаются с 1 и подписаны на contact sheet. photo_alts верни в том же порядке и количестве, что photo_indexes.',
-    buildBatchAiDescriptionEvidencePrompt(product),
     `Особенности поставщика: ${supplierInstructions || 'нет'}`,
-    `Исходный товар: ${JSON.stringify(product)}`,
     `Бренды: ${JSON.stringify(brands)}`,
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
@@ -635,11 +647,17 @@ export function buildBatchAiColorSplitPrompt(input: {
       'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
       `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
     ] : []),
+    `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
+    'Если заполнена общая инструкция поставщика по ценам, верни в каждом product.price только явно указанную этой инструкцией цену для текущего варианта или цену, рассчитанную по её правилу от attributes.szwego_price; иначе оставь product.price равным null. Не помещай цену в тексты товаров.',
+    BATCH_AI_PRODUCT_SECTION,
+    ...(videoPreviewAvailable ? [
+      'После contact sheet приложен отдельный кадр-превью исходного видео. Он не является фотографией товара, не включай его в photo_indexes. Верни video_color_key: точный color_key одного варианта, если по этому кадру цвет виден однозначно; иначе пустую строку. Если на видео несколько цветов, тоже верни пустую строку.',
+    ] : []),
     `Схема атрибутов: ${JSON.stringify(attributes)}`,
     `Ценовые правила поставщика: ${JSON.stringify(priceRules)}`,
-    `Общая инструкция поставщика по ценам: ${priceAiInstructions || 'нет'}`,
+    buildBatchAiDescriptionEvidencePrompt(product),
+    `Исходный товар: ${JSON.stringify(product)}`,
     ...szwegoCardPricePrompt(product),
-    'Если заполнена общая инструкция поставщика по ценам, верни в каждом product.price только явно указанную этой инструкцией цену для текущего варианта или цену, рассчитанную по её правилу от attributes.szwego_price; иначе оставь product.price равным null. Не помещай цену в тексты товаров.',
   ].join('\n\n')
 }
 
@@ -698,6 +716,24 @@ export function resolveBatchAiMediaHosts(additionalHosts: string[] = []) {
   ].map((host) => host.trim().toLowerCase()).filter(Boolean))
 }
 
+/**
+ * Плитка contact sheet всего 384 px, поэтому у Szwego берём готовую миниатюру
+ * CDN (imageMogr2) вместо оригинала до 12 МБ. Оригиналы по-прежнему получает
+ * уточняющий запрос с полноразмерными фото.
+ */
+export function batchAiContactSheetSourceUrl(url: string) {
+  return resizeImageUrl(url, { width: 768, height: 768, quality: 85 })
+}
+
+async function fetchContactSheetPhoto(url: string) {
+  const thumbnailUrl = batchAiContactSheetSourceUrl(url)
+  if (thumbnailUrl !== url && /^https?:/i.test(thumbnailUrl)) {
+    const response = await fetch(thumbnailUrl, { signal: AbortSignal.timeout(20_000) }).catch(() => null)
+    if (response?.ok) return response
+  }
+  return fetch(url, { signal: AbortSignal.timeout(20_000) })
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[], options: { additionalHosts?: string[] } = {}) {
   const allowedHosts = resolveBatchAiMediaHosts(options.additionalHosts)
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {
@@ -713,7 +749,7 @@ export async function buildBatchAiContactSheets(photoUrls: string[], options: { 
   for (let start = 0; start < validUrls.length; start += 9) {
     const urls = validUrls.slice(start, start + 9)
     const tiles = await Promise.all(urls.map(async (url, index) => {
-      const response = await fetch(url, { signal: AbortSignal.timeout(20_000) })
+      const response = await fetchContactSheetPhoto(url)
       if (!response.ok) throw new Error(`Фото ${start + index + 1}: HTTP ${response.status}`)
       const declaredSize = Number(response.headers.get('content-length') || 0)
       if (declaredSize > 12 * 1024 * 1024) throw new Error(`Фото ${start + index + 1}: файл больше 12 МБ`)
@@ -746,22 +782,25 @@ export async function buildBatchAiContactSheets(photoUrls: string[], options: { 
   return sheets
 }
 
-export async function runBatchAiOpenRouter(input: {
-  settings: AiCompletionSettings
-  systemPrompt: string
-  userPrompt: string
+export type BatchAiRequestImages = {
   contactSheets: string[]
   referenceSheets?: string[]
   /** Подпись эталонных листов: у сверки колец эталоны — модели, а не цены. */
   referenceSheetsLabel?: string
   visualExampleSheets?: string[]
   extraImages?: Array<{ label: string; url: string; detail?: 'low' | 'high' | 'auto' }>
-}) {
-  const content: any[] = [{ type: 'text', text: input.userPrompt }]
-  input.contactSheets.forEach((url, index) => {
-    content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
-    content.push({ type: 'image_url', image_url: { url } })
-  })
+}
+
+/**
+ * Собирает содержимое запроса так, чтобы его начало совпадало у всех товаров
+ * запуска: эталоны цен, визуальные эталоны и общая часть промпта идут первыми,
+ * а на последнем общем блоке стоит `cache_control`. Затем идут данные товара и
+ * его contact sheet. Провайдеры с автоматическим кэшем префикса (OpenAI,
+ * Gemini) выигрывают от порядка, Claude — от явной отметки.
+ */
+export function buildBatchAiRequestContent(input: BatchAiRequestImages & { userPrompt: string; cacheSharedPrefix: boolean }) {
+  const { shared, product } = splitBatchAiPrompt(input.userPrompt)
+  const content: any[] = []
   ;(input.referenceSheets || []).forEach((url, index) => {
     content.push({ type: 'text', text: `${input.referenceSheetsLabel || 'Эталоны цен'} ${index + 1}. Это не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
@@ -770,11 +809,50 @@ export async function runBatchAiOpenRouter(input: {
     content.push({ type: 'text', text: `Визуальные эталоны поставщика ${index + 1}. Это отдельный справочник ракурсов, не фотографии текущего товара.` })
     content.push({ type: 'image_url', image_url: { url } })
   })
+  if (shared) {
+    content.push({ type: 'text', text: shared, ...(input.cacheSharedPrefix ? { cache_control: BATCH_AI_PROMPT_CACHE_CONTROL } : {}) })
+  }
+  content.push({ type: 'text', text: product })
+  input.contactSheets.forEach((url, index) => {
+    content.push({ type: 'text', text: `Contact sheet ${index + 1}` })
+    content.push({ type: 'image_url', image_url: { url } })
+  })
   ;(input.extraImages || []).forEach((image) => {
     if (!image?.url) return
     content.push({ type: 'text', text: image.label })
     content.push({ type: 'image_url', image_url: { url: image.url, ...(image.detail ? { detail: image.detail } : {}) } })
   })
+  return content
+}
+
+const promptCacheRejectedBy = new Set<string>()
+
+/**
+ * `cache_control` — расширение Anthropic/OpenRouter; совместимый шлюз может не
+ * знать это поле. Если запрос с отметкой отклонён не временной ошибкой, он
+ * повторяется без неё, и для этого провайдера и модели отметка больше не
+ * отправляется до перезапуска процесса.
+ */
+export async function withBatchAiPromptCacheFallback<T>(key: string, request: (cacheSharedPrefix: boolean) => Promise<T>) {
+  if (promptCacheRejectedBy.has(key)) return request(false)
+  try {
+    return await request(true)
+  } catch (error) {
+    if (isRetryableBatchAiError(error)) throw error
+    const result = await request(false)
+    promptCacheRejectedBy.add(key)
+    console.warn(`AI batch: ${key} отклонил cache_control, кэш промпта отключён: ${String((error as Error)?.message || error).slice(0, 500)}`)
+    return result
+  }
+}
+
+async function requestBatchAiJson(input: {
+  settings: AiCompletionSettings
+  systemPrompt: string
+  label: string
+  emptyResponseError: string
+  content: (cacheSharedPrefix: boolean) => any[]
+}) {
   const protocol = providerProtocol(input.settings.providerBaseUrl || '')
   const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
   const completion = input.settings.provider === 'byesu'
@@ -786,32 +864,47 @@ export async function runBatchAiOpenRouter(input: {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
       })
-  const payload = protocol === 'anthropic'
-    ? await withBatchAiRetry(() => anthropicMessagesCompletion({
+  const cacheKey = `${input.settings.provider}:${input.settings.providerBaseUrl || ''}:${model}`
+  const payload = await withBatchAiPromptCacheFallback(cacheKey, (cacheSharedPrefix) => (protocol === 'anthropic'
+    ? withBatchAiRetry(() => anthropicMessagesCompletion({
         model,
         system: input.systemPrompt,
-        messages: [{ role: 'user', content: toAnthropicContent(content) }],
+        messages: [{ role: 'user', content: toAnthropicContent(input.content(cacheSharedPrefix)) }],
         temperature: input.settings.temperature,
         max_tokens: input.settings.maxTokens,
       }, {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
-      }), 'AI batch')
-    : await withBatchAiRetry(() => completion({
+      }), input.label)
+    : withBatchAiRetry(() => completion({
         model,
         messages: [
           { role: 'system', content: input.systemPrompt },
-          { role: 'user', content },
+          { role: 'user', content: input.content(cacheSharedPrefix) },
         ],
         temperature: input.settings.temperature,
         max_tokens: input.settings.maxTokens,
         response_format: { type: 'json_object' },
-      }), 'AI batch')
+      }), input.label)))
   const text = protocol === 'anthropic'
     ? anthropicResponseText(payload)
     : aiMessageContentText(payload?.choices?.[0]?.message?.content)
-  if (!text) throw new Error('ИИ вернул пустой ответ')
+  if (!text) throw new Error(input.emptyResponseError)
   return parseBatchAiJson(text)
+}
+
+export async function runBatchAiOpenRouter(input: BatchAiRequestImages & {
+  settings: AiCompletionSettings
+  systemPrompt: string
+  userPrompt: string
+}) {
+  return requestBatchAiJson({
+    settings: input.settings,
+    systemPrompt: input.systemPrompt,
+    label: 'AI batch',
+    emptyResponseError: 'ИИ вернул пустой ответ',
+    content: (cacheSharedPrefix) => buildBatchAiRequestContent({ ...input, cacheSharedPrefix }),
+  })
 }
 
 const SIZE_RECOMMENDATION_EVIDENCE_RE = /(?:size\s*(?:chart|recommend)|таблиц[ауыы]?\s*(?:размер|замер)|размерн\w*\s*таблиц|рекоменд\w*\s*размер|尺码表|尺码推荐)/iu
@@ -859,48 +952,19 @@ export async function runBatchAiOpenRouterRefinement(input: {
 }) {
   const originals = allowedOriginalPhotoUrls(input.photoUrls, input.indexes)
   if (!originals.length) return input.previousOutput
-  const content: any[] = [{
-    type: 'text',
-    text: `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''}${input.note ? ` ${input.note}` : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`,
-  }]
-  originals.forEach(({ index, url }) => {
-    content.push({ type: 'text', text: `Оригинал фото ${index}` })
-    content.push({ type: 'image_url', image_url: { url } })
+  const userPrompt = `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''}${input.note ? ` ${input.note}` : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`
+  return requestBatchAiJson({
+    settings: input.settings,
+    systemPrompt: input.systemPrompt,
+    label: 'AI refinement',
+    emptyResponseError: 'ИИ вернул пустой ответ при уточнении оригинала',
+    content: (cacheSharedPrefix) => buildBatchAiRequestContent({
+      userPrompt,
+      cacheSharedPrefix,
+      contactSheets: [],
+      extraImages: originals.map(({ index, url }) => ({ label: `Оригинал фото ${index}`, url })),
+    }),
   })
-  const protocol = providerProtocol(input.settings.providerBaseUrl || '')
-  const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
-  const completion = input.settings.provider === 'byesu'
-    ? (body: Record<string, any>) => byesuChatCompletion(body, {
-        baseUrl: input.settings.providerBaseUrl,
-        apiKey: input.settings.providerApiKey,
-      })
-    : (body: Record<string, any>) => openRouterChatCompletion(body, {}, {
-        baseUrl: input.settings.providerBaseUrl,
-        apiKey: input.settings.providerApiKey,
-      })
-  const payload = protocol === 'anthropic'
-    ? await withBatchAiRetry(() => anthropicMessagesCompletion({
-        model,
-        system: input.systemPrompt,
-        messages: [{ role: 'user', content: toAnthropicContent(content) }],
-        temperature: input.settings.temperature,
-        max_tokens: input.settings.maxTokens,
-      }, {
-        baseUrl: input.settings.providerBaseUrl,
-        apiKey: input.settings.providerApiKey,
-      }), 'AI refinement')
-    : await withBatchAiRetry(() => completion({
-        model,
-        messages: [{ role: 'system', content: input.systemPrompt }, { role: 'user', content }],
-        temperature: input.settings.temperature,
-        max_tokens: input.settings.maxTokens,
-        response_format: { type: 'json_object' },
-      }), 'AI refinement')
-  const text = protocol === 'anthropic'
-    ? anthropicResponseText(payload)
-    : aiMessageContentText(payload?.choices?.[0]?.message?.content)
-  if (!text) throw new Error('ИИ вернул пустой ответ при уточнении оригинала')
-  return parseBatchAiJson(text)
 }
 
 /**
