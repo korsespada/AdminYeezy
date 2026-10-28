@@ -1,3 +1,41 @@
+# Минимальный ffmpeg из исходников Debian: пакет ffmpeg тянет ~500 МБ библиотек
+# (LLVM, Mesa, Intel Media SDK, x265...), а админке нужны только перекодирование
+# в H.264/AAC, scale и JPEG-постер. Встроенные декодеры и демультиплексоры
+# остаются все; внешние библиотеки — только libx264 и dav1d (чтение AV1).
+FROM node:20-bookworm-slim AS ffmpeg-build
+
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    dpkg-dev \
+    nasm \
+    pkg-config \
+    libx264-dev \
+    libdav1d-dev \
+    zlib1g-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+# --disable-autodetect: иначе configure молча подхватит лишние -dev библиотеки,
+# а в итоговом образе их не будет. nasm нужен для SIMD самого ffmpeg.
+RUN apt-get update \
+  && apt-get source ffmpeg \
+  && rm -rf /var/lib/apt/lists/* \
+  && cd ffmpeg-*/ \
+  && ./configure \
+    --prefix=/opt/ffmpeg \
+    --disable-autodetect \
+    --disable-debug \
+    --disable-doc \
+    --disable-ffplay \
+    --enable-gpl \
+    --enable-libx264 \
+    --enable-libdav1d \
+    --enable-zlib \
+  && make -j2 \
+  && make install
+
 FROM node:20-bookworm-slim
 
 WORKDIR /app
@@ -14,8 +52,14 @@ RUN apt-get update \
     python3-venv \
     python-is-python3 \
     ca-certificates \
-    ffmpeg \
+    libx264-164 \
+    libdav1d6 \
+    zlib1g \
   && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ffmpeg-build /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/
+RUN ffmpeg -hide_banner -version \
+  && ! ldd /usr/local/bin/ffmpeg /usr/local/bin/ffprobe | grep 'not found'
 
 COPY requirements.txt /tmp/requirements.txt
 RUN python -m venv /opt/venv \
