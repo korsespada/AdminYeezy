@@ -14,6 +14,7 @@ import {
   DEFAULT_BATCH_AI_SYSTEM_PROMPT,
   GLOBAL_BATCH_AI_CATALOG_RULES,
   buildBatchAiContactSheets,
+  cachedBatchAiReferenceSheets,
   buildBatchAiColorSplitPrompt,
   buildBatchAiFamilyDefinition,
   buildBatchAiShadeRepairPrompt,
@@ -1587,10 +1588,9 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     if (!claimed.rows[0]) return
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
-    context.priceReferenceSheetsPromise ||= buildBatchAiContactSheets(input.priceReferenceUrls || [])
-    context.visualExampleSheetsPromise ||= buildBatchAiContactSheets(input.visualExampleUrls || [])
-    const referenceSheets = await context.priceReferenceSheetsPromise
-    const visualExampleSheets = await context.visualExampleSheetsPromise
+    context.referenceSheets ||= new Map()
+    const referenceSheets = await cachedBatchAiReferenceSheets(context.referenceSheets, input.priceReferenceUrls || [])
+    const visualExampleSheets = await cachedBatchAiReferenceSheets(context.referenceSheets, input.visualExampleUrls || [])
     let raw = await runBatchAiOpenRouter({
       settings,
       systemPrompt: input.systemPrompt,

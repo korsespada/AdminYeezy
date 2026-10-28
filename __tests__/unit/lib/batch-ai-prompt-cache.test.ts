@@ -5,6 +5,7 @@ import {
   buildBatchAiColorSplitPrompt,
   buildBatchAiRequestContent,
   buildBatchAiUserPrompt,
+  cachedBatchAiReferenceSheets,
   splitBatchAiPrompt,
   withBatchAiPromptCacheFallback,
 } from '@/lib/batch-ai'
@@ -84,5 +85,29 @@ describe('batch AI prompt cache', () => {
   it('requests a CDN thumbnail for Szwego contact sheet tiles only', () => {
     expect(batchAiContactSheetSourceUrl('https://xcimg.szwego.com/a/b.jpg')).toContain('imageMogr2/auto-orient/thumbnail/!768x768r')
     expect(batchAiContactSheetSourceUrl('https://static.yeezyunique.ru/a.webp')).not.toContain('imageMogr2')
+  })
+
+  it('builds reference sheets once per set of links, not once per run', async () => {
+    const cache = new Map<string, Promise<string[]>>()
+    const build = vi.fn(async (urls: string[]) => urls.map((url) => `sheet:${url}`))
+
+    const family = await cachedBatchAiReferenceSheets(cache, ['tote.jpg'], build)
+    const sameFamily = await cachedBatchAiReferenceSheets(cache, ['tote.jpg'], build)
+    const otherFamily = await cachedBatchAiReferenceSheets(cache, ['clutch.jpg'], build)
+
+    expect(family).toEqual(['sheet:tote.jpg'])
+    expect(sameFamily).toBe(family)
+    expect(otherFamily).toEqual(['sheet:clutch.jpg'])
+    expect(build).toHaveBeenCalledTimes(2)
+  })
+
+  it('rebuilds reference sheets after a failed download', async () => {
+    const cache = new Map<string, Promise<string[]>>()
+    const build = vi.fn()
+      .mockRejectedValueOnce(new Error('HTTP 502'))
+      .mockResolvedValueOnce(['sheet'])
+
+    await expect(cachedBatchAiReferenceSheets(cache, ['a.jpg'], build)).rejects.toThrow('HTTP 502')
+    await expect(cachedBatchAiReferenceSheets(cache, ['a.jpg'], build)).resolves.toEqual(['sheet'])
   })
 })

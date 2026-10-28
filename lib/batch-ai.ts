@@ -734,6 +734,28 @@ async function fetchContactSheetPhoto(url: string) {
   return fetch(url, { signal: AbortSignal.timeout(20_000) })
 }
 
+/**
+ * Листы эталонов собираются один раз на набор ссылок в пределах запуска.
+ * Эталоны цен зависят от правил, применимых к товару: у товаров одной
+ * цветовой семьи они совпадают и дают общий кэшируемый префикс запроса, а
+ * товар другой семьи получает свои листы, а не листы первого товара запуска.
+ */
+export function cachedBatchAiReferenceSheets(
+  cache: Map<string, Promise<string[]>>,
+  urls: string[],
+  build: (urls: string[]) => Promise<string[]> = buildBatchAiContactSheets,
+) {
+  const key = JSON.stringify(urls)
+  let sheets = cache.get(key)
+  if (!sheets) {
+    sheets = build(urls)
+    cache.set(key, sheets)
+    // Сбой загрузки не должен навсегда ломать эталоны остальных товаров.
+    sheets.catch(() => cache.delete(key))
+  }
+  return sheets
+}
+
 export async function buildBatchAiContactSheets(photoUrls: string[], options: { additionalHosts?: string[] } = {}) {
   const allowedHosts = resolveBatchAiMediaHosts(options.additionalHosts)
   const validUrls = [...new Set(photoUrls.map(String).filter((url) => {
