@@ -1,0 +1,7 @@
+# Coolify деплоит по этому файлу: образ уже собран в GitHub Actions
+# (.github/workflows/docker.yml), здесь он только скачивается из GHCR.
+# SOURCE_COMMIT передаёт Coolify (Include Source Commit in Build), так что
+# деплоится ровно тот коммит, который собрал CI, а не устаревший :latest.
+# Откат на сборку на сервере: в Coolify вернуть Dockerfile Location = /Dockerfile.
+ARG SOURCE_COMMIT
+FROM ghcr.io/korsespada/adminyeezy:${SOURCE_COMMIT}

@@ -5,8 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: image-deploy
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
+  COOLIFY_URL: https://panel.chromoff.store
+  COOLIFY_APP_UUID: fkcwk084skkggowogg8cwss8
 
 jobs:
   # Базовый образ с Python + ffmpeg. Слои кэшируются в GHA-cache, поэтому без
@@ -63,16 +69,53 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Сначала собираем локально и проверяем, что в образ не попали секреты,
+      # и только потом пушим: проверка должна срабатывать до публикации.
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
+          provenance: false
           tags: |
             ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}:latest
             ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             RUNTIME_IMAGE=${{ env.REGISTRY }}/${{ steps.img.outputs.runtime }}:${{ github.sha }}
-            RAILS_ADMIN_EMAIL=${{ secrets.RAILS_ADMIN_EMAIL }}
-            RAILS_API_URL=${{ secrets.RAILS_API_URL || 'https://api.yeezyunique.ru/api/v1' }}
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
+
+      - name: Check image for secrets
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}:${{ github.sha }}
+        run: |
+          deny='(TOKEN|SECRET|PASSWORD|API_KEY|SERVICE_ROLE|DATABASE_URL|ENCRYPTION_KEY|COOKIE|S3_ACCESS|PG_USER|ADMIN_EMAIL)[A-Z_]*='
+          leaks=$(docker history --no-trunc --format '{{.CreatedBy}}' "$IMAGE" | grep -oE "[A-Z_]*$deny" | sort -u || true)
+          leaks="$leaks$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$IMAGE" | grep -oE "^[A-Z_]*$deny" | sort -u || true)"
+          if [ -n "$leaks" ]; then
+            echo "::error::Secret-like variables found in image: $leaks"
+            exit 1
+          fi
+          echo "Image history and env contain no secret-like variables."
+
+      - name: Push image
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}
+        run: |
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+      # Coolify собирает по Dockerfile.deploy: он только скачивает этот образ.
+      - name: Deploy to Coolify
+        env:
+          COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$COOLIFY_DEPLOY_TOKEN" ]; then
+            echo "::warning::COOLIFY_DEPLOY_TOKEN is not set, image pushed without deploy."
+            exit 0
+          fi
+          curl -fsS --retry 3 -X POST \
+            -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" \
+            "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"

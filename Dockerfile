@@ -1,6 +1,7 @@
 ARG RUNTIME_IMAGE=adminyeezy-runtime:python311-ffmpeg
-ARG RAILS_ADMIN_EMAIL
-ARG RAILS_API_URL=https://api.yeezyunique.ru/api/v1
+# Значений окружения на этапе сборки не нужно: NEXT_PUBLIC_* админка не
+# использует, а пререндерятся только страницы-редиректы. Все переменные
+# приходят в контейнер из Coolify в рантайме и не попадают в `docker history`.
 
 FROM node:20-bookworm-slim AS builder
 
