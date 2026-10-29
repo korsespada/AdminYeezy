@@ -37,6 +37,7 @@ logout (Rails увеличивает `admin_users.jwt_version`).
 | `/admin/categories` | Категории и подкатегории | Rails catalog lookups, read-only |
 | `/admin/chromoff` | Каталог Chromoff: общий формат карточек, 40/100/500 карточек на странице, bulk actions, массовая смена любого Rails-поставщика, фильтры по товару и Chromoff-статусам, отдельные поля публикации и SEO | Rails Chromoff API + Rails catalog lookups |
 | `/admin/chromoff/categories` | Редактор разделов и подразделов Chromoff: название, slug, порядок, активность, сопоставление общей категории и добавление новых подразделов | Rails Chromoff API + Rails catalog lookups |
+| `/admin/chromoff/filters` | Фильтры-чипы внутри подкатегорий витрины Chromoff: название, slug, ключевые слова и порядок, предпросмотр раскладки товаров и ручная привязка товара к фильтру | Rails Chromoff API |
 | `/admin/trash` | Архивированные товары | Rails admin/products |
 
 Все изменения опубликованного каталога идут через Rails API. Прямые SQL-записи в Rails CRM Postgres запрещены.

@@ -17,6 +17,7 @@ import { cookies } from 'next/headers'
 import { ADMIN_TOKEN_COOKIE, AdminAuthError } from './admin-session'
 import { isPriceCentsOnRequest, isPriceOnRequest } from './product-pricing'
 import { CATALOG_ATTRIBUTE_DEFINITIONS } from './catalog-attribute-schema'
+import type { ChromoffSubcategoryFilter } from './chromoff-filters'
 
 let cachedRailsAdminToken: { token: string; expiresAt: number } | null = null
 let pendingRailsAdminLogin: Promise<string> | null = null
@@ -193,6 +194,8 @@ export interface RailsChromoffCategory {
   slug: string
   sort_order: number
   active: boolean
+  /** Фильтры-чипы подкатегории на витрине, см. lib/chromoff-filters.ts. */
+  filters?: ChromoffSubcategoryFilter[]
   catalog_category?: { id: string; name: string; slug: string; parent_id?: string | null } | null
 }
 
@@ -226,6 +229,8 @@ export interface RailsChromoffListing {
   chromoff_category_status?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual' | null
   chromoff_category_confidence?: number | null
   chromoff_category_reason?: string | null
+  /** Фильтр подкатегории, который Rails посчитал для витрины. */
+  chromoff_filter?: string | null
   metadata?: Record<string, unknown>
   description?: string
   external_id?: string
@@ -945,6 +950,7 @@ export async function updateRailsChromoffCategory(id: string, input: {
   slug?: string
   sortOrder?: number
   active?: boolean
+  filters?: ChromoffSubcategoryFilter[]
 }) {
   const category: Record<string, unknown> = {}
   if (input.catalogCategoryId !== undefined) category.catalog_category_id = input.catalogCategoryId || null
@@ -952,6 +958,7 @@ export async function updateRailsChromoffCategory(id: string, input: {
   if (input.slug !== undefined) category.slug = input.slug
   if (input.sortOrder !== undefined) category.sort_order = input.sortOrder
   if (input.active !== undefined) category.active = input.active
+  if (input.filters !== undefined) category.filters = input.filters
   const result = await railsFetch<{ category: RailsChromoffCategory }>(`/admin/chromoff/categories/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ category }),
@@ -1044,6 +1051,8 @@ export async function updateRailsChromoffListing(id: string, input: {
   seoTitle?: string
   seoDescription?: string
   h1?: string
+  /** Slug фильтра подкатегории, `none` или пустая строка — снова по ключевым словам. */
+  chromoffFilter?: string
 }) {
   const listing: Record<string, unknown> = {}
   if (input.published !== undefined) listing.published = input.published
@@ -1052,6 +1061,7 @@ export async function updateRailsChromoffListing(id: string, input: {
   if (input.seoTitle !== undefined) listing.seo_title = input.seoTitle
   if (input.seoDescription !== undefined) listing.seo_description = input.seoDescription
   if (input.h1 !== undefined) listing.h1 = input.h1
+  if (input.chromoffFilter !== undefined) listing.chromoff_filter = input.chromoffFilter
 
   const result = await railsFetch<{ listing: RailsChromoffListing }>(`/admin/chromoff/listings/${encodeURIComponent(id)}`, {
     method: 'PATCH',

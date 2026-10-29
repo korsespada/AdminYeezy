@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { chromoffFilterSlug, type ChromoffSubcategoryFilter } from '@/lib/chromoff-filters'
 import { buildChromoffImportPayload, buildChromoffManualSubcategoryPayload, slugify } from '@/lib/chromoff-source'
 import { bulkUpdateRailsChromoffListingsCategory, bulkUpdateRailsChromoffListingsPublished, bulkUpdateRailsChromoffListingsSupplier, createRailsChromoffListing, deleteRailsChromoffListing, listRailsChromoffCategories, runRailsChromoffImport, updateRailsChromoffCategory, updateRailsChromoffListing } from '@/lib/rails-admin'
 
@@ -162,6 +163,41 @@ export async function updateChromoffCategoryAction(formData: FormData) {
     return { success: true, message: 'Раздел Chromoff сохранён.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить раздел.' }
+  }
+}
+
+export async function updateChromoffCategoryFiltersAction(categoryId: string, filters: ChromoffSubcategoryFilter[]) {
+  const id = String(categoryId || '').trim()
+  if (!id) return { success: false, message: 'Не указан подраздел Chromoff.' }
+
+  const normalized = filters.map((filter) => ({
+    slug: filter.slug.trim().toLowerCase() || chromoffFilterSlug(filter.label),
+    label: filter.label.trim(),
+    keywords: filter.keywords,
+  }))
+  if (normalized.some((filter) => !filter.label)) return { success: false, message: 'У каждого фильтра должно быть название.' }
+  if (normalized.some((filter) => !/^[a-z0-9-]+$/.test(filter.slug))) return { success: false, message: 'Slug фильтра — только латиница, цифры и дефисы.' }
+  if (new Set(normalized.map((filter) => filter.slug)).size !== normalized.length) return { success: false, message: 'Slug фильтров не должны повторяться.' }
+
+  try {
+    const category = await updateRailsChromoffCategory(id, { filters: normalized })
+    revalidatePath('/admin/chromoff/filters')
+    return { success: true, message: 'Фильтры сохранены — витрина обновится в течение 5 минут.', filters: category.filters || [] }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить фильтры.' }
+  }
+}
+
+export async function setChromoffListingFilterAction(listingId: string, filterSlug: string) {
+  const id = String(listingId || '').trim()
+  if (!id) return { success: false, message: 'Не указан товар Chromoff.' }
+
+  try {
+    const listing = await updateRailsChromoffListing(id, { chromoffFilter: filterSlug })
+    revalidatePath('/admin/chromoff/filters')
+    return { success: true, message: 'Привязка сохранена.', metadata: listing.metadata || {} }
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : 'Не удалось сохранить привязку.' }
   }
 }
 
