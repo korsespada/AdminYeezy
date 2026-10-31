@@ -83,6 +83,13 @@ export function ShipmentPanel({ shipment, orderId, customerId, showOrder = false
         <Info label="Статус запрошен" value={refreshing ? 'Запрашиваем…' : shipment.tracked_at ? formatDate(shipment.tracked_at) : 'Ещё не запрашивался'} />
       </div>
 
+      {shipment.tracking?.notice && (
+        <div className="rounded-md border border-sky-800 bg-sky-950/40 p-3 text-sky-100">
+          <div className="text-xs text-sky-300">Сообщение STD</div>
+          <div className="mt-1">{shipment.tracking.notice}</div>
+        </div>
+      )}
+
       {shipment.tracking_error && !refreshing && (
         <div className="rounded-md border border-amber-800 bg-amber-950/40 p-3 text-amber-200">{shipment.tracking_error}</div>
       )}

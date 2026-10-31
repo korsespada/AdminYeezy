@@ -475,6 +475,7 @@ export interface RailsCrmTracking {
   destination?: string | null
   recipient?: string | null
   cdek_number?: string | null
+  notice?: string | null
   events: Array<{ time: string; text: string }>
 }
 
