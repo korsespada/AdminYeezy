@@ -78,19 +78,27 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
       (row.default_category && !row.default_category_name) ||
       (row.default_subcategory && !row.default_subcategory_name),
     )
-    if (unresolved) {
-      const [brands, categories, subcategories] = await Promise.all([
-        query('SELECT id::text, name FROM brands'),
-        query('SELECT id::text, name FROM categories'),
-        query('SELECT id::text, name FROM subcategories'),
-      ])
-      const brandNames = new Map(brands.rows.map((row) => [String(row.id), row.name]))
-      const categoryNames = new Map(categories.rows.map((row) => [String(row.id), row.name]))
-      const subcategoryNames = new Map(subcategories.rows.map((row) => [String(row.id), row.name]))
-      for (const row of res.rows) {
-        row.default_brand_name ||= brandNames.get(String(row.default_brand || '')) || null
-        row.default_category_name ||= categoryNames.get(String(row.default_category || '')) || null
-        row.default_subcategory_name ||= subcategoryNames.get(String(row.default_subcategory || '')) || null
+    // Старая база каталога есть не везде (после восстановления 07.11.2026 её нет):
+    // без неё имена берутся только из catalog_id_mappings, а нераспознанный ID
+    // показывается как есть, страница не падает.
+    const legacyCatalogConfigured = Boolean(process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL)
+    if (unresolved && legacyCatalogConfigured) {
+      try {
+        const [brands, categories, subcategories] = await Promise.all([
+          query('SELECT id::text, name FROM brands'),
+          query('SELECT id::text, name FROM categories'),
+          query('SELECT id::text, name FROM subcategories'),
+        ])
+        const brandNames = new Map(brands.rows.map((row) => [String(row.id), row.name]))
+        const categoryNames = new Map(categories.rows.map((row) => [String(row.id), row.name]))
+        const subcategoryNames = new Map(subcategories.rows.map((row) => [String(row.id), row.name]))
+        for (const row of res.rows) {
+          row.default_brand_name ||= brandNames.get(String(row.default_brand || '')) || null
+          row.default_category_name ||= categoryNames.get(String(row.default_category || '')) || null
+          row.default_subcategory_name ||= subcategoryNames.get(String(row.default_subcategory || '')) || null
+        }
+      } catch (error) {
+        console.warn('[suppliers] legacy catalog names unavailable:', (error as Error).message)
       }
     }
     const mappings = await scrapingQuery(`
