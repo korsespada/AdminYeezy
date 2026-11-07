@@ -1491,6 +1491,68 @@ export async function refreshRailsCrmShipment(id: string) {
   return result.shipment
 }
 
+export type RailsDeliveryStage = NonNullable<RailsCrmTracking['stage']> | 'unknown'
+
+export interface RailsDeliveryDuration {
+  count: number
+  median: number | null
+  average: number | null
+  p90: number | null
+}
+
+export interface RailsDeliveryParcelRow {
+  number: string
+  source: 'track' | 'crm' | 'both'
+  stage: RailsCrmTracking['stage']
+  destination: string | null
+  lookups_count: number | null
+  last_lookup_at: string | null
+  last_event_at?: string
+  days_without_events?: number
+}
+
+// Сводка Rails по посылкам STD: номера с публичной страницы /track
+// (tracked_parcels) и треки, которые ввёл менеджер (shipments).
+export interface RailsDeliveryStats {
+  period: { from: string; to: string }
+  generated_at: string
+  lookups: {
+    numbers: number
+    found: number
+    not_found: number
+    unavailable: number
+    lookups: number
+    avg_lookups_per_found: number | null
+    repeat_checked: number
+    off_site_parcels: number
+  }
+  shipments: {
+    total: number
+    created: number
+    in_transit: number
+    delivered: number
+    with_order: number
+    without_order: number
+    with_error: number
+  }
+  parcels: { total: number; delivered: number; handed_to_cdek: number; notice_seen: number }
+  weekly: Array<{ week: string; found: number; not_found: number; shipments: number }>
+  stages: Record<RailsDeliveryStage, number>
+  destinations: Array<{ city: string; count: number }>
+  durations: Record<'total' | 'before_customs' | 'customs' | 'after_customs', RailsDeliveryDuration>
+  stuck: RailsDeliveryParcelRow[]
+  most_checked: RailsDeliveryParcelRow[]
+}
+
+export async function getRailsDeliveryStats(period: { from?: string; to?: string } = {}) {
+  const params = new URLSearchParams()
+  if (period.from) params.set('from', period.from)
+  if (period.to) params.set('to', period.to)
+  const query = params.toString()
+  const result = await railsFetch<{ delivery_stats: RailsDeliveryStats }>(`/admin/delivery_stats${query ? `?${query}` : ''}`)
+  return result.delivery_stats
+}
+
 export async function transitionRailsCrmOrderItem(id: string, input: {
   toStatus: string
   message?: string

@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Tags,
   Trash2,
+  Truck,
   Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -51,6 +52,13 @@ const sections = [
     href: '/admin/crm',
     icon: ClipboardList,
     tone: 'text-violet-300',
+  },
+  {
+    title: 'Доставка',
+    description: 'Статистика посылок STD: сроки по этапам и таможне, города, застрявшие посылки и проверки на /track.',
+    href: '/admin/crm/delivery',
+    icon: Truck,
+    tone: 'text-amber-300',
   },
   {
     title: 'Выгрузки',

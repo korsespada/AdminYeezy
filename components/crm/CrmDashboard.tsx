@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowRight, BellRing, ClipboardList, MessagesSquare, Users } from 'lucide-react'
+import { ArrowRight, BellRing, ClipboardList, MessagesSquare, Truck, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { type RailsCrmOrder } from '@/lib/rails-admin'
@@ -36,6 +36,15 @@ const workspaces = [
     tone: 'text-cyan-300',
     countKey: 'customers',
     countLabel: 'клиентов',
+  },
+  {
+    title: 'Доставка',
+    description: 'Посылки STD: сроки по этапам, таможня, города, застрявшие и проверки на /track.',
+    href: '/admin/crm/delivery',
+    icon: Truck,
+    tone: 'text-amber-300',
+    countKey: null,
+    countLabel: '',
   },
   {
     title: 'Telegram-сообщения',
@@ -103,7 +112,7 @@ export default function CrmDashboard({ railsConfigured, recentOrders, counts, er
           </section>
         )}
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           {workspaces.map((workspace) => {
             const Icon = workspace.icon
             const value = workspace.countKey ? counts[workspace.countKey] : null
