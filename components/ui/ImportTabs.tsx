@@ -4,30 +4,39 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Film, Ruler, Users, Package, Settings2 } from 'lucide-react'
 
-export default function ImportTabs() {
-  const pathname = usePathname()
+const PRIMARY_TABS = [
+  { label: 'История выгрузок', href: '/admin/batches', icon: Package },
+  { label: 'Поставщики', href: '/admin/suppliers', icon: Users },
+]
 
-  const tabs = [
-    { label: 'История выгрузок', href: '/admin/batches', icon: Package },
-    { label: 'Поставщики', href: '/admin/suppliers', icon: Users },
-    { label: 'Видео → товары', href: '/admin/video-matches', icon: Film },
-    { label: 'Шаблоны замеров', href: '/admin/measurement-templates', icon: Ruler },
-  ]
+// Вспомогательные разделы выгрузок стоят справа, рядом с «Настройками ИИ».
+const TOOL_TABS = [
+  { label: 'Видео → товары', href: '/admin/video-matches', icon: Film },
+  { label: 'Шаблоны замеров', href: '/admin/measurement-templates', icon: Ruler },
+  { label: 'Настройки ИИ', href: '/admin/ai-rules', icon: Settings2 },
+]
+
+function isTabActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+export default function ImportTabs() {
+  const pathname = usePathname() || ''
 
   return (
     <div className="mb-8">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex bg-slate-800/50 p-1 rounded-xl w-fit border border-slate-700 overflow-x-auto">
-          {tabs.map((tab) => {
-            const isActive = pathname === tab.href || pathname.startsWith(`${tab.href}/`)
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex w-fit max-w-full overflow-x-auto rounded-xl border border-slate-700 bg-slate-800/50 p-1">
+          {PRIMARY_TABS.map((tab) => {
+            const isActive = isTabActive(pathname, tab.href)
             const Icon = tab.icon
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
-                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                  isActive 
-                  ? 'bg-indigo-600 text-white shadow-lg' 
+                className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-6 py-2.5 text-sm font-medium transition-all ${
+                  isActive
+                  ? 'bg-indigo-600 text-white shadow-lg'
                   : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -38,17 +47,26 @@ export default function ImportTabs() {
           })}
         </div>
 
-        <Link
-          href="/admin/ai-rules"
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl border text-sm font-medium transition-all ${
-            pathname === '/admin/ai-rules'
-            ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
-            : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
-          }`}
-        >
-          <Settings2 size={18} />
-          Настройки ИИ
-        </Link>
+        <div className="flex max-w-full flex-wrap gap-2">
+          {TOOL_TABS.map((tab) => {
+            const isActive = isTabActive(pathname, tab.href)
+            const Icon = tab.icon
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl border px-4 py-2.5 text-sm font-medium transition-all ${
+                  isActive
+                  ? 'border-amber-500/30 bg-amber-500/20 text-amber-400'
+                  : 'border-slate-700 bg-slate-800 text-slate-400 hover:border-slate-600 hover:text-white'
+                }`}
+              >
+                <Icon size={18} />
+                {tab.label}
+              </Link>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

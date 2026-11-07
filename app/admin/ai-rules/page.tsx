@@ -12,13 +12,13 @@ export default async function AIRulesPage() {
   ])
 
   return (
-    <div className="p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <div className="p-4 sm:p-8">
+      <div className="mx-auto max-w-[1800px] space-y-6 sm:space-y-8">
+        <ImportTabs />
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-bold text-white tracking-tight">Настройки интеллекта</h1>
           <p className="text-slate-400">Глобальные настройки обработки китайских товаров в «Выгрузках»</p>
         </div>
-        <ImportTabs />
         <AIRulesEditor initialSettings={settingsResult.data} initialCategories={lookups.categories} initialSubcategories={lookups.subcategories} />
       </div>
     </div>

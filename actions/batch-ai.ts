@@ -1100,7 +1100,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
     if (!operationClaimed) return { success: false, error: 'Для этой выгрузки уже выполняется другое действие' }
     const rawSupplierInstructions = mode === 'variants' ? String(context.batch.ai_instructions || '') : (settings as any).supplierInstructions ?? [
       context.batch.ai_instructions,
-      context.batch.ai_photo_enabled && context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
+      context.batch.ai_photo_models ? `Ориентиры по моделям товаров: ${context.batch.ai_photo_models}` : '',
     ].filter(Boolean).join('\n')
     const supplierInstructions = sanitizeSupplierAiInstructions(
       rawSupplierInstructions,
@@ -1325,10 +1325,11 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           generatedSlug,
           measurementRecoveryOnly: mode === 'recover_measurements',
           measurementTargetProductIds,
-          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : ['media_seo', 'split_colors'].includes(mode) ? product.photos || [] : context.batch.ai_photo_enabled ? product.photos || [] : [],
+          photoUrls: mode === 'recover_measurements' ? measurementPhotoUrls : product.photos || [],
           videoPreviewUrl: mode === 'split_colors' || splitAlbumColors ? videoPosterPreviewUrl(promptProduct) : '',
-          photoEnabled: mode === 'recover_measurements' || ['media_seo', 'split_colors'].includes(mode) || context.batch.ai_photo_enabled === true,
-          fullSizeRefinementEnabled: mode === 'recover_measurements' || (!['media_seo', 'split_colors'].includes(mode) && context.batch.ai_photo_enabled === true && context.batch.ai_deep_search_enabled === true),
+          // Фото 3×3 включено у всех поставщиков.
+          photoEnabled: true,
+          fullSizeRefinementEnabled: mode === 'recover_measurements' || (!['media_seo', 'split_colors'].includes(mode) && context.batch.ai_deep_search_enabled === true),
           preserveExistingPrice: shouldPreserveExistingPrice(product),
           brands: context.brands,
           categories: context.categories,
@@ -1475,9 +1476,8 @@ export async function startBatchMediaSeoAction(batchId: string, productIds?: num
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
   const items = await scrapingQuery("SELECT * FROM batch_ai_items WHERE run_id=$1 AND status='queued' ORDER BY created_at", [runId])
   let cursor = 0
-  const concurrency = context.batch.ai_parallel_enabled === false
-    ? 1
-    : Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))
+  // Параллельная обработка включена всегда: число потоков задаётся глобально в «Настройках ИИ».
+  const concurrency = Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))
   const workers = Array.from({ length: Math.min(concurrency, items.rows.length) }, async () => {
     while (cursor < items.rows.length) {
       const item = items.rows[cursor++]

@@ -10,6 +10,7 @@ describe('szwego parse mode', () => {
   it('keeps the three supported sources', () => {
     expect(SZWEGO_PARSE_MODES).toEqual(['images', 'all', 'video'])
     expect(Object.keys(SZWEGO_PARSE_MODE_LABELS)).toEqual(['images', 'all', 'video'])
+    expect(SZWEGO_PARSE_MODE_LABELS.all).toBe('Единая лента')
   })
 
   it('normalizes stored values and falls back to images', () => {

@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle, ClipboardPaste, Upload } from 'lucide-react'
 import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, fetchSupplierSzwegoStatsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
 import { useRouter, useSearchParams } from 'next/navigation'
@@ -12,6 +13,7 @@ import {
 import { SupplierPostProcessEditor } from '@/components/inventory/SupplierPostProcessEditor'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { SZWEGO_PARSE_MODE_LABELS, normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
+import { useModalDismiss } from '@/components/ui/use-modal-dismiss'
 
 type SupplierAiProcessingOptions = {
   colorFamilyByArticle: boolean
@@ -105,23 +107,7 @@ interface Supplier {
   ai_parallel_count: number
   parse_tags_enabled: boolean
   is_favorite?: boolean
-}
-
-function FilterSelect({ label, value, onChange, options }: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: Array<{ id: string; name: string }>
-}) {
-  return (
-    <label className="space-y-1 text-xs text-slate-500">
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 outline-none focus:border-indigo-500">
-        <option value="">Все</option>
-        {options.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-      </select>
-    </label>
-  )
+  has_post_process_script?: boolean
 }
 
 function CompactBadge({ tone, children }: { tone: 'indigo' | 'cyan' | 'slate' | 'emerald'; children: React.ReactNode }) {
@@ -222,15 +208,16 @@ export default function SupplierList({
   const [selectedSupplierId, setSelectedSupplierId] = useState<number | null>(null)
   const [endDate, setEndDate] = useState('')
   const [overrideValue, setOverrideValue] = useState('') // Format: "type:id"
-  const [overrideMode, setOverrideMode] = useState<SzwegoParseMode>('images')
+  const [overrideMode, setOverrideMode] = useState<SzwegoParseMode>('all')
   const [isStatsLoading, setIsStatsLoading] = useState(false)
   const [statsResult, setStatsResult] = useState<SzwegoAlbumStats | null>(null)
   const [statsError, setStatsError] = useState('')
 
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [brandFilter, setBrandFilter] = useState('')
-  const [genderFilter, setGenderFilter] = useState('')
+  const closeSupplierModal = React.useCallback(() => setIsModalOpen(false), [])
+  const closeScrapingModal = React.useCallback(() => setIsScrapingModalOpen(false), [])
+  useModalDismiss(isModalOpen, closeSupplierModal)
+  useModalDismiss(isScrapingModalOpen && !isModalOpen, closeScrapingModal)
 
   const selectedSupplierCategoryName = React.useMemo(() => {
     if (!editingSupplier) return ''
@@ -302,7 +289,7 @@ export default function SupplierList({
         id: 0,
         name: '',
         album_id: '',
-        szwego_parse_mode: 'images',
+        szwego_parse_mode: 'all',
         group_id: '',
         tag_id: '',
         default_category: '',
@@ -318,7 +305,7 @@ export default function SupplierList({
         brand_tags: '',
         default_price: null,
         default_gender: '',
-        ai_photo_enabled: false,
+        ai_photo_enabled: true,
         ai_cache_enabled: false,
         ai_deep_search_enabled: false,
         ai_resize_enabled: true,
@@ -326,7 +313,7 @@ export default function SupplierList({
         ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS },
         ai_visual_examples: [],
         ai_photo_models: '',
-        ai_parallel_enabled: false,
+        ai_parallel_enabled: true,
         ai_parallel_count: 5,
         parse_tags_enabled: false,
         post_process_enabled: false,
@@ -406,7 +393,6 @@ export default function SupplierList({
     formData.set('brand_tags', tagsStr)
     
     // Explicitly set checkboxes from state/form to ensure they are captured correctly
-    const aiPhotoValue = editingSupplier?.ai_photo_enabled ? 'on' : 'off'
     const aiCacheValue = editingSupplier?.ai_cache_enabled ? 'on' : 'off'
     const aiDeepSearchValue = editingSupplier?.ai_deep_search_enabled ? 'on' : 'off'
     const aiResizeValue = editingSupplier?.ai_resize_enabled ? 'on' : 'off'
@@ -414,7 +400,6 @@ export default function SupplierList({
     const postProcessValue = editingSupplier?.post_process_enabled ? 'on' : 'off'
     const firstPhotoScreenshotValue = editingSupplier?.first_photo_screenshot_filter ? 'on' : 'off'
     
-    formData.set('ai_photo_enabled', aiPhotoValue)
     formData.set('ai_cache_enabled', aiCacheValue)
     formData.set('ai_deep_search_enabled', aiDeepSearchValue)
     formData.set('ai_resize_enabled', aiResizeValue)
@@ -513,7 +498,7 @@ export default function SupplierList({
 
     const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
     const configuredTags = parseBrandTags(selectedSupplier?.brand_tags || '')
-    const mode = overrideMode || selectedSupplier?.szwego_parse_mode || 'images'
+    const mode = overrideMode
     // Единая лента обязана идти по тегу: без него постобработка получает весь альбом.
     // Видео-лента работает и целиком, тег в ней только сужает выбор.
     const requiresFeedTag = mode === 'all' && configuredTags.some((tag) => tag.type === 'tag')
@@ -586,9 +571,6 @@ export default function SupplierList({
   const favoriteCount = suppliers.filter((supplier) => supplier.is_favorite).length
   const visibleSuppliers = suppliers.filter((supplier) => {
     if (showFavoritesOnly && !supplier.is_favorite) return false
-    if (categoryFilter && !supplier.allowed_category_ids.includes(categoryFilter)) return false
-    if (brandFilter && !supplier.allowed_brand_ids.includes(brandFilter)) return false
-    if (genderFilter && supplier.default_gender !== genderFilter) return false
     return true
   })
 
@@ -627,14 +609,6 @@ export default function SupplierList({
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border border-slate-700 bg-slate-900/60 p-3 sm:grid-cols-3">
-        <FilterSelect label="Категория" value={categoryFilter} onChange={setCategoryFilter} options={catalogLookups.categories} />
-        <FilterSelect label="Бренд" value={brandFilter} onChange={setBrandFilter} options={catalogLookups.brands} />
-        <FilterSelect label="Гендер" value={genderFilter} onChange={setGenderFilter} options={[
-          { id: 'female', name: 'Для женщин' }, { id: 'male', name: 'Для мужчин' }, { id: 'unisex', name: 'Унисекс' },
-        ]} />
-      </div>
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {visibleSuppliers.map(s => {
           const isFav = Boolean(s.is_favorite)
@@ -670,7 +644,9 @@ export default function SupplierList({
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate font-bold text-white transition-colors group-hover:text-indigo-400">{s.name}</h3>
-                  <p className="mt-0.5 truncate font-mono text-[10px] text-slate-500" title={`Album ID: ${s.album_id}`}>{s.album_id}</p>
+                  {s.has_post_process_script && (
+                    <span className="mt-1 inline-flex rounded-md border border-orange-500/40 bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-orange-300" title="Есть скрипт постобработки">Скрипт</span>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                     <button
@@ -693,7 +669,6 @@ export default function SupplierList({
                 {(s.allowed_brand_names?.length ? s.allowed_brand_names : ['AI определяет']).slice(0, 2).map((name) => <CompactBadge key={`brand-${name}`} tone="indigo">{name}</CompactBadge>)}
                 {(s.allowed_category_names || []).slice(0, 2).map((name) => <CompactBadge key={`category-${name}`} tone="cyan">{name}</CompactBadge>)}
                 {(s.allowed_subcategory_names || []).slice(0, 2).map((name) => <CompactBadge key={`subcategory-${name}`} tone="slate">{name}</CompactBadge>)}
-                {s.ai_photo_enabled && <CompactBadge tone="emerald">Фото 3×3</CompactBadge>}
               </div>
 
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-700/70 pt-3">
@@ -715,7 +690,7 @@ export default function SupplierList({
                   setSelectedSupplierId(s.id);
                   setIsScrapingModalOpen(true);
                   setOverrideValue(''); // Reset to default
-                  setOverrideMode(normalizeSzwegoParseMode(s.szwego_parse_mode));
+                  setOverrideMode('all');
                   setStatsResult(null);
                   setStatsError('');
                 }}
@@ -730,9 +705,9 @@ export default function SupplierList({
       </div>
 
       {/* Supplier Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div role="dialog" aria-modal="true" aria-label="Настройки поставщика" className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
             <form onSubmit={handleSubmit} className="flex flex-col h-full bg-slate-800">
               <div className="p-6 pb-4 border-b border-slate-700/50 flex justify-between items-center bg-slate-800">
                 <div className="flex items-center gap-4">
@@ -773,52 +748,16 @@ export default function SupplierList({
                       <input name="album_id" defaultValue={editingSupplier?.album_id} required className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white font-mono text-sm outline-none focus:border-emerald-500" />
                     </div>
                     <div>
-                      <label className="block text-sm text-slate-400 mb-1">Источник Szwego</label>
-                      <select
-                        name="szwego_parse_mode"
-                        value={editingSupplier?.szwego_parse_mode || 'images'}
-                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, szwego_parse_mode: normalizeSzwegoParseMode(event.target.value) })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white text-sm outline-none focus:border-emerald-500"
-                      >
-                        <option value="images">Альбомы / изображения (по умолчанию)</option>
-                        <option value="all">全部 / единая лента</option>
-                        <option value="video">Только видео</option>
-                      </select>
-                      <p className="mt-1 text-xs text-slate-500">Единая лента сохраняет текстовые публикации, одиночные фото и размерные сетки для постобработки. Режим «Только видео» выгружает видео-публикации альбома отдельной партией.</p>
+                      <span className="block text-sm text-slate-400 mb-1">Источник Szwego</span>
+                      <div className="rounded-lg border border-slate-700 bg-slate-900/60 px-4 py-2 text-sm text-slate-200">{SZWEGO_PARSE_MODE_LABELS.all}</div>
+                      <p className="mt-1 text-xs text-slate-500">Единая лента сохраняет текстовые публикации, одиночные фото и размерные сетки для постобработки. Видео выгружается отдельной партией: выберите «Только видео» при запуске.</p>
                     </div>
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Avatar URL (опционально)</label>
                       <input name="avatar_url" defaultValue={editingSupplier?.avatar_url || ''} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white text-xs outline-none focus:border-emerald-500" />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Мин. фото</label>
-                        <input
-                          type="number"
-                          name="min_photos"
-                          defaultValue={editingSupplier?.min_photos}
-                          disabled={editingSupplier?.szwego_parse_mode === 'all'}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Мин. символов опис.</label>
-                        <input
-                          type="number"
-                          name="min_desc_len"
-                          defaultValue={editingSupplier?.min_desc_len}
-                          disabled={editingSupplier?.szwego_parse_mode === 'all'}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-                        />
-                      </div>
-                    </div>
-                    {editingSupplier?.szwego_parse_mode === 'all' && (
-                      <>
-                        <input type="hidden" name="min_photos" value={editingSupplier.min_photos ?? 0} />
-                        <input type="hidden" name="min_desc_len" value={editingSupplier.min_desc_len ?? 0} />
-                        <p className="text-xs text-slate-500">В единой ленте эти ограничения не применяются.</p>
-                      </>
-                    )}
+                    <input type="hidden" name="min_photos" value={editingSupplier?.min_photos ?? 0} />
+                    <input type="hidden" name="min_desc_len" value={editingSupplier?.min_desc_len ?? 0} />
                   </div>
 
                   <div className="space-y-4">
@@ -946,25 +885,11 @@ export default function SupplierList({
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2">
-                      <label className="flex items-center gap-2 cursor-pointer group" title="Передавать AI все фото товара листами 3×3. Если выключено, обработка идёт только по тексту.">
-                        <input
-                          type="checkbox"
-                          name="ai_photo_enabled"
-                          checked={editingSupplier?.ai_photo_enabled || false}
-                          onChange={(e) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_photo_enabled: e.target.checked, ai_deep_search_enabled: e.target.checked ? editingSupplier.ai_deep_search_enabled : false })}
-                          className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-800"
-                        />
-                        <span className="text-xs text-slate-300 group-hover:text-white transition-colors flex items-center gap-1">
-                          Фото 3×3 <HelpCircle size={12} className="text-slate-500" />
-                        </span>
-                      </label>
-                      
-                      <label className={`flex items-center gap-2 group ${editingSupplier?.ai_photo_enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`} title="При низкой уверенности AI запросит до трёх выбранных фотографий в оригинальном размере, чтобы прочитать бренд или модель.">
+                      <label className="flex items-center gap-2 cursor-pointer group" title="При низкой уверенности AI запросит до трёх выбранных фотографий в оригинальном размере, чтобы прочитать бренд или модель.">
                         <input
                           type="checkbox"
                           name="ai_deep_search_enabled"
                           checked={editingSupplier?.ai_deep_search_enabled || false}
-                          disabled={!editingSupplier?.ai_photo_enabled}
                           onChange={(e) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_deep_search_enabled: e.target.checked })}
                           className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-slate-800"
                         />
@@ -1110,28 +1035,7 @@ export default function SupplierList({
                   </div>
                   {editingSupplier?.id && <SupplierPostProcessEditor supplierId={editingSupplier.id} legacyScript={editingSupplier.post_process_script} />}
 
-                  <div className="rounded-xl border border-slate-700/50 bg-slate-900/50 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-indigo-400">
-                        <Play size={18} className="rotate-[-90deg]" />
-                        <div>
-                          <h4 className="text-xs font-bold uppercase tracking-widest">Параллельная AI-обработка</h4>
-                          <p className="mt-1 text-[10px] normal-case tracking-normal text-slate-500">Количество потоков задаётся глобально в «Настройках ИИ».</p>
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          name="ai_parallel_enabled"
-                          className="sr-only peer"
-                          defaultChecked={editingSupplier?.ai_parallel_enabled}
-                        />
-                        <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                      </label>
-                    </div>
-                  </div>
-
-                  {editingSupplier?.ai_photo_enabled && (
+                  {editingSupplier && (
                     <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
                       <div className="flex items-center gap-2">
                         <ImageIcon className="w-4 h-4 text-indigo-400" />
@@ -1287,13 +1191,14 @@ export default function SupplierList({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* Scraping Modal */}
-      {isScrapingModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
+      {isScrapingModalOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div role="dialog" aria-modal="true" aria-label="Запуск выгрузки" className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="p-6">
               <h3 className="text-xl font-bold text-white mb-2">Запуск выгрузки</h3>
               <p className="text-sm text-slate-400 mb-6">Выберите параметры выгрузки из альбома.</p>
@@ -1307,11 +1212,10 @@ export default function SupplierList({
                     onChange={(e) => { setOverrideMode(normalizeSzwegoParseMode(e.target.value)); setStatsResult(null); setStatsError('') }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-indigo-500"
                   >
-                    <option value="images">{SZWEGO_PARSE_MODE_LABELS.images}</option>
                     <option value="all">{SZWEGO_PARSE_MODE_LABELS.all}</option>
                     <option value="video">{SZWEGO_PARSE_MODE_LABELS.video}</option>
                   </select>
-                  <p className="mt-1 text-xs text-slate-500">По умолчанию используется источник из карточки поставщика.</p>
+                  <p className="mt-1 text-xs text-slate-500">По умолчанию — единая лента. «Только видео» выгружает видео-публикации отдельной партией.</p>
                 </div>
 
                 {/* Unified Selector */}
@@ -1369,7 +1273,7 @@ export default function SupplierList({
                         {statsResult.shop?.name || 'Альбом'}: всего постов {statsResult.album_total_posts ?? '—'}
                         {statsResult.shop?.totalItemCount ? ` (Szwego: ${statsResult.shop.totalItemCount})` : ''}
                       </p>
-                      {(['images', 'all', 'video'] as const).map((modeKey) => {
+                      {(['all', 'video'] as const).map((modeKey) => {
                         const feed = statsResult.modes?.[modeKey]
                         if (!feed) return null
                         return (
@@ -1451,7 +1355,8 @@ export default function SupplierList({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

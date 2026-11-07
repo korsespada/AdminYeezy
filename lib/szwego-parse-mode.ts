@@ -8,7 +8,7 @@ export const SZWEGO_PARSE_MODES: SzwegoParseMode[] = ['images', 'all', 'video']
 
 export const SZWEGO_PARSE_MODE_LABELS: Record<SzwegoParseMode, string> = {
   images: 'Альбомы / изображения',
-  all: '全部 / единая лента',
+  all: 'Единая лента',
   video: 'Только видео',
 }
 

@@ -28,7 +28,7 @@ import {
 import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
-import { normalizeSzwegoParseMode } from '@/lib/szwego-parse-mode'
+import { normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
 
 // Предпросмотр альбома идёт крупными страницами API: Szwego принимает limit до
 // 3999, поэтому весь альбом укладывается в единицы запросов вместо сотен.
@@ -60,7 +60,14 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
         s.*,
         brand_mapping.name AS default_brand_name,
         category_mapping.name AS default_category_name,
-        subcategory_mapping.name AS default_subcategory_name
+        subcategory_mapping.name AS default_subcategory_name,
+        (
+          NULLIF(BTRIM(s.post_process_script), '') IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM supplier_post_process_scripts script
+            WHERE script.supplier_id = s.id AND script.is_active = TRUE
+          )
+        ) AS has_post_process_script
       FROM suppliers s
       LEFT JOIN catalog_id_mappings brand_mapping
         ON brand_mapping.entity_type = 'brand'
@@ -266,7 +273,8 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
-    const szwego_parse_mode = normalizeSzwegoParseMode(formData.get('szwego_parse_mode'))
+    // Источник поставщика всегда единая лента; видео выбирается разово при запуске.
+    const szwego_parse_mode: SzwegoParseMode = 'all'
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
     const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
@@ -287,7 +295,8 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const default_gender = normalizeSupplierGender(formData.get('default_gender'))
     const ai_deep_search_enabled = formData.get('ai_deep_search_enabled') === 'on'
     const ai_resize_enabled = formData.get('ai_resize_enabled') === 'on'
-    const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
+    // Фото 3×3 включено у всех поставщиков.
+    const ai_photo_enabled = true
     const ai_cache_enabled = formData.get('ai_cache_enabled') === 'on'
     const ai_instructions = formData.get('ai_instructions') as string || ''
     let ai_visual_examples: SupplierAiVisualExample[] = []
@@ -302,7 +311,8 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const first_photo_screenshot_filter = formData.get('first_photo_screenshot_filter') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = ''
-    const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
+    // Параллельность всегда включена; число потоков берётся из «Настроек ИИ».
+    const ai_parallel_enabled = true
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
     const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
@@ -328,7 +338,8 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     await requireAdmin()
     const name = formData.get('name') as string
     const album_id = formData.get('album_id') as string
-    const szwego_parse_mode = normalizeSzwegoParseMode(formData.get('szwego_parse_mode'))
+    // Источник поставщика всегда единая лента; видео выбирается разово при запуске.
+    const szwego_parse_mode: SzwegoParseMode = 'all'
     const group_id = formData.get('group_id') as string || ''
     const tag_id = formData.get('tag_id') as string || ''
     const allowed_category_ids = await canonicalizeSupplierIdList('category', normalizeSupplierIdList(formData.get('allowed_category_ids'), formData.get('default_category')))
@@ -349,7 +360,8 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const default_gender = normalizeSupplierGender(formData.get('default_gender'))
     const ai_deep_search_enabled = formData.get('ai_deep_search_enabled') === 'on'
     const ai_resize_enabled = formData.get('ai_resize_enabled') === 'on'
-    const ai_photo_enabled = formData.get('ai_photo_enabled') === 'on'
+    // Фото 3×3 включено у всех поставщиков.
+    const ai_photo_enabled = true
     const ai_cache_enabled = formData.get('ai_cache_enabled') === 'on'
     const currentInstructions = await scrapingQuery(
       'SELECT ai_photo_instructions FROM suppliers WHERE id=$1',
@@ -371,7 +383,8 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const first_photo_screenshot_filter = formData.get('first_photo_screenshot_filter') === 'on'
     const ai_photo_models = formData.get('ai_photo_models') as string || ''
     const ai_photo_instructions = ''
-    const ai_parallel_enabled = formData.get('ai_parallel_enabled') === 'on'
+    // Параллельность всегда включена; число потоков берётся из «Настроек ИИ».
+    const ai_parallel_enabled = true
     const ai_parallel_count = parseInt(formData.get('ai_parallel_count') as string || '5')
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
     const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
@@ -1045,7 +1058,7 @@ function hasConfiguredSzwegoTag(brandTags: unknown) {
 }
 
 function validateScrapingScope(supplier: any, overrideTag?: string, overrideGroup?: string, overrideMode?: string) {
-  const mode = normalizeSzwegoParseMode(overrideMode || supplier.szwego_parse_mode)
+  const mode = normalizeSzwegoParseMode(overrideMode || 'all')
   if (mode === 'video' && overrideGroup) {
     return 'Для выгрузки видео выберите тег или оставьте выбор пустым: группы относятся только к альбомному источнику.'
   }
@@ -1158,7 +1171,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
     if (!supplier) return { success: false, error: 'Supplier not found' }
     const scopeError = validateScrapingScope(supplier, overrideTag, overrideGroup, overrideMode)
     if (scopeError) return { success: false, error: scopeError }
-    const parseMode = normalizeSzwegoParseMode(overrideMode || supplier.szwego_parse_mode)
+    const parseMode = normalizeSzwegoParseMode(overrideMode || 'all')
     const parserDefaults = {
       brand: supplier.default_brand,
       category: supplier.default_category,

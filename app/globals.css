@@ -66,6 +66,9 @@ body:has(.admin-shell) {
 .admin-shell {
   height: 100vh;
   height: 100dvh;
+  /* Место под полосу прокрутки резервируется всегда: короткие и длинные
+     разделы не меняют ширину контента при переключении вкладок. */
+  scrollbar-gutter: stable;
 }
 
 .admin-scroll {
