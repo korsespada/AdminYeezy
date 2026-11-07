@@ -36,8 +36,8 @@ const row = {
 Описание: Сумка Lindy 26, цвет "слоновая кость", с золотой фурнитурой.`,
   current_attributes: {},
   current_media: [
-    { original_url: 'https://static.yeezyunique.ru/products/a/img_0.webp' },
-    { original_url: 'https://static.yeezyunique.ru/products/a/img_1.webp' },
+    { original_url: 'https://static.yuconcierge.com/products/a/img_0.webp' },
+    { original_url: 'https://static.yuconcierge.com/products/a/img_1.webp' },
   ],
   proposed_name: 'Lindy 26 18/Etoupe',
   proposed_slug: 'hermes-lindy-26-18-etoupe-gold-clemence-her-10993',

@@ -222,7 +222,7 @@ function buildAnalyticsSummary(params: {
   const overallConv = params.funnel.length > 0 ? params.funnel[params.funnel.length - 1].rate : 0;
 
   const lines: string[] = [];
-  lines.push(`📊 Сводка YeezyUnique за ${periodName} (${channelName})`);
+  lines.push(`📊 Сводка YUCONCIERGE за ${periodName} (${channelName})`);
   lines.push("");
   lines.push(`• Онлайн сейчас: ${params.overview.online_now || 0} чел.`);
   lines.push(`• Трафик: ${totalVis.toLocaleString("ru-RU")} уник. посетителей (новых: ${newVis.toLocaleString("ru-RU")}, вернувшихся: ${retVis.toLocaleString("ru-RU")}), просмотров: ${params.overview.page_views || params.overview.total_events || 0}.`);
@@ -454,7 +454,7 @@ export async function GET(request: Request) {
                OR meta->>'referrer' ILIKE '%telegram%' THEN 'Telegram Mini App'
           WHEN meta->>'referrer' ILIKE '%yandex%' OR meta->>'referrer' ILIKE '%ya.ru%' THEN 'Яндекс (Органика)'
           WHEN meta->>'referrer' ILIKE '%google%' THEN 'Google (Поиск)'
-          WHEN meta->>'referrer' IS NOT NULL AND meta->>'referrer' != '' AND meta->>'referrer' NOT ILIKE '%yeezyunique%' THEN 'Внешние переходы'
+          WHEN meta->>'referrer' IS NOT NULL AND meta->>'referrer' != '' AND meta->>'referrer' NOT ILIKE '%yuconcierge%' AND meta->>'referrer' NOT ILIKE '%yeezyunique%' THEN 'Внешние переходы'
           ELSE 'Прямой трафик'
         END as name,
         COUNT(DISTINCT session_id) as visitors,
@@ -828,11 +828,11 @@ export async function GET(request: Request) {
           },
           yandexWebmaster: {
             configured: true,
-            siteUrl: "https://yeezyunique.ru",
+            siteUrl: "https://yuconcierge.com",
           },
           googleSearchConsole: {
             configured: true,
-            property: "sc-domain:yeezyunique.ru",
+            property: "sc-domain:yuconcierge.com",
           },
           googleMerchantCenter: {
             configured: true,

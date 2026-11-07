@@ -8,7 +8,7 @@ const legacyPool = new Pool({
   connectionString: process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL,
 })
 
-const lookupBase = (process.env.RAILS_LOOKUPS_URL || 'https://api.yeezyunique.ru/api/v1').replace(/\/+$/, '')
+const lookupBase = (process.env.RAILS_LOOKUPS_URL || 'https://api.yuconcierge.com/api/v1').replace(/\/+$/, '')
 const CATEGORY_NAME_ALIASES = new Map([
   ['кошельки', 'кошельки и картхолдеры'],
 ])
@@ -22,7 +22,7 @@ function key(value) {
 }
 
 async function fetchJson(pathname) {
-  const headers = process.env.STOREFRONT_API_KEY ? { 'X-Storefront-Key': process.env.STOREFRONT_API_KEY } : {}
+  const headers = process.env.FRONTEND_API_KEY ? { 'X-Frontend-Key': process.env.FRONTEND_API_KEY } : {}
   const response = await fetch(`${lookupBase}${pathname}`, { headers })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {

@@ -2,8 +2,8 @@
 
 ## Project scope
 
-AdminYeezy is a separate Next.js operational admin for `admin.yeezyunique.ru`.
-It owns the technical `yeezy_scraping` workflow and uses the Rails API for the
+AdminYeezy is a separate Next.js operational admin for `admin.yuconcierge.com`.
+It owns the technical `yu_scraping` workflow and uses the Rails API for the
 published catalog and CRM operations.
 
 ## Documentation source of truth
@@ -22,7 +22,7 @@ published catalog and CRM operations.
 
 ## Data boundaries
 
-- `yeezy_scraping` is the direct-write database for scraping, suppliers, AI
+- `yu_scraping` is the direct-write database for scraping, suppliers, AI
   processing, and import batches.
 - Published catalog, customers, orders, payments, refunds, wallet, and CRM
   workflow belong to Rails CRM Postgres and are changed only through Rails API

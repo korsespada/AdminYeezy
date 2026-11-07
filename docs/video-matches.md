@@ -23,7 +23,7 @@
 - Товары — опубликованный каталог Rails CRM; чтение и запись только через Rails API
   (`/admin/products`, `/admin/products/:id`). Прямая запись в CRM Postgres запрещена.
 - Хранение очереди — таблицы `product_video_matches` и `product_video_match_scope`
-  в `yeezy_scraping` (`npm run db:migrate:product-video-matches`).
+  в `yu_scraping` (`npm run db:migrate:product-video-matches`).
 - Видео переносится в собственный S3 теми же ключами, что и публикация выгрузок:
   `videos/{sha256(source_url)}.mp4` и `videos/{sha256(source_url)}-poster.webp`.
   Ключ детерминирован, поэтому повторный запуск ничего не перекачивает, а
@@ -123,7 +123,7 @@ scraping-БД, имя поставщика в каталоге, партия в�
   Для Hermes это 9 «сумочных» категорий и 11 обувных, фильтр Rails
   `supplier=<uuid>` (по имени фильтр не работает), статус `active`; архив не
   обрабатывается.
-- Очередь — `product_card_updates` в `yeezy_scraping`
+- Очередь — `product_card_updates` в `yu_scraping`
   (`npm run db:migrate:product-card-updates`). Одна строка = один товар; хранится
   снимок текущей карточки (название, описание, характеристики, медиа с альтами),
   предложение, предупреждения, отдельный статус ИИ-текста и решение оператора.

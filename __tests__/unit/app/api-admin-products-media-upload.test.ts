@@ -31,17 +31,17 @@ describe('product media upload route', () => {
     mocks.getRailsAdminProduct.mockResolvedValue({
       id: 'product-1',
       name: 'Product',
-      photos: ['https://static.yeezyunique.ru/products/media/existing.webp'],
+      photos: ['https://static.yuconcierge.com/products/media/existing.webp'],
       media: [],
     })
     mocks.uploadProductPhotoFromUrl.mockResolvedValue({
       source: 'https://cdn.example/photo.jpg',
-      media: { original_url: 'https://static.yeezyunique.ru/products/media/new.webp' },
+      media: { original_url: 'https://static.yuconcierge.com/products/media/new.webp' },
     })
     mocks.uploadProductVideoFromUrl.mockResolvedValue({
       source: 'https://cdn.example/video.mp4',
-      url: 'https://static.yeezyunique.ru/videos/new.mp4',
-      posterUrl: 'https://static.yeezyunique.ru/videos/new-poster.webp',
+      url: 'https://static.yuconcierge.com/videos/new.mp4',
+      posterUrl: 'https://static.yuconcierge.com/videos/new-poster.webp',
     })
   })
 
@@ -68,10 +68,10 @@ describe('product media upload route', () => {
 
     expect(mocks.patchRailsAdminProduct).toHaveBeenCalledWith('product-1', expect.objectContaining({
       media: expect.arrayContaining([
-        expect.objectContaining({ original_url: 'https://static.yeezyunique.ru/products/media/existing.webp' }),
-        expect.objectContaining({ original_url: 'https://static.yeezyunique.ru/products/media/new.webp' }),
+        expect.objectContaining({ original_url: 'https://static.yuconcierge.com/products/media/existing.webp' }),
+        expect.objectContaining({ original_url: 'https://static.yuconcierge.com/products/media/new.webp' }),
       ]),
-      videoUrl: 'https://static.yeezyunique.ru/videos/new.mp4',
+      videoUrl: 'https://static.yuconcierge.com/videos/new.mp4',
       videoPosterUrl: 'https://cdn.example/manual-poster.webp',
     }))
   })

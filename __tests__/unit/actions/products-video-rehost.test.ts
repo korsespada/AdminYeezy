@@ -49,11 +49,11 @@ describe('rehostProductVideoAction', () => {
     mocks.isAlreadyHosted.mockReturnValue(true)
 
     const { rehostProductVideoAction } = await import('@/actions/products')
-    const result = await rehostProductVideoAction('https://static.yeezyunique.ru/videos/abc.mp4')
+    const result = await rehostProductVideoAction('https://static.yuconcierge.com/videos/abc.mp4')
 
     expect(result.success).toBe(true)
     expect(result.alreadyHosted).toBe(true)
-    expect(result.url).toBe('https://static.yeezyunique.ru/videos/abc.mp4')
+    expect(result.url).toBe('https://static.yuconcierge.com/videos/abc.mp4')
     expect(mocks.videoStorageKeys).not.toHaveBeenCalled()
     expect(mocks.uploadVideoIfNeeded).not.toHaveBeenCalled()
   })
@@ -65,8 +65,8 @@ describe('rehostProductVideoAction', () => {
       posterKey: 'videos/hash-poster.webp',
     })
     mocks.uploadVideoIfNeeded.mockResolvedValue({
-      url: 'https://static.yeezyunique.ru/videos/hash.mp4',
-      posterUrl: 'https://static.yeezyunique.ru/videos/hash-poster.webp',
+      url: 'https://static.yuconcierge.com/videos/hash.mp4',
+      posterUrl: 'https://static.yuconcierge.com/videos/hash-poster.webp',
     })
 
     const { rehostProductVideoAction } = await import('@/actions/products')
@@ -80,8 +80,8 @@ describe('rehostProductVideoAction', () => {
     )
     expect(result).toEqual({
       success: true,
-      url: 'https://static.yeezyunique.ru/videos/hash.mp4',
-      posterUrl: 'https://static.yeezyunique.ru/videos/hash-poster.webp',
+      url: 'https://static.yuconcierge.com/videos/hash.mp4',
+      posterUrl: 'https://static.yuconcierge.com/videos/hash-poster.webp',
     })
   })
 

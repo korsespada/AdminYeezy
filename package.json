@@ -1,5 +1,5 @@
 {
-  "name": "yeezyunique-admin",
+  "name": "yuconcierge-admin",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -98,7 +98,7 @@
     "fast-xml-parser": "^5.8.0",
     "picomatch": "^4.0.4"
   },
-  "description": "Операционная Next.js-админка YeezyUnique. Она сохраняется как отдельное приложение и разворачивается на:",
+  "description": "Операционная Next.js-админка YUCONCIERGE. Она сохраняется как отдельное приложение и разворачивается на:",
   "main": "inspect_db.js",
   "directories": {
     "doc": "docs",

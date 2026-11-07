@@ -319,7 +319,7 @@ describe('batch AI normalization', () => {
     })
     expect(prompt).toContain('Категории Chromoff')
     expect(prompt).toContain('Браслеты из кожи')
-    expect(prompt).toContain('Не заменяй её общей категорией YeezyUnique')
+    expect(prompt).toContain('Не заменяй её общей категорией YUCONCIERGE')
 
     const result = normalizeBatchAiOutput({
       product: { name: 'Браслет Chrome Hearts', category: '', subcategory: '', catalog_attributes: {} },

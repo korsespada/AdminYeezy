@@ -171,20 +171,20 @@ describe('rails admin product adapter', () => {
     const byPastedNameLink = buildRailsAdminProductsParams({
       page: 1,
       perPage: 40,
-      name: 'https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share',
+      name: 'https://yuconcierge.com/product/gucci-kurtka-abc123?utm=share',
     })
     expect(byPastedNameLink.get('q')).toBe('gucci-kurtka-abc123')
     expect(byPastedNameLink.get('name')).toBeNull()
   })
 
   it('normalizes pasted product URLs to product slugs for search', () => {
-    expect(normalizeProductSearchInput('https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share')).toBe('gucci-kurtka-abc123')
+    expect(normalizeProductSearchInput('https://yuconcierge.com/product/gucci-kurtka-abc123?utm=share')).toBe('gucci-kurtka-abc123')
     expect(normalizeProductSearchInput('/product/dior-sneakers-42')).toBe('dior-sneakers-42')
 
     const params = buildRailsAdminProductsParams({
       page: 1,
       perPage: 40,
-      search: 'https://yeezyunique.ru/product/gucci-kurtka-abc123?utm=share',
+      search: 'https://yuconcierge.com/product/gucci-kurtka-abc123?utm=share',
     })
 
     expect(params.get('q')).toBe('gucci-kurtka-abc123')
@@ -970,16 +970,16 @@ describe('rails admin product adapter', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await patchRailsAdminProduct('product-id', {
-      videoUrl: 'https://static.yeezyunique.ru/videos/video.mp4',
-      videoPosterUrl: 'https://static.yeezyunique.ru/videos/video-poster.webp',
-      media: [{ original_url: 'https://static.yeezyunique.ru/products/media/photo.webp' }],
+      videoUrl: 'https://static.yuconcierge.com/videos/video.mp4',
+      videoPosterUrl: 'https://static.yuconcierge.com/videos/video-poster.webp',
+      media: [{ original_url: 'https://static.yuconcierge.com/products/media/photo.webp' }],
     })
 
     const patchBody = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(patchBody.product).toMatchObject({
-      video_url: 'https://static.yeezyunique.ru/videos/video.mp4',
-      video_poster_url: 'https://static.yeezyunique.ru/videos/video-poster.webp',
-      media: [{ original_url: 'https://static.yeezyunique.ru/products/media/photo.webp', sort_order: 0 }],
+      video_url: 'https://static.yuconcierge.com/videos/video.mp4',
+      video_poster_url: 'https://static.yuconcierge.com/videos/video-poster.webp',
+      media: [{ original_url: 'https://static.yuconcierge.com/products/media/photo.webp', sort_order: 0 }],
     })
   })
 

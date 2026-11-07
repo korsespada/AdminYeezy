@@ -3,8 +3,8 @@ import { Agentation } from 'agentation'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Админка YeezyUnique',
-  description: 'Админка YeezyUnique',
+  title: 'Админка YUCONCIERGE',
+  description: 'Админка YUCONCIERGE',
   robots: {
     index: false,
     follow: false,

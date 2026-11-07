@@ -33,7 +33,7 @@ export async function uploadToS3(key: string, buffer: Buffer, contentType: strin
  * Get Public URL for a specific S3 key
  */
 export function getS3PublicUrl(key: string) {
-  // Если задан кастомный домен в .env (например, static.yeezyunique.ru)
+  // Если задан кастомный домен в .env (например, static.yuconcierge.com)
   const publicDomain = process.env.S3_PUBLIC_DOMAIN;
   if (publicDomain) {
     const domain = publicDomain.endsWith('/') ? publicDomain.slice(0, -1) : publicDomain;

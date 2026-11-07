@@ -149,7 +149,7 @@ export default function ChromoffCatalog({
   const [selectedPrice, setSelectedPrice] = useState('')
   const [isBulkUpdating, setIsBulkUpdating] = useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
-  /** Подтверждение удаления из Chromoff: список листингов и опция скрыть товар с yeezyunique. */
+  /** Подтверждение удаления из Chromoff: список листингов и опция скрыть товар с YUCONCIERGE. */
   const [deleteRequest, setDeleteRequest] = useState<{ listingIds: string[]; label: string } | null>(null)
   const [deleteHideProduct, setDeleteHideProduct] = useState(false)
   const [isBulkPublishing, setIsBulkPublishing] = useState(false)
@@ -529,8 +529,8 @@ export default function ChromoffCatalog({
               className="mt-0.5 h-4 w-4 shrink-0 accent-violet-500"
             />
             <span>
-              <span className="block text-xs font-medium text-slate-200">Скрыть товар и на yeezyunique</span>
-              <span className="mt-0.5 block text-[11px] text-slate-400">Товар пропадёт с yeezyunique, но останется в каталоге: вернуть его можно, сняв галочку «Показывать только в Chromoff» в карточке.</span>
+              <span className="block text-xs font-medium text-slate-200">Скрыть товар и на YUCONCIERGE</span>
+              <span className="mt-0.5 block text-[11px] text-slate-400">Товар пропадёт с YUCONCIERGE, но останется в каталоге: вернуть его можно, сняв галочку «Показывать только в Chromoff» в карточке.</span>
             </span>
           </label>
           <DialogFooter>

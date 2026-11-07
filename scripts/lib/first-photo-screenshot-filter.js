@@ -4,7 +4,7 @@ const DEFAULT_PREVIEW_WIDTH = 64
 const DEFAULT_MIN_PORTRAIT_RATIO = 1.25
 const DEFAULT_TIMEOUT_MS = 15000
 const DEFAULT_RETRIES = 1
-const DEFAULT_ALLOWED_HOSTS = ['static.yeezyunique.ru', 'xcimg.szwego.com']
+const DEFAULT_ALLOWED_HOSTS = ['static.yuconcierge.com', 'xcimg.szwego.com']
 
 function allowedPhotoHosts(options = {}) {
   const raw = options.allowedHosts

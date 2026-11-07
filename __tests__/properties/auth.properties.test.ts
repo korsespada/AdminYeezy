@@ -3,7 +3,7 @@ import * as fc from 'fast-check'
 import { ADMIN_TOKEN_COOKIE } from '@/lib/admin-session'
 
 /**
- * Feature: yeezyunique-admin
+ * Feature: yuconcierge-admin
  * Property-based tests for authentication logic
  */
 

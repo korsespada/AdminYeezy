@@ -13,7 +13,7 @@
 
 - Keep changes narrow and preserve unrelated working-tree changes.
 - Prefer existing helpers and API clients over a new abstraction.
-- Keep scraping writes in `yeezy_scraping` and CRM writes behind Rails API.
+- Keep scraping writes in `yu_scraping` and CRM writes behind Rails API.
 - Do not add a new MCP, plugin, or dependency unless the task needs it.
 - Do not launch a swarm of agents. A single read-only review is the maximum
   default delegation for this repository.
@@ -33,7 +33,7 @@ Full deployed smoke checks run after deployment, not after every local edit.
 - Codebase MCP: repository navigation and focused code context.
 - Context7: current package and framework documentation.
 - Coolify MCP: resolve `AdminYeezy` by project, environment, name, or
-  `admin.yeezyunique.ru` before inspecting or changing a resource.
+  `admin.yuconcierge.com` before inspecting or changing a resource.
 
 Do not print secrets or request their values. Use SSH only for host-level work
 that Coolify MCP cannot provide.

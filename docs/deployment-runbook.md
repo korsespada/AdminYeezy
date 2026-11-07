@@ -30,7 +30,7 @@ bin/rails test test/controllers/api/v1/admin/customers_controller_test.rb \
 
 Секреты не хранить в репозитории. Пароли, токены, SSH-доступы и Coolify env должны передаваться только через защищенный канал/панель сервера.
 
-Для сохранённых AI-провайдеров добавьте в Coolify `AI_PROVIDER_ENCRYPTION_KEY` — длинный случайный секрет. Он используется для AES-256-GCM шифрования ключей в `yeezy_scraping.ai_providers`; без него кнопка добавления провайдера отклоняется. При ротации этого секрета ранее сохранённые ключи потребуется перенести заново.
+Для сохранённых AI-провайдеров добавьте в Coolify `AI_PROVIDER_ENCRYPTION_KEY` — длинный случайный секрет. Он используется для AES-256-GCM шифрования ключей в `yu_scraping.ai_providers`; без него кнопка добавления провайдера отклоняется. При ротации этого секрета ранее сохранённые ключи потребуется перенести заново.
 
 ## Rails API deploy
 
@@ -39,26 +39,26 @@ bin/rails test test/controllers/api/v1/admin/customers_controller_test.rb \
 - route `GET /api/v1/admin/customers`;
 - `Api::V1::Admin::CustomersController`;
 - действующие endpoints для orders, order_items, supplier_requests, replacement_offers, refunds, wallet withdrawals;
-- CORS разрешает `https://admin.yeezyunique.ru`.
+- CORS разрешает `https://admin.yuconcierge.com`.
 
 Минимальный env Rails:
 
 ```env
-CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yeezyunique.ru
+CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yuconcierge.com
 ```
 
 Smoke-check Rails:
 
 ```bash
-curl -i https://api.yeezyunique.ru/api/v1/health
-curl -i https://api.yeezyunique.ru/api/v1/catalog/brands
+curl -i https://api.yuconcierge.com/api/v1/health
+curl -i https://api.yuconcierge.com/api/v1/catalog/brands
 ```
 
 Admin endpoints проверять только с валидным admin JWT:
 
 ```bash
 curl -i -H "Authorization: Bearer $ADMIN_JWT" \
-  https://api.yeezyunique.ru/api/v1/admin/customers
+  https://api.yuconcierge.com/api/v1/admin/customers
 ```
 
 ## AdminYeezy deploy
@@ -75,14 +75,14 @@ Coolify собирает последний коммит ветки: если в
 Домен:
 
 ```text
-https://admin.yeezyunique.ru
+https://admin.yuconcierge.com
 ```
 
 Минимальный production env:
 
 ```env
-ADMIN_BASE_URL=https://admin.yeezyunique.ru
-RAILS_API_URL=https://api.yeezyunique.ru/api/v1
+ADMIN_BASE_URL=https://admin.yuconcierge.com
+RAILS_API_URL=https://api.yuconcierge.com/api/v1
 SCRAPING_DATABASE_URL=postgresql://...
 ```
 
@@ -142,15 +142,15 @@ Auth:
 Smoke-check AdminYeezy:
 
 ```text
-https://admin.yeezyunique.ru/login
-https://admin.yeezyunique.ru/admin/home
-https://admin.yeezyunique.ru/admin
-https://admin.yeezyunique.ru/admin/video-matches
-https://admin.yeezyunique.ru/admin/crm
-https://admin.yeezyunique.ru/admin/crm/orders
-https://admin.yeezyunique.ru/admin/crm/customers
-https://admin.yeezyunique.ru/admin/crm/refunds
-https://admin.yeezyunique.ru/admin/crm/wallet-withdrawals
+https://admin.yuconcierge.com/login
+https://admin.yuconcierge.com/admin/home
+https://admin.yuconcierge.com/admin
+https://admin.yuconcierge.com/admin/video-matches
+https://admin.yuconcierge.com/admin/crm
+https://admin.yuconcierge.com/admin/crm/orders
+https://admin.yuconcierge.com/admin/crm/customers
+https://admin.yuconcierge.com/admin/crm/refunds
+https://admin.yuconcierge.com/admin/crm/wallet-withdrawals
 ```
 
 Проверить вручную:
@@ -162,7 +162,7 @@ https://admin.yeezyunique.ru/admin/crm/wallet-withdrawals
 - CRM customers открывается и ищет по email/phone/Telegram/referral;
 - order detail открывается из списка заказов;
 - refund approve/reject и wallet approve/reject/mark paid отправляют запросы в Rails, а не в локальную БД;
-- scraping/batches/suppliers продолжают видеть `yeezy_scraping`.
+- scraping/batches/suppliers продолжают видеть `yu_scraping`.
 
 ## Storefront deploy
 
@@ -170,7 +170,7 @@ https://admin.yeezyunique.ru/admin/crm/wallet-withdrawals
 
 Проверить публичные решения:
 
-- storefront `/admin` и `/admin/login` permanent redirect на `https://admin.yeezyunique.ru`;
+- storefront `/admin` и `/admin/login` permanent redirect на `https://admin.yuconcierge.com`;
 - `/brand/{slug}` permanent redirect на `/collections/{slug}` с query params;
 - sitemap не содержит `/admin`, `/admin/login`, `/brand/*`;
 - `/collections/{brand-slug}` canonical/metadata указывают на collections URL.

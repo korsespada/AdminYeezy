@@ -11,8 +11,10 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  COOLIFY_URL: https://panel.chromoff.store
-  COOLIFY_APP_UUID: fkcwk084skkggowogg8cwss8
+  # Панель и приложение задаются repository variables, чтобы смена сервера
+  # не требовала правки workflow. Без COOLIFY_APP_UUID образ только собирается.
+  COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+  COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
 
 jobs:
   # Базовый образ с Python + ffmpeg. Слои кэшируются в GHA-cache, поэтому без
@@ -107,15 +109,18 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
 
-      # Coolify собирает по Dockerfile.deploy: он только скачивает этот образ.
+      # Приложение в Coolify — Docker-образ с тегом :production: перед деплоем
+      # тег переводится на этот коммит, Coolify скачивает его из GHCR.
       - name: Deploy to Coolify
         env:
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}
         run: |
-          if [ -z "$COOLIFY_DEPLOY_TOKEN" ]; then
-            echo "::warning::COOLIFY_DEPLOY_TOKEN is not set, image pushed without deploy."
+          if [ -z "$COOLIFY_DEPLOY_TOKEN" ] || [ -z "$COOLIFY_URL" ] || [ -z "$COOLIFY_APP_UUID" ]; then
+            echo "::warning::Coolify is not configured (token, COOLIFY_URL or COOLIFY_APP_UUID), image pushed without deploy."
             exit 0
           fi
-          curl -fsS --retry 3 -X POST \
+          docker buildx imagetools create -t "$IMAGE:production" "$IMAGE:$GITHUB_SHA"
+          curl -fsS --retry 3 --connect-timeout 20 --max-time 120 -X POST \
             -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" \
             "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"

@@ -84,7 +84,7 @@ describe('batch AI prompt cache', () => {
 
   it('requests a CDN thumbnail for Szwego contact sheet tiles only', () => {
     expect(batchAiContactSheetSourceUrl('https://xcimg.szwego.com/a/b.jpg')).toContain('imageMogr2/auto-orient/thumbnail/!768x768r')
-    expect(batchAiContactSheetSourceUrl('https://static.yeezyunique.ru/a.webp')).not.toContain('imageMogr2')
+    expect(batchAiContactSheetSourceUrl('https://static.yuconcierge.com/a.webp')).not.toContain('imageMogr2')
   })
 
   it('builds reference sheets once per set of links, not once per run', async () => {

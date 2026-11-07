@@ -94,7 +94,7 @@ export async function runProductCardAi(
   if (photoUrls.length === 0) throw new Error('у товара нет фотографий для ИИ')
 
   const contactSheets = await buildBatchAiContactSheets(photoUrls, {
-    additionalHosts: ['static.yeezyunique.ru'],
+    additionalHosts: ['static.yuconcierge.com'],
   })
   const raw = await runBatchAiOpenRouter({
     settings,

@@ -12,12 +12,12 @@ describe('image URL helpers', () => {
   })
 
   it('routes own CDN images through resize proxy', () => {
-    const url = resizeImageUrl('https://cdn.yeezyunique.ru/products/1/photo.jpg', imagePresets.productTable)
+    const url = resizeImageUrl('https://static.yuconcierge.com/products/1/photo.jpg', imagePresets.productTable)
 
     expect(url).toContain('/api/media/resize?')
     expect(url).toContain('w=96')
     expect(url).toContain('h=96')
-    expect(decodeURIComponent(url)).toContain('https://cdn.yeezyunique.ru/products/1/photo.jpg')
+    expect(decodeURIComponent(url)).toContain('https://static.yuconcierge.com/products/1/photo.jpg')
   })
 
   it('normalizes product thumb and first photo sources before resizing', () => {
@@ -25,7 +25,7 @@ describe('image URL helpers', () => {
     const productWithPhoto = product({ id: 'p2', thumb: '', photos: ['photo.jpg'] })
 
     expect(productImageSource(productWithThumb)).toBe('https://yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru/products/p1/thumb.jpg')
-    expect(decodeURIComponent(productImageUrl(productWithPhoto, imagePresets.productTable))).toContain('https://cdn.yeezyunique.ru/products/p2/photo.jpg')
+    expect(decodeURIComponent(productImageUrl(productWithPhoto, imagePresets.productTable))).toContain('https://static.yuconcierge.com/products/p2/photo.jpg')
   })
 })
 

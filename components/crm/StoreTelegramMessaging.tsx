@@ -75,7 +75,7 @@ export default function StoreTelegramMessaging({ contacts, total, campaigns }: P
               </Field>
             </div>
             <Field label="Или публичная ссылка / идентификатор файла Telegram">
-              <input name="mediaUrl" placeholder="https://static.yeezyunique.ru/..." className={inputClassName} />
+              <input name="mediaUrl" placeholder="https://static.yuconcierge.com/..." className={inputClassName} />
             </Field>
 
             <div>

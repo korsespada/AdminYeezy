@@ -1132,7 +1132,7 @@ export async function applyRailsChromoffAiContent(id: string, input: {
 
 /**
  * Удаление Chromoff-листинга. `hideProduct` дополнительно скрывает общий товар
- * с yeezyunique (`chromoff_only`), сам товар из каталога не удаляется.
+ * с YUCONCIERGE (`chromoff_only`), сам товар из каталога не удаляется.
  */
 export async function deleteRailsChromoffListing(id: string, options: { hideProduct?: boolean } = {}) {
   const query = options.hideProduct ? '?hide_product=true' : ''
@@ -1262,7 +1262,7 @@ export async function refreshRailsProductSlugs(externalIds: string[]) {  const i
  * Явный адрес товара для раздела «Видео → товары» и обработки карточек поставщика.
  *
  * Rails пересчитывает канонический slug на каждой записи (`Catalog::ProductSlug`),
- * поэтому адрес ставится отдельным вызовом: crm-api параметризует значение,
+ * поэтому адрес ставится отдельным вызовом: backend параметризует значение,
  * при коллизии добавляет номер перед артикулом, помечает товар `slug_locked`
  * и создаёт 301 со старого адреса. Возвращается фактический адрес.
  */

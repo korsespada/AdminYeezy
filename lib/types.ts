@@ -154,7 +154,7 @@ export interface Product {
   fulfillment_mode?: 'ready_to_ship' | 'requires_confirmation' | 'made_to_order'
   availability_confidence?: 'unknown' | 'low' | 'medium' | 'high'
   indexing_status?: 'indexable' | 'noindex' | 'needs_review' | 'thin_content' | 'duplicate'
-  /** Товар продаётся только на chromoff.store и не показывается на yeezyunique. */
+  /** Товар продаётся только на chromoff.store и не показывается на YUCONCIERGE. */
   chromoff_only?: boolean
   currency?: 'RUB'
   production_min_days?: number | null

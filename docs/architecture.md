@@ -2,17 +2,17 @@
 
 ## Назначение
 
-`AdminYeezy` - отдельная операционная админка на `https://admin.yeezyunique.ru`. Она не является частью публичного storefront и разворачивается независимо.
+`AdminYeezy` - отдельная операционная админка на `https://admin.yuconcierge.com`. Она не является частью публичного storefront и разворачивается независимо.
 
 ## Целевая схема
 
 ```text
-AdminYeezy -> yeezy_scraping
+AdminYeezy -> yu_scraping
            -> Rails API -> Rails CRM Postgres -> storefront
                                       -> Chromoff storefront
 
 legacy shop DB -> Rails bootstrap importer
-NocoDB         -> yeezy_scraping
+NocoDB         -> yu_scraping
 NocoDB         -> Rails CRM read-only access
 ```
 
@@ -20,13 +20,13 @@ NocoDB         -> Rails CRM read-only access
 
 | Система | Что хранит | Кто пишет |
 |---|---|---|
-| `yeezy_scraping` | Поставщики, scraping-задачи, JSONB-снимки, AI-результаты, партии | `AdminYeezy` |
+| `yu_scraping` | Поставщики, scraping-задачи, JSONB-снимки, AI-результаты, партии | `AdminYeezy` |
 | Rails CRM Postgres | Опубликованный каталог, клиенты, заказы, платежи и возвраты | Rails services |
 | Legacy `shop` | Старый каталог и переходные справочники | Старый контур до завершения миграции |
 | Elasticsearch | Поисковая read model | Rails search jobs |
 | S3/CDN | Изображения | Media pipeline |
 
-Rails CRM Postgres является единственным source of truth для сайта. `yeezy_scraping` не заменяет CRM-БД, а `shop` не должен использоваться как основная БД нового сайта.
+Rails CRM Postgres является единственным source of truth для сайта. `yu_scraping` не заменяет CRM-БД, а `shop` не должен использоваться как основная БД нового сайта.
 
 Responsive layout is presentation-only across the in-scope admin surfaces:
 mobile cards, filter drawers/sheets, editors, navigation surfaces, and desktop
@@ -58,7 +58,7 @@ for ordinary entity collections.
 - В админке есть Python-скрипты, worker-задачи и техническая БД.
 - Деплой админки не должен рисковать публичным storefront.
 - Storefront и `AdminYeezy` используют разные версии Next.js.
-- Доступ к `admin.yeezyunique.ru` проще ограничивать отдельно.
+- Доступ к `admin.yuconcierge.com` проще ограничивать отдельно.
 
 ## Этапы развития
 

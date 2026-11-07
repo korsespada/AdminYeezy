@@ -22,8 +22,8 @@ export const imagePresets = {
 } satisfies Record<string, ResizeImageOptions>
 
 const RESIZABLE_HOSTS = new Set([
-  'static.yeezyunique.ru',
-  'cdn.yeezyunique.ru',
+  'static.yuconcierge.com',
+  'static.yuconcierge.com',
   'yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru',
   'localhost',
   '127.0.0.1',
@@ -86,7 +86,7 @@ export function productImageSource(product: Product | null | undefined) {
   if (!photoUrl) return ''
 
   if (!photoUrl.startsWith('http') && !photoUrl.includes('/')) {
-    return `https://cdn.yeezyunique.ru/products/${product.id}/${photoUrl}`
+    return `https://static.yuconcierge.com/products/${product.id}/${photoUrl}`
   }
 
   return photoUrl

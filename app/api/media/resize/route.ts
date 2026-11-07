@@ -2,8 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 import sharp from 'sharp'
 
 const ALLOWED_HOSTS = new Set([
-  'static.yeezyunique.ru',
-  'cdn.yeezyunique.ru',
+  'static.yuconcierge.com',
+  'static.yuconcierge.com',
   'yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru',
   'xcimg.szwego.com',
 ])

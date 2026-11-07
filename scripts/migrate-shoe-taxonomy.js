@@ -16,14 +16,14 @@ const REQUIRED_SLUGS = [
 ]
 
 function railsApiUrl(pathname) {
-  const raw = process.env.RAILS_API_URL || 'https://api.yeezyunique.ru/api/v1'
+  const raw = process.env.RAILS_API_URL || 'https://api.yuconcierge.com/api/v1'
   let base = raw.replace(/\/+$/, '')
   if (!base.endsWith('/api/v1')) base = `${base}/api/v1`
   return `${base}${pathname}`
 }
 
 async function loadShoeTaxonomy() {
-  const headers = process.env.STOREFRONT_API_KEY ? { 'X-Storefront-Key': process.env.STOREFRONT_API_KEY } : {}
+  const headers = process.env.FRONTEND_API_KEY ? { 'X-Frontend-Key': process.env.FRONTEND_API_KEY } : {}
   const response = await fetch(railsApiUrl('/catalog/categories'), { headers, signal: AbortSignal.timeout(20_000) })
   if (!response.ok) throw new Error(`Rails catalog returned HTTP ${response.status}`)
   const payload = await response.json()

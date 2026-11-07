@@ -895,7 +895,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                                 <p className="text-[11px] text-muted-foreground mt-1">Позиции в Google, показы и CTR</p>
                             </div>
                             <div className="pt-2 border-t border-border/40 text-xs">
-                                <a href="https://search.google.com/search-console?resource_id=sc-domain:yeezyunique.ru" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                <a href="https://search.google.com/search-console?resource_id=sc-domain:yuconcierge.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
                                     Панель Google <ExternalLink className="h-3 w-3" />
                                 </a>
                             </div>
@@ -931,7 +931,7 @@ export default function AnalyticsDashboard(_props: AnalyticsDashboardProps) {
                                 <p className="text-[11px] text-muted-foreground mt-1">Индексация страниц и сниппеты Яндекса</p>
                             </div>
                             <div className="pt-2 border-t border-border/40 text-xs">
-                                <a href="https://webmaster.yandex.ru/site/https:yeezyunique.ru:443/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
+                                <a href="https://webmaster.yandex.ru/site/https:yuconcierge.com:443/" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">
                                     Кабинет Яндекса <ExternalLink className="h-3 w-3" />
                                 </a>
                             </div>

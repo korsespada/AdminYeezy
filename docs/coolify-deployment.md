@@ -6,7 +6,7 @@
 
 ```text
 Name: AdminYeezy
-Domain: https://admin.yeezyunique.ru
+Domain: https://admin.yuconcierge.com
 Port: 3000
 Dockerfile: ./Dockerfile
 ```
@@ -18,11 +18,11 @@ Dockerfile: ./Dockerfile
 Взять полный шаблон из [`.env.example`](../.env.example). Для production обязательно задать:
 
 ```env
-ADMIN_BASE_URL=https://admin.yeezyunique.ru
-RAILS_API_URL=https://api.yeezyunique.ru/api/v1
+ADMIN_BASE_URL=https://admin.yuconcierge.com
+RAILS_API_URL=https://api.yuconcierge.com/api/v1
 RAILS_ADMIN_EMAIL=admin@yeezyunique.ru
 RAILS_ADMIN_PASSWORD=replace_me
-SCRAPING_DATABASE_URL=postgresql://.../yeezy_scraping
+SCRAPING_DATABASE_URL=postgresql://.../yu_scraping
 LEGACY_CATALOG_DATABASE_URL=postgresql://readonly_user:.../shop
 ```
 
@@ -35,7 +35,7 @@ LEGACY_CATALOG_DATABASE_URL=postgresql://readonly_user:.../shop
 В env Rails API добавить:
 
 ```env
-CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yeezyunique.ru
+CORS_ORIGINS=https://yeezyunique.ru,https://tg.yeezyunique.ru,https://admin.yuconcierge.com
 ```
 
 ## Redeploy
@@ -127,7 +127,7 @@ Actions):
 | Secret | Назначение |
 |---|---|
 | `RAILS_ADMIN_EMAIL` | Значение build-переменной Coolify `RAILS_ADMIN_EMAIL` |
-| `RAILS_API_URL` | Обычно `https://api.yeezyunique.ru/api/v1` |
+| `RAILS_API_URL` | Обычно `https://api.yuconcierge.com/api/v1` |
 
 Чтобы Coolify перестал собирать сам и начал тянуть готовый образ:
 
@@ -154,8 +154,8 @@ git grep -nE 'SECRET|TOKEN|PASSWORD|ACCESS_KEY|PRIVATE_KEY'
 ## Проверка
 
 ```text
-https://admin.yeezyunique.ru/login
-https://api.yeezyunique.ru/api/v1/health
+https://admin.yuconcierge.com/login
+https://api.yuconcierge.com/api/v1/health
 ```
 
 После подключения Rails API проверить вход, список товаров, scraping-партии, публикацию тестовой партии, CRM-разделы и отображение товара на storefront.

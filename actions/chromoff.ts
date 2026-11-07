@@ -12,7 +12,7 @@ export async function deleteChromoffListingAction(id: string, hideProduct = fals
   try {
     await deleteRailsChromoffListing(listingId, { hideProduct })
     revalidatePath('/admin/chromoff')
-    return { success: true, message: hideProduct ? 'Товар удалён из Chromoff и скрыт с yeezyunique.' : 'Товар удалён из Chromoff.' }
+    return { success: true, message: hideProduct ? 'Товар удалён из Chromoff и скрыт с YUCONCIERGE.' : 'Товар удалён из Chromoff.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось удалить товар из Chromoff.' }
   }
@@ -27,7 +27,7 @@ export async function deleteChromoffListingsAction(ids: string[], hideProduct = 
       await deleteRailsChromoffListing(listingId, { hideProduct })
     }
     revalidatePath('/admin/chromoff')
-    return { success: true, deleted: listingIds.length, message: hideProduct ? 'Товары удалены из Chromoff и скрыты с yeezyunique.' : 'Товары удалены из Chromoff.' }
+    return { success: true, deleted: listingIds.length, message: hideProduct ? 'Товары удалены из Chromoff и скрыты с YUCONCIERGE.' : 'Товары удалены из Chromoff.' }
   } catch (error) {
     return { success: false, message: error instanceof Error ? error.message : 'Не удалось удалить товары из Chromoff.' }
   }

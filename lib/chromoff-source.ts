@@ -143,7 +143,7 @@ export async function buildChromoffImportPayload(): Promise<RailsChromoffImportP
   const rootCatalogId = new Map<string, string>()
   for (const [sourceName, railsName] of Object.entries(ROOT_CATEGORY_NAMES)) {
     const match = catalog.categories.find((category) => normalize(category.name) === normalize(railsName))
-    if (!match) throw new Error(`В YeezyUnique не найдена корневая категория «${railsName}».`)
+    if (!match) throw new Error(`В YUCONCIERGE не найдена корневая категория «${railsName}».`)
     rootCatalogId.set(sourceName, match.id)
   }
   const categoryTargetId = (sourceRootName: string, sourceSubcategoryName?: string) => {

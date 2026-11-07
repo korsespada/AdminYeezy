@@ -409,7 +409,7 @@ export async function pushCsvProductsAction(products: CsvProduct[]) {
                 const photoPromises = (p.photos || []).map(async (url, i) => {
                     if (!url) return null;
                     
-                    if (url.includes('beget.app') || url.includes('selcloud.ru') || url.includes('beget.cloud') || url.includes('yeezyunique.ru')) {
+                    if (url.includes('yuconcierge.com') || url.includes('s3.regru.cloud')) {
                         return url;
                     }
 

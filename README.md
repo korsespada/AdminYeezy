@@ -3,7 +3,7 @@
 Операционная Next.js-админка YeezyUnique. Она сохраняется как отдельное приложение и разворачивается на:
 
 ```text
-https://admin.yeezyunique.ru
+https://admin.yuconcierge.com
 ```
 
 Проект уже содержит рабочие инструменты просмотра товаров, scraping-партий, AI-обработки, поставщиков и аналитики. Переписывать его с нуля не нужно.
@@ -11,11 +11,11 @@ https://admin.yeezyunique.ru
 ## Целевая архитектура
 
 ```text
-AdminYeezy -> yeezy_scraping
+AdminYeezy -> yu_scraping
            -> Rails API -> Rails CRM Postgres -> storefront
 ```
 
-- `yeezy_scraping` - техническая БД этой админки: поставщики, JSONB-снимки этапов, AI и партии.
+- `yu_scraping` - техническая БД этой админки: поставщики, JSONB-снимки этапов, AI и партии.
 - Rails CRM Postgres - единственный source of truth для опубликованного каталога, сайта и будущей CRM.
 - `shop` - legacy-каталог, только источник bootstrap-импорта и переходных справочников.
 - NocoDB - дополнительный операторский инструмент, но не обход Rails workflow.

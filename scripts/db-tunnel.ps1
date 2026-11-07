@@ -1,32 +1,40 @@
 $ErrorActionPreference = "Stop"
 
-$keyPath = Join-Path $env:USERPROFILE ".ssh\adminyeezy_ed25519"
-if (!(Test-Path $keyPath)) {
-  throw "SSH key not found: $keyPath"
-}
+# SSH tunnel localhost:15432 -> Postgres on the YUCONCIERGE server.
+# Postgres runs as a Coolify database without a host port, so the tunnel
+# targets the container IP on the Docker network. Override for another server:
+#   $env:YU_SSH_HOST     ssh host alias from ~/.ssh/config (default: yu)
+#   $env:YU_PG_CONTAINER Coolify database UUID / container name
+$sshHost = if ($env:YU_SSH_HOST) { $env:YU_SSH_HOST } else { "yu" }
+$container = if ($env:YU_PG_CONTAINER) { $env:YU_PG_CONTAINER } else { "tsq6n4yyapu6mdcqv8isbhqn" }
+$localPort = 15432
 
-$existing = Get-NetTCPConnection -LocalPort 15432 -State Listen -ErrorAction SilentlyContinue
+$existing = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
 if ($existing) {
-  Write-Host "DB tunnel already listens on localhost:15432"
+  Write-Host "DB tunnel already listens on localhost:$localPort"
   exit 0
 }
 
+$containerIp = (& ssh.exe -o BatchMode=yes $sshHost "sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' $container").Trim().Split(" ")[0]
+if (-not $containerIp) {
+  throw "Postgres container $container not found on $sshHost"
+}
+
 $sshArgs = @(
-  "-i", $keyPath,
   "-N",
-  "-L", "15432:127.0.0.1:5432",
+  "-L", "${localPort}:${containerIp}:5432",
   "-o", "ExitOnForwardFailure=yes",
   "-o", "ServerAliveInterval=30",
   "-o", "ServerAliveCountMax=3",
-  "root@85.198.97.100"
+  $sshHost
 )
 
 Start-Process -FilePath "ssh.exe" -ArgumentList $sshArgs -WindowStyle Hidden
 Start-Sleep -Seconds 2
 
-$started = Get-NetTCPConnection -LocalPort 15432 -State Listen -ErrorAction SilentlyContinue
+$started = Get-NetTCPConnection -LocalPort $localPort -State Listen -ErrorAction SilentlyContinue
 if (!$started) {
-  throw "DB tunnel did not start on localhost:15432"
+  throw "DB tunnel did not start on localhost:$localPort"
 }
 
-Write-Host "DB tunnel ready: localhost:15432 -> 85.198.97.100:127.0.0.1:5432"
+Write-Host "DB tunnel ready: localhost:$localPort -> ${sshHost}:${containerIp}:5432 ($container)"

@@ -13,6 +13,7 @@
 - [Video matches](./video-matches.md) — attaching supplier videos to catalog products.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.
 - [Coolify deployment](./coolify-deployment.md) — environment and operations.
+- [Переменные для YUCONCIERGE](./yuconcierge-env.md) — что внести в Coolify на новом сервере и откуда каждое значение.
 - [Codex workflow](./CODEX_WORKFLOW.md) — project-specific agent rules.
 - [Project decisions](./PROJECT_DECISIONS.md) — short current decisions.
 

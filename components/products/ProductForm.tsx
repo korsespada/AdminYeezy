@@ -622,7 +622,7 @@ export default function ProductForm({
   ) => {
     const photoUrls = photos.map((item) => item.url).filter((url): url is string => Boolean(url))
     const photoFiles = photos.map((item) => item.file).filter((file): file is File => Boolean(file))
-    const shouldUploadVideoUrl = Boolean(sourceVideoUrl.trim()) && !/^https?:\/\/static\.yeezyunique\.ru\//i.test(sourceVideoUrl.trim())
+    const shouldUploadVideoUrl = Boolean(sourceVideoUrl.trim()) && !/^https?:\/\/static\.yuconcierge\.com\//i.test(sourceVideoUrl.trim())
     if (photoUrls.length === 0 && photoFiles.length === 0 && !videoFile && !shouldUploadVideoUrl) return
 
     const uploadData = new FormData()
@@ -1008,7 +1008,7 @@ export default function ProductForm({
             {product?.slug && (
               <Button asChild type="button" variant="outline" size="sm" className="border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700">
                 <a
-                  href={`${process.env.NEXT_PUBLIC_STOREFRONT_URL || 'https://yeezyunique.ru'}/product/${product.slug}`}
+                  href={`${process.env.NEXT_PUBLIC_FRONTEND_URL || 'https://yuconcierge.com'}/product/${product.slug}`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -1610,7 +1610,7 @@ export default function ProductForm({
                   />
                   <span>
                     <span className="block text-xs font-medium text-slate-200">Показывать только в Chromoff</span>
-                    <span className="mt-0.5 block text-[11px] text-slate-400">Товар не показывается в каталоге, поиске, sitemap и фидах yeezyunique и остаётся только на chromoff.store.</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-400">Товар не показывается в каталоге, поиске, sitemap и фидах YUCONCIERGE и остаётся только на chromoff.store.</span>
                   </span>
                 </label>
                 {chromoffListing && (

@@ -115,7 +115,7 @@ describe('Chromoff AI SEO helpers', () => {
 
   it('keeps configured Chromoff media hosts in the AI allowlist', () => {
     expect(resolveBatchAiMediaHosts(['images.example.com'])).toEqual(new Set([
-      'static.yeezyunique.ru',
+      'static.yuconcierge.com',
       'xcimg.szwego.com',
       'images.example.com',
     ]))

@@ -1147,10 +1147,10 @@ async function mappedCatalogLookups() {
   return lookups;
 }
 
-// Rails отдаёт публичный каталог только с ключом витрины STOREFRONT_API_KEY.
+// Rails отдаёт публичный каталог только с ключом витрины FRONTEND_API_KEY.
 function railsCatalogHeaders() {
-  const key = process.env.STOREFRONT_API_KEY;
-  return key ? { 'X-Storefront-Key': key } : {};
+  const key = process.env.FRONTEND_API_KEY;
+  return key ? { 'X-Frontend-Key': key } : {};
 }
 
 async function railsCatalogLookups() {
@@ -1416,7 +1416,7 @@ function railsImportChunkSize() {
 }
 
 /**
- * Асинхронный импорт — режим по умолчанию: crm-api выполняет работу в
+ * Асинхронный импорт — режим по умолчанию: backend выполняет работу в
  * SolidQueue и сразу отдаёт id батча, а публикация ждёт терминального статуса.
  */
 function railsImportAsyncEnabled() {
@@ -3154,7 +3154,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
 
     if (railsImportAsyncEnabled()) {
       if (!importBatchId) {
-        throw new Error('Rails не вернул import_batch_id: сначала выкатите crm-api с асинхронным импортом');
+        throw new Error('Rails не вернул import_batch_id: сначала выкатите backend с асинхронным импортом');
       }
       const finishedBatch = await waitForRailsImportBatch(importBatchId);
       productsImported = Number(finishedBatch.products_imported ?? finishedBatch.items_count ?? 0);

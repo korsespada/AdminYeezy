@@ -1,6 +1,6 @@
 # Разделы AdminYeezy
 
-`AdminYeezy` - операционная админка на `https://admin.yeezyunique.ru`. Публичный storefront не содержит админский UI; `/admin` на сайте должен редиректить сюда.
+`AdminYeezy` - операционная админка на `https://admin.yuconcierge.com`. Публичный storefront не содержит админский UI; `/admin` на сайте должен редиректить сюда.
 
 ## Главный экран
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | `/` | Redirect по auth-состоянию | cookie `admin_token` / `/login` |
 | `/login` | Вход через Rails admin auth | `POST /api/v1/admin/auth/login` |
-| `/admin/home` | Launchpad со всеми разделами | Rails API, `yeezy_scraping` status |
+| `/admin/home` | Launchpad со всеми разделами | Rails API, `yu_scraping` status |
 
 Shell и главный экран поддерживают ширину от 360 px. Ниже 1024 px навигация
 открывается отдельным доступным меню с ссылками на Home, товары, Chromoff,
@@ -170,15 +170,15 @@ desktop-ветка, на узком — мобильная, а не обе од�
 
 | URL | Назначение | Источник |
 |---|---|---|
-| `/admin/batches` | Партии и выгрузки | `yeezy_scraping` + Rails import API |
-| `/admin/suppliers` | Поставщики, альбомы, настройки | `yeezy_scraping` |
-| `/admin/scraping` | Запуск и контроль scraping-задач | `yeezy_scraping`, scripts |
-| `/admin/measurement-templates` | Библиотека скриншотов и структурированных таблиц замеров для назначения в карточках выгрузки и массового назначения в каталоге | `yeezy_scraping.measurement_templates` |
+| `/admin/batches` | Партии и выгрузки | `yu_scraping` + Rails import API |
+| `/admin/suppliers` | Поставщики, альбомы, настройки | `yu_scraping` |
+| `/admin/scraping` | Запуск и контроль scraping-задач | `yu_scraping`, scripts |
+| `/admin/measurement-templates` | Библиотека скриншотов и структурированных таблиц замеров для назначения в карточках выгрузки и массового назначения в каталоге | `yu_scraping.measurement_templates` |
 
 Целевой поток публикации:
 
 ```text
-yeezy_scraping batch
+yu_scraping batch
   -> AdminYeezy CSV/import adapter
   -> POST /api/v1/admin/import_batches
   -> Rails CRM Postgres
@@ -271,7 +271,7 @@ batch и сохранённым snapshot используют те же canonica
 | URL | Назначение | Источник |
 |---|---|---|
 | `/admin/video-matches` | Сопоставление альбомов с видео из выгрузки поставщика с товарами каталога, апрув и перенос видео в S3 | scraping `product_video_matches` + Rails CRM `/admin/products` |
-| `/admin/ai-rules` | Глобальные настройки batch AI: BYESU/OpenRouter/сохранённые провайдеры, модель, temperature, max tokens и системный промпт китайского каталога | `yeezy_scraping.app_settings` |
+| `/admin/ai-rules` | Глобальные настройки batch AI: BYESU/OpenRouter/сохранённые провайдеры, модель, temperature, max tokens и системный промпт китайского каталога | `yu_scraping.app_settings` |
 | `/admin/analytics` | Аналитика каталога, трафика и коммерческих показателей: разделение каналов (Сайт десктоп/мобайл, TG Mini App), мультиканальная сегментация источников (Яндекс Органика, Google Поиск, TG Mini App, внешний трафик), поисковый спрос покупателей на витрине, сквозная воронка конверсии, выручка CRM, средний чек, топ товаров, произвольные даты и хаб 4 платформ (Яндекс.Метрика с поддержкой прямого API, Google Search Console, Google Merchant Center, Яндекс.Вебмастер, GA4) | AdminYeezy `analytics_events` + Rails CRM `/admin/orders` |
 
 SEO landings, redirects и audits относятся к Rails CRM/API. Прямые записи в CRM-БД запрещены.
@@ -281,6 +281,6 @@ SEO landings, redirects и audits относятся к Rails CRM/API. Прям�
 
 - `AdminYeezy` остается отдельным Next.js приложением.
 - Rails CRM - source of truth для каталога, заказов, клиентов, платежей и возвратов.
-- `yeezy_scraping` остается технической БД для парсинга, supplier/import batches и AI-процессов.
+- `yu_scraping` остается технической БД для парсинга, supplier/import batches и AI-процессов.
 - NocoDB допустим только для контролируемого просмотра/ограниченной операторской работы, не для прямого CRM workflow.
 - Storefront `/admin` не развивается как UI.

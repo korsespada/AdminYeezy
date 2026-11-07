@@ -83,10 +83,10 @@ describe('batch workflow CSV compatibility adapter', () => {
 
   it('recognizes only the configured S3 host as already stored', () => {
     const previous = process.env.S3_PUBLIC_DOMAIN
-    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yuconcierge.com'
     try {
-      expect(workflow.isAlreadyHosted('https://static.yeezyunique.ru/batches/a/1.jpg')).toBe(true)
-      expect(workflow.isAlreadyHosted('https://api.yeezyunique.ru/media/1.jpg')).toBe(false)
+      expect(workflow.isAlreadyHosted('https://static.yuconcierge.com/batches/a/1.jpg')).toBe(true)
+      expect(workflow.isAlreadyHosted('https://api.yuconcierge.com/media/1.jpg')).toBe(false)
       expect(workflow.isAlreadyHosted('https://xcimg.szwego.com/1.jpg')).toBe(false)
     } finally {
       process.env.S3_PUBLIC_DOMAIN = previous
@@ -95,30 +95,30 @@ describe('batch workflow CSV compatibility adapter', () => {
 
   it('does not schedule video transfer when the video is already hosted locally or in Rails', () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
-    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yuconcierge.com'
     try {
       const sourceProduct = { attributes: { szwego_video_url: 'https://supplier.example/source.mov' } }
       expect(workflow.needsVideoTransfer(sourceProduct)).toBe(true)
       expect(workflow.needsVideoTransfer({
         attributes: {
           szwego_video_url: 'https://supplier.example/source.mov',
-          hosted_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+          hosted_video_url: 'https://static.yuconcierge.com/batches/old/item.mp4',
         },
       })).toBe(false)
       expect(workflow.needsVideoTransfer(sourceProduct, {
-        video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
-        video_poster_url: 'https://static.yeezyunique.ru/batches/old/item-poster.webp',
+        video_url: 'https://static.yuconcierge.com/batches/old/item.mp4',
+        video_poster_url: 'https://static.yuconcierge.com/batches/old/item-poster.webp',
       })).toBe(false)
       const alreadyHostedSource = {
         external_id: 'item-static',
         name: 'Товар со статическим видео',
         attributes: {
-          szwego_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+          szwego_video_url: 'https://static.yuconcierge.com/batches/old/item.mp4',
         },
       }
       expect(workflow.needsVideoTransfer(alreadyHostedSource)).toBe(false)
       expect(workflow.railsUpdatePayload(alreadyHostedSource).product.video_url)
-        .toBe('https://static.yeezyunique.ru/batches/old/item.mp4')
+        .toBe('https://static.yuconcierge.com/batches/old/item.mp4')
     } finally {
       if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
       else process.env.S3_PUBLIC_DOMAIN = previousDomain
@@ -378,13 +378,13 @@ describe('batch workflow CSV compatibility adapter', () => {
 
   it('uses a manually supplied video instead of an older Szwego or hosted video', () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
-    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yuconcierge.com'
     try {
       expect(workflow.needsVideoTransfer({
         attributes: {
           manual_video_url: 'https://operator.example/replacement.mp4',
           szwego_video_url: 'https://supplier.example/original.mov',
-          hosted_video_url: 'https://static.yeezyunique.ru/batches/old/item.mp4',
+          hosted_video_url: 'https://static.yuconcierge.com/batches/old/item.mp4',
         },
       })).toBe(true)
     } finally {
@@ -396,13 +396,13 @@ describe('batch workflow CSV compatibility adapter', () => {
   it('reuses an already hosted photo without another S3 request', async () => {
     const previousDomain = process.env.S3_PUBLIC_DOMAIN
     const previousBucket = process.env.S3_BUCKET
-    process.env.S3_PUBLIC_DOMAIN = 'https://static.yeezyunique.ru'
+    process.env.S3_PUBLIC_DOMAIN = 'https://static.yuconcierge.com'
     process.env.S3_BUCKET = 'yeezy-products'
     try {
       await expect(workflow.uploadPhotoIfNeeded(
-        'https://static.yeezyunique.ru/batches/old/product-1.jpg',
+        'https://static.yuconcierge.com/batches/old/product-1.jpg',
         'unused.jpg',
-      )).resolves.toBe('https://static.yeezyunique.ru/batches/old/product-1.jpg')
+      )).resolves.toBe('https://static.yuconcierge.com/batches/old/product-1.jpg')
     } finally {
       if (previousDomain === undefined) delete process.env.S3_PUBLIC_DOMAIN
       else process.env.S3_PUBLIC_DOMAIN = previousDomain

@@ -132,7 +132,7 @@ export async function authenticateApiOrAdmin(request: Request): Promise<AdminSes
 
     for (const key of configuredKeys) {
       if (token.length === key.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(key))) {
-        return { id: 'api-key', email: 'agent@yeezyunique.ru', role: 'agent', source: 'local' }
+        return { id: 'api-key', email: 'agent@yuconcierge.com', role: 'agent', source: 'local' }
       }
     }
 

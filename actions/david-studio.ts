@@ -283,7 +283,7 @@ export async function generateDavidDraftAction(handle: string, targetProductId: 
   const model = provider === 'byesu' ? String(settings.byesuModel || '') : String(settings.openrouterModel || '')
   try {
     const contactSheets = await buildBatchAiContactSheets(prepared.data.photoUrls, {
-      additionalHosts: ['static.yeezyunique.ru'],
+      additionalHosts: ['static.yuconcierge.com'],
     })
     const raw = await runBatchAiOpenRouter({
       settings,

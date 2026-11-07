@@ -2,7 +2,7 @@
 
 ## Цель
 
-Сохранить существующий `yeezy_scraping` в NocoDB и добавить безопасный доступ к Rails CRM. Рекомендуемый адрес:
+Сохранить существующий `yu_scraping` в NocoDB и добавить безопасный доступ к Rails CRM. Рекомендуемый адрес:
 
 ```text
 https://nocodb.yeezyunique.ru
@@ -36,7 +36,7 @@ pg_dump -Fc -h HOST -U USER DB_NAME > nocodb-meta.backup
 
 | Data source | Права | Назначение |
 |---|---|---|
-| `yeezy_scraping` | Read/write | Сохранить существующие поставщики, задачи и партии |
+| `yu_scraping` | Read/write | Сохранить существующие поставщики, задачи и партии |
 | `rails_crm_readonly` | `SELECT` | Просмотр CRM и опубликованного каталога |
 | `rails_catalog_editor` | Ограниченный write | Редактирование только безопасных таблиц опубликованного каталога |
 

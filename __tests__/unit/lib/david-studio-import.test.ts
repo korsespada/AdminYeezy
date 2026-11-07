@@ -120,7 +120,7 @@ describe('buildDavidAttributeSchema', () => {
 
 describe('промпт David', () => {
   it('отдаёт размеры уже в сантиметрах и не повторяет дюймы', () => {
-    const promptProduct = toDavidPromptProduct(BRACELET, ['https://static.yeezyunique.ru/products/media/a.webp'])
+    const promptProduct = toDavidPromptProduct(BRACELET, ['https://static.yuconcierge.com/products/media/a.webp'])
     expect(promptProduct.attributes.sizes).toEqual(['16 см', '17 см'])
     expect(JSON.stringify(promptProduct)).not.toContain('6.3 IN')
   })
@@ -128,7 +128,7 @@ describe('промпт David', () => {
   it('вкладывает карту областей категорий в текст промпта', () => {
     const { userPrompt } = buildDavidAiPrompt({
       product: BRACELET,
-      photos: ['https://static.yeezyunique.ru/products/media/a.webp'],
+      photos: ['https://static.yuconcierge.com/products/media/a.webp'],
       settings: { categoryRules: [] },
       brands: [],
       categories: [{ id: 'cat-1', name: 'Ювелирные изделия' }],
@@ -144,7 +144,7 @@ describe('промпт David', () => {
 
 describe('normalizeDavidAiOutput', () => {
   it('отдаёт характеристики в product.attributes (а не в catalog_attributes)', () => {
-    const promptProduct = toDavidPromptProduct(BRACELET, ['https://static.yeezyunique.ru/products/media/a.webp'])
+    const promptProduct = toDavidPromptProduct(BRACELET, ['https://static.yuconcierge.com/products/media/a.webp'])
     const normalized: any = normalizeDavidAiOutput({
       product: {
         name: 'Серебряный браслет',
@@ -212,14 +212,14 @@ describe('реальная выгрузка David Studio', () => {
 describe('buildDavidMediaPayload', () => {
   it('раскладывает альты по порядку кадров', () => {
     const media = buildDavidMediaPayload(
-      [{ url: 'https://static.yeezyunique.ru/products/media/b.webp', position: 2 },
-       { url: 'https://static.yeezyunique.ru/products/media/a.webp', position: 1 }],
+      [{ url: 'https://static.yuconcierge.com/products/media/b.webp', position: 2 },
+       { url: 'https://static.yuconcierge.com/products/media/a.webp', position: 1 }],
       ['первый', 'второй'],
       'запасной',
     )
     expect(media.map((item) => item.original_url)).toEqual([
-      'https://static.yeezyunique.ru/products/media/a.webp',
-      'https://static.yeezyunique.ru/products/media/b.webp',
+      'https://static.yuconcierge.com/products/media/a.webp',
+      'https://static.yuconcierge.com/products/media/b.webp',
     ])
     expect(media[0].alt_text).toBe('первый')
   })

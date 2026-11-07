@@ -16,7 +16,7 @@ export default function CrmTelegramNotifications({ recipients }: { recipients: R
         <header>
           <Link href="/admin/crm" className="text-sm font-medium text-sky-300 hover:text-sky-200">CRM</Link>
           <div className="mt-4 flex items-center gap-3"><BellRing className="h-8 w-8 text-violet-300" /><h1 className="text-3xl font-bold text-white sm:text-4xl">Настройки CRM</h1></div>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">Настройте, какие уведомления получает каждый человек: сайт присылает auth-бот, заявки Mini App — @YeezyUniqueBot.</p>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-400">Настройте, какие уведомления получает каждый человек: сайт присылает auth-бот, заявки Mini App — @YUCONCIERGEBot.</p>
         </header>
 
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-5">
@@ -58,7 +58,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function NotificationChannels({ recipient }: { recipient?: RailsTelegramNotificationRecipient }) {
-  return <fieldset className="grid gap-2 text-sm font-medium text-slate-300"><legend>Получать уведомления</legend><label className="flex items-center gap-2"><input name="notifySite" type="checkbox" defaultChecked={recipient?.notify_site ?? true} className="h-4 w-4 accent-sky-500" />Сайт · auth-бот</label><label className="flex items-center gap-2"><input name="notifyTelegramMiniApp" type="checkbox" defaultChecked={recipient?.notify_telegram_mini_app ?? true} className="h-4 w-4 accent-violet-500" />Mini App · @YeezyUniqueBot</label></fieldset>
+  return <fieldset className="grid gap-2 text-sm font-medium text-slate-300"><legend>Получать уведомления</legend><label className="flex items-center gap-2"><input name="notifySite" type="checkbox" defaultChecked={recipient?.notify_site ?? true} className="h-4 w-4 accent-sky-500" />Сайт · auth-бот</label><label className="flex items-center gap-2"><input name="notifyTelegramMiniApp" type="checkbox" defaultChecked={recipient?.notify_telegram_mini_app ?? true} className="h-4 w-4 accent-violet-500" />Mini App · @YUCONCIERGEBot</label></fieldset>
 }
 
 const inputClassName = 'h-10 rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none placeholder:text-slate-600 focus:border-sky-500'

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 
 const ALLOWED_DOWNLOAD_HOSTS = new Set([
-  'static.yeezyunique.ru',
-  'cdn.yeezyunique.ru',
+  'static.yuconcierge.com',
+  'static.yuconcierge.com',
   'yeezy-app-thumbs.hb.ru-msk.vkcloud-storage.ru',
   'xcimg.szwego.com',
 ])

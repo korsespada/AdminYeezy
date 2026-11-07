@@ -470,7 +470,7 @@ export function buildBatchAiUserPrompt(input: {
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
     ...(chromoffMode ? [
-      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YeezyUnique.',
+      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YUCONCIERGE.',
       'Выбирай наиболее конкретную подкатегорию из справочника; родительскую категорию выбирай только если у неё нет подходящей дочерней категории.',
       'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
       `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
@@ -642,7 +642,7 @@ export function buildBatchAiColorSplitPrompt(input: {
     `Категории: ${JSON.stringify(categories)}`,
     `Подкатегории: ${JSON.stringify(subcategories)}`,
     ...(chromoffMode ? [
-      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YeezyUnique.',
+      'Это режим Chromoff для поставщика из списка Chromoff. Выбери chromoff_category только из отдельного справочника ниже. Не заменяй её общей категорией YUCONCIERGE.',
       'Выбирай наиболее конкретную подкатегорию из справочника; родительскую категорию выбирай только если у неё нет подходящей дочерней категории.',
       'Если товар нельзя уверенно отнести к одной категории Chromoff, верни пустой id и confidence ниже 0.75. Товар останется скрытым для ручной проверки.',
       `Категории Chromoff: ${JSON.stringify(chromoffCategories)}`,
@@ -711,7 +711,7 @@ export function buildBatchAiShadeRepairPrompt(products: any[], variants: any[]) 
 
 export function resolveBatchAiMediaHosts(additionalHosts: string[] = []) {
   return new Set([
-    ...(process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(','),
+    ...(process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yuconcierge.com,xcimg.szwego.com').split(','),
     ...additionalHosts,
   ].map((host) => host.trim().toLowerCase()).filter(Boolean))
 }
@@ -949,7 +949,7 @@ export function batchAiMeasurementPhotoIndexes(raw: any, photoUrls: unknown[]): 
 }
 
 function allowedOriginalPhotoUrls(photoUrls: unknown[], indexes: unknown[]) {
-  const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yeezyunique.ru,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
+  const allowedHosts = new Set((process.env.AI_CATALOG_MEDIA_HOSTS || 'static.yuconcierge.com,xcimg.szwego.com').split(',').map((host) => host.trim().toLowerCase()).filter(Boolean))
   const selected = [...new Set(indexes.map(Number).filter((value) => Number.isInteger(value) && value > 0 && value <= photoUrls.length))].slice(0, 3)
   return selected.flatMap((index) => {
     try {
