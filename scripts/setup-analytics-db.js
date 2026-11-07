@@ -1,51 +1,57 @@
-
+// Схема analytics_events в yu_scraping под app/api/analytics/route.ts.
+// Идемпотентно. Пустую таблицу старого формата (event_type, product_id) заменяет;
+// если в ней есть данные — останавливается, переносить их нужно отдельно.
 const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const connectionString = process.env.ANALYTICS_DATABASE_URL || process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('Нужен ANALYTICS_DATABASE_URL (или SCRAPING_DATABASE_URL)');
+  process.exit(1);
+}
+const pool = new Pool({ connectionString });
 
 async function setupAnalytics() {
+  const client = await pool.connect();
   try {
-    console.log('Создаю таблицы аналитики...');
-    
-    await pool.query(`
-      -- Таблица для событий аналитики
-      CREATE TABLE IF NOT EXISTS analytics_events (
-        id SERIAL PRIMARY KEY,
-        event_type VARCHAR(50) NOT NULL, -- view, cart_add, favorite_add, order_success
-        product_id VARCHAR(100),
-        product_name VARCHAR(255),
-        price DECIMAL(10, 2),
-        session_id VARCHAR(100),
-        user_agent TEXT,
-        country VARCHAR(100),
-        os VARCHAR(50),
-        metadata JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      -- Таблица для заказов (если её еще нет)
-      CREATE TABLE IF NOT EXISTS orders (
-        id SERIAL PRIMARY KEY,
-        total_price DECIMAL(10, 2) NOT NULL,
-        status VARCHAR(50) DEFAULT 'pending',
-        items JSONB,
-        customer_info JSONB,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-
-      -- Индексы для быстрого поиска
-      CREATE INDEX IF NOT EXISTS idx_events_type ON analytics_events(event_type);
-      CREATE INDEX IF NOT EXISTS idx_events_created ON analytics_events(created_at);
-      CREATE INDEX IF NOT EXISTS idx_events_product ON analytics_events(product_id);
+    await client.query('BEGIN');
+    const { rows: legacy } = await client.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'analytics_events' AND column_name = 'event_type'
     `);
+    if (legacy.length) {
+      const { rows: [{ count }] } = await client.query('SELECT count(*)::int AS count FROM analytics_events');
+      if (count > 0) throw new Error(`analytics_events старого формата содержит ${count} строк — перенесите их вручную`);
+      await client.query('DROP TABLE analytics_events');
+      console.log('Пустая таблица analytics_events старого формата удалена');
+    }
 
-    console.log('Таблицы успешно созданы!');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS analytics_events (
+        id BIGSERIAL PRIMARY KEY,
+        event VARCHAR(64) NOT NULL,
+        "productId" VARCHAR(128),
+        name TEXT NOT NULL DEFAULT '',
+        price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+        session_id VARCHAR(128) NOT NULL,
+        user_agent TEXT NOT NULL DEFAULT '',
+        meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_created_at ON analytics_events (created_at);
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_event_created_at ON analytics_events (event, created_at);
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_session_id ON analytics_events (session_id);
+      CREATE INDEX IF NOT EXISTS idx_analytics_events_product_id ON analytics_events ("productId");
+    `);
+    await client.query('COMMIT');
+    console.log('analytics_events готова');
   } catch (err) {
-    console.error('Ошибка при создании таблиц:', err.message);
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Ошибка схемы аналитики:', err.message);
+    process.exitCode = 1;
   } finally {
+    client.release();
     await pool.end();
   }
 }
