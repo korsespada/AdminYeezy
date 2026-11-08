@@ -1576,8 +1576,15 @@ function videoPosterPreviewUrl(product: any) {
   return /^https?:\/\//i.test(url) ? url : ''
 }
 
+// Живой воркер обновляет updated_at товара чаще порога «зависания» (90 с) в
+// resumeStaleOpenRouterRun. Без этого запрос к модели дольше 90 с считался
+// зависшим: товар снова ставился в очередь и запускался параллельно, а попытки
+// росли без результата.
+const BATCH_AI_ITEM_HEARTBEAT_MS = 30_000
+
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
   let rawOutput: any = null
+  let heartbeat: ReturnType<typeof setInterval> | null = null
   try {
     const claimed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='running',attempts=attempts+1,updated_at=NOW()
@@ -1586,6 +1593,12 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       RETURNING i.id
     `, [item.id])
     if (!claimed.rows[0]) return
+    heartbeat = setInterval(() => {
+      void scrapingQuery(
+        "UPDATE batch_ai_items SET updated_at=NOW() WHERE id=$1 AND status='running'",
+        [item.id],
+      ).catch(() => undefined)
+    }, BATCH_AI_ITEM_HEARTBEAT_MS)
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
     context.referenceSheets ||= new Map()
@@ -1744,6 +1757,7 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
   } finally {
+    if (heartbeat) clearInterval(heartbeat)
     await touchBatchOperation(String(context.batch.id), String(item.run_id)).catch(() => undefined)
   }
 }
