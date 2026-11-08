@@ -97,6 +97,7 @@ export async function runProductCardAi(
     additionalHosts: ['static.yuconcierge.com'],
   })
   const raw = await runBatchAiOpenRouter({
+    usageFeature: 'card_updates',
     settings,
     systemPrompt: composeCardSystemPrompt({
       base: PRODUCT_CARD_AI_SYSTEM_PROMPT,

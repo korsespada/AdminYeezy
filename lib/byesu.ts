@@ -1,3 +1,4 @@
+import { recordAiUsage } from '@/lib/ai-usage'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 
 const BYESU_CHAT_URL = 'https://byesu.com/v1/chat/completions'
@@ -158,6 +159,18 @@ export async function byesuChatCompletion(
   const target = connection.baseUrl?.trim()
     ? `${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`
     : BYESU_CHAT_URL
+  const startedAt = Date.now()
+  try {
+    const payload = await sendByesuRequest(target, apiKey, requestBody)
+    recordAiUsage({ target, protocol: 'openai', model: requestBody.model, payload, startedAt })
+    return payload
+  } catch (error) {
+    recordAiUsage({ target, protocol: 'openai', model: requestBody.model, error, startedAt })
+    throw error
+  }
+}
+
+async function sendByesuRequest(target: string, apiKey: string, requestBody: Record<string, any>): Promise<ByesuPayload> {
   const response = await fetch(target, {
     method: 'POST',
     headers: {

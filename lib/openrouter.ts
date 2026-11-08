@@ -2,6 +2,7 @@ import https from 'node:https'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { SocksProxyAgent } from 'socks-proxy-agent'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
+import { recordAiUsage } from '@/lib/ai-usage'
 
 const OPENROUTER_CHAT_URL = new URL('https://openrouter.ai/api/v1/chat/completions')
 /**
@@ -66,7 +67,29 @@ export async function openRouterChatCompletion(
     ? new URL(`${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`)
     : OPENROUTER_CHAT_URL
   const label = openRouterProviderLabel(target)
+  const startedAt = Date.now()
 
+  // Каждый ответ и каждая неудача пишутся в учёт расхода ИИ.
+  return sendOpenRouterRequest(target, body, apiKey, agent, extraHeaders, label).then(
+    (payload) => {
+      recordAiUsage({ target, protocol: 'openai', model: requestBody.model, payload, startedAt })
+      return payload
+    },
+    (error) => {
+      recordAiUsage({ target, protocol: 'openai', model: requestBody.model, error, startedAt })
+      throw error
+    },
+  )
+}
+
+function sendOpenRouterRequest(
+  target: URL,
+  body: string,
+  apiKey: string,
+  agent: ReturnType<typeof createOpenRouterAgent>,
+  extraHeaders: Record<string, string>,
+  label: string,
+): Promise<OpenRouterPayload> {
   return new Promise((resolve, reject) => {
     const request = https.request(target, {
       method: 'POST',

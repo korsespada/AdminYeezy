@@ -90,6 +90,8 @@ import {
 } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
+import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
+import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
@@ -142,7 +144,7 @@ export async function getBatchAiSettingsAction() {
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
   const configuredProviders = await scrapingQuery(`
-    SELECT id,name,kind,base_url,model,models,created_at,updated_at
+    SELECT id,name,kind,base_url,model,models,pricing,created_at,updated_at
     FROM ai_providers ORDER BY updated_at DESC, created_at DESC
   `).catch(() => ({ rows: [] }))
   const activeProviderId = String(values.batch_ai_provider_id || '').trim() || null
@@ -160,6 +162,7 @@ export async function getBatchAiSettingsAction() {
     model: String(row.model || ''),
     models: Array.isArray(row.models) ? row.models : [],
     hasApiKey: true,
+    pricing: normalizePricingTable(row.pricing),
     createdAt: String(row.created_at || ''),
     updatedAt: String(row.updated_at || ''),
   }))
@@ -853,14 +856,14 @@ export async function createAiProviderAction(input: {
     const result = await scrapingQuery(`
       INSERT INTO ai_providers(id,name,kind,base_url,api_key_ciphertext,model,models,updated_at)
       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
-      RETURNING id,name,kind,base_url,model,models,created_at,updated_at
+      RETURNING id,name,kind,base_url,model,models,pricing,created_at,updated_at
     `, [crypto.randomUUID(), name, kind, baseUrl, encrypted, model, JSON.stringify(models)])
     const row = result.rows[0]
     return {
       success: true,
       data: {
         id: String(row.id), name: row.name, kind: row.kind, baseUrl: row.base_url, model: row.model,
-        models: Array.isArray(row.models) ? row.models : [], hasApiKey: true,
+        models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing),
         createdAt: String(row.created_at), updatedAt: String(row.updated_at),
       } satisfies AiProviderRecord,
     }
@@ -873,7 +876,7 @@ function aiProviderRecord(row: any): AiProviderRecord {
   return {
     id: String(row.id), name: String(row.name || ''), kind: row.kind as AiProviderKind,
     baseUrl: String(row.base_url || ''), model: String(row.model || ''),
-    models: Array.isArray(row.models) ? row.models : [], hasApiKey: true,
+    models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing),
     createdAt: String(row.created_at || ''), updatedAt: String(row.updated_at || ''),
   }
 }
@@ -911,7 +914,7 @@ export async function updateAiProviderAction(input: {
       UPDATE ai_providers
       SET name=$2,base_url=$3,api_key_ciphertext=$4,model=$5,models=$6::jsonb,updated_at=NOW()
       WHERE id=$1
-      RETURNING id,name,kind,base_url,model,models,created_at,updated_at
+      RETURNING id,name,kind,base_url,model,models,pricing,created_at,updated_at
     `, [id, name, baseUrl, encrypted, model, JSON.stringify(models)])
     return { success: true, data: aiProviderRecord(updated.rows[0]) }
   } catch (error: any) {
@@ -934,7 +937,7 @@ export async function testAiProviderAction(providerId: string) {
     const models = await fetchProviderModels(row.base_url, apiKey).catch(() => [])
     const model = String(row.model || '').trim() || models[0]?.value || ''
     if (!model) return { success: false, error: 'Не удалось определить модель. Укажите её в редактировании провайдера.' }
-    const payload = providerProtocol(row.base_url) === 'anthropic'
+    const payload = await withAiUsageContext({ feature: 'provider_test', providerId: id }, async () => providerProtocol(row.base_url) === 'anthropic'
       ? await anthropicMessagesCompletion({
           model,
           system: 'Отвечай только одним словом.',
@@ -947,7 +950,7 @@ export async function testAiProviderAction(providerId: string) {
           messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
           temperature: 0,
           max_tokens: 1,
-        }, {}, { baseUrl: row.base_url, apiKey })
+        }, {}, { baseUrl: row.base_url, apiKey }))
     if (providerProtocol(row.base_url) === 'anthropic') {
       if (!Array.isArray(payload?.content) || payload.content.length === 0) throw new Error('Endpoint вернул ответ без content')
     } else if (!Array.isArray(payload?.choices) || payload.choices.length === 0) {
@@ -957,6 +960,28 @@ export async function testAiProviderAction(providerId: string) {
   } catch (error: any) {
     return { success: false, error: error.message || 'Не удалось проверить провайдера' }
   }
+}
+
+/**
+ * Цена модели провайдера для учёта расхода (USD за 1 млн токенов). `null`
+ * удаляет ручную цену: для DeepSeek тогда снова действует встроенный прайс.
+ */
+export async function updateAiProviderPricingAction(providerId: string, model: string, price: AiModelPrice | null) {
+  await requireAdmin()
+  const id = String(providerId || '').trim()
+  const modelKey = normalizeModelName(model)
+  if (!id || !modelKey) return { success: false, error: 'Провайдер или модель не указаны' }
+  if (price && !isValidPrice(price)) return { success: false, error: 'Цены должны быть неотрицательными числами' }
+  const current = await scrapingQuery('SELECT pricing FROM ai_providers WHERE id=$1', [id])
+  if (!current.rows[0]) return { success: false, error: 'Провайдер не найден' }
+  const pricing = normalizePricingTable(current.rows[0].pricing)
+  if (price) pricing[modelKey] = { input: Number(price.input), cachedInput: Number(price.cachedInput), output: Number(price.output) }
+  else delete pricing[modelKey]
+  await scrapingQuery('UPDATE ai_providers SET pricing=$2::jsonb,updated_at=NOW() WHERE id=$1', [id, JSON.stringify(pricing)])
+  resetAiProviderPricingCache()
+  revalidatePath('/admin/ai-rules')
+  revalidatePath('/admin/ai-usage')
+  return { success: true, data: { pricing } }
 }
 
 export async function deleteAiProviderAction(providerId: string) {
@@ -1551,7 +1576,21 @@ function videoPosterPreviewUrl(product: any) {
 // росли без результата.
 const BATCH_AI_ITEM_HEARTBEAT_MS = 30_000
 
+// Все запросы к модели внутри товара записываются в учёт расхода с привязкой
+// к выгрузке, запуску и товару.
 async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
+  return withAiUsageContext({
+    feature: 'batch_ai',
+    batchId: context?.batch?.id ? String(context.batch.id) : null,
+    runId: item?.run_id ? String(item.run_id) : null,
+    itemId: item?.id ? String(item.id) : null,
+    productId: item?.product_id ? Number(item.product_id) : null,
+    supplierId: context?.batch?.supplier_id ? Number(context.batch.supplier_id) : null,
+    providerId: settings.providerId || settings.activeProviderId || null,
+  }, () => processOpenRouterItemWork(item, context, settings))
+}
+
+async function processOpenRouterItemWork(item: any, context: any, settings: BatchAiSettings) {
   let rawOutput: any = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
   try {

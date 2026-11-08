@@ -1,3 +1,4 @@
+import type { AiPricingTable } from '@/lib/ai-usage-pricing'
 import crypto from 'node:crypto'
 
 export type AiProviderKind = 'openrouter' | 'byesu'
@@ -11,6 +12,8 @@ export type AiProviderRecord = {
   model: string
   models: Array<{ value: string; label: string }>
   hasApiKey: boolean
+  /** Ручные цены моделей, USD за 1 млн токенов (ключ — имя модели в нижнем регистре). */
+  pricing?: AiPricingTable
   createdAt: string
   updatedAt: string
 }

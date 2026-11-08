@@ -53,6 +53,7 @@ export async function recognizeMeasurementImage(imageUrl: string, providerSettin
     detail: 'high' as const,
   }]
   const firstOutput = await runBatchAiOpenRouter({
+    usageFeature: 'measurement_templates',
     settings,
     systemPrompt: MEASUREMENT_RECOGNITION_PROMPT,
     userPrompt: 'На оригинальном изображении размерная сетка. Перенеси только видимые размеры, названия строк и точные значения ячеек в JSON. Сверь количество размеров и строк с сеткой перед ответом. Ничего не дополняй по знанию о типовых сетках. Примечание о допуске или ручном измерении пиши только в note.',
@@ -68,6 +69,7 @@ export async function recognizeMeasurementImage(imageUrl: string, providerSettin
   }
 
   const output = await runBatchAiOpenRouter({
+    usageFeature: 'measurement_templates',
     settings,
     systemPrompt: `${MEASUREMENT_RECOGNITION_PROMPT}\n\nЭто независимая контрольная проверка: предыдущий ответ тебе не известен. Самостоятельно прочитай каждую строку, заголовок и ячейку только по изображению. Если хотя бы один размер, параметр или номер ячейки нельзя подтвердить, верни только {"unreadable":true}.`,
     userPrompt: 'Независимо распознай размерную таблицу на изображении. Не используй типовые сетки и не дополняй отсутствующие данные.',

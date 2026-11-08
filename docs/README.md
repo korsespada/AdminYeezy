@@ -9,6 +9,7 @@
 - [Chromoff catalog](./chromoff-catalog.md) — catalog ownership, import and operator workflow.
 - [David Studio import](./david-studio-import.md) — supplier export, photo cleaning queue and AI draft worker contract.
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
+- [AI usage](./ai-usage.md) — учёт токенов и стоимости ИИ, цены моделей, DeepSeek.
 - [Export history](./exports.md) — export history, stages and publication.
 - [Video matches](./video-matches.md) — attaching supplier videos to catalog products.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.

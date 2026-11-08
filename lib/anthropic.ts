@@ -1,3 +1,4 @@
+import { recordAiUsage } from '@/lib/ai-usage'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv, providerMessagesUrl } from '@/lib/ai-providers'
 
 const ANTHROPIC_DEFAULT_TIMEOUT_MS = 300_000
@@ -60,6 +61,18 @@ export async function anthropicMessagesCompletion(
   const apiKey = connection.apiKey?.trim()
   if (!apiKey) throw new Error('API-ключ Anthropic не задан')
   const baseUrl = connection.baseUrl?.trim() || 'https://api.anthropic.com'
+  const startedAt = Date.now()
+  try {
+    const payload = await sendAnthropicRequest(requestBody, baseUrl, apiKey)
+    recordAiUsage({ target: providerMessagesUrl(baseUrl), protocol: 'anthropic', model: requestBody.model, payload, startedAt })
+    return payload
+  } catch (error) {
+    recordAiUsage({ target: providerMessagesUrl(baseUrl), protocol: 'anthropic', model: requestBody.model, error, startedAt })
+    throw error
+  }
+}
+
+async function sendAnthropicRequest(requestBody: Record<string, any>, baseUrl: string, apiKey: string): Promise<AnthropicPayload> {
   const response = await fetch(providerMessagesUrl(baseUrl), {
     method: 'POST',
     headers: headers(baseUrl, apiKey),

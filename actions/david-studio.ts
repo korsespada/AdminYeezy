@@ -286,6 +286,7 @@ export async function generateDavidDraftAction(handle: string, targetProductId: 
       additionalHosts: ['static.yuconcierge.com'],
     })
     const raw = await runBatchAiOpenRouter({
+      usageFeature: 'david_studio',
       settings,
       // Как и в «Выгрузках»: обязательные правила каталога действуют для всех
       // категорий и имеют приоритет над сохранённым системным промптом.

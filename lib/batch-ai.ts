@@ -2,6 +2,7 @@ import sharp from 'sharp'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
+import { withAiUsageContext, type AiUsageFeature } from '@/lib/ai-usage'
 import { isProviderTimeoutError, providerProtocol } from '@/lib/ai-providers'
 import { resizeImageUrl } from '@/lib/image'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
@@ -874,6 +875,8 @@ async function requestBatchAiJson(input: {
   label: string
   emptyResponseError: string
   content: (cacheSharedPrefix: boolean) => any[]
+  /** Раздел для учёта расхода ИИ, если запрос идёт не из обработки выгрузки. */
+  usageFeature?: AiUsageFeature
 }) {
   const protocol = providerProtocol(input.settings.providerBaseUrl || '')
   const model = input.settings.provider === 'byesu' ? input.settings.byesuModel : input.settings.openrouterModel
@@ -887,7 +890,7 @@ async function requestBatchAiJson(input: {
         apiKey: input.settings.providerApiKey,
       })
   const cacheKey = `${input.settings.provider}:${input.settings.providerBaseUrl || ''}:${model}`
-  const payload = await withBatchAiPromptCacheFallback(cacheKey, (cacheSharedPrefix) => (protocol === 'anthropic'
+  const request = () => withBatchAiPromptCacheFallback(cacheKey, (cacheSharedPrefix) => (protocol === 'anthropic'
     ? withBatchAiRetry(() => anthropicMessagesCompletion({
         model,
         system: input.systemPrompt,
@@ -908,6 +911,9 @@ async function requestBatchAiJson(input: {
         max_tokens: input.settings.maxTokens,
         response_format: { type: 'json_object' },
       }), input.label)))
+  const payload = input.usageFeature
+    ? await withAiUsageContext({ feature: input.usageFeature }, request)
+    : await request()
   const text = protocol === 'anthropic'
     ? anthropicResponseText(payload)
     : aiMessageContentText(payload?.choices?.[0]?.message?.content)
@@ -919,8 +925,10 @@ export async function runBatchAiOpenRouter(input: BatchAiRequestImages & {
   settings: AiCompletionSettings
   systemPrompt: string
   userPrompt: string
+  usageFeature?: AiUsageFeature
 }) {
   return requestBatchAiJson({
+    usageFeature: input.usageFeature,
     settings: input.settings,
     systemPrompt: input.systemPrompt,
     label: 'AI batch',

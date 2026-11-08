@@ -3,10 +3,11 @@
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, ShieldAlert, Trash2, X } from 'lucide-react'
-import { createAiProviderAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { createAiProviderAction, updateAiProviderPricingAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import type { AiProviderRecord } from '@/lib/ai-providers'
+import { builtinPeakPrice, normalizeModelName, type AiPricingTable } from '@/lib/ai-usage-pricing'
 import type { Category, Subcategory } from '@/lib/types'
 
 type Props = {
@@ -288,6 +289,12 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                   placeholder="Название модели"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
                 />}
+                <ModelPricingEditor
+                  key={`${activeSavedProvider.id}:${selectedModel}`}
+                  provider={activeSavedProvider}
+                  model={selectedModel}
+                  onSaved={(pricing) => setProviders((current) => current.map((item) => item.id === activeSavedProvider.id ? { ...item, pricing } : item))}
+                />
               </>
             ) : (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
@@ -458,6 +465,95 @@ function InfoCard({ icon: Icon, title, children }: { icon: typeof Bot; title: st
     <div className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
       <div className="flex items-center gap-2 font-semibold text-white"><Icon className="h-4 w-4 text-indigo-400" /> {title}</div>
       <p className="mt-2 text-sm leading-relaxed text-slate-400">{children}</p>
+    </div>
+  )
+}
+
+function providerHost(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Цена выбранной модели для вкладки «Использование». Для DeepSeek цены
+ * встроены и учитывают скидку вне часов пик; ручная цена их заменяет.
+ */
+function ModelPricingEditor({ provider, model, onSaved }: {
+  provider: AiProviderRecord
+  model: string
+  onSaved: (pricing: AiPricingTable) => void
+}) {
+  const modelKey = normalizeModelName(model)
+  const custom = provider.pricing?.[modelKey]
+  const builtin = builtinPeakPrice(providerHost(provider.baseUrl), model)
+  const [form, setForm] = useState({
+    input: custom ? String(custom.input) : '',
+    cachedInput: custom ? String(custom.cachedInput) : '',
+    output: custom ? String(custom.output) : '',
+  })
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [pending, startTransition] = useTransition()
+  if (!modelKey) return null
+
+  const save = (clear = false) => startTransition(async () => {
+    setStatus(null)
+    const price = clear ? null : {
+      input: Number(form.input.replace(',', '.')),
+      cachedInput: Number((form.cachedInput || form.input).replace(',', '.')),
+      output: Number(form.output.replace(',', '.')),
+    }
+    if (price && (!form.input.trim() || !form.output.trim())) {
+      setStatus({ type: 'error', text: 'Укажите цену входа и выхода.' })
+      return
+    }
+    const result = await updateAiProviderPricingAction(provider.id, model, price)
+    if (!result.success) {
+      setStatus({ type: 'error', text: result.error || 'Не удалось сохранить цены' })
+      return
+    }
+    onSaved(result.data?.pricing || {})
+    if (clear) setForm({ input: '', cachedInput: '', output: '' })
+    setStatus({ type: 'success', text: clear ? 'Ручная цена удалена.' : 'Цены сохранены: новые запросы считаются по ним.' })
+  })
+
+  const field = (key: keyof typeof form, label: string, placeholder?: number) => (
+    <label className="space-y-1 text-xs text-slate-400">
+      <span>{label}</span>
+      <input
+        inputMode="decimal"
+        value={form[key]}
+        onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))}
+        placeholder={placeholder !== undefined ? String(placeholder) : '—'}
+        className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-white outline-none focus:border-indigo-500"
+      />
+    </label>
+  )
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+      <div className="text-xs font-semibold text-slate-300">Цена модели, $ за 1 млн токенов</div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {field('input', 'Вход', builtin?.input)}
+        {field('cachedInput', 'Вход из кэша', builtin?.cachedInput)}
+        {field('output', 'Выход', builtin?.output)}
+      </div>
+      <p className="text-xs leading-relaxed text-slate-500">
+        {builtin
+          ? custom
+            ? 'Действует ручная цена. Удалите её, чтобы вернуть встроенный прайс DeepSeek со скидкой 50% вне часов пик.'
+            : 'Цены DeepSeek встроены (в полях — пиковые). Вне часов пик (будни 01–04 и 06–10 UTC — пик) расход считается вдвое дешевле.'
+          : custom
+            ? 'Стоимость новых запросов считается по этим ценам.'
+            : 'Без цены вкладка «Использование» покажет токены, но не стоимость (кроме провайдеров, которые сами сообщают цену, как OpenRouter).'}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => save()} disabled={pending} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Сохранить цены</button>
+        {custom && <button type="button" onClick={() => save(true)} disabled={pending} className="rounded-lg px-3 py-1.5 text-xs text-slate-400 hover:text-white disabled:opacity-50">Удалить ручную цену</button>}
+        {status && <span className={`text-xs ${status.type === 'success' ? 'text-emerald-300' : 'text-red-300'}`}>{status.text}</span>}
+      </div>
     </div>
   )
 }

@@ -354,6 +354,7 @@ async function processChromoffAiItem(
     const userPrompt = buildChromoffAiUserPrompt(input, categoryPrompts, attributeDefinitions)
     const contactSheets = await buildBatchAiContactSheets(photos, { additionalHosts: chromoffMediaHosts() })
     const raw = await runBatchAiOpenRouter({
+      usageFeature: 'chromoff',
       settings,
       systemPrompt: settings.systemPrompt,
       userPrompt,
