@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -153,9 +153,17 @@ describe('batch AI normalization', () => {
   })
 
   it('enforces the current product-title contract over saved legacy prompts', () => {
-    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('name — видимый заголовок товара без бренда и артикула, но с точным цветом')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('name — заголовок товара без бренда, суббренда/коллекции и артикула, но с точным цветом')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Бренд не появляется в name ни в начале, ни в середине, ни в коллаборации')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Сервер записывает h1 равным name')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Не возвращай attribute_suggestions или subcategory_suggestion')
+  })
+
+  it('forbids narrating the frame in the public description', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('а не пересказывать кадр')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('вместо «На кожаной вставке внизу виден тиснёный крест»')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Пиши об изделии, а не о кадре')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Кожаная вставка с тиснёным крестом')
   })
 
   it('requires unrelated size charts to be discarded and allows tabs only for a confirmed set', () => {
@@ -226,6 +234,59 @@ describe('batch AI normalization', () => {
     expect(result.product.h1).toBe('Сумка 22 Mini, чёрная')
     expect(result.product.seo_title).toBe('')
     expect(result.product.seo_description).toBe('')
+  })
+
+  it('removes the brand from the middle of the visible name', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Чёрный кожаный жилет Chrome Hearts с тиснёными крестами' },
+    }, {
+      product: { name: '', photos: [], attributes: {} },
+      brandIds: new Set(['chrome-hearts']),
+      brandNames: new Map([['chrome-hearts', 'Chrome Hearts']]),
+      categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.name).toBe('Чёрный кожаный жилет с тиснёными крестами')
+    expect(result.product.h1).toBe('Чёрный кожаный жилет с тиснёными крестами')
+  })
+
+  it('drops both brands of a collab name together with the separator', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Чёрные высокие кеды Chrome Hearts x Converse 1970S из канваса' },
+    }, {
+      product: { name: '', photos: [], attributes: {} },
+      brandIds: new Set(['chrome-hearts']),
+      brandNames: new Map([['chrome-hearts', 'Chrome Hearts'], ['converse', 'Converse']]),
+      categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.name).toBe('Чёрные высокие кеды 1970S из канваса')
+  })
+
+  it('drops a collab partner that is not in the brand dictionary', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Жёлтые джинсы Chrome Hearts × Levi\'s с крестами' },
+    }, {
+      product: { name: '', photos: [], attributes: {} },
+      brandIds: new Set(['chrome-hearts']),
+      brandNames: new Map([['chrome-hearts', 'Chrome Hearts']]),
+      categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.name).toBe('Жёлтые джинсы с крестами')
+  })
+
+  it('keeps the original name when only the brand is left', () => {
+    const result = normalizeBatchAiOutput({
+      product: { name: 'Chrome Hearts' },
+    }, {
+      product: { name: '', photos: [], attributes: {} },
+      brandIds: new Set(['chrome-hearts']),
+      brandNames: new Map([['chrome-hearts', 'Chrome Hearts']]),
+      categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
+    })
+
+    expect(result.product.name).toBe('Chrome Hearts')
   })
 
   it('moves only the selected cover photo to the first position', () => {
