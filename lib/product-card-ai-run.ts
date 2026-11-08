@@ -1,5 +1,5 @@
 import { scrapingQuery } from '@/lib/db'
-import { loadBatchAiSettingsCore } from '@/lib/batch-ai-settings'
+import { loadBatchAiSettingsCore, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { runProductCardAi } from '@/lib/product-card-ai'
 import { findProductCardPreset } from '@/lib/product-card-presets'
 import { resolveCardSupplierPrompt } from '@/lib/product-card-suppliers'
@@ -135,7 +135,7 @@ export async function cardAiRunProgress(supplierId: string) {
 export async function runCardAiLoop(supplierId: string, options: { maxIterations?: number } = {}) {
   const preset = findProductCardPreset(supplierId)
   const prompt = await resolveCardSupplierPrompt(preset.key)
-  const settings = await loadBatchAiSettingsCore()
+  const settings = requireSavedBatchAiProvider(await loadBatchAiSettingsCore())
   const model = settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel
   const deadline = Date.now() + CARD_AI_MAX_MINUTES * 60_000
   let retriedFailures = false

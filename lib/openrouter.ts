@@ -38,9 +38,18 @@ function createOpenRouterAgent() {
   throw new Error('OPENROUTER_PROXY_URL поддерживает только HTTP(S) и SOCKS-прокси')
 }
 
-function openRouterError(payload: OpenRouterPayload, statusCode: number) {
+/**
+ * Клиент OpenAI-совместимый: им же ходят в BYESU и другие шлюзы с собственным
+ * адресом. В ошибках называем реальный хост, а не всегда «OpenRouter».
+ */
+export function openRouterProviderLabel(target: URL) {
+  const host = target.hostname.toLowerCase()
+  return host === 'openrouter.ai' || host.endsWith('.openrouter.ai') ? 'OpenRouter' : host
+}
+
+function openRouterError(payload: OpenRouterPayload, statusCode: number, label: string) {
   const message = payload?.error?.message
-  return new Error(message ? String(message) : `OpenRouter error ${statusCode}`)
+  return new Error(message ? String(message) : `${label}: ошибка ${statusCode}`)
 }
 
 export async function openRouterChatCompletion(
@@ -56,6 +65,7 @@ export async function openRouterChatCompletion(
   const target = connection.baseUrl?.trim()
     ? new URL(`${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`)
     : OPENROUTER_CHAT_URL
+  const label = openRouterProviderLabel(target)
 
   return new Promise((resolve, reject) => {
     const request = https.request(target, {
@@ -74,7 +84,7 @@ export async function openRouterChatCompletion(
       response.on('data', (chunk: Buffer) => {
         receivedBytes += chunk.length
         if (receivedBytes > OPENROUTER_MAX_RESPONSE_BYTES) {
-          request.destroy(new Error('Ответ OpenRouter превышает допустимый размер'))
+          request.destroy(new Error(`Ответ ${label} превышает допустимый размер`))
           return
         }
         chunks.push(chunk)
@@ -86,13 +96,13 @@ export async function openRouterChatCompletion(
         try {
           payload = raw ? JSON.parse(raw) : {}
         } catch {
-          reject(new Error(`OpenRouter вернул некорректный JSON (${response.statusCode || 0})`))
+          reject(new Error(`${label} вернул некорректный JSON (${response.statusCode || 0})`))
           return
         }
 
         const statusCode = response.statusCode || 0
         if (statusCode < 200 || statusCode >= 300) {
-          reject(openRouterError(payload, statusCode))
+          reject(openRouterError(payload, statusCode, label))
           return
         }
         resolve(payload)
@@ -100,7 +110,7 @@ export async function openRouterChatCompletion(
     })
 
     request.setTimeout(openRouterTimeoutMs(), () => {
-      request.destroy(providerTimeoutError('OpenRouter', openRouterTimeoutMs()))
+      request.destroy(providerTimeoutError(label, openRouterTimeoutMs()))
     })
     request.on('error', (error: NodeJS.ErrnoException) => {
       // Тайм-аут сохраняем как тайм-аут: раньше он подменялся сообщением об
@@ -109,7 +119,7 @@ export async function openRouterChatCompletion(
         reject(error)
         return
       }
-      reject(providerConnectionError('OpenRouter', error))
+      reject(providerConnectionError(label, error))
     })
     request.end(body)
   })

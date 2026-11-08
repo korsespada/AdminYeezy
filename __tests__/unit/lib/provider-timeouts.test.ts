@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 import { anthropicTimeoutMs } from '@/lib/anthropic'
 import { byesuTimeoutMs } from '@/lib/byesu'
-import { openRouterTimeoutMs } from '@/lib/openrouter'
+import { openRouterProviderLabel, openRouterTimeoutMs } from '@/lib/openrouter'
 
 const TOUCHED = ['BYESU_TIMEOUT_MS', 'OPENROUTER_TIMEOUT_MS', 'ANTHROPIC_TIMEOUT_MS'] as const
 
@@ -64,5 +64,10 @@ describe('provider error classification', () => {
     expect((connection as Error & { code?: string }).code).toBe('ECONNRESET')
     expect(isProviderTimeoutError(connection)).toBe(false)
     expect(providerConnectionError('Anthropic', new Error('boom')).message).toBe('Не удалось подключиться к Anthropic')
+  })
+
+  it('names the real host of an OpenAI-compatible gateway', () => {
+    expect(openRouterProviderLabel(new URL('https://openrouter.ai/api/v1/chat/completions'))).toBe('OpenRouter')
+    expect(openRouterProviderLabel(new URL('https://byesu.com/v1/chat/completions'))).toBe('byesu.com')
   })
 })

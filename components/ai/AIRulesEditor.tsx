@@ -6,35 +6,16 @@ import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, Refr
 import { createAiProviderAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
-import { byesuApiKeyEnvName, byesuGroupLabel, byesuModelGroup, type ByesuModelOption } from '@/lib/byesu'
 import type { AiProviderRecord } from '@/lib/ai-providers'
 import type { Category, Subcategory } from '@/lib/types'
 
 type Props = {
   initialSettings: BatchAiSettings & {
-    credentials?: {
-      openrouter?: boolean
-      byesuGemini?: boolean
-      byesuOpenai?: boolean
-      byesuClaude?: boolean
-      byesuGrok?: boolean
-      byesuLegacy?: boolean
-    }
-    byesuModels?: ByesuModelOption[]
     providers?: AiProviderRecord[]
   }
   initialCategories: Category[]
   initialSubcategories: Subcategory[]
 }
-
-const FALLBACK_BYESU_MODELS: ByesuModelOption[] = [
-  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' },
-  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' },
-  // Claude 4.x видит изображения через BYESU, а свежие 5.x отвечают «не вижу фото»:
-  // для сверки по фотографиям подходит именно эта модель.
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', group: 'claude' },
-  { value: 'grok-4.7', label: 'Grok 4.7', group: 'grok' },
-]
 
 export default function AIRulesEditor({ initialSettings, initialCategories, initialSubcategories }: Props) {
   const [settings, setSettings] = useState<BatchAiSettings>({
@@ -63,26 +44,17 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
   const [newCategoryName, setNewCategoryName] = useState('')
   const [newSubcategoryName, setNewSubcategoryName] = useState('')
   const [newSubcategoryParentId, setNewSubcategoryParentId] = useState(initialCategories[0]?.id || '')
-  const credentials = initialSettings.credentials
-  const byesuModels = initialSettings.byesuModels?.length ? initialSettings.byesuModels : FALLBACK_BYESU_MODELS
   const activeSavedProvider = providers.find((provider) => provider.id === settings.activeProviderId)
-  const selectedByesuGroup = byesuModelGroup(settings.byesuModel)
-  const selectedByesuKeyReady = Boolean(activeSavedProvider?.hasApiKey) || (
-    selectedByesuGroup === 'gemini'
-      ? Boolean(credentials?.byesuGemini)
-      : selectedByesuGroup === 'claude'
-        ? Boolean(credentials?.byesuClaude)
-        : selectedByesuGroup === 'grok'
-          ? Boolean(credentials?.byesuGrok)
-          : Boolean(credentials?.byesuOpenai)
-  )
+  // Старые записи могли сохраниться с kind='byesu': модель тогда лежит в byesuModel.
+  const modelKey: 'byesuModel' | 'openrouterModel' = settings.provider === 'byesu' ? 'byesuModel' : 'openrouterModel'
+  const selectedModel = settings[modelKey]
 
   const update = <K extends keyof BatchAiSettings>(key: K, value: BatchAiSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
   }
 
-  const selectLegacyProvider = (provider: BatchAiSettings['provider']) => {
-    setSettings((current) => ({ ...current, provider, activeProviderId: null, providerId: undefined }))
+  const clearActiveProvider = () => {
+    setSettings((current) => ({ ...current, activeProviderId: null, providerId: undefined }))
   }
 
   const selectSavedProvider = (provider: AiProviderRecord) => {
@@ -148,7 +120,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
         return
       }
       setProviders((current) => current.filter((item) => item.id !== provider.id))
-      if (settings.activeProviderId === provider.id) selectLegacyProvider('openrouter')
+      if (settings.activeProviderId === provider.id) clearActiveProvider()
       setMessage({ type: 'success', text: `Провайдер «${provider.name}» удалён.` })
     })
   }
@@ -209,13 +181,15 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
 
   const save = () => startTransition(async () => {
     setMessage(null)
+    if (!activeSavedProvider) {
+      setMessage({ type: 'error', text: 'Выберите AI-провайдера или добавьте нового.' })
+      return
+    }
     const result = await updateBatchAiSettingsAction(settings)
     setMessage(result.success
       ? {
           type: 'success',
-          text: `Настройки сохранены. Новые тесты используют ${
-            settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel
-          }; продолжение уже выполненного теста сохраняет его прежний snapshot.`,
+          text: `Настройки сохранены. Новые запуски используют «${activeSavedProvider.name}» · ${selectedModel}.`,
         }
       : { type: 'error', text: result.error || 'Не удалось сохранить настройки' })
   })
@@ -223,8 +197,8 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
   return (
     <div className="space-y-6 pb-24 animate-in fade-in duration-300">
       <div className="grid gap-4 md:grid-cols-3">
-        <InfoCard icon={Image} title="Опциональные фото 3×3">
-          Для каждого поставщика можно включить фото. Без галочки AI работает только с китайским текстом.
+        <InfoCard icon={Image} title="Фото 3×3">
+          AI всегда получает коллаж фотографий товара вместе с китайским текстом.
         </InfoCard>
         <InfoCard icon={Bot} title="Промпт + правила категорий">
           Общий промпт задаёт формат и качество, а классификация подключается отдельно по категории товара.
@@ -246,28 +220,10 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
         </header>
 
         <div className="grid gap-5 p-6 lg:grid-cols-2">
-          <div className="space-y-3">
-            <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдер</span>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <ProviderButton
-                active={!settings.activeProviderId && settings.provider === 'byesu'}
-                title="BYESU API"
-                description={`Gemini ${credentials?.byesuGemini ? '✓' : '—'} · OpenAI ${credentials?.byesuOpenai ? '✓' : '—'} · Claude ${credentials?.byesuClaude ? '✓' : '—'} · Grok ${credentials?.byesuGrok ? '✓' : '—'}`}
-                onClick={() => selectLegacyProvider('byesu')}
-              />
-              <ProviderButton
-                active={!settings.activeProviderId && settings.provider === 'openrouter'}
-                title="OpenRouter"
-                description={credentials?.openrouter ? 'Ключ подключён' : 'Ключ не задан'}
-                onClick={() => selectLegacyProvider('openrouter')}
-              />
-            </div>
-          </div>
-
           <div className="space-y-3 lg:col-span-2">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Сохранённые провайдеры</span>
+                <span className="text-xs font-bold uppercase tracking-widest text-slate-500">Провайдеры</span>
                 <p className="mt-1 text-xs text-slate-500">Ключ хранится в БД зашифрованным и никогда не показывается обратно.</p>
               </div>
               <button type="button" onClick={() => openProviderForm()} className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
@@ -307,78 +263,37 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                 ))}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-700 px-4 py-5 text-sm text-slate-500">Сохранённых провайдеров пока нет. Можно продолжить использовать ключи из окружения.</div>
+              <div className="rounded-xl border border-dashed border-slate-700 px-4 py-5 text-sm text-slate-500">Провайдеров пока нет. Нажмите «Добавить AI-провайдера» и укажите название, Base URL и API-ключ.</div>
             )}
           </div>
 
           <div className="space-y-3">
-            {settings.provider === 'byesu' && (
-              <>
-                <label htmlFor="batch-ai-byesu-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                  Модель BYESU
-                </label>
-                {activeSavedProvider?.models.length ? <select
-                  id="batch-ai-byesu-model"
-                  value={settings.byesuModel}
-                  onChange={(event) => update('byesuModel', event.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
-                >
-                  {activeSavedProvider.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
-                </select> : <select
-                  id="batch-ai-byesu-model"
-                  value={settings.byesuModel}
-                  onChange={(event) => update('byesuModel', event.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-white outline-none focus:border-indigo-500"
-                >
-                  {!byesuModels.some((model) => model.value === settings.byesuModel) && (
-                    <option value={settings.byesuModel}>{settings.byesuModel}</option>
-                  )}
-                  {byesuModels.map((model) => (
-                    <option key={`${model.group}:${model.value}`} value={model.value}>{model.label} · {byesuGroupLabel(model.group)}</option>
-                  ))}
-                </select>}
-                <div className={`rounded-xl border p-3 text-sm ${
-                  selectedByesuKeyReady
-                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                    : 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                }`}>
-                  <div className="font-semibold">
-                    Группа {byesuGroupLabel(selectedByesuGroup)}
-                  </div>
-                  <p className="mt-1">
-                    {selectedByesuKeyReady
-                      ? activeSavedProvider ? `Ключ сохранён в провайдере «${activeSavedProvider.name}».` : 'Нужный API-ключ подключён.'
-                      : `Добавьте ${byesuApiKeyEnvName(selectedByesuGroup)} в Coolify.`}
-                  </p>
-                </div>
-                <p className="text-xs leading-relaxed text-slate-500">
-                  Список загружен из каталога BYESU по подключённым ключам. BYESU привязывает ключ к группе, поэтому в поставщиках их вводить не нужно.
-                </p>
-              </>
-            )}
-
-            {settings.provider === 'openrouter' && (
+            {activeSavedProvider ? (
               <>
                 <label htmlFor="batch-ai-model" className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                  Модель OpenRouter
+                  Модель «{activeSavedProvider.name}»
                 </label>
-                {activeSavedProvider?.models.length ? <select
+                {activeSavedProvider.models.length ? <select
                   id="batch-ai-model"
-                  value={settings.openrouterModel}
-                  onChange={(event) => update('openrouterModel', event.target.value)}
+                  value={selectedModel}
+                  onChange={(event) => update(modelKey, event.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
                 >
+                  {!activeSavedProvider.models.some((model) => model.value === selectedModel) && <option value={selectedModel}>{selectedModel}</option>}
                   {activeSavedProvider.models.map((model) => <option key={model.value} value={model.value}>{model.label}</option>)}
                 </select> : <input
                   id="batch-ai-model"
-                  value={settings.openrouterModel}
-                  onChange={(event) => update('openrouterModel', event.target.value)}
-                  placeholder="google/gemini-2.5-flash"
+                  value={selectedModel}
+                  onChange={(event) => update(modelKey, event.target.value)}
+                  placeholder="Название модели"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
                 />}
               </>
+            ) : (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+                Провайдер не выбран: AI-обработка не запустится. Выберите карточку провайдера выше.
+              </div>
             )}
-
           </div>
 
           <label className="space-y-2 text-sm text-slate-300">
@@ -416,7 +331,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
               onChange={(event) => update('concurrency', Number(event.target.value))}
               className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-500"
             />
-            <span className="block text-xs text-slate-500">Общий лимит для OpenRouter и BYESU. Поставщик может запретить параллельную обработку.</span>
+            <span className="block text-xs text-slate-500">Общий лимит одновременных запросов к выбранному провайдеру.</span>
           </label>
         </div>
       </section>
@@ -544,30 +459,5 @@ function InfoCard({ icon: Icon, title, children }: { icon: typeof Bot; title: st
       <div className="flex items-center gap-2 font-semibold text-white"><Icon className="h-4 w-4 text-indigo-400" /> {title}</div>
       <p className="mt-2 text-sm leading-relaxed text-slate-400">{children}</p>
     </div>
-  )
-}
-
-function ProviderButton({ active, title, description, onClick }: {
-  active: boolean
-  title: string
-  description: string
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-xl border p-4 text-left transition ${
-        active
-          ? 'border-indigo-500 bg-indigo-500/10 text-white shadow-lg'
-          : 'border-slate-700 bg-slate-950/50 text-slate-400 hover:border-slate-600'
-      }`}
-    >
-      <span className="flex items-center justify-between font-semibold">
-        {title}
-        {active && <CheckCircle2 className="h-4 w-4 text-indigo-400" />}
-      </span>
-      <span className="mt-1 block text-xs text-slate-500">{description}</span>
-    </button>
   )
 }

@@ -12,10 +12,11 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
-  Send,
   Trash2,
   FolderPlus,
   RotateCcw,
+  Settings2,
+  Globe,
   BadgeRussianRuble,
   Sparkles,
   Square,
@@ -34,10 +35,8 @@ import {
   createExportFolderAction,
   deleteExportFolderAction,
   getBatchAiRunAction,
-  getBatchSnapshotsAction,
   moveBatchToFolderAction,
   renameExportFolderAction,
-  rollbackBatchAction,
   startBatchAiAction,
   stopBatchAiRunAction,
 } from '@/actions/batch-ai'
@@ -249,12 +248,20 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
 
   const handleDeleteFileFromAdmin = async (batch: ExportHistoryBatch, file: ExportHistoryFile) => {
     if (file.is_virtual) return
-    if (!confirm(`Удалить этап "${fileName(file.result_path)}" из админки?`)) return
+    const stageName = file.label || file.status || fileName(file.result_path)
+    const rollsBack = file.is_current && file.status !== 'Сырой товар'
+    if (!confirm(rollsBack
+      ? `Удалить этап «${stageName}»?
+
+Товары партии вернутся к предыдущему этапу, и он станет текущей версией.`
+      : `Удалить этап «${stageName}» из истории?`)) return
 
     setPendingAction(`file-${file.id}`)
     const res = await deleteExportFileFromAdminAction(Number(file.id))
     if (res.success) {
-      setBatches((prev) => prev
+      // После отката текущим становится предыдущий этап: берём свежую историю.
+      if (rollsBack) await refresh()
+      else setBatches((prev) => prev
         .map((item) => item.id === batch.id ? { ...item, files: item.files.filter((f) => f.id !== file.id) } : item)
         .filter((item) => item.files.length > 0))
     } else {
@@ -351,18 +358,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
     } finally {
       setPendingAction(null)
     }
-  }
-
-  const rollback = async (batch: ExportHistoryBatch) => {
-    const result = await getBatchSnapshotsAction(batch.id)
-    if (!result.success || !result.data?.length) return alert('Снимков для отката нет')
-    const list = result.data.map((snapshot: any, index: number) => `${index + 1}. ${snapshot.label} · ${formatDate(snapshot.created_at)} · ${snapshot.items_count} шт.`).join('\n')
-    const selected = Number(prompt(`Выберите этап, к которому вернуть товары:\n${list}`))
-    const snapshot = result.data[selected - 1]
-    if (!snapshot || !confirm('Поздние снимки и AI-версии будут удалены. Продолжить?')) return
-    const rollbackResult = await rollbackBatchAction(batch.id, snapshot.id)
-    if (rollbackResult.success) await refresh()
-    else alert(rollbackResult.error)
   }
 
   const visibleBatches = batches.filter((batch) => {
@@ -475,20 +470,11 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 const aiProductCount = Number(batch.ai_product_count || 0)
                 const productCount = Number(batch.product_count || batch.items_count || 0)
                 const hasAiRemaining = productCount > 0 && aiProductCount < productCount
-                // A previously published batch may need a safe retry when the
-                // catalog import was interrupted after the stage was marked
-                // PUSHED. Both publication modes are idempotent by external_id.
-                const canPublish = ['SCRIPT_PROCESSED', 'AI_PROCESSED', 'PUSHED'].includes(String(batch.stage || '')) && productCount > 0 && aiProductCount === productCount
                 const canDeleteCatalog = canDeletePublishedCatalog(batch.stage, batch.published_external_count, batch.catalog_deleted_at)
                 const aiRunning = ['queued', 'running'].includes(batch.ai_run_status || '')
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'
                 const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
-                const hasScript = batch.has_script !== false
-                const pathStages = hasScript
-                  ? [['SCRAPED', 'Сырой товар'], ['SCRIPT_PROCESSED', 'Скрипт'], ['AI_PROCESSED', 'ИИ'], ['PUSHED', 'Опубликовано']]
-                  : [['SCRAPED', 'Сырой товар'], ['AI_PROCESSED', 'ИИ'], ['PUSHED', 'Опубликовано']]
-                const currentIndex = pathStages.findIndex(([stage]) => stage === String(batch.stage || ''))
 
                 return (
                   <React.Fragment key={batch.id}>
@@ -586,77 +572,41 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                             {!batch.isSynthetic && batch.supplier_id && (
                               <button
                                 onClick={() => router.push(`/admin/suppliers?supplier=${batch.supplier_id}`)}
-                                className="flex w-full items-start gap-2 px-4 py-2 text-sm text-violet-300 transition-colors hover:bg-violet-500/10"
+                                className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800"
                               >
-                                <Sparkles className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span><b className="block">Настройки AI поставщика</b><small className="text-slate-500">Постоянные правила применяются к тесту и полной обработке</small></span>
+                                <Settings2 className="h-4 w-4 shrink-0" />
+                                Настройки поставщика
                               </button>
                             )}
-                            {!batch.isSynthetic && canPublish && (
-                              <button onClick={() => router.push(`/admin/batches/${encodeURIComponent(batch.id)}`)} className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-emerald-300 hover:bg-emerald-500/10">
-                                <Send className="mt-0.5 h-4 w-4 shrink-0" /><span><b className="block">Открыть для публикации</b><small className="text-slate-500">Выбрать режим и видеть ход операции</small></span>
-                              </button>
-                            )}
-                            <button
-                              onClick={() => rollback(batch)}
-                              disabled={batch.isSynthetic}
-                              className="flex w-full items-start gap-2 px-4 py-2 text-sm text-amber-300 transition-colors hover:bg-amber-500/10 disabled:text-slate-600"
-                            >
-                              <RotateCcw className="mt-0.5 h-4 w-4 shrink-0" />
-                              <span><b className="block">Восстановить версию…</b><small className="text-slate-500">Вернуть товары к сохранённому этапу</small></span>
-                            </button>
                             {canDeleteCatalog && !batch.isSynthetic && (
                               <button
-                              onClick={() => handleDeleteFromCatalog(batch)}
-                              disabled={isBusy}
-                              className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:text-slate-600"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              <span><b className="block">Удалить с сайта</b><small className="block text-slate-500">Локальная выгрузка останется</small></span>
-                            </button>
+                                onClick={() => handleDeleteFromCatalog(batch)}
+                                disabled={isBusy}
+                                className="flex w-full items-start gap-2 px-4 py-2 text-left text-sm text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:text-slate-600"
+                              >
+                                <Globe className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span><b className="block font-medium">Удалить с сайта</b><small className="block text-slate-500">Товары уйдут из каталога, локальная выгрузка останется</small></span>
+                              </button>
                             )}
                             <button
                               onClick={() => handleDeleteFromDb(batch)}
                               disabled={batch.isSynthetic || batch.status === 'Удалено из БД' || isBusy}
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-slate-200 transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600"
                             >
-                              <Database className="h-4 w-4" />
-                              <span><b className="block">Удалить локальную выгрузку</b><small className="block text-slate-500">Товары сайта останутся</small></span>
+                              <Database className="h-4 w-4 shrink-0" />
+                              Удалить локально
                             </button>
                             <button
                               onClick={() => handleDeleteBatchFromAdmin(batch)}
                               className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/10"
                             >
-                              <ArchiveX className="h-4 w-4" />
-                              Удалить историю выгрузки
+                              <ArchiveX className="h-4 w-4 shrink-0" />
+                              Удалить из истории
                             </button>
                           </div>
                         )}
                       </td>
                     </tr>
-
-                    {isExpanded && !batch.isSynthetic && (
-                      <tr className="border-b border-slate-800 bg-slate-950/60">
-                        <td colSpan={6} className="px-6 py-4">
-                          <div className="mb-2 flex items-center justify-between gap-3">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Путь выгрузки</span>
-                            {batch.stage === 'DELETED_FROM_DB' && <span className="text-xs text-rose-300">Локальные товары удалены</span>}
-                          </div>
-                          <div className={`grid gap-1.5 ${hasScript ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
-                            {pathStages.map(([stage, label], index) => {
-                              const reached = currentIndex >= index && currentIndex >= 0
-                              const hint = currentIndex === index ? 'Текущий' : reached ? 'Сохранён' : 'Не пройден'
-                              return (
-                                <div key={stage} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${reached ? 'border-indigo-400/30 bg-indigo-500/10' : 'border-slate-800 bg-slate-900'}`}>
-                                  <div className={`truncate text-[11px] font-semibold ${reached ? 'text-indigo-200' : 'text-slate-500'}`}>{index + 1}. {label}</div>
-                                  <div className="shrink-0 text-[9px] text-slate-600">{hint}</div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
 
                     {isExpanded && batch.files.map((file) => (
                       <tr

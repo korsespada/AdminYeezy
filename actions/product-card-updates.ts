@@ -43,7 +43,7 @@ import {
   stopCardApplyRun,
 } from '@/lib/product-card-apply-run'
 import { isCardAutoApplyEnabled } from '@/lib/product-card-suppliers'
-import { hydrateBatchAiSettings } from '@/lib/batch-ai-settings'
+import { hydrateBatchAiSettings, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { ActionResponse } from '@/lib/types'
@@ -486,7 +486,7 @@ export async function runProductCardsAiAction(
     if (!settingsResult.success || !settingsResult.data) {
       throw new Error('Не удалось прочитать настройки ИИ в «Выгрузках»')
     }
-    const settings = await hydrateBatchAiSettings(settingsResult.data as BatchAiSettings)
+    const settings = requireSavedBatchAiProvider(await hydrateBatchAiSettings(settingsResult.data as BatchAiSettings))
     const model = settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel
     const supplierPrompt = await resolveCardSupplierPrompt(preset.key)
 

@@ -25,6 +25,19 @@ export async function hydrateBatchAiSettings(settings: BatchAiSettings): Promise
   }
 }
 
+export const MISSING_BATCH_AI_PROVIDER_ERROR = 'Выберите AI-провайдера в «Настройках ИИ»: добавьте название, Base URL и API-ключ'
+
+/**
+ * ИИ «Выгрузок» работает только через провайдера, сохранённого в интерфейсе.
+ * Ключи из окружения (OPENROUTER_API_KEY, BYESU_*) здесь больше не используются.
+ */
+export function requireSavedBatchAiProvider(settings: BatchAiSettings) {
+  if (!settings.providerApiKey?.trim() || !settings.providerBaseUrl?.trim()) {
+    throw new Error(MISSING_BATCH_AI_PROVIDER_ERROR)
+  }
+  return settings
+}
+
 const CORE_SETTINGS_KEYS = [
   'batch_ai_provider',
   'batch_ai_provider_id',

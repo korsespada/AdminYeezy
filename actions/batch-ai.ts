@@ -76,7 +76,6 @@ import {
   saveBatchAiSuggestions,
   savePreparedColorFamilySuggestion,
 } from '@/lib/batch-ai-suggestions'
-import { byesuApiKeyEnvName, byesuApiKeyStatus, byesuGroupLabel, byesuModelGroup, getByesuModels } from '@/lib/byesu'
 import { openRouterChatCompletion } from '@/lib/openrouter'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { buildProductSeoSlug, normalizeMediaSeoOutput } from '@/lib/product-media-seo'
@@ -90,7 +89,7 @@ import {
   type AiProviderRecord,
 } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
-import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib } from '@/lib/batch-ai-settings'
+import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
 import {
@@ -125,12 +124,6 @@ const SETTINGS_KEYS = [
   'batch_ai_category_rules',
 ]
 
-const FALLBACK_BYESU_MODELS = [
-  { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', group: 'gemini' as const },
-  { value: 'gpt-5.6-luna', label: 'GPT 5.6 Luna', group: 'openai' as const },
-  { value: 'grok-4.7', label: 'Grok 4.7', group: 'grok' as const },
-]
-
 function finiteNumber(value: unknown, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
@@ -159,9 +152,6 @@ export async function getBatchAiSettingsAction() {
     : ['openrouter', 'byesu'].includes(values.batch_ai_provider)
     ? values.batch_ai_provider as BatchAiProvider
     : 'openrouter'
-  const byesuKeys = byesuApiKeyStatus()
-  const fetchedByesuModels = await getByesuModels()
-  const byesuModels = fetchedByesuModels.length > 0 ? fetchedByesuModels : FALLBACK_BYESU_MODELS
   const providers: AiProviderRecord[] = configuredProviders.rows.map((row) => ({
     id: String(row.id),
     name: String(row.name || ''),
@@ -186,15 +176,6 @@ export async function getBatchAiSettingsAction() {
       concurrency: Math.max(1, Math.min(10, Math.round(finiteNumber(values.batch_ai_concurrency, 5)))),
       systemPrompt: values.batch_ai_system_prompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       categoryRules: normalizeBatchAiCategoryRules(safeJsonParse(values.batch_ai_category_rules)),
-      credentials: {
-        openrouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
-        byesuGemini: byesuKeys.gemini,
-        byesuOpenai: byesuKeys.openai,
-        byesuClaude: byesuKeys.claude,
-        byesuGrok: byesuKeys.grok,
-        byesuLegacy: byesuKeys.legacy,
-      },
-      byesuModels,
     },
   }
 }
@@ -1075,19 +1056,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
     const needsAiProvider = mode !== 'variants'
       || Boolean((variantPlan?.visualCandidates.length || 0) + (variantPlan?.shadeCandidates.length || 0))
 
-    if (needsAiProvider && settings.provider === 'byesu' && !settings.providerApiKey) {
-      const group = byesuModelGroup(settings.byesuModel)
-      const keys = byesuApiKeyStatus()
-      if (!keys[group]) {
-        return {
-          success: false,
-          error: `Для этой модели нужен ${byesuApiKeyEnvName(group)} (группа ${byesuGroupLabel(group)})`,
-        }
-      }
-    }
-    if (needsAiProvider && settings.provider === 'openrouter' && !settings.providerApiKey && !process.env.OPENROUTER_API_KEY?.trim()) {
-      return { success: false, error: 'OPENROUTER_API_KEY не задан в окружении AdminYeezy' }
-    }
+    if (needsAiProvider) requireSavedBatchAiProvider(settings)
 
     // Processing switches belong to the supplier, not to an individual launch:
     // every run reads the current global AI settings and supplier switches.

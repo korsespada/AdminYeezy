@@ -175,6 +175,20 @@ function productVideoForDisplay(product: CsvProduct) {
   return { url, posterUrl };
 }
 
+/** Число колонок сетки товаров при текущей ширине окна (те же брейкпоинты, что в классах сетки). */
+function useGridColumnCount(viewMode: "cards" | "photos" | "rows", cardColumns: number) {
+  const [width, setWidth] = useState(1280);
+  useEffect(() => {
+    const update = () => setWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  if (width >= 1024) return cardColumns;
+  if (viewMode === "photos") return 4;
+  return width >= 640 ? 2 : 1;
+}
+
 function approvedVariantGroupKey(product: CsvProduct) {
   const key = String(product.variant_group_key || "").trim();
   return /^[0-9a-f]{32}$/i.test(key) ? key : "";
@@ -935,11 +949,41 @@ export default function CsvImportApp({
   const filteredProducts = facetProducts.all;
 
   const displayedProducts = filteredProducts;
-  const visibleProducts = useMemo(
-    () => displayedProducts.slice(0, visibleProductCount),
-    [displayedProducts, visibleProductCount],
-  );
-  const hasMoreVisibleProducts = visibleProducts.length < displayedProducts.length;
+  // Цвета одной семьи идут подряд на месте первого цвета: сетка рисует их
+  // одним обведённым блоком, а ленивая подгрузка не разрывает семью.
+  const productUnits = useMemo(() => {
+    const units: { familyKey: string; products: CsvProduct[] }[] = [];
+    const familyUnits = new Map<string, { familyKey: string; products: CsvProduct[] }>();
+    for (const product of displayedProducts) {
+      const key = approvedVariantGroupKey(product);
+      if (key && variantGroups.has(key)) {
+        const existing = familyUnits.get(key);
+        if (existing) {
+          existing.products.push(product);
+          continue;
+        }
+        const unit = { familyKey: key, products: [product] };
+        familyUnits.set(key, unit);
+        units.push(unit);
+        continue;
+      }
+      units.push({ familyKey: "", products: [product] });
+    }
+    return units;
+  }, [displayedProducts, variantGroups]);
+  const visibleUnits = useMemo(() => {
+    const result: typeof productUnits = [];
+    let count = 0;
+    for (const unit of productUnits) {
+      if (count >= visibleProductCount) break;
+      result.push(unit);
+      count += unit.products.length;
+    }
+    return result;
+  }, [productUnits, visibleProductCount]);
+  const visibleProducts = useMemo(() => visibleUnits.flatMap((unit) => unit.products), [visibleUnits]);
+  const hasMoreVisibleProducts = visibleUnits.length < productUnits.length;
+  const gridColumns = useGridColumnCount(viewMode, cardColumns);
   const lazyLoadSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -2866,7 +2910,7 @@ export default function CsvImportApp({
             <div
               className={viewMode === "rows"
                 ? "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
-                : `grid pb-48 ${viewMode === "photos" ? "grid-cols-4 gap-1.5 sm:gap-2.5" : "grid-cols-1 gap-5 sm:grid-cols-2"} ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
+                : `grid grid-flow-row-dense pb-48 ${viewMode === "photos" ? "grid-cols-4 gap-1.5 sm:gap-2.5" : "grid-cols-1 gap-5 sm:grid-cols-2"} ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
               }
             >
               {viewMode === "rows" && (
@@ -2881,7 +2925,8 @@ export default function CsvImportApp({
                   <div />
                 </div>
               )}
-              {visibleProducts.map((product) => {
+              {(() => {
+              const renderProduct = (product: CsvProduct) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
@@ -3011,7 +3056,29 @@ export default function CsvImportApp({
                   />
                 )}
                 </React.Fragment>;
-              })}
+              };
+              if (viewMode === "rows") return visibleProducts.map((product) => renderProduct(product));
+              return visibleUnits.map((unit) => {
+                if (unit.products.length < 2) return renderProduct(unit.products[0]);
+                const span = Math.min(unit.products.length, gridColumns);
+                const colors = variantFamilyColors(unit.products);
+                return (
+                  <div
+                    key={`family-${unit.familyKey}`}
+                    style={{ gridColumn: `span ${span} / span ${span}` }}
+                    className="overflow-hidden rounded-xl border-2 border-violet-500/50 bg-violet-500/5"
+                  >
+                    <div className="flex min-w-0 items-center gap-2 border-b border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] text-violet-200">
+                      <span className="truncate font-semibold">{variantFamilyTitle(unit.products)}</span>
+                      <span className="truncate text-violet-300/70">· {unit.products.length} цв.{colors.length ? ` · ${colors.join(", ")}` : ""}</span>
+                    </div>
+                    <div className="grid" style={{ gridTemplateColumns: `repeat(${span}, minmax(0, 1fr))` }}>
+                      {unit.products.map((product) => renderProduct(product))}
+                    </div>
+                  </div>
+                );
+              });
+              })()}
             </div>
             {hasMoreVisibleProducts && (
               <div

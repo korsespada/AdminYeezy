@@ -14,6 +14,7 @@ import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
 import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsSupplierFacets, invalidateRailsCatalogCaches } from '@/lib/rails-admin'
 import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
+import { rollbackBatchAction } from '@/actions/batch-ai'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -1315,6 +1316,29 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
   }
 }
 
+const STAGE_BY_TASK_STATUS: Record<string, string> = {
+  'Обработан скриптом': 'SCRIPT_PROCESSED',
+  'Обработано ИИ': 'AI_PROCESSED',
+}
+const EARLIER_STAGES: Record<string, string[]> = {
+  SCRIPT_PROCESSED: ['SCRAPED'],
+  AI_PROCESSED: ['SCRAPED', 'SCRIPT_PROCESSED'],
+}
+
+/** Снимок, к которому вернуть партию, если удаляют её текущий этап. */
+async function previousStageSnapshotId(batchId: string, taskStatus: string) {
+  const stage = STAGE_BY_TASK_STATUS[taskStatus]
+  if (!stage) return null
+  const batch = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
+  if (batch.rows[0]?.stage !== stage) return null
+  const snapshot = await scrapingQuery(`
+    SELECT id FROM batch_snapshots
+    WHERE batch_id=$1 AND stage=ANY($2::text[])
+    ORDER BY created_at DESC LIMIT 1
+  `, [batchId, EARLIER_STAGES[stage]])
+  return snapshot.rows[0]?.id ? String(snapshot.rows[0].id) : null
+}
+
 export async function deleteTaskAction(taskId: number): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -1323,6 +1347,16 @@ export async function deleteTaskAction(taskId: number): Promise<ActionResponse> 
     if (res.rows[0]?.batch_id) {
       const operation = await scrapingQuery('SELECT operation FROM batch_operation_locks WHERE batch_id=$1', [res.rows[0].batch_id])
       if (operation.rows[0]) return { success: false, error: `Выгрузка занята операцией: ${operation.rows[0].operation}` }
+    }
+    // Удаление текущего этапа (скрипт или ИИ) возвращает товары партии к
+    // предыдущему снимку: иначе партия остаётся в удалённом этапе, а прежний
+    // этап открывается только как неактуальный исторический снимок.
+    const rollbackSnapshotId = res.rows[0]?.batch_id
+      ? await previousStageSnapshotId(String(res.rows[0].batch_id), normalizeTaskStatus(res.rows[0].status, res.rows[0].result_path))
+      : null
+    if (rollbackSnapshotId) {
+      const rollback = await rollbackBatchAction(String(res.rows[0].batch_id), rollbackSnapshotId)
+      if (!rollback.success) return { success: false, error: `Не удалось вернуть товары к предыдущему этапу: ${rollback.error}` }
     }
     const filePath = res.rows[0]?.result_path
     await deleteScrapingFileArtifactForTask(taskId)
