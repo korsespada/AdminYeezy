@@ -685,6 +685,7 @@ export default function CsvImportApp({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchUpdateTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const batchPendingPatches = useRef<Map<string, Partial<CsvProduct>>>(new Map());
   const catalogReferenceSignature = useMemo(() => JSON.stringify({
     brands: [...new Set(products.map((product) => String(product.brand || "")).filter(Boolean))].sort(),
     categories: [...new Set(products.map((product) => String(product.category || "")).filter(Boolean))].sort(),
@@ -1532,30 +1533,43 @@ export default function CsvImportApp({
       setProducts((prev) =>
         prev.map((p, i) => (i === index ? { ...p, [field]: value, ...(field === 'price' ? { price_source: 'manual' } : {}) } : p)),
       );
-      setIsDirty(true);
-      if (batchId && currentProduct) {
-        const identifier = currentProduct.id || currentProduct.external_id;
-        if (identifier) {
-          const timerKey = `${batchId}:${identifier}:${field}`;
-          const previousTimer = batchUpdateTimers.current.get(timerKey);
-          if (previousTimer) clearTimeout(previousTimer);
-          const timer = setTimeout(() => {
-            updateBatchProductAction(identifier, { [field]: value } as Partial<CsvProduct>, batchId)
-                .then((res) => {
-                  if (res.success) {
-                  if (batchUpdateTimers.current.size <= 1) setIsDirty(false);
-                  setSaveMsg("✓ Сохранено в БД");
-                  setTimeout(() => setSaveMsg(null), 2500);
-                } else {
-                  setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
-                }
-              })
-              .catch((error) => setSaveMsg("✗ Ошибка БД: " + error.message))
-              .finally(() => batchUpdateTimers.current.delete(timerKey));
-          }, 500);
-          batchUpdateTimers.current.set(timerKey, timer);
-        }
+      const identifier = batchId && currentProduct ? currentProduct.id || currentProduct.external_id : null;
+      if (!batchId || !identifier) {
+        setIsDirty(true);
+        return;
       }
+      // Правки партии сохраняются автоматически, поэтому кнопки «Сохранить БД» и
+      // «Отменить изменения» на время автосохранения не появляются (раньше они
+      // мигали в шапке при каждом перетаскивании фото). Поля одного товара,
+      // изменённые за 500 мс (фото, подписи и slug при перестановке), уходят
+      // одним запросом, а не тремя.
+      const timerKey = `${batchId}:${identifier}`;
+      const pendingPatch = { ...(batchPendingPatches.current.get(timerKey) || {}), [field]: value } as Partial<CsvProduct>;
+      batchPendingPatches.current.set(timerKey, pendingPatch);
+      const previousTimer = batchUpdateTimers.current.get(timerKey);
+      if (previousTimer) clearTimeout(previousTimer);
+      const timer = setTimeout(() => {
+        const patch = batchPendingPatches.current.get(timerKey) || pendingPatch;
+        batchPendingPatches.current.delete(timerKey);
+        updateBatchProductAction(identifier, patch, batchId)
+          .then((res) => {
+            if (res.success) {
+              setSaveMsg("✓ Сохранено в БД");
+              setTimeout(() => setSaveMsg(null), 2500);
+            } else {
+              setIsDirty(true);
+              setSaveMsg("✗ Ошибка БД: " + (res.error || "unknown"));
+            }
+          })
+          .catch((error) => {
+            setIsDirty(true);
+            setSaveMsg("✗ Ошибка БД: " + error.message);
+          })
+          .finally(() => {
+            if (batchUpdateTimers.current.get(timerKey) === timer) batchUpdateTimers.current.delete(timerKey);
+          });
+      }, 500);
+      batchUpdateTimers.current.set(timerKey, timer);
     },
     [batchId, isSnapshotSource, products],
   );
