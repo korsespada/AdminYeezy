@@ -60,6 +60,7 @@ import {
   detachBatchVariantProductAction,
   deleteBatchVariantFamilyAction,
   deleteBatchProductAction,
+  deleteBatchProductsAction,
   getSupplierDataAction,
   runCustomSupplierScriptAction,
   type CsvProduct,
@@ -1732,28 +1733,31 @@ export default function CsvImportApp({
         return;
       }
 
-      const deletedIdentifiers = new Set<string>();
-      const failures: string[] = [];
-      for (const product of selectedProducts) {
-        const identifier = product.id || product.external_id;
-        if (!identifier) {
-          failures.push(product.name || product.external_id || 'товар без идентификатора');
-          continue;
-        }
-        const result = await deleteBatchProductAction(identifier, batchId);
-        if (result.success) deletedIdentifiers.add(String(identifier));
-        else failures.push(`${product.name || product.external_id}: ${result.error || 'ошибка удаления'}`);
+      const identifiers = selectedProducts
+        .map((product) => product.id || product.external_id)
+        .filter((identifier): identifier is string | number => Boolean(identifier));
+      const result = await deleteBatchProductsAction(identifiers, batchId);
+      if (!result.success) {
+        setSaveMsg(`✗ Не удалось удалить товары: ${result.error || 'ошибка удаления'}`);
+        return;
       }
-
-      if (deletedIdentifiers.size > 0) {
-        setProducts((current) => current.filter((product) => !deletedIdentifiers.has(String(product.id || product.external_id))));
+      const deletedIds = new Set((result.data?.deleted || []).map((row) => String(row.id)));
+      const deletedExternalIds = new Set((result.data?.deleted || []).map((row) => row.external_id).filter(Boolean));
+      const isDeleted = (product: CsvProduct) => (
+        (product.id !== undefined && product.id !== null && deletedIds.has(String(product.id)))
+        || (!product.id && deletedExternalIds.has(String(product.external_id || '')))
+      );
+      const deletedCount = deletedIds.size;
+      if (deletedCount > 0) {
+        setProducts((current) => current.filter((product) => !isDeleted(product)));
         setSelectedForMerge([]);
         setSelectedIdx(null);
       }
       setIsDirty(false);
-      setSaveMsg(failures.length
-        ? `Удалено: ${deletedIdentifiers.size}. Не удалось удалить: ${failures.length}. ${failures.slice(0, 2).join(' · ')}`
-        : `✓ Удалено товаров: ${deletedIdentifiers.size}`);
+      const missed = selectedProducts.length - deletedCount;
+      setSaveMsg(missed > 0
+        ? `Удалено: ${deletedCount}. Не найдено в БД: ${missed}.`
+        : `✓ Удалено товаров: ${deletedCount}`);
     } finally {
       setIsBulkDeleting(false);
     }
@@ -2926,7 +2930,7 @@ export default function CsvImportApp({
                 </div>
               )}
               {(() => {
-              const renderProduct = (product: CsvProduct) => {
+              const renderProduct = (product: CsvProduct, inFamilyBlock = false) => {
                 const realIndex = products.indexOf(product);
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
@@ -2947,7 +2951,7 @@ export default function CsvImportApp({
                   metadata: {},
                   created: '', updated: '', collectionId: '', collectionName: 'products',
                 } as any;
-                const variants = variantGroups.get(approvedVariantGroupKey(product)) || [];
+                const variants = inFamilyBlock ? [] : variantGroups.get(approvedVariantGroupKey(product)) || [];
                 const variantColors = [...new Set(variants.flatMap((variant) => attributeValues(variant.attributes?.colors ?? variant.attributes?.color)))];
                 return <React.Fragment key={`${product.external_id}-${realIndex}`}>
                 {viewMode === "rows" ? (
@@ -3061,19 +3065,15 @@ export default function CsvImportApp({
               return visibleUnits.map((unit) => {
                 if (unit.products.length < 2) return renderProduct(unit.products[0]);
                 const span = Math.min(unit.products.length, gridColumns);
-                const colors = variantFamilyColors(unit.products);
+                // Рамка уже показывает семью: без шапки с названием и без бейджей вариантов на карточках.
                 return (
                   <div
                     key={`family-${unit.familyKey}`}
                     style={{ gridColumn: `span ${span} / span ${span}` }}
                     className="overflow-hidden rounded-xl border-2 border-violet-500/50 bg-violet-500/5"
                   >
-                    <div className="flex min-w-0 items-center gap-2 border-b border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[11px] text-violet-200">
-                      <span className="truncate font-semibold">{variantFamilyTitle(unit.products)}</span>
-                      <span className="truncate text-violet-300/70">· {unit.products.length} цв.{colors.length ? ` · ${colors.join(", ")}` : ""}</span>
-                    </div>
                     <div className="grid" style={{ gridTemplateColumns: `repeat(${span}, minmax(0, 1fr))` }}>
-                      {unit.products.map((product) => renderProduct(product))}
+                      {unit.products.map((product) => renderProduct(product, true))}
                     </div>
                   </div>
                 );

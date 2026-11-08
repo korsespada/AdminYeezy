@@ -1012,6 +1012,44 @@ export async function deleteBatchProductAction(identifier: string | number, batc
   }
 }
 
+/**
+ * Массовое удаление товаров партии одним запросом. Раньше выбранные товары
+ * удалялись по одному: отдельный server action, пересчёт счётчика и
+ * перерисовка страницы на каждый товар.
+ */
+export async function deleteBatchProductsAction(identifiers: Array<string | number>, batchId: string) {
+  try {
+    await requireAdmin()
+    if (!batchId) return { success: false, error: 'Для удаления товаров требуется batchId' }
+    if (await activeBatchOperation(batchId)) return { success: false, error: 'Нельзя удалять товары во время обработки выгрузки' }
+    const ids: number[] = []
+    const externalIds: string[] = []
+    for (const identifier of identifiers) {
+      const value = String(identifier ?? '').trim()
+      if (!value) continue
+      if (/^\d+$/.test(value)) ids.push(Number(value))
+      else externalIds.push(value)
+    }
+    if (ids.length === 0 && externalIds.length === 0) return { success: false, error: 'Не выбраны товары для удаления' }
+    const deleted = await scrapingQuery(`
+      DELETE FROM products
+      WHERE batch_id=$1 AND (id=ANY($2::bigint[]) OR external_id=ANY($3::text[]))
+      RETURNING id, external_id
+    `, [batchId, ids, externalIds])
+    await scrapingQuery('UPDATE scraping_batches SET items_count=(SELECT COUNT(*) FROM products WHERE batch_id=$1), updated_at=NOW() WHERE id=$1', [batchId])
+    revalidatePath('/admin/batches')
+    revalidatePath('/admin/scraping')
+    return {
+      success: true,
+      data: {
+        deleted: deleted.rows.map((row) => ({ id: Number(row.id), external_id: String(row.external_id || '') })),
+      },
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
 export async function exportBatchProductsCsvAction(batchId: string): Promise<any> {
   try {
     await requireAdmin()

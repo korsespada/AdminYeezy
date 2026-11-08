@@ -175,6 +175,28 @@ describe('batch product server actions', () => {
     )
   })
 
+  it('deletes selected batch products in one query', async () => {
+    const { deleteBatchProductsAction } = await import('@/actions/csv-import')
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 7, external_id: 'ext-7' }, { id: 9, external_id: 'ext-1' }] })
+      .mockResolvedValue({ rowCount: 1 })
+
+    const res = await deleteBatchProductsAction([7, '9', 'ext-1', ''], 'batch-1')
+
+    expect(res).toEqual({
+      success: true,
+      data: { deleted: [{ id: 7, external_id: 'ext-7' }, { id: 9, external_id: 'ext-1' }] },
+    })
+    expect(mocks.scrapingQuery).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('DELETE FROM products'),
+      ['batch-1', [7, 9], ['ext-1']],
+    )
+    expect(mocks.scrapingQuery).toHaveBeenCalledTimes(3)
+    expect(mocks.revalidatePath).toHaveBeenCalledTimes(2)
+  })
+
   it('exports batch products as csv content', async () => {
     const { exportBatchProductsCsvAction } = await import('@/actions/csv-import')
     mocks.scrapingQuery.mockResolvedValueOnce({
