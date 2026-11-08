@@ -76,3 +76,29 @@ describe('ai usage pricing', () => {
     expect(cost).toBeCloseTo(0.003048, 8)
   })
 })
+
+describe('batch AI truncated responses', () => {
+  it('rejects a response cut by the token limit', async () => {
+    const { batchAiTruncationError, isRetryableBatchAiError } = await import('@/lib/batch-ai')
+    const error = batchAiTruncationError({
+      choices: [{ finish_reason: 'length', message: { content: '{"product":{"category":"x"' } }],
+      usage: { completion_tokens: 8000, completion_tokens_details: { reasoning_tokens: 6920 } },
+    }, 'openai', 8000)
+    expect(error?.message).toContain('8000, из них 6920 на размышления')
+    expect(isRetryableBatchAiError(error)).toBe(false)
+    expect(batchAiTruncationError({ stop_reason: 'max_tokens', usage: { output_tokens: 5000 } }, 'anthropic')).not.toBeNull()
+    expect(batchAiTruncationError({ choices: [{ finish_reason: 'stop' }] }, 'openai')).toBeNull()
+  })
+})
+
+describe('reasoning toggle', () => {
+  it('sends the provider-specific switch only where it is known', async () => {
+    const { reasoningRequestParams, supportsReasoningToggle } = await import('@/lib/ai-reasoning')
+    expect(reasoningRequestParams('https://api.deepseek.com/v1', 'disabled')).toEqual({ thinking: { type: 'disabled' } })
+    expect(reasoningRequestParams('https://openrouter.ai/api/v1', 'disabled')).toEqual({ reasoning: { enabled: false } })
+    expect(reasoningRequestParams('https://byesu.com/v1', 'disabled')).toEqual({})
+    expect(reasoningRequestParams('https://api.deepseek.com/v1', 'default')).toEqual({})
+    expect(supportsReasoningToggle('https://api.deepseek.com/v1')).toBe(true)
+    expect(supportsReasoningToggle('https://byesu.com/v1')).toBe(false)
+  })
+})

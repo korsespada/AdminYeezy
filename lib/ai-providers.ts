@@ -4,6 +4,9 @@ import crypto from 'node:crypto'
 export type AiProviderKind = 'openrouter' | 'byesu'
 export type AiProviderProtocol = 'openai' | 'anthropic'
 
+export { normalizeReasoningMode, reasoningRequestParams, supportsReasoningToggle, type AiReasoningMode } from '@/lib/ai-reasoning'
+import type { AiReasoningMode } from '@/lib/ai-reasoning'
+
 export type AiProviderRecord = {
   id: string
   name: string
@@ -14,6 +17,8 @@ export type AiProviderRecord = {
   hasApiKey: boolean
   /** Ручные цены моделей, USD за 1 млн токенов (ключ — имя модели в нижнем регистре). */
   pricing?: AiPricingTable
+  /** `disabled` — запросы уходят без размышлений модели (DeepSeek, OpenRouter). */
+  reasoning?: AiReasoningMode
   createdAt: string
   updatedAt: string
 }

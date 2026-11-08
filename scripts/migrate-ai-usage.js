@@ -48,6 +48,8 @@ async function migrate() {
     await client.query('CREATE INDEX IF NOT EXISTS ai_usage_events_created_idx ON ai_usage_events(created_at DESC)')
     await client.query('CREATE INDEX IF NOT EXISTS ai_usage_events_batch_idx ON ai_usage_events(batch_id, created_at DESC)')
     await client.query("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS pricing JSONB NOT NULL DEFAULT '{}'::jsonb")
+    // 'disabled' — запросы без размышлений модели (DeepSeek thinking, OpenRouter reasoning).
+    await client.query("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS reasoning_mode TEXT NOT NULL DEFAULT 'default'")
     await client.query('COMMIT')
     console.log('ai_usage_events ready')
   } catch (error) {

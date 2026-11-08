@@ -84,9 +84,12 @@ import {
   encryptProviderApiKey,
   fetchProviderModels,
   normalizeProviderBaseUrl,
+  normalizeReasoningMode,
   providerProtocol,
+  supportsReasoningToggle,
   type AiProviderKind,
   type AiProviderRecord,
+  type AiReasoningMode,
 } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
@@ -144,7 +147,7 @@ export async function getBatchAiSettingsAction() {
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
   const configuredProviders = await scrapingQuery(`
-    SELECT id,name,kind,base_url,model,models,pricing,created_at,updated_at
+    SELECT id,name,kind,base_url,model,models,pricing,reasoning_mode,created_at,updated_at
     FROM ai_providers ORDER BY updated_at DESC, created_at DESC
   `).catch(() => ({ rows: [] }))
   const activeProviderId = String(values.batch_ai_provider_id || '').trim() || null
@@ -162,7 +165,7 @@ export async function getBatchAiSettingsAction() {
     model: String(row.model || ''),
     models: Array.isArray(row.models) ? row.models : [],
     hasApiKey: true,
-    pricing: normalizePricingTable(row.pricing),
+    pricing: normalizePricingTable(row.pricing), reasoning: normalizeReasoningMode(row.reasoning_mode),
     createdAt: String(row.created_at || ''),
     updatedAt: String(row.updated_at || ''),
   }))
@@ -856,14 +859,14 @@ export async function createAiProviderAction(input: {
     const result = await scrapingQuery(`
       INSERT INTO ai_providers(id,name,kind,base_url,api_key_ciphertext,model,models,updated_at)
       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,NOW())
-      RETURNING id,name,kind,base_url,model,models,pricing,created_at,updated_at
+      RETURNING id,name,kind,base_url,model,models,pricing,reasoning_mode,created_at,updated_at
     `, [crypto.randomUUID(), name, kind, baseUrl, encrypted, model, JSON.stringify(models)])
     const row = result.rows[0]
     return {
       success: true,
       data: {
         id: String(row.id), name: row.name, kind: row.kind, baseUrl: row.base_url, model: row.model,
-        models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing),
+        models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing), reasoning: normalizeReasoningMode(row.reasoning_mode),
         createdAt: String(row.created_at), updatedAt: String(row.updated_at),
       } satisfies AiProviderRecord,
     }
@@ -876,7 +879,7 @@ function aiProviderRecord(row: any): AiProviderRecord {
   return {
     id: String(row.id), name: String(row.name || ''), kind: row.kind as AiProviderKind,
     baseUrl: String(row.base_url || ''), model: String(row.model || ''),
-    models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing),
+    models: Array.isArray(row.models) ? row.models : [], hasApiKey: true, pricing: normalizePricingTable(row.pricing), reasoning: normalizeReasoningMode(row.reasoning_mode),
     createdAt: String(row.created_at || ''), updatedAt: String(row.updated_at || ''),
   }
 }
@@ -914,7 +917,7 @@ export async function updateAiProviderAction(input: {
       UPDATE ai_providers
       SET name=$2,base_url=$3,api_key_ciphertext=$4,model=$5,models=$6::jsonb,updated_at=NOW()
       WHERE id=$1
-      RETURNING id,name,kind,base_url,model,models,pricing,created_at,updated_at
+      RETURNING id,name,kind,base_url,model,models,pricing,reasoning_mode,created_at,updated_at
     `, [id, name, baseUrl, encrypted, model, JSON.stringify(models)])
     return { success: true, data: aiProviderRecord(updated.rows[0]) }
   } catch (error: any) {
@@ -982,6 +985,22 @@ export async function updateAiProviderPricingAction(providerId: string, model: s
   revalidatePath('/admin/ai-rules')
   revalidatePath('/admin/ai-usage')
   return { success: true, data: { pricing } }
+}
+
+/** Размышления модели провайдера: `disabled` экономит токены выхода и время. */
+export async function updateAiProviderReasoningAction(providerId: string, mode: AiReasoningMode) {
+  await requireAdmin()
+  const id = String(providerId || '').trim()
+  if (!id) return { success: false, error: 'Провайдер не указан' }
+  const current = await scrapingQuery('SELECT base_url FROM ai_providers WHERE id=$1', [id])
+  if (!current.rows[0]) return { success: false, error: 'Провайдер не найден' }
+  const reasoning = normalizeReasoningMode(mode)
+  if (reasoning === 'disabled' && !supportsReasoningToggle(current.rows[0].base_url)) {
+    return { success: false, error: 'Этот провайдер не поддерживает отключение размышлений' }
+  }
+  await scrapingQuery('UPDATE ai_providers SET reasoning_mode=$2,updated_at=NOW() WHERE id=$1', [id, reasoning])
+  revalidatePath('/admin/ai-rules')
+  return { success: true, data: { reasoning } }
 }
 
 export async function deleteAiProviderAction(providerId: string) {

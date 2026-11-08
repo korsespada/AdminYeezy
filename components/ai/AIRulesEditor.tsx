@@ -3,10 +3,11 @@
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, ShieldAlert, Trash2, X } from 'lucide-react'
-import { createAiProviderAction, updateAiProviderPricingAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { createAiProviderAction, updateAiProviderPricingAction, updateAiProviderReasoningAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import type { AiProviderRecord } from '@/lib/ai-providers'
+import { supportsReasoningToggle, type AiReasoningMode } from '@/lib/ai-reasoning'
 import { builtinPeakPrice, normalizeModelName, type AiPricingTable } from '@/lib/ai-usage-pricing'
 import type { Category, Subcategory } from '@/lib/types'
 
@@ -289,6 +290,12 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                   placeholder="Название модели"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
                 />}
+                {supportsReasoningToggle(activeSavedProvider.baseUrl) && (
+                  <ReasoningToggle
+                    provider={activeSavedProvider}
+                    onSaved={(reasoning) => setProviders((current) => current.map((item) => item.id === activeSavedProvider.id ? { ...item, reasoning } : item))}
+                  />
+                )}
                 <ModelPricingEditor
                   key={`${activeSavedProvider.id}:${selectedModel}`}
                   provider={activeSavedProvider}
@@ -555,5 +562,48 @@ function ModelPricingEditor({ provider, model, onSaved }: {
         {status && <span className={`text-xs ${status.type === 'success' ? 'text-emerald-300' : 'text-red-300'}`}>{status.text}</span>}
       </div>
     </div>
+  )
+}
+
+/**
+ * Размышления модели входят в лимит «Максимум токенов» и оплачиваются как
+ * выход. Для заполнения карточки по фото и тексту они обычно не нужны.
+ */
+function ReasoningToggle({ provider, onSaved }: {
+  provider: AiProviderRecord
+  onSaved: (reasoning: AiReasoningMode) => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+  const disabled = provider.reasoning === 'disabled'
+
+  const toggle = (nextDisabled: boolean) => startTransition(async () => {
+    setError(null)
+    const result = await updateAiProviderReasoningAction(provider.id, nextDisabled ? 'disabled' : 'default')
+    if (!result.success) {
+      setError(result.error || 'Не удалось сохранить')
+      return
+    }
+    onSaved(result.data?.reasoning || 'default')
+  })
+
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+      <input
+        type="checkbox"
+        checked={disabled}
+        disabled={pending}
+        onChange={(event) => toggle(event.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 accent-indigo-500"
+      />
+      <span className="space-y-1">
+        <span className="block text-sm font-semibold text-white">Без размышлений модели</span>
+        <span className="block text-xs leading-relaxed text-slate-500">
+          Модель сразу пишет ответ. Дешевле и быстрее: размышления оплачиваются как выход и съедают лимит «Максимум токенов».
+          Сохраняется сразу и действует для новых запусков; уже идущая обработка доработает с прежним режимом.
+        </span>
+        {error && <span className="block text-xs text-red-300">{error}</span>}
+      </span>
+    </label>
   )
 }

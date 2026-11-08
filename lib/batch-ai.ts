@@ -3,7 +3,7 @@ import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { withAiUsageContext, type AiUsageFeature } from '@/lib/ai-usage'
-import { isProviderTimeoutError, providerProtocol } from '@/lib/ai-providers'
+import { isProviderTimeoutError, providerProtocol, reasoningRequestParams, type AiReasoningMode } from '@/lib/ai-providers'
 import { resizeImageUrl } from '@/lib/image'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
 import {
@@ -73,6 +73,7 @@ export type BatchAiSettings = {
   providerName?: string
   providerBaseUrl?: string
   providerApiKey?: string
+  providerReasoning?: AiReasoningMode
   openrouterModel: string
   byesuModel: string
   temperature: number
@@ -84,7 +85,7 @@ export type BatchAiSettings = {
 }
 
 export type AiCompletionSettings = Pick<BatchAiSettings,
-  'provider' | 'providerBaseUrl' | 'providerApiKey' | 'openrouterModel' | 'byesuModel' | 'temperature' | 'maxTokens'
+  'provider' | 'providerBaseUrl' | 'providerApiKey' | 'providerReasoning' | 'openrouterModel' | 'byesuModel' | 'temperature' | 'maxTokens'
 >
 
 export function restoreRetryProductsFromSnapshots(products: any[], sourceRows: Array<{ product_id?: number; source_product?: unknown }>) {
@@ -910,15 +911,37 @@ async function requestBatchAiJson(input: {
         temperature: input.settings.temperature,
         max_tokens: input.settings.maxTokens,
         response_format: { type: 'json_object' },
+        ...reasoningRequestParams(input.settings.providerBaseUrl, input.settings.providerReasoning),
       }), input.label)))
   const payload = input.usageFeature
     ? await withAiUsageContext({ feature: input.usageFeature }, request)
     : await request()
+  const truncated = batchAiTruncationError(payload, protocol === 'anthropic' ? 'anthropic' : 'openai', input.settings.maxTokens)
+  if (truncated) throw truncated
   const text = protocol === 'anthropic'
     ? anthropicResponseText(payload)
     : aiMessageContentText(payload?.choices?.[0]?.message?.content)
   if (!text) throw new Error(input.emptyResponseError)
   return parseBatchAiJson(text)
+}
+
+/**
+ * Ответ, оборванный лимитом токенов, нельзя разбирать: парсер достаёт из
+ * обрывка отдельные поля (категорию, цену), и товар сохранялся как
+ * обработанный без названия и описания. Так было с DeepSeek, который по
+ * умолчанию тратит большую часть лимита на размышления.
+ */
+export function batchAiTruncationError(payload: any, protocol: 'openai' | 'anthropic', maxTokens?: number) {
+  const reason = protocol === 'anthropic' ? payload?.stop_reason : payload?.choices?.[0]?.finish_reason
+  if (reason !== 'length' && reason !== 'max_tokens') return null
+  const usage = payload?.usage || {}
+  const output = Number(protocol === 'anthropic' ? usage.output_tokens : usage.completion_tokens) || Number(maxTokens) || 0
+  const reasoning = Number(usage.completion_tokens_details?.reasoning_tokens) || 0
+  const reasoningNote = reasoning > 0 ? `, из них ${reasoning} на размышления модели` : ''
+  return new Error(
+    `Ответ ИИ обрезан лимитом «Максимум токенов» (${output}${reasoningNote}). `
+    + 'Увеличьте лимит в «Настройках ИИ» или отключите размышления модели.',
+  )
 }
 
 export async function runBatchAiOpenRouter(input: BatchAiRequestImages & {
