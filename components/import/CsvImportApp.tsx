@@ -1322,7 +1322,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "text_only" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1361,6 +1361,8 @@ export default function CsvImportApp({
               ? `Пересборка цветовых семейств: визуальных групп ${data.queued}, по артикулам ${data.deterministic || 0}…`
               : mode === "family_names"
               ? `Согласование названий семей: в очереди ${data.queued}…`
+              : mode === "text_only"
+              ? `Переобработка названий и описаний: в очереди ${data.queued}…`
               : `ИИ: в очереди ${data.queued}, ожидаем обработку…`);
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -1678,6 +1680,15 @@ export default function CsvImportApp({
   const handleRecoverMeasurements = async () => {
     setShowMoreActions(false);
     await handleAiProcess("recover_measurements");
+  };
+
+  const handleReprocessTexts = async () => {
+    if (!window.confirm(
+      `Переобработать названия и описания у ${products.length} товаров?\n\n` +
+      "Меняются только название, H1 и описание (включая английский перевод). Цена, размеры, замеры, альты, фотографии и классификация останутся прежними. Перед запуском создаётся снимок.",
+    )) return;
+    setShowMoreActions(false);
+    await handleAiProcess("text_only");
   };
 
   const handleBulkApply = () => {
@@ -2166,6 +2177,7 @@ export default function CsvImportApp({
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
                       {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Удалить товары, которых нет в партии</span></button>}
+                      {(batchStage === "AI_PROCESSED" || batchStage === "PUSHED") && <button onClick={handleReprocessTexts} title="ИИ перепишет только название и описание: цена, размеры, замеры, альты и фото не меняются" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sky-300 hover:bg-slate-800"><FileText className="h-4 w-4" />Переобработать названия и описания<span className="block text-xs text-slate-500">Цена, размеры, альты и фото не меняются</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
                     </div>

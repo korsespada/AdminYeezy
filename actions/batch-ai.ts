@@ -565,7 +565,7 @@ async function syncCurrentRailsCatalogMappings() {
   return catalog
 }
 
-type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'retry_selection' | 'reprocess' | 'recover_measurements' | 'media_seo' | 'split_colors' | 'family_names'
+type BatchAiRunMode = 'sample' | 'full' | 'retry' | 'variants' | 'selection' | 'retry_selection' | 'reprocess' | 'text_only' | 'recover_measurements' | 'media_seo' | 'split_colors' | 'family_names'
 
 const MEDIA_SEO_SYSTEM_PROMPT = `Ты создаёшь SEO-данные фотографий каталога. Верни строго JSON без markdown. Для каждой фотографии напиши отдельный точный alt на русском длиной обычно 60–120 символов и не более 160 символов: подтверждённый бренд, товар, видимый ракурс и 1–2 различимые детали. Бренд товара обязателен в каждом alt. Не добавляй неподтверждённые свойства, рекламные обещания, слова «на фото» и упоминания реплики. Если товар лежит рядом с упаковкой или другим товаром, описывай только основной товар.`
 
@@ -641,6 +641,15 @@ async function batchContext(batchId: string, mode: BatchAiRunMode, productId?: n
   if (mode === 'sample') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id LIMIT 10'
   if (mode === 'full') predicate = 'AND COALESCE(ai_processed,false)=false ORDER BY source_position ASC NULLS LAST, id'
   if (mode === 'reprocess') predicate = 'ORDER BY source_position ASC NULLS LAST, id'
+  if (mode === 'text_only') {
+    const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
+    if (productIds.length > 0) {
+      params.push(productIds)
+      predicate = `AND id=ANY($${params.length}::int[]) ORDER BY source_position ASC NULLS LAST, id`
+    } else {
+      predicate = 'ORDER BY source_position ASC NULLS LAST, id'
+    }
+  }
   if (mode === 'media_seo') {
     const productIds = [...new Set((Array.isArray(productId) ? productId : [productId]).map(Number).filter(Number.isInteger))]
     if (productIds.length > 0) {
@@ -1137,6 +1146,8 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
         context.batch.stage || 'SCRAPED',
         mode === 'reprocess'
           ? 'До повторной AI-обработки'
+          : mode === 'text_only'
+          ? 'До переобработки названий и описаний'
           : mode === 'recover_measurements'
           ? 'До восстановления замеров'
           : mode === 'family_names'
@@ -1285,7 +1296,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           ? String(product.slug || '').trim()
           : buildProductSeoSlug(product, brandName)
         const promptSubcategories = promptSubcategoriesForContext(context)
-        const priceRules = mode === 'variants' || mode === 'media_seo' || mode === 'recover_measurements'
+        const priceRules = mode === 'variants' || mode === 'media_seo' || mode === 'text_only' || mode === 'recover_measurements'
           ? []
           : priceRuleHints(context.priceRules, promptProduct)
         const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
@@ -1335,6 +1346,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           allowSingleVariant: splitAlbumColors,
           processingOptions: normalizedProcessingOptions,
           mediaSeoOnly: mode === 'media_seo',
+          textOnly: mode === 'text_only',
           generatedSlug,
           measurementRecoveryOnly: mode === 'recover_measurements',
           measurementTargetProductIds,
@@ -1518,6 +1530,7 @@ function batchAiNormalizationOptions(input: any, context: any) {
     priceAiInstructions: input.priceAiInstructions,
     chromoffMode: input.chromoffMode === true,
     chromoffCategories: Array.isArray(input.chromoffCategories) ? input.chromoffCategories : [],
+    textOnly: input.textOnly === true,
     processingOptions: normalizeBatchAiProcessingOptions(input.processingOptions),
   }
 }
@@ -1723,7 +1736,7 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
           ...batchAiNormalizationOptions(input, context),
           measurementPhotoIndexes,
         })
-    const missingSizes = !input.mediaSeoOnly && !input.colorSplitOnly && !input.variantScanOnly && measurementPhotoIndexes.length
+    const missingSizes = !input.mediaSeoOnly && !input.textOnly && !input.colorSplitOnly && !input.variantScanOnly && measurementPhotoIndexes.length
       ? textSizesMissingFromMeasurements(input.product?.description, normalized.product?.attributes?.measurements)
       : []
     if (missingSizes.length) {
@@ -2386,8 +2399,11 @@ async function finalizeRun(runId: string) {
         } else if (currentRun?.mode === 'full' && sequenceScan) {
           nextMode = 'variants'
         }
+        // Переобработка только названий и описаний не запускает согласование
+        // семей и подбор вариантов: оператор просил поменять текст, а не партию.
+        if (currentRun?.mode === 'text_only') nextMode = null
       }
-      if (!['variants', 'media_seo'].includes(currentRun?.mode)) {
+      if (!['variants', 'media_seo', 'text_only'].includes(currentRun?.mode)) {
         try {
           await alignColorFamiliesAfterRun(runId, String(currentRun.batch_id), (productIds) => (
             syncFamilySizeCharts(String(currentRun.batch_id), productIds, loadSettings)

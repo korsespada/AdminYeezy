@@ -166,6 +166,17 @@ describe('batch AI normalization', () => {
     expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Кожаная вставка с тиснёным крестом')
   })
 
+  it('requires the brand in photo alts but not in the visible name', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Brand в name запрещён, а в alt нужен')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Бренд обязателен в каждом alt')
+  })
+
+  it('keeps labels, supplier wording and country of origin out of the description', () => {
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('не пиши «по ярлыку», «на бирке указано», «по данным поставщика»')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('страну производства и надписи Made in USA/China не упоминай вообще')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Страну производства и надписи Made in USA/China не упоминай')
+  })
+
   it('requires unrelated size charts to be discarded and allows tabs only for a confirmed set', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('не относится ни к основному товару, ни к подтверждённой части комплекта')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('measurements.tabs')
@@ -287,6 +298,48 @@ describe('batch AI normalization', () => {
     })
 
     expect(result.product.name).toBe('Chrome Hearts')
+  })
+
+  it('updates only name and description in text-only mode', () => {
+    const original = {
+      name: 'Старое название',
+      description: 'Старое описание',
+      price: 21000,
+      price_source: 'manual',
+      photos: ['1.jpg', '2.jpg'],
+      photo_alts: ['Старый alt'],
+      brand: 'chanel',
+      category: 'bags',
+      subcategory: 'bags-generic',
+      attributes: { sizes: ['S'], measurements: { rows: [] }, color: 'black' },
+    }
+    const result = normalizeBatchAiOutput({
+      product: {
+        name: 'Новое название',
+        description: 'Новое описание',
+        catalog_attributes: { sizes: ['XL'] },
+        price: 999,
+      },
+    }, {
+      product: original,
+      brandIds: new Set(['chanel']),
+      brandNames: new Map([['chanel', 'Chanel']]),
+      categoryIds: new Set(['bags']),
+      subcategoryIds: new Set(['bags-generic']),
+      attributeCodes: new Set(['sizes']),
+      textOnly: true,
+    })
+
+    expect(result.product.name).toBe('Новое название')
+    expect(result.product.h1).toBe('Новое название')
+    expect(result.product.description).toBe('Новое описание')
+    expect(result.product.price).toBe(21000)
+    expect(result.product.price_source).toBe('manual')
+    expect(result.product.photos).toEqual(['1.jpg', '2.jpg'])
+    expect(result.product.photo_alts).toEqual(['Старый alt'])
+    expect(result.product.attributes).toEqual(original.attributes)
+    expect(result.product.brand).toBe('chanel')
+    expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [] })
   })
 
   it('moves only the selected cover photo to the first position', () => {
