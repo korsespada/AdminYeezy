@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiImageDataUrl, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -1847,5 +1847,39 @@ describe('batch AI retry classification', () => {
   it('не повторяет содержательные ошибки', () => {
     expect(isRetryableBatchAiError(new Error('BYESU вернул некорректный JSON (200)'))).toBe(false)
     expect(isRetryableBatchAiError(new Error('Ответ BYESU превышает допустимый размер'))).toBe(false)
+  })
+})
+
+describe('batch AI original images', () => {
+  // Провайдер отклонял ссылки на наши webp («unsupported image»), поэтому
+  // оригинал для уточнения уходит картинкой в data URL.
+  it('перекодирует удалённый webp в JPEG data URL', async () => {
+    const sharp = (await import('sharp')).default
+    const source = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#ffffff' } })
+      .webp()
+      .toBuffer()
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => new Response(source, {
+      status: 200,
+      headers: { 'content-type': 'image/webp' },
+    })) as typeof fetch
+    try {
+      const dataUrl = await batchAiImageDataUrl('https://static.yuconcierge.com/batches/x/photo.webp')
+      expect(dataUrl).toMatch(/^data:image\/jpeg;base64,/)
+      const bytes = Buffer.from(String(dataUrl).split(',')[1], 'base64')
+      expect(bytes.subarray(0, 3).toString('hex')).toBe('ffd8ff')
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+
+  it('пропускает фото, которое не скачалось', async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => new Response('missing', { status: 404 })) as typeof fetch
+    try {
+      expect(await batchAiImageDataUrl('https://static.yuconcierge.com/batches/x/missing.webp')).toBeNull()
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })

@@ -1039,6 +1039,44 @@ function allowedOriginalPhotoUrls(photoUrls: unknown[], indexes: unknown[]) {
   })
 }
 
+/**
+ * Оригинал для уточнения отправляется картинкой, а не ссылкой.
+ *
+ * Провайдер (api.deepseek.com, BYESU-шлюзы) отказывал в ссылках на наши
+ * `static.yuconcierge.com/...webp` словами «You have uploaded an unsupported
+ * image», хотя файл валидный: 13 товаров партии 7062225b так и остались
+ * «сырыми», тогда как основной проход с JPEG contact sheet проходил. Поэтому
+ * картинка скачивается один раз, ужимается до 2048 px и уходит data URL.
+ */
+async function batchAiImageDataUrlFromUrl(url: string): Promise<string | null> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+  if (!response.ok) return null
+  const declaredSize = Number(response.headers.get('content-length') || 0)
+  if (declaredSize > 12 * 1024 * 1024) return null
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (!buffer.length || buffer.length > 12 * 1024 * 1024) return null
+  const jpeg = await sharp(buffer)
+    .rotate()
+    .resize({ width: 2048, height: 2048, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 88 })
+    .toBuffer()
+  return `data:image/jpeg;base64,${jpeg.toString('base64')}`
+}
+
+/**
+ * Картинка для запроса ИИ в виде data URL: провайдер не умеет забирать наши
+ * `static.yuconcierge.com/...webp` по ссылке (см. batchAiImageDataUrlFromUrl).
+ */
+export async function batchAiImageDataUrl(url: unknown): Promise<string | null> {
+  const value = String(url || '').trim()
+  if (!/^https?:\/\//i.test(value)) return null
+  try {
+    return await batchAiImageDataUrlFromUrl(value)
+  } catch {
+    return null
+  }
+}
+
 export async function runBatchAiOpenRouterRefinement(input: {
   settings: BatchAiSettings
   systemPrompt: string
@@ -1051,6 +1089,21 @@ export async function runBatchAiOpenRouterRefinement(input: {
 }) {
   const originals = allowedOriginalPhotoUrls(input.photoUrls, input.indexes)
   if (!originals.length) return input.previousOutput
+  const preparedImages = (
+    await Promise.all(
+      originals.map(async ({ index, url }) => {
+        try {
+          const dataUrl = await batchAiImageDataUrlFromUrl(url)
+          return dataUrl ? { index, url: dataUrl } : null
+        } catch (error: any) {
+          console.warn(`AI refinement: оригинал фото ${index} не подготовлен: ${String(error?.message || error).slice(0, 200)}`)
+          return null
+        }
+      }),
+    )
+  ).filter((image): image is { index: number; url: string } => Boolean(image))
+  // Без читаемых оригиналов уточнение бессмысленно: оставляем первый результат.
+  if (!preparedImages.length) return input.previousOutput
   const userPrompt = `${input.userPrompt}\n\nПредыдущий результат: ${JSON.stringify(input.previousOutput)}\n\nНиже только запрошенные оригиналы. Уточни по ним плохо читаемый бренд, модель, конструкцию или конфликт между исходным текстом и фотографиями.${input.measurementFocus ? ' Если на фото есть две логические таблицы «Size Chart» и «Size Recommendation», обязательно верни обе: measurements для замеров изделия и size_recommendation для подбора по росту/весу. Не записывай ростовые или весовые диапазоны в sizes.' : ''}${input.note ? ` ${input.note}` : ''} Если текст относится к другому товару, проигнорируй противоречащие сведения и исправь весь результат по фотографиям. Верни полный итоговый JSON той же схемы. Не запрашивай дополнительные фото.`
   return requestBatchAiJson({
     settings: input.settings,
@@ -1061,7 +1114,7 @@ export async function runBatchAiOpenRouterRefinement(input: {
       userPrompt,
       cacheSharedPrefix,
       contactSheets: [],
-      extraImages: originals.map(({ index, url }) => ({ label: `Оригинал фото ${index}`, url })),
+      extraImages: preparedImages.map(({ index, url }) => ({ label: `Оригинал фото ${index}`, url })),
     }),
   })
 }

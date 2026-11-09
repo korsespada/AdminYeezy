@@ -39,6 +39,7 @@ import {
   filterLegacySubcategoriesForAi,
   runBatchAiOpenRouter,
   runBatchAiOpenRouterRefinement,
+  batchAiImageDataUrl,
   type BatchAiProvider,
   type BatchAiSettings,
 } from '@/lib/batch-ai'
@@ -1602,6 +1603,18 @@ function videoPosterPreviewUrl(product: any) {
   return /^https?:\/\//i.test(url) ? url : ''
 }
 
+/**
+ * Кадр-превью видео уходит картинкой, а не ссылкой: провайдер отклонял наши
+ * `static.yuconcierge.com/...webp` как «unsupported image», а JPEG в data URL
+ * принимает всегда (см. batchAiImageDataUrl в lib/batch-ai).
+ */
+async function batchAiVideoPreviewImages(videoPreviewUrl: unknown) {
+  const dataUrl = await batchAiImageDataUrl(videoPreviewUrl)
+  return dataUrl
+    ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: dataUrl }]
+    : []
+}
+
 // Живой воркер обновляет updated_at товара чаще порога «зависания» (90 с) в
 // resumeStaleOpenRouterRun. Без этого запрос к модели дольше 90 с считался
 // зависшим: товар снова ставился в очередь и запускался параллельно, а попытки
@@ -1651,7 +1664,7 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
       contactSheets: sheets,
       referenceSheets,
       visualExampleSheets,
-      extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
+      extraImages: await batchAiVideoPreviewImages(input.videoPreviewUrl),
     })
     rawOutput = raw
     if (input.familyNamingOnly) {
@@ -1722,7 +1735,7 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
         contactSheets: sheets,
         referenceSheets,
         visualExampleSheets,
-        extraImages: input.videoPreviewUrl ? [{ label: 'Отдельный кадр-превью исходного видео. Не включай его в нумерацию фотографий.', url: String(input.videoPreviewUrl) }] : [],
+        extraImages: await batchAiVideoPreviewImages(input.videoPreviewUrl),
       })
       rawOutput = raw
     }
