@@ -1859,7 +1859,7 @@ describe('batch AI original images', () => {
       .webp()
       .toBuffer()
     const original = globalThis.fetch
-    globalThis.fetch = (async () => new Response(source, {
+    globalThis.fetch = (async () => new Response(new Uint8Array(source), {
       status: 200,
       headers: { 'content-type': 'image/webp' },
     })) as typeof fetch
