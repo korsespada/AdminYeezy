@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import sharp from 'sharp'
-import { bucketName, getS3PublicUrl, s3Client } from '@/lib/s3'
+import { bucketName, cacheControlForKey, getS3PublicUrl, s3Client } from '@/lib/s3'
 
 const MAX_PHOTO_BYTES = 30 * 1024 * 1024
 const MAX_VIDEO_BYTES = 150 * 1024 * 1024
@@ -74,6 +74,7 @@ async function uploadPhotoBuffer(source: string, buffer: Buffer): Promise<Produc
       Key: key,
       Body: normalized,
       ContentType: 'image/webp',
+      CacheControl: cacheControlForKey(key),
     }))
   }
 
@@ -134,8 +135,12 @@ export async function uploadProductVideoFromBuffer(source: string, buffer: Buffe
     const video = readFileSync(outputPath)
     const poster = await sharp(readFileSync(posterJpegPath)).webp({ quality: 84, effort: 4 }).toBuffer()
     await Promise.all([
-      s3Client.send(new PutObjectCommand({ Bucket: bucketName, Key: videoKey, Body: video, ContentType: 'video/mp4' })),
-      s3Client.send(new PutObjectCommand({ Bucket: bucketName, Key: posterKey, Body: poster, ContentType: 'image/webp' })),
+      s3Client.send(new PutObjectCommand({
+        Bucket: bucketName, Key: videoKey, Body: video, ContentType: 'video/mp4', CacheControl: cacheControlForKey(videoKey),
+      })),
+      s3Client.send(new PutObjectCommand({
+        Bucket: bucketName, Key: posterKey, Body: poster, ContentType: 'image/webp', CacheControl: cacheControlForKey(posterKey),
+      })),
     ])
 
     return { source, url: getS3PublicUrl(videoKey), posterUrl: getS3PublicUrl(posterKey) }

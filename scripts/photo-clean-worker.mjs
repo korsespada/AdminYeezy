@@ -17,7 +17,10 @@ import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import s3CacheControl from './lib/s3-cache-control.js'
 import dotenv from 'dotenv'
+
+const { cacheControlForKey } = s3CacheControl
 
 dotenv.config()
 
@@ -107,7 +110,9 @@ function runPython(args, timeoutMs = Number(process.env.PHOTO_CLEAN_PYTHON_TIMEO
 
 async function uploadFile(key, file, contentType) {
   const body = readFileSync(file)
-  await s3.send(new PutObjectCommand({ Bucket: bucketName, Key: key, Body: body, ContentType: contentType }))
+  await s3.send(new PutObjectCommand({
+    Bucket: bucketName, Key: key, Body: body, ContentType: contentType, CacheControl: cacheControlForKey(key),
+  }))
   return s3PublicUrl(key)
 }
 

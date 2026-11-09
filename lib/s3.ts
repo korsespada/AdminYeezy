@@ -1,5 +1,12 @@
 import { S3Client, PutObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 
+// Общий модуль нужен и CommonJS-скриптам публикации, поэтому он лежит в scripts/lib.
+const s3CacheControl = require('../scripts/lib/s3-cache-control') as { cacheControlForKey: (key: string) => string };
+
+export function cacheControlForKey(key: string) {
+  return s3CacheControl.cacheControlForKey(key);
+}
+
 const endpoint = process.env.S3_ENDPOINT || '';
 
 export const s3Client = new S3Client({
@@ -24,6 +31,7 @@ export async function uploadToS3(key: string, buffer: Buffer, contentType: strin
     Key: key,
     Body: buffer,
     ContentType: contentType,
+    CacheControl: cacheControlForKey(key),
   });
   await s3Client.send(command);
   return getS3PublicUrl(key);

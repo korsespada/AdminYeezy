@@ -14,6 +14,7 @@ const {
 } = require('./lib/burberry-post-process');
 const { batchColorFamilyIssues } = require('./lib/color-family-alignment');
 const { downloadVideoToFile, transcodeVideoForWeb } = require('./lib/video-transcode');
+const { cacheControlForKey } = require('./lib/s3-cache-control');
 
 const SCRAPING_DB = process.env.SCRAPING_DATABASE_URL || process.env.DATABASE_URL;
 const LEGACY_CATALOG_DB = process.env.LEGACY_CATALOG_DATABASE_URL || process.env.DATABASE_URL || process.env.SCRAPING_DATABASE_URL;
@@ -2457,6 +2458,7 @@ async function uploadPhotoAttempt(url, key, options = {}) {
       Key: key,
       Body: buffer,
       ContentType: 'image/webp',
+      CacheControl: cacheControlForKey(key),
     }));
     const hostedUrl = getS3PublicUrl(key);
     if (!isAlreadyHosted(hostedUrl)) throw new Error('полученная ссылка не относится к настроенному S3');
@@ -2503,9 +2505,11 @@ async function uploadVideoIfNeeded(url, videoKey, posterKey) {
     await Promise.all([
       s3Client.send(new PutObjectCommand({
         Bucket: process.env.S3_BUCKET, Key: videoKey, Body: fs.readFileSync(outputPath), ContentType: 'video/mp4',
+        CacheControl: cacheControlForKey(videoKey),
       })),
       s3Client.send(new PutObjectCommand({
         Bucket: process.env.S3_BUCKET, Key: posterKey, Body: poster, ContentType: 'image/webp',
+        CacheControl: cacheControlForKey(posterKey),
       })),
     ]);
     return { url: getS3PublicUrl(videoKey), posterUrl: getS3PublicUrl(posterKey) };
