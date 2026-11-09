@@ -57,3 +57,6 @@ output/playwright/
 # Выгрузки поставщиков (например data/david-studio/catalog.json) читает
 # админка на проде, поэтому файлы должны попадать в репозиторий и в образ.
 # Обновляются командой: npm run catalog:sync:david-studio
+
+# Локальный MCP-конфиг с токенами (Coolify и др.)
+.mcp.json
