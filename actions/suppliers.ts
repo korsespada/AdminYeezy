@@ -257,8 +257,6 @@ function normalizeSupplierAiProcessingOptions(value: FormDataEntryValue | null) 
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) source = parsed
   } catch { /* use defaults */ }
   return {
-    colorFamilyByArticle: source.colorFamilyByArticle === true,
-    colorFamilyBySequence: source.colorFamilyBySequence === true,
     articleExample: String(source.articleExample || '').trim().slice(0, 500),
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,

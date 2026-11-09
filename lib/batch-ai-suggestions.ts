@@ -481,9 +481,8 @@ function suggestionsFromOutput(normalized: any) {
   if (normalized.subcategorySuggestion?.name) {
     suggestions.push({ ...normalized.subcategorySuggestion, kind: 'subcategory', code: normalized.subcategorySuggestion.name })
   }
-  if (normalized.colorFamily?.group_signature && normalized.colorFamily.confidence >= 0.75) {
-    suggestions.push({ ...normalized.colorFamily, kind: 'color_family', code: normalized.colorFamily.group_signature })
-  }
+  // Цветовые семейства ИИ не предлагает: suggestions с kind=color_family больше
+  // не создаются, остальные виды предложений остаются как были.
   return suggestions
 }
 

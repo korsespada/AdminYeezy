@@ -133,24 +133,16 @@ describe('batch AI normalization', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { external_id: 'SP001-blue', photos: ['1.jpg', '2.jpg'] },
       brands: [], categories: [], subcategories: [], attributes: [],
-      processingOptions: {
-        colorFamilyByArticle: true,
-        articleExample: 'SP001 blue',
+      processingOptions: {
         splitAlbumColors: false,
         reorderFirstPhoto: true,
         skipModelOnlyAlbum: true,
       },
     })
-    expect(prompt).toContain('SP001 blue')
-    expect(prompt).toContain('SP001 green')
     expect(prompt).toContain('cover_photo_index')
     expect(prompt).toContain('skip_product=true')
   })
 
-  it('keeps consecutive-family matching disabled unless the supplier enables it', () => {
-    expect(normalizeBatchAiProcessingOptions({}).colorFamilyBySequence).toBe(false)
-    expect(normalizeBatchAiProcessingOptions({ colorFamilyBySequence: true }).colorFamilyBySequence).toBe(true)
-  })
 
   it('enforces the current product-title contract over saved legacy prompts', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('name — заголовок товара без бренда, суббренда/коллекции и артикула, но с точным цветом')
@@ -350,8 +342,7 @@ describe('batch AI normalization', () => {
     }, {
       product: { name: '', photos: ['1.jpg', '2.jpg', '3.jpg'], attributes: {} },
       brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
-      processingOptions: {
-        colorFamilyByArticle: false, articleExample: '', splitAlbumColors: false,
+      processingOptions: { articleExample: '', splitAlbumColors: false,
         reorderFirstPhoto: true, skipModelOnlyAlbum: false,
       },
     })
@@ -414,7 +405,7 @@ describe('batch AI normalization', () => {
       product: { name: '', photos: ['1.jpg'], attributes: {} },
       brandIds: new Set(), categoryIds: new Set(), subcategoryIds: new Set(), attributeCodes: new Set(),
       processingOptions: {
-        colorFamilyByArticle: false, articleExample: '', splitAlbumColors: false,
+        splitAlbumColors: false,
         reorderFirstPhoto: false, skipModelOnlyAlbum: true,
       },
     })

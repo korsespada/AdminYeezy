@@ -27,9 +27,7 @@ import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from 
 export type BatchAiProvider = 'openrouter' | 'byesu'
 
 export type BatchAiProcessingOptions = {
-  colorFamilyByArticle: boolean
-  colorFamilyBySequence?: boolean
-  articleExample: string
+  articleExample?: string
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
@@ -39,8 +37,6 @@ export type BatchAiProcessingOptions = {
 }
 
 export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
-  colorFamilyByArticle: false,
-  colorFamilyBySequence: false,
   articleExample: '',
   splitAlbumColors: false,
   reorderFirstPhoto: false,
@@ -53,8 +49,6 @@ export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
 export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProcessingOptions {
   const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
   return {
-    colorFamilyByArticle: source.colorFamilyByArticle === true,
-    colorFamilyBySequence: source.colorFamilyBySequence === true,
     articleExample: String(source.articleExample || '').trim().slice(0, 500),
     splitAlbumColors: source.splitAlbumColors === true,
     reorderFirstPhoto: source.reorderFirstPhoto === true,
@@ -499,7 +493,6 @@ export function buildBatchAiUserPrompt(input: {
       translations: { en: { name: '', description: '' } },
       media: { discard_indexes: [], size_chart_indexes: [] },
       inspect_full_size_indexes: [],
-      color_family: null,
       ai_processing: {
         skip_product: false,
         cover_photo_index: null,
@@ -531,10 +524,7 @@ export function buildBatchAiUserPrompt(input: {
       `Визуальные эталоны ракурсов поставщика: ${JSON.stringify(visualExamplePrompt)}`,
       'Отдельно от фотографий текущего товара приложен лист «Визуальные эталоны поставщика». Это не фотографии текущего товара и не доказательство бренда, цвета или материала. Используй его только для понимания качества и типа ракурса, который требуется выбрать первым или исключить.',
     ] : []),
-    'color_family: {group_signature,category_kind,model_name,bag_size,materials,hardware,color,matching_evidence,confidence} или null.',
-    ...(processingOptions.colorFamilyByArticle ? [
-      `Определи цветовое семейство по артикулу/коду модели. Пример пользователя: «${processingOptions.articleExample || 'SP001 blue'}». Если в таких артикулах цвет идёт после общей основы (например, SP001 blue и SP001 green), в color_family.group_signature и ai_processing.article_key оставь только общую основу SP001, а цвет запиши отдельно в color. Не объединяй разные модели только из-за похожего артикула.`,
-    ] : []),
+    'color_family не предлагай: цветовые семейства ИИ больше не формирует.',
     ...(processingOptions.reorderFirstPhoto ? [
       'Подбери лучший продающий кадр и верни его исходный номер в ai_processing.cover_photo_index. Разрешено менять только первое фото, остальные оставь в исходном порядке.',
     ] : []),
@@ -574,29 +564,6 @@ export function buildBatchAiVisualSetCorrectionPrompt(userPrompt: string) {
     'ОБЯЗАТЕЛЬНАЯ ВИЗУАЛЬНАЯ ПЕРЕПРОВЕРКА: исходный текст товара намеренно не передан, потому что предварительный ответ назвал товар комплектом. Определи товар независимо только по приложенным contact sheet.',
     'Признавай комплектом только случай, когда на серии фотографий отчётливо видны минимум две разные вещи. Текст внутри фотографии с размерной таблицей, ценой или перечислением верха и брюк не является доказательством второй вещи. Если на всех фото показана одна вещь, укажи только её фактический тип, название, описание и подкатегорию; не упоминай отсутствующие предметы и не создавай measurements.tabs для отсутствующей вещи.',
     'Верни полный итоговый JSON исходной схемы без markdown. Не запрашивай дополнительные фотографии.',
-  ].join('\n\n')
-}
-
-export function buildBatchAiVariantPrompt(product: any) {
-  const textOnlyProduct = {
-    external_id: product.external_id,
-    name: product.name,
-    description: product.description,
-    brand: product.brand,
-    category: product.category,
-    subcategory: product.subcategory,
-    gender: product.gender,
-    attributes: product.attributes || {},
-  }
-  return [
-    'Проверь только возможность объединить этот товар с такими же товарами других цветов.',
-    'Используй исключительно переданные текстовые поля и атрибуты. Фотографии отсутствуют и не нужны.',
-    'Ничего не переписывай, не классифицируй и не предлагай: SEO, цену, категорию, подкатегорию или атрибуты.',
-    'Верни строго JSON вида {"color_family": null} либо {"color_family": {"group_signature":"","category_kind":"","model_name":"","bag_size":"","materials":[],"hardware":"","color":"","matching_evidence":"","confidence":0}}.',
-    'color_family верни только если из текста достоверно известны конкретная модель/конструкция и цвет.',
-    'group_signature — стабильная основа товара без цвета. Для сумок в ней должны совпасть бренд, точная модель, габариты, материал и фурнитура. Для обуви — бренд, модель, конструкция и материал; размер обуви не включай. Для одежды — бренд, модель/фасон и материал; размер одежды не включай.',
-    'Не объединяй разные модели, конструкции, материалы, фурнитуру или размеры самого изделия. При сомнении верни null.',
-    `Товар: ${JSON.stringify(textOnlyProduct)}`,
   ].join('\n\n')
 }
 
@@ -658,9 +625,6 @@ export function buildBatchAiColorSplitPrompt(input: {
     ] : []),
     ...(processingOptions.reorderFirstPhoto ? [
       'Для каждого варианта укажи cover_photo_index — исходный номер лучшего продающего кадра из его photo_indexes. Разрешено менять только первое фото варианта.',
-    ] : []),
-    ...(processingOptions.colorFamilyByArticle ? [
-      `При определении общей семьи используй пример артикула «${processingOptions.articleExample || 'SP001 blue'}»: SP001 blue и SP001 green имеют общую основу SP001, цвет не включай в family_name/group_signature.`,
     ] : []),
     'У каждого варианта должно быть собственное name без бренда, но с его точным цветом; например, «Чёрная сумка 22 Mini» и «Белая сумка 22 Mini». color_key и attributes.colors дублируют цвет как структурированные данные. family_name содержит общую основу без бренда и цвета. Каждый product должен содержать название, описание, классификацию, пол, атрибуты, ценовое правило и confidence. H1 и SEO не возвращай: сервер и Rails формируют их после сохранения.',
     'Верни строго JSON без markdown следующей формы:',
@@ -1866,13 +1830,9 @@ export function normalizeBatchAiOutput(raw: any, input: {
     ? (explicitGender || aiGender || sizeFallbackGender || original.gender)
     : (aiGender || original.gender)
 
-  const rawColorFamily = raw?.color_family && typeof raw.color_family === 'object'
-    ? { ...raw.color_family }
-    : null
-  const articleKey = String(rawProcessing.article_key || '').trim().slice(0, 250)
-  if (processingOptions.colorFamilyByArticle && rawColorFamily && articleKey) {
-    rawColorFamily.group_signature = articleKey
-  }
+  // Цветовые семейства ИИ больше не предлагает: поле остаётся в форме ответа
+  // для совместимости, но всегда пустое.
+  const rawColorFamily = null
 
   const technicalFactCandidates = processingOptions.preserveAllPhotos
     ? [

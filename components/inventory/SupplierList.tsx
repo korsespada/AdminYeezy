@@ -16,8 +16,6 @@ import { SZWEGO_PARSE_MODE_LABELS, normalizeSzwegoParseMode, type SzwegoParseMod
 import { useModalDismiss } from '@/components/ui/use-modal-dismiss'
 
 type SupplierAiProcessingOptions = {
-  colorFamilyByArticle: boolean
-  colorFamilyBySequence?: boolean
   articleExample: string
   splitAlbumColors: boolean
   reorderFirstPhoto: boolean
@@ -28,8 +26,6 @@ type SupplierAiProcessingOptions = {
 }
 
 const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
-  colorFamilyByArticle: false,
-  colorFamilyBySequence: false,
   articleExample: '',
   splitAlbumColors: false,
   reorderFirstPhoto: false,
@@ -932,33 +928,6 @@ export default function SupplierList({
                       <h4 className="text-xs font-bold uppercase tracking-widest text-violet-200">Постоянные настройки AI-обработки</h4>
                       <p className="mt-1 text-[11px] text-slate-500">Применяются автоматически к тесту 10 товаров и к полной обработке всех выгрузок этого поставщика.</p>
                     </div>
-                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={editingSupplier?.ai_processing_options?.colorFamilyByArticle || false}
-                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, colorFamilyByArticle: event.target.checked } })}
-                        className="mt-0.5 h-4 w-4 accent-violet-500"
-                      />
-                      <span><b className="block text-slate-100">Группировать цветовое семейство по артикулу</b><small className="text-xs text-slate-500">ИИ отделит цвет от общей основы артикула и запишет семью.</small></span>
-                    </label>
-                    <div className="ml-7">
-                      <label className="text-[11px] text-slate-500">Пример артикула с цветом</label>
-                      <input
-                        value={editingSupplier?.ai_processing_options?.articleExample || ''}
-                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, articleExample: event.target.value } })}
-                        placeholder="Например: SP001 blue"
-                        className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white outline-none focus:border-violet-500"
-                      />
-                    </div>
-                    <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={editingSupplier?.ai_processing_options?.colorFamilyBySequence || false}
-                        onChange={(event) => editingSupplier && setEditingSupplier({ ...editingSupplier, ai_processing_options: { ...DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS, ...editingSupplier.ai_processing_options, colorFamilyBySequence: event.target.checked } })}
-                        className="mt-0.5 h-4 w-4 accent-violet-500"
-                      />
-                      <span><b className="block text-slate-100">Проверять подряд идущие товары как цветовое семейство</b><small className="text-xs text-slate-500">После полной AI-обработки ИИ автоматически сравнит соседние карточки по фото, даже без общего артикула. Он только предложит семью — фото не объединяются.</small></span>
-                    </label>
                     <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-300">
                       <input
                         type="checkbox"

@@ -1078,7 +1078,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
       `, [batchId])
       const approvedIds = new Set(approved.rows.map((row) => Number(row.product_id)))
       const completePlan = colorFamilyRebuildPlan(context.products, {
-        includeSequentialCandidates: normalizeBatchAiProcessingOptions(context.batch.ai_processing_options).colorFamilyBySequence === true,
+        includeSequentialCandidates: false,
       })
       // Уже принятые товары остаются якорями семьи. Иначе частично принятое
       // семейство невозможно дополнить пропущенными цветами при пересборке.
@@ -2401,10 +2401,10 @@ async function finalizeRun(runId: string) {
       }
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
-        const sequenceScan = normalizeBatchAiProcessingOptions(currentRun?.settings_snapshot?.processingOptions).colorFamilyBySequence === true
+        const sequenceScan = false
         // Когда выгрузка обработана целиком — полной обработкой, повтором или
-        // по выбору, — согласуются названия семей; затем при включённой
-        // настройке ищутся новые семьи среди соседних карточек.
+        // по выбору, — согласуются названия семей. Автоматического поиска новых
+        // семейств ИИ больше не запускает: цветовые семейства ИИ не предлагает.
         if (currentRun?.mode === 'family_names') {
           nextMode = sequenceScan ? 'variants' : null
         } else if (await batchNeedsFamilyNaming(String(currentRun.batch_id))) {
