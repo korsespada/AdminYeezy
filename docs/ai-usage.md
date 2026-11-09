@@ -80,9 +80,14 @@
 поля, и товар помечался обработанным только с категорией и ценой. Для DeepSeek
 лимит нужно держать с запасом (например, 20000).
 
-В «Настройках ИИ» у провайдеров DeepSeek и OpenRouter есть выключатель «Без
-размышлений модели» (`ai_providers.reasoning_mode = disabled`). Он добавляет в
-запрос `thinking: {type: "disabled"}` (DeepSeek) или
-`reasoning: {enabled: false}` (OpenRouter). Для других шлюзов выключателя нет:
+В «Настройках ИИ» у провайдеров DeepSeek и OpenRouter есть список «Размышления
+модели» (`ai_providers.reasoning_mode`): «По умолчанию провайдера» (`default`,
+параметр не передаётся; у DeepSeek это уровень high), «Без размышлений»
+(`disabled`) и уровни `low`, `high`, `max`. Для DeepSeek `disabled` отправляет
+`thinking: {type: "disabled"}`, а уровень — `thinking: {type: "enabled"}` и
+`reasoning_effort`. Для OpenRouter `disabled` отправляет
+`reasoning: {enabled: false}`, а уровень — `reasoning: {effort}` (`max` у
+OpenRouter передаётся как `high`). При размышлениях DeepSeek игнорирует
+temperature. Для других шлюзов выбора нет:
 неизвестный параметр они могут отклонить. Режим читается при старте запуска
 обработки, поэтому уже идущий запуск доработает с прежним режимом.

@@ -1004,8 +1004,8 @@ export async function updateAiProviderReasoningAction(providerId: string, mode: 
   const current = await scrapingQuery('SELECT base_url FROM ai_providers WHERE id=$1', [id])
   if (!current.rows[0]) return { success: false, error: 'Провайдер не найден' }
   const reasoning = normalizeReasoningMode(mode)
-  if (reasoning === 'disabled' && !supportsReasoningToggle(current.rows[0].base_url)) {
-    return { success: false, error: 'Этот провайдер не поддерживает отключение размышлений' }
+  if (reasoning !== 'default' && !supportsReasoningToggle(current.rows[0].base_url)) {
+    return { success: false, error: 'Этот провайдер не поддерживает управление размышлениями' }
   }
   await scrapingQuery('UPDATE ai_providers SET reasoning_mode=$2,updated_at=NOW() WHERE id=$1', [id, reasoning])
   revalidatePath('/admin/ai-rules')

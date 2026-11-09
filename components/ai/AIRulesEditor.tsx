@@ -7,7 +7,7 @@ import { createAiProviderAction, updateAiProviderPricingAction, updateAiProvider
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import type { AiProviderRecord } from '@/lib/ai-providers'
-import { supportsReasoningToggle, type AiReasoningMode } from '@/lib/ai-reasoning'
+import { AI_REASONING_MODES, supportsReasoningToggle, type AiReasoningMode } from '@/lib/ai-reasoning'
 import { builtinPeakPrice, normalizeModelName, type AiPricingTable } from '@/lib/ai-usage-pricing'
 import type { Category, Subcategory } from '@/lib/types'
 
@@ -567,7 +567,7 @@ function ModelPricingEditor({ provider, model, onSaved }: {
 
 /**
  * Размышления модели входят в лимит «Максимум токенов» и оплачиваются как
- * выход. Для заполнения карточки по фото и тексту они обычно не нужны.
+ * выход. Уровень выбирается под качество текста и цену.
  */
 function ReasoningToggle({ provider, onSaved }: {
   provider: AiProviderRecord
@@ -575,11 +575,10 @@ function ReasoningToggle({ provider, onSaved }: {
 }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
-  const disabled = provider.reasoning === 'disabled'
 
-  const toggle = (nextDisabled: boolean) => startTransition(async () => {
+  const save = (mode: AiReasoningMode) => startTransition(async () => {
     setError(null)
-    const result = await updateAiProviderReasoningAction(provider.id, nextDisabled ? 'disabled' : 'default')
+    const result = await updateAiProviderReasoningAction(provider.id, mode)
     if (!result.success) {
       setError(result.error || 'Не удалось сохранить')
       return
@@ -588,22 +587,21 @@ function ReasoningToggle({ provider, onSaved }: {
   })
 
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
-      <input
-        type="checkbox"
-        checked={disabled}
+    <label className="block space-y-2 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+      <span className="block text-sm font-semibold text-white">Размышления модели</span>
+      <select
+        value={provider.reasoning || 'default'}
         disabled={pending}
-        onChange={(event) => toggle(event.target.checked)}
-        className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-900 accent-indigo-500"
-      />
-      <span className="space-y-1">
-        <span className="block text-sm font-semibold text-white">Без размышлений модели</span>
-        <span className="block text-xs leading-relaxed text-slate-500">
-          Модель сразу пишет ответ. Дешевле и быстрее: размышления оплачиваются как выход и съедают лимит «Максимум токенов».
-          Сохраняется сразу и действует для новых запусков; уже идущая обработка доработает с прежним режимом.
-        </span>
-        {error && <span className="block text-xs text-red-300">{error}</span>}
+        onChange={(event) => save(event.target.value as AiReasoningMode)}
+        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+      >
+        {AI_REASONING_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+      </select>
+      <span className="block text-xs leading-relaxed text-slate-500">
+        Размышления оплачиваются как выход и съедают лимит «Максимум токенов»; при них temperature не действует.
+        Сохраняется сразу и действует для новых запусков; уже идущая обработка доработает с прежним режимом.
       </span>
+      {error && <span className="block text-xs text-red-300">{error}</span>}
     </label>
   )
 }

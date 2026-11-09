@@ -94,9 +94,9 @@ describe('batch AI normalization', () => {
 
     const richPrompt = buildBatchAiUserPrompt({ product: richProduct, brands: [], categories: [], subcategories: [], attributes: [] })
     expect(richPrompt).toContain('богатый фактический источник')
-    expect(richPrompt).toContain('900–2000 знаков')
-    expect(richPrompt).toContain('минимальная глубина, а не верхняя граница')
-    expect(richPrompt).toContain('технологии, материалы, конструкцию')
+    expect(richPrompt).toContain('700–1400 знаков')
+    expect(richPrompt).toContain('не растягивай текст ради объёма')
+    expect(richPrompt).toContain('материалы и состав, наполнитель, конструкцию')
 
     const sparsePrompt = buildBatchAiColorSplitPrompt({ product: sparseProduct, brands: [], categories: [], subcategories: [], attributes: [] })
     expect(sparsePrompt).toContain('скудный текст, фотографии — основной источник')
@@ -162,7 +162,7 @@ describe('batch AI normalization', () => {
   it('forbids narrating the frame in the public description', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('а не пересказывать кадр')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('вместо «На кожаной вставке внизу виден тиснёный крест»')
-    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Пиши об изделии, а не о кадре')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Пересказ кадра: «на фото»')
     expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Кожаная вставка с тиснёным крестом')
   })
 
@@ -172,8 +172,8 @@ describe('batch AI normalization', () => {
   })
 
   it('keeps labels, supplier wording and country of origin out of the description', () => {
-    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('не пиши «по ярлыку», «на бирке указано», «по данным поставщика»')
-    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('страну производства и надписи Made in USA/China не упоминай вообще')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('(«по ярлыку», «на бирке указано», «по данным поставщика»)')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('страна производства и надписи Made in USA/China')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Страну производства и надписи Made in USA/China не упоминай')
   })
 
