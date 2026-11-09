@@ -19,15 +19,25 @@ export function openRouterTimeoutMs() {
 
 type OpenRouterPayload = Record<string, any>
 
-function createOpenRouterAgent() {
-  const rawProxyUrl = process.env.OPENROUTER_PROXY_URL?.trim()
+/**
+ * Прокси для OpenAI-совместимых шлюзов. Провайдер «BYESU GEMINI» заведён как
+ * `kind=openrouter` с адресом `https://byesu.com/v1`, поэтому его запросы идут
+ * этим клиентом, а не `byesuChatCompletion`: без прокси крупные тела с
+ * картинками рвутся (`ECONNRESET`) и товар висит до таймаута. Для byesu.com
+ * берём `BYESU_PROXY_URL`, для остальных — `OPENROUTER_PROXY_URL`.
+ */
+function createOpenRouterAgent(hostname = '') {
+  const host = hostname.toLowerCase()
+  const isByesu = host === 'byesu.com' || host.endsWith('.byesu.com')
+  const envName = isByesu ? 'BYESU_PROXY_URL' : 'OPENROUTER_PROXY_URL'
+  const rawProxyUrl = (isByesu ? process.env.BYESU_PROXY_URL?.trim() : '') || process.env.OPENROUTER_PROXY_URL?.trim()
   if (!rawProxyUrl) return undefined
 
   let proxyUrl: URL
   try {
     proxyUrl = new URL(rawProxyUrl)
   } catch {
-    throw new Error('OPENROUTER_PROXY_URL имеет неверный формат')
+    throw new Error(`${envName} имеет неверный формат`)
   }
 
   if (proxyUrl.protocol === 'http:' || proxyUrl.protocol === 'https:') {
@@ -36,7 +46,7 @@ function createOpenRouterAgent() {
   if (['socks:', 'socks4:', 'socks4a:', 'socks5:', 'socks5h:'].includes(proxyUrl.protocol)) {
     return new SocksProxyAgent(proxyUrl)
   }
-  throw new Error('OPENROUTER_PROXY_URL поддерживает только HTTP(S) и SOCKS-прокси')
+  throw new Error(`${envName} поддерживает только HTTP(S) и SOCKS-прокси`)
 }
 
 /**
@@ -62,10 +72,10 @@ export async function openRouterChatCompletion(
   if (!apiKey) throw new Error('OPENROUTER_API_KEY не задан')
 
   const body = JSON.stringify(requestBody)
-  const agent = createOpenRouterAgent()
   const target = connection.baseUrl?.trim()
     ? new URL(`${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`)
     : OPENROUTER_CHAT_URL
+  const agent = createOpenRouterAgent(target.hostname)
   const label = openRouterProviderLabel(target)
   const startedAt = Date.now()
 
