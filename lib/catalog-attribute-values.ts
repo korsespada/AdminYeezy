@@ -3,6 +3,7 @@ import {
   resolveCatalogAttributeCode,
   type CatalogAttributeDefinition,
 } from '@/lib/catalog-attribute-schema'
+import { expandEvenSizeRange } from '@/lib/clothing-sizes'
 import { normalizeProductMeasurements, normalizeSizeRecommendation } from '@/lib/measurement-templates'
 
 const COLOR_VALUES: Record<string, string> = {
@@ -89,6 +90,9 @@ export function normalizeCatalogAttributes(
     ? options.allowedCodes
     : getCatalogAttributeDefinitionsForCategory(categoryName, options.subcategoryName).map((item) => item.code))
   const isShoes = normalizeText(categoryName) === 'обувь'
+  // Одежда продаётся чётными размерами: «28–36» — это 28, 30, 32, 34, 36.
+  // Обувь сохраняет свой шаг 1 (36, 37, 38 …) и половинные размеры.
+  const evenNumericSizes = normalizeText(categoryName) === 'одежда'
   const result: Record<string, unknown> = {}
 
   for (const [rawCode, rawValue] of Object.entries(value as Record<string, unknown>)) {
@@ -99,7 +103,7 @@ export function normalizeCatalogAttributes(
 
     const normalized = applyDictionaryValue(
       code,
-      normalizeAttributeValue(code, rawValue),
+      normalizeAttributeValue(code, rawValue, { evenNumericSizes }),
       options.definitions,
     )
     if (!isEmpty(normalized)) result[code] = normalized
@@ -137,11 +141,15 @@ function applyDictionaryValue(
   return value
 }
 
-export function normalizeAttributeValue(code: string, value: unknown): unknown {
+export function normalizeAttributeValue(
+  code: string,
+  value: unknown,
+  options: { evenNumericSizes?: boolean } = {},
+): unknown {
   if (value === null || value === undefined) return undefined
   if (code === 'measurements') return normalizeMeasurements(value)
   if (code === 'size_recommendation') return normalizeSizeRecommendation(value) || undefined
-  if (code === 'sizes' || code === 'jewelry_size') return normalizeStructuredSizes(value)
+  if (code === 'sizes' || code === 'jewelry_size') return normalizeStructuredSizes(value, options)
   const structured = structuredAttributeValue(value)
   if (structured !== undefined) value = structured
   if (code === 'colors') return normalizeList(value).map((item) => COLOR_VALUES[normalizeText(item)] || titleCase(item))
@@ -173,16 +181,16 @@ function structuredAttributeValue(value: unknown): unknown {
   return undefined
 }
 
-export function normalizeSizes(value: unknown): string[] {
+export function normalizeSizes(value: unknown, options: { evenNumericSizes?: boolean } = {}): string[] {
   const source = structuredSizeValues(value)
   return [...new Set(normalizeList(source)
-    .flatMap((item) => expandSizeRange(item))
+    .flatMap((item) => (options.evenNumericSizes ? expandEvenSizeRange(item) : expandSizeRange(item)))
     .map((item) => item.trim().replace(',', '.').toUpperCase())
     .filter(Boolean))]
 }
 
-function normalizeStructuredSizes(value: unknown) {
-  const values = normalizeSizes(value)
+function normalizeStructuredSizes(value: unknown, options: { evenNumericSizes?: boolean } = {}) {
+  const values = normalizeSizes(value, options)
   if (values.length === 0) return undefined
 
   const source = value && typeof value === 'object' && !Array.isArray(value)
@@ -190,7 +198,7 @@ function normalizeStructuredSizes(value: unknown) {
     : {}
   const groups = Array.isArray(source.groups)
     ? source.groups.map((group: any) => {
-      const groupValues = normalizeSizes(group?.values?.length ? group.values : values)
+      const groupValues = normalizeSizes(group?.values?.length ? group.values : values, options)
       return {
         ...(Number.isFinite(Number(group?.min)) ? { min: Number(group.min) } : {}),
         ...(Number.isFinite(Number(group?.max)) ? { max: Number(group.max) } : {}),

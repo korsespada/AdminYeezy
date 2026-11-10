@@ -22,6 +22,7 @@ import { batchAiCategoryRuleForRules, normalizeBatchAiCategoryRules, type BatchA
 import { normalizeRetainedPhotoAlts } from '@/lib/product-media-seo'
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from '@/lib/supplier-publication'
 import { normalizeMeasurementTable, normalizeProductMeasurements, normalizeSizeRecommendation, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
+import { expandEvenSizeRange, planEvenClothingSizes } from '@/lib/clothing-sizes'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 
 export type BatchAiProvider = 'openrouter' | 'byesu'
@@ -289,7 +290,7 @@ description: «Короткий пуховик-бомбер из шерстян�
 - Определи size_class как small, medium или large по фото и тексту наиболее вероятным образом.
 - Для сумок запиши числовые bag_width_cm и bag_height_cm, если размеры явно указаны в тексте или уверенно читаются на таблице/фото. Не угадывай точные сантиметры только по внешнему виду.
 - Если переданы ценовые правила, выбери price_rule_key только при уверенном совпадении модели, размеров или визуального эталона. Цена в этих правилах не должна попадать в тексты товара.
-- Исключай только рекламные, нерелевантные, дублирующиеся кадры и фото таблиц размеров/замеров. Если основной товар лежит рядом с упаковкой или другим товаром, но сам хорошо виден и остаётся главным объектом кадра, не исключай его. Исключай упаковку или другой товар только когда они доминируют в кадре либо делают продаваемый товар неясным. Исключай кадры с крупным наложенным текстом поверх фото: цена, акция, призыв, рекламная надпись на китайском, английском или любом другом языке; мелкий логотип товара или ненавязчивый водяной знак не исключай. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры товара в sizes, замеры изделия — в measurements, а таблицу подбора по росту/весу — отдельно в size_recommendation. В sizes переноси только размеры из колонки «Размер» этой таблицы или явно указанные в тексте: стандартные размеры справочника (S/M/L/XL и подобные) не добавляй, если их нет в таблице или тексте.
+- Исключай только рекламные, нерелевантные, дублирующиеся кадры и фото таблиц размеров/замеров. Если основной товар лежит рядом с упаковкой или другим товаром, но сам хорошо виден и остаётся главным объектом кадра, не исключай его. Исключай упаковку или другой товар только когда они доминируют в кадре либо делают продаваемый товар неясным. Исключай кадры с крупным наложенным текстом поверх фото: цена, акция, призыв, рекламная надпись на китайском, английском или любом другом языке; мелкий логотип товара или ненавязчивый водяной знак не исключай. Фото таблиц размеров и замеров исключи из публичной галереи, но распознай размеры товара в sizes, замеры изделия — в measurements, а таблицу подбора по росту/весу — отдельно в size_recommendation. В sizes переноси только размеры из колонки «Размер» этой таблицы или явно указанные в тексте: стандартные размеры справочника (S/M/L/XL и подобные) не добавляй, если их нет в таблице или тексте. Числовой ряд одежды и брюк пиши только чётными значениями через 2: «28–36» — это 28, 30, 32, 34, 36, «48–56» — 48, 50, 52, 54, 56; нечётные размеры диапазона не добавляй, обувь и детские размеры меньше 20 не меняй.
 - measurements заполняй только по явно читаемой таблице или тексту и только объектом {unit:"см",columns:[{key,label}],rows:[{size,values:{key:value}}],note:""}. В columns оставляй только реально указанные параметры: для одежды length/Длина, chest/Обхват груди, shoulders/Плечи, sleeve/Рукав, waist/Талия, hips/Бёдра, rise/Посадка, inseam/Шаговый шов; для обуви insole_length/Длина стельки, foot_length/Длина стопы, width/Ширина, instep/Подъём, shaft_height/Высота голенища. Не смешивай таблицы разных товаров, не достраивай отсутствующие размеры и не пересчитывай значения.
 - Для цветового семейства group_signature описывает неизменяемую основу товара и НИКОГДА не содержит цвет.
 - В group_signature обязательно включи бренд, точную модель/конструкцию, размер самого товара, материал и фурнитуру. Цвет верни только в отдельном поле color.
@@ -308,6 +309,7 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Не возвращай h1, seo_title или seo_description. Сервер записывает h1 равным name; Rails формирует title и meta description из бренда, name и текущей цены.
 - Используй только существующие бренды, категории, подкатегории и коды атрибутов. Не возвращай attribute_suggestions или subcategory_suggestion и не предлагай новые сущности.
 - Заполняй catalog_attributes только кодами из переданной для конкретного товара схемы атрибутов. Не переноси атрибут из другой категории и не используй похожий по смыслу код не по назначению.
+- Числовые размеры одежды, брюк и джинсов — только чётные значения с шагом 2: диапазон «28–36» означает 28, 30, 32, 34, 36, «48–56» — 48, 50, 52, 54, 56. Нечётные размеры из диапазона в sizes не добавляй; если источник перечисляет их поимённо, оставь только чётные. Правило не применяй к обуви, головным уборам, аксессуарам и детским размерам меньше 20.
 - Не записывай в атрибуты служебные заглушки «не определён», «не указано», «unknown» и подобные: неизвестное значение оставляй пустым.
 - Для сумок с подтверждёнными габаритами обязательно заполни dimensions в формате «Ш × В × Г см» или, если глубина не дана, «Ш × В см», а также bag_width_cm и bag_height_cm. Для кошельков, картхолдеров и обложек паспорта сохраняй подтверждённые габариты в dimensions, в том числе если известны только ширина и высота. Не записывай размер сумки в sizes: это не размерный ряд. Если подтверждён номинальный размер модели, например Classic Flap 25, включи его в name без бренда.
 - Для сумок при подтверждённом тексте или фото обязательно заполни hardware_color допустимым значением из схемы атрибутов. Не угадывай цвет фурнитуры.
@@ -1482,15 +1484,33 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (normalizedSizeRecommendation) attributes.size_recommendation = normalizedSizeRecommendation
     else delete attributes.size_recommendation
   }
+  const sizeCategoryId = [proposed.category, original.category]
+    .map((value) => String(value || ''))
+    .find((value) => input.categoryIds.has(value)) || ''
+  const sizeCategoryName = String(input.categoryNames?.get(sizeCategoryId) || '')
+    .trim().toLowerCase().replace(/ё/g, 'е')
+  const isClothingSizeCategory = sizeCategoryName === 'одежда'
+  const isShoeSizeCategory = sizeCategoryName === 'обувь'
+  /**
+   * «28–36» у брюк и «48–56» у верхней одежды — чётный ряд. Модель, текст
+   * карточки и таблица замеров могут вернуть все значения подряд, поэтому ряд
+   * приводится к чётному шагу 2 после каждого источника размеров.
+   */
+  const applyEvenClothingSizes = () => {
+    if (!isClothingSizeCategory || !Array.isArray(attributes.sizes)) return
+    const evenRun = planEvenClothingSizes(attributes.sizes.map((size: unknown) => String(size)))
+    if (!evenRun) return
+    attributes.sizes = evenRun.kept
+    if (attributes.measurements) {
+      const filteredMeasurements = withoutMeasurementRows(attributes.measurements, evenRun.removed)
+      if (filteredMeasurements) attributes.measurements = filteredMeasurements
+      else delete attributes.measurements
+    }
+  }
   if (input.attributeCodes.has('sizes')) {
     const sizeSourceText = [original.description, proposed.description].filter(Boolean).join('\n')
-    const categoryId = [proposed.category, original.category]
-      .map((value) => String(value || ''))
-      .find((value) => input.categoryIds.has(value)) || ''
-    const isClothing = String(input.categoryNames?.get(categoryId) || '')
-      .trim().toLowerCase().replace(/ё/g, 'е') === 'одежда'
-    const isShoe = String(input.categoryNames?.get(categoryId) || '')
-      .trim().toLowerCase().replace(/ё/g, 'е') === 'обувь'
+    const isClothing = isClothingSizeCategory
+    const isShoe = isShoeSizeCategory
     const shoeSizeGroups = isShoe ? extractShoeSizeGroups(attributes.sizes) : []
     const sizeValues = [
       ...extractExplicitClothingSizes(sizeSourceText),
@@ -1499,7 +1519,11 @@ export function normalizeBatchAiOutput(raw: any, input: {
       ...measurementRowSizes(attributes.measurements),
     ].map(canonicalClothingSize).filter(Boolean)
     if (sizeValues.length > 0) {
-      const normalizedSizes = [...new Set(sizeValues)]
+      let normalizedSizes = [...new Set(sizeValues)]
+      if (isClothing) {
+        const evenRun = planEvenClothingSizes(normalizedSizes)
+        if (evenRun) normalizedSizes = evenRun.kept
+      }
       attributes.sizes = shoeSizeGroups.length
         ? {
             values: normalizedSizes,
@@ -1509,6 +1533,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
             })),
           }
         : normalizedSizes
+      applyEvenClothingSizes()
     }
     if (
       !attributes.size_system
@@ -1554,6 +1579,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       // hallucinated AI attribute. This also recovers Chinese labels such as
       // 码数：38-46 with notes after the range.
       attributes.sizes = explicit.sizes
+      applyEvenClothingSizes()
     }
     if (!attributes.size_system && explicit.size_system && input.attributeCodes.has('size_system')) {
       attributes.size_system = explicit.size_system
@@ -2016,6 +2042,21 @@ function normalizeSingleMeasurementRowSizes(table: MeasurementTable) {
   }
 }
 
+function withoutMeasurementRows(measurements: unknown, removed: string[]) {
+  const removedSet = new Set(removed.map(canonicalClothingSize))
+  const filterTable = (table: any) => {
+    if (!table || !Array.isArray(table.rows)) return table
+    const rows = table.rows.filter((row: any) => !removedSet.has(canonicalClothingSize(row?.size)))
+    return rows.length === table.rows.length ? table : { ...table, rows }
+  }
+  const value = measurements as any
+  if (value && typeof value === 'object' && Array.isArray(value.tabs)) {
+    const tabs = value.tabs.map(filterTable).filter((tab: any) => Array.isArray(tab?.rows) && tab.rows.length > 0)
+    return tabs.length > 0 ? { ...value, tabs } : null
+  }
+  return filterTable(value)
+}
+
 function extractExplicitClothingSizes(value: unknown): string[] {
   const text = String(value || '')
   const result: string[] = []
@@ -2036,7 +2077,13 @@ function extractExplicitNumericClothingSizes(value: unknown): string[] {
     if (range) {
       const from = Number(range[1].replace(',', '.'))
       const to = Number(range[2].replace(',', '.'))
-      const step = Number.isInteger(from) && Number.isInteger(to) ? 1 : 0.5
+      // Числовой ряд одежды чётный: 28–36 — это 28, 30, 32, 34, 36. Половинные
+      // размеры (обувь) и диапазоны меньше 20 остаются с прежним шагом.
+      if (Number.isInteger(from) && Number.isInteger(to)) {
+        result.push(...expandEvenSizeRange(`${from}-${to}`))
+        continue
+      }
+      const step = 0.5
       const count = Math.floor((to - from) / step) + 1
       if (to >= from && count <= 20) {
         result.push(...Array.from({ length: count }, (_, index) => {

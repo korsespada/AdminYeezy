@@ -133,7 +133,7 @@ describe('batch AI normalization', () => {
     const prompt = buildBatchAiUserPrompt({
       product: { external_id: 'SP001-blue', photos: ['1.jpg', '2.jpg'] },
       brands: [], categories: [], subcategories: [], attributes: [],
-      processingOptions: {
+      processingOptions: {
         splitAlbumColors: false,
         reorderFirstPhoto: true,
         skipModelOnlyAlbum: true,
@@ -1225,7 +1225,22 @@ describe('batch AI normalization', () => {
       attributeCodes: new Set(['sizes']),
     })
 
-    expect(result.product.attributes.sizes).toEqual(['46', '47', '48', '49', '50'])
+    expect(result.product.attributes.sizes).toEqual(['46', '48', '50'])
+  })
+
+  it('keeps only even sizes for a pants range', () => {
+    const result = normalizeBatchAiOutput({
+      product: { category: 'clothing', catalog_attributes: { sizes: ['28', '29', '30', '31', '32', '33', '34', '35', '36'] } },
+    }, {
+      product: { category: 'clothing', description: 'Размеры: 28–36', photos: [], attributes: {} },
+      brandIds: new Set(),
+      categoryIds: new Set(['clothing']),
+      categoryNames: new Map([['clothing', 'Одежда']]),
+      subcategoryIds: new Set(),
+      attributeCodes: new Set(['sizes']),
+    })
+
+    expect(result.product.attributes.sizes).toEqual(['28', '30', '32', '34', '36'])
   })
 
   it('maps a known shoe construction suggestion to an existing broad subcategory', () => {
