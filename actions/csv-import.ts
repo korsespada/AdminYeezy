@@ -3,6 +3,7 @@
 import crypto from 'node:crypto'
 import { query, scrapingQuery, getScrapingClient, redis, elastic } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { revalidatePathsSafely } from '@/lib/safe-revalidate'
 import { after } from 'next/server'
 import { uploadToS3 } from '@/lib/s3'
 import { getScrapingFileArtifact } from '@/lib/scraping-files'
@@ -909,8 +910,7 @@ export async function saveBatchProductsAction(
       await client.query('UPDATE scraping_batches SET items_count=$1,updated_at=NOW() WHERE id=$2', [normalizedProducts.length, batchId])
     }
     await client.query('COMMIT')
-    revalidatePath('/admin/batches')
-    revalidatePath('/admin/scraping')
+    revalidatePathsSafely('/admin/batches', '/admin/scraping')
     return { success: true, data: { count: normalizedProducts.length, taskId } }
   } catch (err: any) {
     await client.query('ROLLBACK')
@@ -1258,8 +1258,7 @@ async function executeCustomSupplierScript(
   const saveRes = await saveBatchProductsAction(batchId, finalProducts, operationOwnerId, { supplierId });
   if (!saveRes.success) throw new Error(saveRes.error);
 
-  revalidatePath('/admin/scraping');
-  revalidatePath('/admin/batches');
+  revalidatePathsSafely('/admin/scraping', '/admin/batches');
   return {
     path: `db://batch/${batchId}/script`,
     taskId: saveRes.data?.taskId,
@@ -1277,7 +1276,7 @@ export async function runCustomSupplierScriptAction(
   try {
     await requireAdmin()
 
-    const supplierRes = await scrapingQuery('SELECT album_id, post_process_script FROM suppliers WHERE id=$1', [supplierId]);
+    const supplierRes = await scrapingQuery('SELECT album_id, post_process_script, first_photo_screenshot_filter FROM suppliers WHERE id=$1', [supplierId]);
     if (!supplierRes.rows.length) throw new Error("Поставщик не найден");
     const supplierData = supplierRes.rows[0];
     const storedScript = await getActiveSupplierPostProcess(supplierId)

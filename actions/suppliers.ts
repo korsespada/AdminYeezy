@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache'
+import { revalidatePathsSafely } from '@/lib/safe-revalidate'
 import { query, scrapingQuery, getScrapingClient, redis, describeScrapingDatabaseConnection } from '@/lib/db'
 import { deleteS3Folder, uploadToS3 } from '@/lib/s3'
 import type { ActionResponse } from '@/lib/types'
@@ -1303,7 +1304,7 @@ export async function startScrapingLocalAction(supplierId: number, endDate?: str
       await notifyTelegram(supplier.name, finalStatus, taskId, outputPath, itemsCount)
       
       console.log(`[Scraper ${taskId}] Finished with status: ${finalStatus}`)
-      revalidatePath('/admin/batches')
+      revalidatePathsSafely('/admin/batches')
     })
 
     revalidatePath('/admin/scraping')
