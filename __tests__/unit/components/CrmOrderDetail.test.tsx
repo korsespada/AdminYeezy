@@ -2,7 +2,12 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import CrmOrderDetail from '@/components/crm/CrmOrderDetail'
 
-vi.mock('@/actions/crm', () => ({ transitionOrderAction: vi.fn() }))
+vi.mock('@/actions/crm', () => ({
+  transitionOrderAction: vi.fn(),
+  saveShipmentAction: vi.fn(),
+  refreshShipmentAction: vi.fn(),
+  deleteShipmentAction: vi.fn(),
+}))
 
 describe('CrmOrderDetail', () => {
   it('renders the simplified order detail', () => {

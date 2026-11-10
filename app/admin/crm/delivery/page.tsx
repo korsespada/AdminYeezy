@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { AlertCircle } from 'lucide-react'
 import CrmDeliveryStats from '@/components/crm/CrmDeliveryStats'
-import { deliveryPeriodParam } from '@/lib/delivery-stats'
+import { deliveryParcelFilters, deliveryPeriodParam } from '@/lib/delivery-stats'
 import { getRailsDeliveryStats } from '@/lib/rails-admin'
 
 export const dynamic = 'force-dynamic'
@@ -9,13 +9,13 @@ export const dynamic = 'force-dynamic'
 export default async function CrmDeliveryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string | string[]; to?: string | string[] }>
+  searchParams: Promise<{ from?: string | string[]; to?: string | string[]; stage?: string | string[]; q?: string | string[] }>
 }) {
   const params = await searchParams
 
   try {
     const stats = await getRailsDeliveryStats({ from: deliveryPeriodParam(params.from), to: deliveryPeriodParam(params.to) })
-    return <CrmDeliveryStats stats={stats} />
+    return <CrmDeliveryStats stats={stats} filters={deliveryParcelFilters(params)} />
   } catch (error) {
     return (
       <main className="min-h-full bg-slate-950 p-8 text-slate-100">

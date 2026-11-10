@@ -1505,10 +1505,23 @@ export interface RailsDeliveryParcelRow {
   source: 'track' | 'crm' | 'both'
   stage: RailsCrmTracking['stage']
   destination: string | null
+  // Как показывает STD: имя и первая буква фамилии («Иван П.»).
+  recipient?: string | null
   lookups_count: number | null
   last_lookup_at: string | null
-  last_event_at?: string
+  last_event_at?: string | null
   days_without_events?: number
+}
+
+// Строка общего списка посылок. days — дни в пути по событиям STD: до
+// вручения, у невручённых — до момента отчёта.
+export interface RailsDeliveryParcelListRow extends RailsDeliveryParcelRow {
+  first_seen_at: string | null
+  started_at: string | null
+  last_event_text: string | null
+  days: number | null
+  customer_id: string | null
+  order_id: string | null
 }
 
 // Сводка Rails по посылкам STD: номера с публичной страницы /track
@@ -1538,10 +1551,13 @@ export interface RailsDeliveryStats {
   parcels: { total: number; delivered: number; handed_to_cdek: number; notice_seen: number }
   weekly: Array<{ week: string; found: number; not_found: number; shipments: number }>
   stages: Record<RailsDeliveryStage, number>
-  destinations: Array<{ city: string; count: number }>
+  // delivered и median_days — по врученным в город; нет в старых ответах Rails.
+  destinations: Array<{ city: string; count: number; delivered?: number; median_days?: number | null }>
   durations: Record<'total' | 'before_customs' | 'customs' | 'after_customs', RailsDeliveryDuration>
   stuck: RailsDeliveryParcelRow[]
   most_checked: RailsDeliveryParcelRow[]
+  // Нет в ответе Rails до версии со списком посылок.
+  parcel_list?: RailsDeliveryParcelListRow[]
 }
 
 export async function getRailsDeliveryStats(period: { from?: string; to?: string } = {}) {
@@ -1551,6 +1567,16 @@ export async function getRailsDeliveryStats(period: { from?: string; to?: string
   const query = params.toString()
   const result = await railsFetch<{ delivery_stats: RailsDeliveryStats }>(`/admin/delivery_stats${query ? `?${query}` : ''}`)
   return result.delivery_stats
+}
+
+// Обновить снимок STD у одной посылки раздела «Доставка». error — фраза для
+// менеджера, если STD не ответил.
+export async function refreshRailsDeliveryParcel(number: string) {
+  const result = await railsFetch<{ parcel: { number: string; stage: RailsDeliveryStage | null; error: string | null } }>(
+    '/admin/delivery_stats/refresh',
+    { method: 'POST', body: JSON.stringify({ number }) },
+  )
+  return result.parcel
 }
 
 export async function transitionRailsCrmOrderItem(id: string, input: {

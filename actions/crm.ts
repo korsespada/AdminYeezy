@@ -11,6 +11,7 @@ import {
   markRailsCrmWalletWithdrawalPaid,
   recordRailsCrmSupplierResponse,
   refreshRailsCrmShipment,
+  refreshRailsDeliveryParcel,
   rejectRailsCrmRefund,
   rejectRailsCrmWalletWithdrawal,
   transitionRailsCrmOrder,
@@ -108,6 +109,17 @@ export async function refreshShipmentAction(_state: ShipmentActionState | null, 
     const shipment = await refreshRailsCrmShipment(requiredString(formData, 'shipmentId'))
     revalidateShipment(formData)
     return shipment.tracking_error ? { ok: false, message: shipment.tracking_error } : { ok: true, message: 'Статус обновлён' }
+  } catch (error) {
+    return { ok: false, message: actionErrorMessage(error) }
+  }
+}
+
+export async function refreshDeliveryParcelAction(_state: ShipmentActionState | null, formData: FormData): Promise<ShipmentActionState> {
+  await requireAdmin()
+  try {
+    const parcel = await refreshRailsDeliveryParcel(requiredString(formData, 'number'))
+    revalidatePath('/admin/crm/delivery')
+    return parcel.error ? { ok: false, message: parcel.error } : { ok: true, message: 'Обновлено' }
   } catch (error) {
     return { ok: false, message: actionErrorMessage(error) }
   }
