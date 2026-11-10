@@ -9,6 +9,12 @@
   python clean_one.py --in photo.jpg --out clean.webp --report report.json \
       --crop-before before.png --crop-after after.png \
       --templates data/david-studio/watermark --model tmp/models/big-lama.pt
+
+Постоянный режим для воркера (модель грузится один раз, а не на каждое фото):
+  python clean_one.py --serve --templates ... --model ...
+  stdin:  по строке JSON на фото {"in", "out", "report", "crop_before", "crop_after", "box"}
+  stdout: строка {"ready": true} после загрузки, затем по строке {"ok": true, "report": {...}}
+          или {"ok": false, "error": "..."} на каждое фото. Логи идут в stderr.
 """
 from __future__ import annotations
 
@@ -49,38 +55,45 @@ def crop_pair(image: np.ndarray, clean: np.ndarray, box: list[int], zoom: float 
     return before, after
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--in", dest="input", required=True)
-    parser.add_argument("--out", dest="output", required=True)
-    parser.add_argument("--report", required=True)
-    parser.add_argument("--crop-before", default="")
-    parser.add_argument("--crop-after", default="")
-    parser.add_argument("--templates", default="data/david-studio/watermark")
-    parser.add_argument("--model", default="tmp/david-watermark-pilot/models/big-lama.pt")
-    parser.add_argument("--no-lama", action="store_true")
-    # Рамка вотермарки, отмеченная оператором: "x1,y1,x2,y2" в долях кадра (0..1).
-    parser.add_argument("--box", default="")
-    args = parser.parse_args()
+class CleanError(Exception):
+    """Ошибка одного кадра: в постоянном режиме не роняет процесс."""
 
+
+class LamaHolder:
+    """Модель LaMa грузится один раз на процесс и только когда понадобилась."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.model = self.torch = None
+
+    def get(self):
+        if self.model is None:
+            if not os.path.exists(self.path):
+                raise CleanError(f"нет модели LaMa: {self.path}")
+            self.model, self.torch = core.load_lama(core.ensure_model(self.path))
+        return self.model, self.torch
+
+
+def clean_file(job: dict, templates: list[np.ndarray], lama: LamaHolder | None) -> dict:
+    """Чистит один файл: job = {in, out, report, crop_before, crop_after, box}."""
     started = time.time()
-    templates = load_templates(args.templates)
-    image = cv2.imread(args.input, cv2.IMREAD_COLOR)
+    image = cv2.imread(job["in"], cv2.IMREAD_COLOR)
     if image is None:
-        raise SystemExit(f"не читается файл {args.input}")
+        raise CleanError(f"не читается файл {job['in']}")
 
     norm = core.normalize(image)
     manual = False
     box = None
-    if args.box:
+    box_arg = job.get("box") or ""
+    if box_arg:
         try:
-            parts = [float(value) for value in args.box.replace(" ", "").split(",")]
+            parts = [float(value) for value in box_arg.replace(" ", "").split(",")]
             if len(parts) != 4:
                 raise ValueError("нужно четыре числа")
             box = tuple(parts)
             manual = True
         except ValueError as error:
-            raise SystemExit(f"не разобрал --box {args.box!r}: {error}")
+            raise CleanError(f"не разобрал --box {box_arg!r}: {error}")
 
     if manual:
         # Чистка по рамке оператора: он обвёл надпись сам, поэтому затираем ровно
@@ -118,21 +131,17 @@ def main() -> None:
     clean = image.copy()
     mask_px = passes_done = 0
     z_after = z_before
-    if manual and not args.no_lama:
+    if manual and lama is not None:
         # Один проход по отмеченной рамке: LaMa перерисовывает её целиком.
-        model, torch = core.load_lama(core.ensure_model(args.model)) if os.path.exists(args.model) else (None, None)
-        if model is None:
-            raise SystemExit(f"нет модели LaMa: {args.model}")
+        model, torch = lama.get()
         mask = np.zeros(image.shape[:2], np.uint8)
         mask[hit_orig.y:hit_orig.y + hit_orig.h, hit_orig.x:hit_orig.x + hit_orig.w] = 255
         mask_px = int(np.count_nonzero(mask))
         clean = core.apply_pass(model, torch, clean, mask)
         passes_done = 1
         z_after = core.local_z(cv2.cvtColor(core.normalize(clean), cv2.COLOR_BGR2GRAY), templates, hit)
-    elif confident and not args.no_lama:
-        model, torch = core.load_lama(core.ensure_model(args.model)) if os.path.exists(args.model) else (None, None)
-        if model is None:
-            raise SystemExit(f"нет модели LaMa: {args.model}")
+    elif confident and lama is not None:
+        model, torch = lama.get()
         prior = core.strokes_at(templates[0], hit_orig.w, hit_orig.h)
         box_area = max(hit_orig.w * hit_orig.h, 1)
         for pass_index, (mode, value, near_px) in enumerate(passes, 1):
@@ -156,19 +165,20 @@ def main() -> None:
         status = "review"
 
     # Формат вывода задаётся расширением: воркер просит webp для S3.
-    if args.output.lower().endswith((".webp", ".jpg", ".jpeg")):
-        params = [cv2.IMWRITE_WEBP_QUALITY, 92] if args.output.lower().endswith(".webp") else [cv2.IMWRITE_JPEG_QUALITY, 92]
-        cv2.imwrite(args.output, clean, params)
+    if job["out"].lower().endswith((".webp", ".jpg", ".jpeg")):
+        params = [cv2.IMWRITE_WEBP_QUALITY, 92] if job["out"].lower().endswith(".webp") else [cv2.IMWRITE_JPEG_QUALITY, 92]
+        cv2.imwrite(job["out"], clean, params)
     else:
-        cv2.imwrite(args.output, clean)
+        cv2.imwrite(job["out"], clean)
 
-    if args.crop_before or args.crop_after:
+    crop_before, crop_after = job.get("crop_before") or "", job.get("crop_after") or ""
+    if crop_before or crop_after:
         before, after = crop_pair(image, clean, [hit_orig.x, hit_orig.y, hit_orig.w, hit_orig.h])
         if before is not None:
-            if args.crop_before:
-                cv2.imwrite(args.crop_before, before)
-            if args.crop_after:
-                cv2.imwrite(args.crop_after, after)
+            if crop_before:
+                cv2.imwrite(crop_before, before)
+            if crop_after:
+                cv2.imwrite(crop_after, after)
 
     report = {
         "status": status,
@@ -190,8 +200,66 @@ def main() -> None:
     }
     if box is not None:
         report["manual_box"] = list(box)
-    with open(args.report, "w", encoding="utf-8") as handle:
-        json.dump(report, handle, ensure_ascii=False)
+    if job.get("report"):
+        with open(job["report"], "w", encoding="utf-8") as handle:
+            json.dump(report, handle, ensure_ascii=False)
+    return report
+
+
+def serve(templates: list[np.ndarray], lama: LamaHolder | None) -> None:
+    """Постоянный режим: строка JSON на входе — строка JSON с результатом на выходе."""
+    # Канал с воркером — UTF-8 независимо от кодовой страницы Windows.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    protocol = sys.stdout
+    sys.stdout = sys.stderr  # логи модуля чистки не должны попасть в протокол
+    if lama is not None:
+        lama.get()
+
+    def reply(payload: dict) -> None:
+        protocol.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        protocol.flush()
+
+    reply({"ready": True})
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            reply({"ok": True, "report": clean_file(json.loads(line), templates, lama)})
+        except Exception as error:  # noqa: BLE001 — один плохой кадр не роняет процесс
+            reply({"ok": False, "error": str(error) or error.__class__.__name__})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--in", dest="input")
+    parser.add_argument("--out", dest="output")
+    parser.add_argument("--report", default="")
+    parser.add_argument("--crop-before", default="")
+    parser.add_argument("--crop-after", default="")
+    parser.add_argument("--templates", default="data/david-studio/watermark")
+    parser.add_argument("--model", default="tmp/david-watermark-pilot/models/big-lama.pt")
+    parser.add_argument("--no-lama", action="store_true")
+    # Рамка вотермарки, отмеченная оператором: "x1,y1,x2,y2" в долях кадра (0..1).
+    parser.add_argument("--box", default="")
+    args = parser.parse_args()
+
+    templates = load_templates(args.templates)
+    lama = None if args.no_lama else LamaHolder(args.model)
+    if args.serve:
+        serve(templates, lama)
+        return
+    if not args.input or not args.output:
+        parser.error("нужны --in и --out (или --serve)")
+    try:
+        report = clean_file({
+            "in": args.input, "out": args.output, "report": args.report,
+            "crop_before": args.crop_before, "crop_after": args.crop_after, "box": args.box,
+        }, templates, lama)
+    except CleanError as error:
+        raise SystemExit(str(error))
     print(json.dumps(report, ensure_ascii=False))
 
 

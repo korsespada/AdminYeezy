@@ -6,16 +6,20 @@
  * в контейнере AdminYeezy это держать нельзя. Воркер сам ходит наружу — в AdminYeezy за
  * заданиями, на Shopify CDN за оригиналами и в наш S3 за результатом. Входящие порты не нужны.
  *
+ * Скорость: модель LaMa грузится один раз в постоянном процессе Python (clean_one.py --serve),
+ * а не на каждое фото; пока чистится кадр, следующий уже скачивается, а готовый — загружается в S3.
+ *
  * Запуск:
  *   node scripts/photo-clean-worker.mjs                # крутится постоянно
  *   node scripts/photo-clean-worker.mjs --once         # разобрать одну пачку и выйти
  *   node scripts/photo-clean-worker.mjs --limit 3      # сколько фото брать за раз
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { writeFile } from 'node:fs/promises'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import s3CacheControl from './lib/s3-cache-control.js'
 import dotenv from 'dotenv'
@@ -40,6 +44,8 @@ const TEMPLATES = process.env.PHOTO_CLEAN_TEMPLATES || join('data', 'david-studi
 const CLEANER = join('scripts', 'david-studio-watermark', 'clean_one.py')
 const LIMIT = Math.max(1, Math.min(10, Number(argValue('--limit') || 3)))
 const IDLE_MS = Number(process.env.PHOTO_CLEAN_IDLE_MS || 15000)
+const PYTHON_TIMEOUT_MS = Number(process.env.PHOTO_CLEAN_PYTHON_TIMEOUT_MS || 240000)
+const PYTHON_START_TIMEOUT_MS = Number(process.env.PHOTO_CLEAN_START_TIMEOUT_MS || 180000)
 
 const bucketName = process.env.S3_BUCKET || ''
 const s3 = new S3Client({
@@ -84,28 +90,116 @@ async function download(url, target) {
   if (!response.ok) throw new Error(`источник вернул HTTP ${response.status}`)
   const buffer = Buffer.from(await response.arrayBuffer())
   if (!buffer.length) throw new Error('источник вернул пустой файл')
-  writeFileSync(target, buffer)
+  await writeFile(target, buffer)
   return buffer.length
 }
 
-function runPython(args, timeoutMs = Number(process.env.PHOTO_CLEAN_PYTHON_TIMEOUT_MS || 240000)) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON, [CLEANER, ...args], { stdio: ['ignore', 'pipe', 'pipe'] })
-    let out = ''
-    let err = ''
-    // Без таймаута один тяжёлый кадр блокирует всю очередь: процесс висит, lease держится.
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      reject(new Error(`чистка не уложилась в ${Math.round(timeoutMs / 1000)} с`))
-    }, timeoutMs)
-    child.stdout.on('data', (chunk) => { out += chunk })
-    child.stderr.on('data', (chunk) => { err += chunk })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0) resolve(out)
-      else reject(new Error(err.trim() || `python ${code}`))
+/**
+ * Постоянный процесс чистки: Python, torch и модель LaMa грузятся один раз
+ * (это ~4–5 с), дальше по строке JSON на фото. Если процесс упал или кадр не
+ * уложился в таймаут, процесс убивается и поднимается заново на следующем фото.
+ */
+class Cleaner {
+  constructor() {
+    this.child = null
+    this.ready = null
+    this.pending = null
+  }
+
+  start() {
+    // detached: Ctrl+C в окне воркера не долетает до Python, текущее фото дочищается.
+    // Если окно закрыли, stdin процесса закрывается и он выходит сам.
+    const child = spawn(PYTHON, ['-W', 'ignore', CLEANER, '--serve', '--templates', TEMPLATES, '--model', MODEL], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+      windowsHide: true,
     })
-  })
+    this.child = child
+    let buffer = ''
+    let stderrTail = ''
+    let markReady
+    let failReady
+    this.ready = new Promise((resolve, reject) => { markReady = resolve; failReady = reject })
+    this.ready.catch(() => {})
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      buffer += chunk
+      let newline
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newline).trim()
+        buffer = buffer.slice(newline + 1)
+        if (!line) continue
+        let message
+        try { message = JSON.parse(line) } catch { continue }
+        if (message.ready) { markReady(); continue }
+        const pending = this.pending
+        this.pending = null
+        if (!pending) continue
+        if (message.ok) pending.resolve(message.report)
+        else pending.reject(new Error(message.error || 'ошибка чистки'))
+      }
+    })
+    child.stderr.on('data', (chunk) => { stderrTail = (stderrTail + chunk).slice(-4000) })
+    child.stdin.on('error', () => {})
+    child.on('error', (error) => { stderrTail += `\n${error.message}` })
+    child.on('close', (code) => {
+      if (this.child === child) this.child = null
+      const tail = stderrTail.trim().split('\n').slice(-5).join(' | ')
+      const error = new Error(tail || `python завершился с кодом ${code}`)
+      failReady(error)
+      const pending = this.pending
+      this.pending = null
+      if (pending) pending.reject(error)
+    })
+  }
+
+  stop() {
+    const child = this.child
+    this.child = null
+    if (child) child.kill()
+  }
+
+  async ensureStarted() {
+    if (this.child) return
+    log('запускаю процесс чистки и загружаю модель LaMa…')
+    const started = Date.now()
+    this.start()
+    let timer
+    try {
+      await Promise.race([
+        this.ready,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('процесс чистки не запустился вовремя')), PYTHON_START_TIMEOUT_MS)
+        }),
+      ])
+    } catch (error) {
+      this.stop()
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+    log(`модель загружена за ${((Date.now() - started) / 1000).toFixed(1)} с`)
+  }
+
+  async clean(request) {
+    await this.ensureStarted()
+    const child = this.child
+    if (!child) throw new Error('процесс чистки остановлен')
+    return new Promise((resolve, reject) => {
+      // Без таймаута один тяжёлый кадр блокирует всю очередь: процесс висит, lease держится.
+      const timer = setTimeout(() => {
+        this.pending = null
+        this.stop()
+        reject(new Error(`чистка не уложилась в ${Math.round(PYTHON_TIMEOUT_MS / 1000)} с`))
+      }, PYTHON_TIMEOUT_MS)
+      this.pending = {
+        resolve: (report) => { clearTimeout(timer); resolve(report) },
+        reject: (error) => { clearTimeout(timer); reject(error) },
+      }
+      child.stdin.write(`${JSON.stringify(request)}\n`)
+    })
+  }
 }
 
 async function uploadFile(key, file, contentType) {
@@ -116,54 +210,105 @@ async function uploadFile(key, file, contentType) {
   return s3PublicUrl(key)
 }
 
-async function processJob(job) {
+function jobLabel(job) {
+  return `${job.source_product} #${job.source_position}`
+}
+
+async function failJob(job, error) {
+  log(`  ошибка на ${jobLabel(job)}: ${error.message}`)
+  await api({ action: 'fail', job_id: job.id, lease_token: job.lease_token, error: error.message }).catch(() => {})
+}
+
+/** Скачивание оригинала. Не бросает: ошибка возвращается в объекте, чтобы предзагрузка не роняла процесс. */
+async function prepareJob(job) {
   const dir = mkdtempSync(join(tmpdir(), 'photo-clean-'))
   try {
     const extension = extname(new URL(job.source_url.split('?')[0]).pathname) || '.jpg'
     const input = join(dir, `source${extension}`)
-    const cleaned = join(dir, 'clean.webp')
-    const reportPath = join(dir, 'report.json')
-    const cropBefore = join(dir, 'before.png')
-    const cropAfter = join(dir, 'after.png')
-
     const bytes = await download(job.source_url, input)
-    // Рамку оператора передаём как есть: чистка пойдёт по ней без автоопределения.
-    const manualBox = job.manual_box && typeof job.manual_box === 'object'
-      ? [job.manual_box.x1, job.manual_box.y1, job.manual_box.x2, job.manual_box.y2].join(',')
-      : ''
-    log(`скачано ${Math.round(bytes / 1024)} КБ, чищу ${job.source_product} #${job.source_position}${manualBox ? ' (рамка оператора)' : ''}`)
-    await runPython([
-      '--in', input, '--out', cleaned, '--report', reportPath,
-      '--crop-before', cropBefore, '--crop-after', cropAfter,
-      '--templates', TEMPLATES, '--model', MODEL,
-      ...(manualBox ? ['--box', manualBox] : []),
-    ])
-    const report = JSON.parse(readFileSync(reportPath, 'utf8'))
-    log(`  ${report.status} score=${report.score} z_after=${report.z_after} mask=${report.mask_px} ${report.seconds}с`)
-
-    const hash = createHash('sha256').update(readFileSync(cleaned)).digest('hex')
-    const cleanUrl = await uploadFile(`products/media/${hash}.webp`, cleaned, 'image/webp')
-    const beforeUrl = await uploadFile(`photo-clean/${hash}/before.png`, cropBefore, 'image/png')
-    const afterUrl = await uploadFile(`photo-clean/${hash}/after.png`, cropAfter, 'image/png')
-
-    await api({
-      action: 'complete',
-      job_id: job.id,
-      lease_token: job.lease_token,
-      clean_status: report.status,
-      s3_clean_url: cleanUrl,
-      s3_before_url: beforeUrl,
-      s3_after_url: afterUrl,
-      z_after: report.z_after,
-      mask_px: report.mask_px,
-      passes: report.passes,
-      seconds: report.seconds,
-      quality: report,
-    })
-    return report
-  } finally {
+    return { job, dir, input, bytes }
+  } catch (error) {
     rmSync(dir, { recursive: true, force: true })
+    return { job, error }
   }
+}
+
+async function cleanJob(cleaner, prepared) {
+  const { job, dir, input, bytes } = prepared
+  // Рамку оператора передаём как есть: чистка пойдёт по ней без автоопределения.
+  const manualBox = job.manual_box && typeof job.manual_box === 'object'
+    ? [job.manual_box.x1, job.manual_box.y1, job.manual_box.x2, job.manual_box.y2].join(',')
+    : ''
+  log(`скачано ${Math.round(bytes / 1024)} КБ, чищу ${jobLabel(job)}${manualBox ? ' (рамка оператора)' : ''}`)
+  const files = {
+    cleaned: join(dir, 'clean.webp'),
+    cropBefore: join(dir, 'before.png'),
+    cropAfter: join(dir, 'after.png'),
+  }
+  const report = await cleaner.clean({
+    in: input, out: files.cleaned, crop_before: files.cropBefore, crop_after: files.cropAfter, box: manualBox,
+  })
+  log(`  ${report.status} score=${report.score} z_after=${report.z_after} mask=${report.mask_px} ${report.seconds}с`)
+  return { report, files }
+}
+
+/** Загрузка результата в S3 и отметка в очереди. */
+async function finishJob(job, { report, files }) {
+  const hash = createHash('sha256').update(readFileSync(files.cleaned)).digest('hex')
+  const [cleanUrl, beforeUrl, afterUrl] = await Promise.all([
+    uploadFile(`products/media/${hash}.webp`, files.cleaned, 'image/webp'),
+    uploadFile(`photo-clean/${hash}/before.png`, files.cropBefore, 'image/png'),
+    uploadFile(`photo-clean/${hash}/after.png`, files.cropAfter, 'image/png'),
+  ])
+
+  await api({
+    action: 'complete',
+    job_id: job.id,
+    lease_token: job.lease_token,
+    clean_status: report.status,
+    s3_clean_url: cleanUrl,
+    s3_before_url: beforeUrl,
+    s3_after_url: afterUrl,
+    z_after: report.z_after,
+    mask_px: report.mask_px,
+    passes: report.passes,
+    seconds: report.seconds,
+    quality: report,
+  })
+}
+
+/**
+ * Пачка конвейером: пока LaMa чистит кадр, следующий уже скачивается, а готовый
+ * загружается в S3. Сама чистка — строго по одному кадру (LaMa забирает все ядра).
+ */
+async function processBatch(cleaner, jobs, isStopping) {
+  const finishing = []
+  let next = prepareJob(jobs[0])
+  for (let index = 0; next; index++) {
+    const prepared = await next
+    next = index + 1 < jobs.length && !isStopping() ? prepareJob(jobs[index + 1]) : null
+    const { job } = prepared
+    if (prepared.error) {
+      await failJob(job, new Error(`не скачал оригинал: ${prepared.error.message}`))
+    } else {
+      try {
+        const result = await cleanJob(cleaner, prepared)
+        finishing.push(finishJob(job, result)
+          .catch((error) => failJob(job, error))
+          .finally(() => rmSync(prepared.dir, { recursive: true, force: true })))
+      } catch (error) {
+        rmSync(prepared.dir, { recursive: true, force: true })
+        await failJob(job, error)
+      }
+    }
+    // Остановка: дочищенное догружаем, остальные задания вернутся в очередь по истечении lease.
+    if (isStopping()) break
+  }
+  if (next) {
+    const skipped = await next
+    if (skipped.dir) rmSync(skipped.dir, { recursive: true, force: true })
+  }
+  await Promise.all(finishing)
 }
 
 async function main() {
@@ -174,6 +319,8 @@ async function main() {
 
   let stopping = false
   process.on('SIGINT', () => { stopping = true; log('останавливаюсь после текущего фото…') })
+  const cleaner = new Cleaner()
+  process.on('exit', () => cleaner.stop())
 
   for (;;) {
     let jobs = []
@@ -194,20 +341,14 @@ async function main() {
       continue
     }
 
-    for (const job of jobs) {
-      try {
-        await processJob(job)
-      } catch (error) {
-        log(`  ошибка на ${job.source_product} #${job.source_position}: ${error.message}`)
-        await api({ action: 'fail', job_id: job.id, lease_token: job.lease_token, error: error.message }).catch(() => {})
-      }
-      if (stopping) return
-    }
-    if (hasFlag('--once')) return
+    await processBatch(cleaner, jobs, () => stopping)
+    if (stopping || hasFlag('--once')) return
   }
 }
 
-main().catch((error) => {
-  console.error('ОШИБКА:', error.message)
-  process.exit(1)
-})
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error('ОШИБКА:', error.message)
+    process.exit(1)
+  })
