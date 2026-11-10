@@ -2805,6 +2805,25 @@ async function recordBatchPublication(batchId, externalId, railsProductId, paylo
   `, [batchId, externalId, railsProductId ? String(railsProductId) : null, payloadHash || null]);
 }
 
+/**
+ * Поставщик, для которого конфликты цветовых семей — предупреждение, а не
+ * блокировка публикации. Список хранится в app_settings:
+ *   key = 'family_check_skip_suppliers', value = '[3]'.
+ */
+async function familyCheckSkipped(supplierId) {
+  const id = Number(supplierId);
+  if (!Number.isInteger(id)) return false;
+  const res = await scrapingPool.query("SELECT value FROM app_settings WHERE key='family_check_skip_suppliers'");
+  const raw = res.rows[0] && res.rows[0].value;
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return Array.isArray(parsed) && parsed.map(Number).includes(id);
+  } catch {
+    return false;
+  }
+}
+
 async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (typeof options === 'function' && !onProgress) {
     onProgress = options;
@@ -2890,9 +2909,19 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const lookups = await loadLegacyLookupMaps();
   // Rails группирует витрину по variant_group_key, поэтому семья с разными
   // брендом, классификацией, ценой или сеткой не должна уйти в каталог.
+  // Для поставщиков из app_settings.family_check_skip_suppliers проверка
+  // остаётся диагностикой: семьи собраны вручную, цены и габариты у цветов
+  // действительно разные, и блокировать публикацию нельзя.
   const familyIssues = batchColorFamilyIssues(products.map((product) => withoutBagSizes(product, lookups)));
   if (familyIssues.length > 0) {
-    throw new Error(`Цветовые семьи не прошли проверку:\n${familyIssues.slice(0, 20).map((entry) => `«${entry.family}»: ${entry.message}`).join('\n')}`);
+    const details = familyIssues.slice(0, 20)
+      .map((entry) => `«${entry.family}»: ${entry.message}`)
+      .join('\n');
+    if (await familyCheckSkipped(batch.supplier_id)) {
+      console.warn(`[batch-publish] проверка цветовых семей пропущена для поставщика ${batch.supplier_id}:\n${details}`);
+    } else {
+      throw new Error(`Цветовые семьи не прошли проверку:\n${details}`);
+    }
   }
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
   await ensurePublicationPayloadHashes();
@@ -3268,6 +3297,7 @@ module.exports = {
   finalizeBvPostProcessRemote,
   existingRailsExternalIds,
   existingRailsProducts,
+  familyCheckSkipped,
   existingRailsPhotoMap,
   deleteRailsProductsByExternalIds,
   getBatch,
