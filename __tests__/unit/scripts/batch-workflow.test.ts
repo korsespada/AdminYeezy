@@ -874,3 +874,25 @@ describe('batch workflow CSV compatibility adapter', () => {
     })
   })
 })
+
+describe('publication attributes', () => {
+  it('does not turn translation columns into catalog characteristics', () => {
+    const product = workflow.normalizeProduct({
+      id: 1,
+      external_id: 'ext-1',
+      name: 'Подвеска',
+      attributes: { colors: ['Серебристый'] },
+      photo_alts: ['Подвеска, вид спереди'],
+      photo_alts_en: ['Chrome Hearts silver cross pendant, front view'],
+      translations: { en: { name: 'Cross pendant', status: 'machine' } },
+    })
+    expect(product.attributes).toEqual({ colors: ['Серебристый'] })
+    expect(product.photo_alts_en).toEqual(['Chrome Hearts silver cross pendant, front view'])
+    expect(workflow.catalogAttributes({
+      colors: ['Серебристый'],
+      photo_alts_en: ['alt'],
+      photo_alts: ['alt'],
+      translations: { en: { name: 'x' } },
+    })).toEqual({ colors: ['Серебристый'] })
+  })
+})

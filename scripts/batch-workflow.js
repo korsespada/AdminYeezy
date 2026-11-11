@@ -78,6 +78,9 @@ const CORE_PRODUCT_FIELDS = new Set([
   'id', 'external_id', 'name', 'description', 'h1', 'seo_title', 'seo_description', 'price', 'price_source', 'status', 'brand',
   'category', 'subcategory', 'gender', 'photos', 'batch_id', 'batchid',
   'slug', 'photo_alts', 'photo_slugs', 'ai_processed', 'attributes', 'variant_group_key', 'variant_group_name', 'ai_error', 'ai_confidence', 'source_position', 'supplier_published_on', 'created_at', 'updated_at',
+  // Колонки EN-перевода: без них extractAttributes перекладывал их в
+  // характеристики, и в Rails уходили `translations` и `photo_alts_en`.
+  'translations', 'photo_alts_en',
 ]);
 
 function ensureDir(dir) {
@@ -798,7 +801,11 @@ function catalogAttributes(value) {
       && normalized !== 'size_chart_photo_urls'
       && normalized !== 'video_url'
       && normalized !== 'video_poster_url'
-      && normalized !== 'source_parent_external_id';
+      && normalized !== 'source_parent_external_id'
+      // Alt-тексты и переводы — поля карточки, а не характеристики товара.
+      && !normalized.startsWith('photo_alts')
+      && normalized !== 'photo_slugs'
+      && normalized !== 'translations';
   }));
 }
 
@@ -3290,6 +3297,8 @@ async function closePools() {
 
 module.exports = {
   PRODUCT_COLUMNS,
+  catalogAttributes,
+  normalizeProduct,
   closePools,
   deduplicatePostProcessedProducts,
   deduplicateBvByContentFingerprints,
