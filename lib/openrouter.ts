@@ -3,6 +3,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { SocksProxyAgent } from 'socks-proxy-agent'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 import { recordAiUsage } from '@/lib/ai-usage'
+import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
 const OPENROUTER_CHAT_URL = new URL('https://openrouter.ai/api/v1/chat/completions')
 /**
@@ -78,9 +79,18 @@ export async function openRouterChatCompletion(
   const agent = createOpenRouterAgent(target.hostname)
   const label = openRouterProviderLabel(target)
   const startedAt = Date.now()
+  const isByesuHost = target.hostname.toLowerCase() === 'byesu.com' || target.hostname.toLowerCase().endsWith('.byesu.com')
+
+  // BYESU идёт через пул прокси из «Настроек ИИ» (см. lib/batch-ai-proxies):
+  // без прокси крупные тела с картинками висят до таймаута. Остальные шлюзы
+  // используют прежний OPENROUTER_PROXY_URL.
+  const send = isByesuHost
+    ? () => withProxyFailover((proxyAgent) => sendOpenRouterRequest(target, body, apiKey, proxyAgent, extraHeaders, label))
+        .then((result) => result.value)
+    : () => sendOpenRouterRequest(target, body, apiKey, agent, extraHeaders, label)
 
   // Каждый ответ и каждая неудача пишутся в учёт расхода ИИ.
-  return sendOpenRouterRequest(target, body, apiKey, agent, extraHeaders, label).then(
+  return send().then(
     (payload) => {
       recordAiUsage({ target, protocol: 'openai', model: requestBody.model, payload, startedAt })
       return payload
@@ -96,7 +106,7 @@ function sendOpenRouterRequest(
   target: URL,
   body: string,
   apiKey: string,
-  agent: ReturnType<typeof createOpenRouterAgent>,
+  agent: ReturnType<typeof createOpenRouterAgent> | BatchAiProxyAgent,
   extraHeaders: Record<string, string>,
   label: string,
 ): Promise<OpenRouterPayload> {
