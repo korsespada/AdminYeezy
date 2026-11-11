@@ -327,7 +327,7 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
             <input
               type="number"
               min="1000"
-              max="20000"
+              max="64000"
               step="100"
               value={settings.maxTokens}
               onChange={(event) => update('maxTokens', Number(event.target.value))}

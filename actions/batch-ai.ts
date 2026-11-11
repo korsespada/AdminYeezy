@@ -205,7 +205,7 @@ export async function updateBatchAiSettingsAction(settings: BatchAiSettings) {
     batch_ai_openrouter_model: String(settings.openrouterModel || '').trim() || 'google/gemini-2.5-flash',
     batch_ai_byesu_model: String(settings.byesuModel || '').trim() || 'gemini-3.1-flash-lite',
     batch_ai_temperature: String(Math.max(0, Math.min(2, finiteNumber(settings.temperature, 0.1)))),
-    batch_ai_max_tokens: String(Math.max(1000, Math.min(20000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
+    batch_ai_max_tokens: String(Math.max(1000, Math.min(64000, Math.round(finiteNumber(settings.maxTokens, 5000))))),
     batch_ai_concurrency: String(Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))),
     batch_ai_system_prompt: String(settings.systemPrompt || '').trim() || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
     batch_ai_category_rules: JSON.stringify(normalizeBatchAiCategoryRules(settings.categoryRules)),
