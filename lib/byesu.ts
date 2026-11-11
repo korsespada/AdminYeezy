@@ -226,7 +226,7 @@ async function sendByesuRequest(target: string, apiKey: string, requestBody: Rec
   const body = JSON.stringify(requestBody)
   // Прокси берутся из списка «Настроек ИИ»: при обрыве запрос уходит через
   // следующий рабочий адрес (см. lib/batch-ai-proxies).
-  const { value: response } = await withProxyFailover((agent) => postByesuJson(target, apiKey, body, agent))
+  const { value: response } = await withProxyFailover((agent) => postByesuJson(target, apiKey, body, agent), { hostname: new URL(target).hostname })
 
   if (response.contentLength > BYESU_MAX_RESPONSE_BYTES) {
     throw new Error('Ответ BYESU превышает допустимый размер')

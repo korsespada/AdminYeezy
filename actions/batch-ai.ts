@@ -96,7 +96,7 @@ import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
 import { abortAiRun, isAiCancelledError, registerAiRunController, throwIfAiCancelled, withAiAbortSignal } from '@/lib/ai-cancellation'
-import { loadBatchAiProxies, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, saveBatchAiProxies } from '@/lib/batch-ai-proxies'
+import { loadBatchAiProxies, loadProxyAllProviders, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, saveBatchAiProxies, saveProxyAllProviders } from '@/lib/batch-ai-proxies'
 import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
@@ -3197,6 +3197,18 @@ function normalizeProxyDraft(input: { id?: string | null; url?: string; label?: 
 export async function getBatchAiProxiesAction() {
   await requireAdmin()
   return { success: true, data: await loadBatchAiProxies() }
+}
+
+/** Флажок «Все провайдеры ИИ через прокси»: BYESU ходит через пул всегда. */
+export async function getBatchAiProxyAllProvidersAction() {
+  await requireAdmin()
+  return { success: true, data: await loadProxyAllProviders() }
+}
+
+export async function setBatchAiProxyAllProvidersAction(enabled: boolean) {
+  await requireAdmin()
+  await saveProxyAllProviders(enabled === true)
+  return { success: true, data: enabled === true }
 }
 
 export async function saveBatchAiProxyAction(input: { id?: string | null; url?: string; label?: string; enabled?: boolean }) {

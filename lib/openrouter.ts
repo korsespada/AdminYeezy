@@ -4,7 +4,7 @@ import { SocksProxyAgent } from 'socks-proxy-agent'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 import { recordAiUsage } from '@/lib/ai-usage'
 import { bindAiAbortToRequest, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
-import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
+import { proxyPoolAppliesTo, withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
 const OPENROUTER_CHAT_URL = new URL('https://openrouter.ai/api/v1/chat/completions')
 /**
@@ -82,11 +82,13 @@ export async function openRouterChatCompletion(
   const startedAt = Date.now()
   const isByesuHost = target.hostname.toLowerCase() === 'byesu.com' || target.hostname.toLowerCase().endsWith('.byesu.com')
 
-  // BYESU идёт через пул прокси из «Настроек ИИ» (см. lib/batch-ai-proxies):
-  // без прокси крупные тела с картинками висят до таймаута. Остальные шлюзы
-  // используют прежний OPENROUTER_PROXY_URL.
-  const send = isByesuHost
-    ? () => withProxyFailover((proxyAgent) => sendOpenRouterRequest(target, body, apiKey, proxyAgent, extraHeaders, label))
+  // BYESU идёт через пул прокси из «Настроек ИИ» всегда (см. lib/batch-ai-proxies):
+  // без прокси крупные тела с картинками висят до таймаута. Остальные шлюзы —
+  // через пул при флажке «Все провайдеры ИИ через прокси», иначе через прежний
+  // OPENROUTER_PROXY_URL или напрямую.
+  const usePool = isByesuHost || await proxyPoolAppliesTo(target.hostname)
+  const send = usePool
+    ? () => withProxyFailover((proxyAgent) => sendOpenRouterRequest(target, body, apiKey, proxyAgent, extraHeaders, label), { hostname: target.hostname })
         .then((result) => result.value)
     : () => sendOpenRouterRequest(target, body, apiKey, agent, extraHeaders, label)
 

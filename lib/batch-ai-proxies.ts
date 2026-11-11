@@ -8,7 +8,10 @@ import { scrapingQuery } from '@/lib/db'
 import { isProviderTimeoutError } from '@/lib/ai-providers'
 
 /**
- * Пул прокси для запросов к BYESU, который оператор ведёт в «Настройках ИИ».
+ * Пул прокси для запросов к ИИ, который оператор ведёт в «Настройках ИИ».
+ * BYESU ходит через пул всегда; остальные провайдеры (OpenRouter-совместимые,
+ * Anthropic-совместимые, DeepSeek и т.д.) — только при включённом флажке
+ * «Все провайдеры ИИ через прокси» (`app_settings.batch_ai_proxy_all_providers`).
  *
  * Зачем: с сервера админки крупные тела (contact sheets с картинками) до
  * byesu.com по HTTP/1.1 не доходят — соединение рвётся или висит до таймаута,
@@ -34,6 +37,7 @@ export type BatchAiProxy = {
 }
 
 const SETTINGS_KEY = 'batch_ai_proxies'
+const ALL_PROVIDERS_KEY = 'batch_ai_proxy_all_providers'
 const PROBE_URL = 'https://byesu.com/v1/models'
 const PROBE_TIMEOUT_MS = 12_000
 
@@ -125,9 +129,38 @@ export function legacyProxyFromEnv(): BatchAiProxy | null {
   return { id: 'env', url, label: 'BYESU_PROXY_URL', enabled: true, status: 'unknown', latencyMs: null, checkedAt: null, lastError: '' }
 }
 
-export async function resolveBatchAiProxies(): Promise<BatchAiProxy[]> {
+export function isByesuHostname(hostname: string) {
+  const host = String(hostname || '').toLowerCase()
+  return host === 'byesu.com' || host.endsWith('.byesu.com')
+}
+
+export async function loadProxyAllProviders(): Promise<boolean> {
+  const result = await scrapingQuery('SELECT value FROM app_settings WHERE key=$1', [ALL_PROVIDERS_KEY]).catch(() => ({ rows: [] as any[] }))
+  return String(result.rows[0]?.value || '').trim() === 'true'
+}
+
+export async function saveProxyAllProviders(enabled: boolean) {
+  await scrapingQuery(
+    `INSERT INTO app_settings (key, value, updated_at) VALUES($1,$2,NOW())
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [ALL_PROVIDERS_KEY, enabled ? 'true' : 'false'],
+  )
+}
+
+/**
+ * Идёт ли запрос к этому хосту через пул. BYESU — всегда; остальные — только
+ * при включённом флажке. Без хоста (старые вызовы) считаем запрос к BYESU.
+ */
+export async function proxyPoolAppliesTo(hostname?: string) {
+  if (!hostname || isByesuHostname(hostname)) return true
+  return loadProxyAllProviders()
+}
+
+export async function resolveBatchAiProxies(hostname?: string): Promise<BatchAiProxy[]> {
   const stored = await loadBatchAiProxies()
   if (stored.length) return proxyCandidates(stored)
+  // BYESU_PROXY_URL относится только к byesu.com.
+  if (hostname && !isByesuHostname(hostname)) return []
   const legacy = legacyProxyFromEnv()
   return legacy ? [legacy] : []
 }
@@ -191,8 +224,9 @@ export type ProxyAttemptResult<T> = { value: T; proxyUrl: string | null }
  */
 export async function withProxyFailover<T>(
   attempt: (agent: ReturnType<typeof createProxyAgent> | undefined) => Promise<T>,
+  options: { hostname?: string } = {},
 ): Promise<ProxyAttemptResult<T>> {
-  const candidates = await resolveBatchAiProxies()
+  const candidates = await proxyPoolAppliesTo(options.hostname) ? await resolveBatchAiProxies(options.hostname) : []
   if (!candidates.length) {
     return { value: await attempt(undefined), proxyUrl: null }
   }
