@@ -95,6 +95,7 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
+import { loadBatchAiProxies, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, saveBatchAiProxies } from '@/lib/batch-ai-proxies'
 import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
@@ -3128,4 +3129,76 @@ export async function getBatchAiSuggestionsAction(batchId: string, syncCatalog =
   } finally {
     client.release()
   }
+}
+
+const PROXY_SAVE_ERROR = 'Укажите адрес прокси в виде http://user:pass@host:port'
+
+function normalizeProxyDraft(input: { id?: string | null; url?: string; label?: string; enabled?: boolean }) {
+  return {
+    id: String(input.id || '').trim() || null,
+    url: normalizeProxyUrl(input.url),
+    label: String(input.label || '').trim().slice(0, 80),
+    enabled: input.enabled !== false,
+  }
+}
+
+export async function getBatchAiProxiesAction() {
+  await requireAdmin()
+  return { success: true, data: await loadBatchAiProxies() }
+}
+
+export async function saveBatchAiProxyAction(input: { id?: string | null; url?: string; label?: string; enabled?: boolean }) {
+  await requireAdmin()
+  const draft = normalizeProxyDraft(input)
+  if (!draft.url) return { success: false, error: PROXY_SAVE_ERROR }
+  const proxies = await loadBatchAiProxies()
+  const existing = (draft.id ? proxies.find((proxy) => proxy.id === draft.id) : undefined)
+    || proxies.find((proxy) => proxy.url === draft.url)
+  if (existing) {
+    existing.url = draft.url
+    existing.label = draft.label
+    existing.enabled = draft.enabled
+    existing.status = 'unknown'
+    existing.latencyMs = null
+    existing.checkedAt = null
+    existing.lastError = ''
+  } else {
+    proxies.push({
+      id: crypto.randomUUID(),
+      url: draft.url,
+      label: draft.label,
+      enabled: draft.enabled,
+      status: 'unknown',
+      latencyMs: null,
+      checkedAt: null,
+      lastError: '',
+    })
+  }
+  const normalized = normalizeBatchAiProxies(proxies)
+  await saveBatchAiProxies(normalized)
+  return { success: true, data: normalized }
+}
+
+export async function deleteBatchAiProxyAction(id: string) {
+  await requireAdmin()
+  const proxies = (await loadBatchAiProxies()).filter((proxy) => proxy.id !== String(id || ''))
+  await saveBatchAiProxies(proxies)
+  return { success: true, data: proxies }
+}
+
+export async function checkBatchAiProxiesAction() {
+  await requireAdmin()
+  const proxies = await loadBatchAiProxies()
+  const checked = await Promise.all(proxies.map(async (proxy) => {
+    const result = await probeBatchAiProxy(proxy.url)
+    return {
+      ...proxy,
+      status: result.ok ? 'ok' as const : 'fail' as const,
+      latencyMs: result.latencyMs,
+      checkedAt: new Date().toISOString(),
+      lastError: result.error,
+    }
+  }))
+  await saveBatchAiProxies(checked)
+  return { success: true, data: checked }
 }

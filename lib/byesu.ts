@@ -1,10 +1,8 @@
 import https from 'node:https'
 
-import { HttpsProxyAgent } from 'https-proxy-agent'
-import { SocksProxyAgent } from 'socks-proxy-agent'
-
 import { recordAiUsage } from '@/lib/ai-usage'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
+import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
 const BYESU_CHAT_URL = 'https://byesu.com/v1/chat/completions'
 const BYESU_MODELS_URL = 'https://byesu.com/v1/models'
@@ -37,36 +35,11 @@ export function byesuRequestError(error: any, timeoutMs = byesuTimeoutMs()) {
 
 type ByesuPayload = Record<string, any>
 
-/**
- * Прокси для BYESU. С сервера админки крупные тела запросов (contact sheets с
- * картинками) до byesu.com по HTTP/1.1 не доходят: соединение рвётся через
- * 10–30 с, тогда как `curl --http2` и тот же запрос через прокси проходят с
- * первого раза (проверено на 300 КБ и 1 МБ). Прокси необязателен: без
- * `BYESU_PROXY_URL` запросы идут напрямую, как раньше.
- */
-function createByesuAgent() {
-  const rawProxyUrl = process.env.BYESU_PROXY_URL?.trim()
-  if (!rawProxyUrl) return undefined
-  let proxyUrl: URL
-  try {
-    proxyUrl = new URL(rawProxyUrl)
-  } catch {
-    throw new Error('BYESU_PROXY_URL имеет неверный формат')
-  }
-  if (proxyUrl.protocol === 'http:' || proxyUrl.protocol === 'https:') {
-    return new HttpsProxyAgent(proxyUrl)
-  }
-  if (['socks:', 'socks4:', 'socks4a:', 'socks5:', 'socks5h:'].includes(proxyUrl.protocol)) {
-    return new SocksProxyAgent(proxyUrl)
-  }
-  throw new Error('BYESU_PROXY_URL поддерживает только HTTP(S) и SOCKS-прокси')
-}
-
 function postByesuJson(
   target: string,
   apiKey: string,
   body: string,
-  agent: ReturnType<typeof createByesuAgent>,
+  agent: BatchAiProxyAgent | undefined,
 ): Promise<{ status: number; contentLength: number; text: string }> {
   return new Promise((resolve, reject) => {
     const timeoutMs = byesuTimeoutMs()
@@ -246,8 +219,10 @@ export async function byesuChatCompletion(
 }
 
 async function sendByesuRequest(target: string, apiKey: string, requestBody: Record<string, any>): Promise<ByesuPayload> {
-  const agent = createByesuAgent()
-  const response = await postByesuJson(target, apiKey, JSON.stringify(requestBody), agent)
+  const body = JSON.stringify(requestBody)
+  // Прокси берутся из списка «Настроек ИИ»: при обрыве запрос уходит через
+  // следующий рабочий адрес (см. lib/batch-ai-proxies).
+  const { value: response } = await withProxyFailover((agent) => postByesuJson(target, apiKey, body, agent))
 
   if (response.contentLength > BYESU_MAX_RESPONSE_BYTES) {
     throw new Error('Ответ BYESU превышает допустимый размер')

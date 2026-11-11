@@ -48,7 +48,7 @@ describe('byesuRequestError', () => {
     const error = byesuRequestError(socket)
 
     expect(error.message).toBe('Не удалось подключиться к BYESU (ECONNRESET)')
-    expect(error.code).toBe('ECONNRESET')
+    expect((error as Error & { code?: string }).code).toBe('ECONNRESET')
   })
 
   it('уважает настройку BYESU_TIMEOUT_MS и её границы', () => {

@@ -1,5 +1,6 @@
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
 import AIRulesEditor from '@/components/ai/AIRulesEditor'
+import BatchAiProxySettings from '@/components/ai/BatchAiProxySettings'
 import ImportTabs from '@/components/ui/ImportTabs'
 import { getRailsCatalogLookups } from '@/lib/rails-admin'
 
@@ -20,6 +21,7 @@ export default async function AIRulesPage() {
           <p className="text-slate-400">Глобальные настройки обработки китайских товаров в «Выгрузках»</p>
         </div>
         <AIRulesEditor initialSettings={settingsResult.data} initialCategories={lookups.categories} initialSubcategories={lookups.subcategories} />
+        <BatchAiProxySettings />
       </div>
     </div>
   )
