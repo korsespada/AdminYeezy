@@ -1,4 +1,5 @@
 import { recordAiUsage } from '@/lib/ai-usage'
+import { AiRequestCancelledError, currentAiAbortSignal, throwIfAiCancelled } from '@/lib/ai-cancellation'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv, providerMessagesUrl } from '@/lib/ai-providers'
 
 const ANTHROPIC_DEFAULT_TIMEOUT_MS = 300_000
@@ -73,12 +74,16 @@ export async function anthropicMessagesCompletion(
 }
 
 async function sendAnthropicRequest(requestBody: Record<string, any>, baseUrl: string, apiKey: string): Promise<AnthropicPayload> {
+  throwIfAiCancelled()
+  const cancelSignal = currentAiAbortSignal()
+  const timeoutSignal = AbortSignal.timeout(anthropicTimeoutMs())
   const response = await fetch(providerMessagesUrl(baseUrl), {
     method: 'POST',
     headers: headers(baseUrl, apiKey),
     body: JSON.stringify(requestBody),
-    signal: AbortSignal.timeout(anthropicTimeoutMs()),
+    signal: cancelSignal ? AbortSignal.any([timeoutSignal, cancelSignal]) : timeoutSignal,
   }).catch((error: any) => {
+    if (cancelSignal?.aborted) throw new AiRequestCancelledError()
     const causeCode = error?.cause?.code
     if (isProviderTimeoutError(error) || causeCode === 'UND_ERR_HEADERS_TIMEOUT' || causeCode === 'UND_ERR_BODY_TIMEOUT') {
       throw providerTimeoutError('Anthropic', anthropicTimeoutMs(), error)

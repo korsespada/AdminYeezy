@@ -41,8 +41,7 @@ import {
   stopBatchAiRunAction,
 } from '@/actions/batch-ai'
 import SupplierPriceRulesDialog from './SupplierPriceRulesDialog'
-import BatchAiReviewDialog from './BatchAiReviewDialog'
-import { canDeletePublishedCatalog, shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
+import { batchStatusProgress, batchSubtitle, canDeletePublishedCatalog, shouldOpenBatchArtifactAsFile } from '@/lib/batch-history'
 
 type ModalState = {
   localPath: string
@@ -82,11 +81,12 @@ function fileName(filePath?: string | null) {
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
-function StatusBadge({ status, loading = false }: { status: string; loading?: boolean }) {
+function StatusBadge({ status, loading = false, progress = '' }: { status: string; loading?: boolean; progress?: string }) {
   return (
     <span className={`inline-flex w-fit min-w-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[status] || statusStyles.failed}`}>
       {loading && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />}
       {status === 'failed' ? 'Ошибка' : status}
+      {progress && <span className="font-normal tabular-nums opacity-80">({progress})</span>}
     </span>
   )
 }
@@ -96,7 +96,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [batches, setBatches] = useState<ExportHistoryBatch[]>(initialData)
   const [folders, setFolders] = useState<any[]>(initialFolders)
   const [folderFilter, setFolderFilter] = useState<string>('all')
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set(initialData[0] ? [initialData[0].id] : []))
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
   const [isRefreshing, setIsRefreshing] = useState(false)
 
   useEffect(() => {
@@ -106,7 +106,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [modalState, setModalState] = useState<ModalState | null>(null)
   const [priceSupplier, setPriceSupplier] = useState<{ id: number; name: string } | null>(null)
-  const [reviewBatch, setReviewBatch] = useState<ExportHistoryBatch | null>(null)
 
   const refresh = async () => {
     setIsRefreshing(true)
@@ -330,6 +329,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
               ai_run_status: finalRun.status,
               ai_completed_count: Number(finalRun.completed_count || 0),
               ai_failed_count: Number(finalRun.failed_count || 0),
+              ai_total_count: Number(finalRun.total_count || item.ai_total_count || 0),
             } : item))
             if (['completed', 'failed', 'cancelled'].includes(finalRun.status)) break
           }
@@ -400,6 +400,8 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
           const publishing = Boolean(batch.active_operation?.includes('publish'))
           const parsing = batch.status === 'Запущено'
           const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
+          const statusProgress = batchStatusProgress({ publishing, aiRunning, activeOperation: batch.active_operation, aiCompletedCount: batch.ai_completed_count, aiFailedCount: batch.ai_failed_count, aiTotalCount: batch.ai_total_count })
+          const subtitle = batchSubtitle(batch.name, batch.supplier_name)
 
           return (
             <article key={`mobile-${batch.id}`} className="overflow-hidden rounded-xl border border-slate-700 bg-slate-800/80 shadow-lg">
@@ -409,10 +411,10 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                     <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full border border-slate-600 bg-slate-700">
                       {batch.supplier_avatar ? <img src={batch.supplier_avatar} alt={batch.supplier_name || ''} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center text-sm font-bold text-slate-300">{batch.supplier_name?.charAt(0).toUpperCase() || '?'}</div>}
                     </div>
-                    <div className="min-w-0"><h3 className="break-words font-semibold text-white">{batch.supplier_name || 'Поставщик не найден'}</h3><p className="mt-1 break-words text-xs text-slate-500">{batch.name}</p></div>
+                    <div className="min-w-0"><h3 className="break-words font-semibold text-white">{batch.supplier_name || 'Поставщик не найден'}</h3>{subtitle && <p className="mt-1 break-words text-xs text-slate-500">{subtitle}</p>}</div>
                   </div>
                   <div className="flex min-w-0 flex-col items-end gap-1">
-                    <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                    <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} progress={statusProgress} />
                     {batch.catalog_deleted_at && <span className="text-right text-[10px] text-amber-300">Локальная выгрузка сохранена</span>}
                   </div>
                 </div>
@@ -475,6 +477,8 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                 const publishing = Boolean(batch.active_operation?.includes('publish'))
                 const parsing = batch.status === 'Запущено'
                 const displayedStatus = publishing ? 'Публикация в БД' : aiRunning ? 'Обработка ИИ' : batch.status
+                const statusProgress = batchStatusProgress({ publishing, aiRunning, activeOperation: batch.active_operation, aiCompletedCount: batch.ai_completed_count, aiFailedCount: batch.ai_failed_count, aiTotalCount: batch.ai_total_count })
+                const subtitle = batchSubtitle(batch.name, batch.supplier_name)
 
                 return (
                   <React.Fragment key={batch.id}>
@@ -495,7 +499,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           </div>
                           <div className="min-w-0">
                             <div className="truncate text-sm font-semibold text-white">{batch.supplier_name || 'Поставщик не найден'}</div>
-                            <div className="truncate text-xs text-slate-500">{batch.name}</div>
+                            {subtitle && <div className="truncate text-xs text-slate-500">{subtitle}</div>}
                           </div>
                         </div>
                       </td>
@@ -514,7 +518,7 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-100">{batch.items_count} шт.</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
-                          <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} />
+                          <StatusBadge status={displayedStatus} loading={parsing || aiRunning || publishing} progress={statusProgress} />
                           {batch.catalog_deleted_at && <span className="text-[10px] text-amber-300">Локальная выгрузка сохранена</span>}
                         </div>
                       </td>
@@ -538,9 +542,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
                           )}
                           {!batch.isSynthetic && batch.supplier_id && (
                             <button onClick={(event) => { event.stopPropagation(); setPriceSupplier({ id: batch.supplier_id!, name: batch.supplier_name || 'Поставщик' }) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-amber-300 hover:bg-amber-500/10" title="Правила цен поставщика" aria-label="Правила цен"><BadgeRussianRuble className="h-4 w-4" /></button>
-                          )}
-                          {!batch.isSynthetic && Boolean(batch.ai_completed_count) && (
-                            <button onClick={(event) => { event.stopPropagation(); setReviewBatch(batch) }} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-violet-300 hover:bg-violet-500/10" title="Предложения ИИ" aria-label="Предложения ИИ"><Sparkles className="h-4 w-4" /></button>
                           )}
                           <button
                             onClick={(event) => {
@@ -688,16 +689,6 @@ export default function ExportHistoryList({ initialData, initialFolders }: { ini
         forceFileMode={modalState?.forceFileMode}
       />
       {priceSupplier && <SupplierPriceRulesDialog supplierId={priceSupplier.id} supplierName={priceSupplier.name} onClose={() => setPriceSupplier(null)} />}
-      {reviewBatch && <BatchAiReviewDialog batchId={reviewBatch.id} batchName={reviewBatch.name} onClose={(familiesApproved) => {
-        const batchId = reviewBatch.id
-        setReviewBatch(null)
-        // Одобренные ИИ семьи сразу получают согласованные названия цветов.
-        if (familiesApproved) {
-          void startBatchAiAction(batchId, 'family_names').then((result) => {
-            if (!result.success) alert(`Согласование названий семей не запущено: ${result.error}`)
-          })
-        }
-      }} />}
     </div>
   )
 }

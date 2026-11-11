@@ -1,6 +1,7 @@
 import https from 'node:https'
 
 import { recordAiUsage } from '@/lib/ai-usage'
+import { bindAiAbortToRequest, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
@@ -42,6 +43,7 @@ function postByesuJson(
   agent: BatchAiProxyAgent | undefined,
 ): Promise<{ status: number; contentLength: number; text: string }> {
   return new Promise((resolve, reject) => {
+    throwIfAiCancelled()
     const timeoutMs = byesuTimeoutMs()
     const request = https.request(new URL(target), {
       method: 'POST',
@@ -73,8 +75,10 @@ function postByesuJson(
     request.setTimeout(timeoutMs, () => {
       request.destroy(providerTimeoutError('BYESU', timeoutMs))
     })
+    const unbindAbort = bindAiAbortToRequest(request)
+    request.on('close', unbindAbort)
     request.on('error', (error: Error) => {
-      reject(isProviderTimeoutError(error) ? error : byesuRequestError(error))
+      reject(isProviderTimeoutError(error) || isAiCancelledError(error) ? error : byesuRequestError(error))
     })
     request.end(body)
   })

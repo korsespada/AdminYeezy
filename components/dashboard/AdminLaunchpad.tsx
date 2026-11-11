@@ -8,7 +8,6 @@ import {
   FileSearch,
   FolderTree,
   PackageSearch,
-  Film,
   RefreshCw,
   Ruler,
   Settings2,
@@ -73,13 +72,6 @@ const sections = [
     href: '/admin/suppliers',
     icon: Users,
     tone: 'text-emerald-300',
-  },
-  {
-    title: 'Видео → товары',
-    description: 'Альбомы с видео из выгрузки поставщика, сопоставление с товарами каталога, S3 и привязка к карточке.',
-    href: '/admin/video-matches',
-    icon: Film,
-    tone: 'text-sky-300',
   },
   {
     title: 'Шаблоны замеров',

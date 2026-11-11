@@ -80,7 +80,7 @@ describe('AdminLaunchpad', () => {
     expect(screen.getByRole('link', { name: 'Открыть раздел: Бренды' })).toHaveAttribute('href', '/admin/brands')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Категории' })).toHaveAttribute('href', '/admin/categories')
     expect(screen.getByRole('link', { name: 'Открыть раздел: Схема атрибутов' })).toHaveAttribute('href', '/admin/filter-characteristics')
-    expect(screen.getByRole('link', { name: 'Открыть раздел: Видео → товары' })).toHaveAttribute('href', '/admin/video-matches')
+    expect(screen.queryByRole('link', { name: 'Открыть раздел: Видео → товары' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Открыть раздел: Правила AI' })).toHaveAttribute('href', '/admin/ai-rules')
     expect(screen.queryByRole('link', { name: 'Открыть раздел: AI-каталог' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Открыть раздел: Атрибуты товаров' })).not.toBeInTheDocument()

@@ -76,7 +76,6 @@ import {
   alignBatchColorFamiliesAction,
   getBatchAiRunAction,
   getBatchAiRunLogsAction,
-  getBatchAiSuggestionsAction,
   getLatestBatchAiRunAction,
   rollbackBatchProductAiAction,
   startBatchAiAction,
@@ -90,7 +89,6 @@ import { extractProductAttributes } from "@/lib/product-attributes";
 import { validateProducts } from "@/lib/product-validation";
 import AdminProductCard from "@/components/products/ProductCard";
 import ProductPhotoGallery from "@/components/products/ProductPhotoGallery";
-import BatchAiReviewDialog from "@/components/import/BatchAiReviewDialog";
 import SupplierPriceRulesDialog from "@/components/import/SupplierPriceRulesDialog";
 import { MeasurementsField, SizeRecommendationField } from "@/components/catalog-attributes/CatalogAttributeFields";
 import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
@@ -668,8 +666,6 @@ export default function CsvImportApp({
   const scriptBatchId = batchId || (batchStage === "SCRAPED" ? initialBatchId : null);
 
   const [isProcessing, setIsProcessing] = useState(false)
-  const [aiSuggestions, setAiSuggestions] = useState<any[]>([])
-  const [showAiSuggestions, setShowAiSuggestions] = useState(false)
   const [aiProgress, setAiProgress] = useState<{current: number, total: number, failed: number} | null>(null);
   const [activeAiRunId, setActiveAiRunId] = useState<string | null>(null);
   const [aiQueue, setAiQueue] = useState<any[]>([]);
@@ -914,15 +910,6 @@ export default function CsvImportApp({
     return [...groups.entries()].sort((left, right) => right[1] - left[1]);
   }, [aiErrorProducts]);
   const canPublish = isBatchSource && ["SCRIPT_PROCESSED", "AI_PROCESSED"].includes(batchStage) && products.length > 0 && aiRemainingCount === 0;
-  const pendingAiSuggestions = useMemo(
-    () => aiSuggestions.filter((item) => item.status === "pending"),
-    [aiSuggestions],
-  );
-
-  const loadAiSuggestions = useCallback(async (nextBatchId: string) => {
-    const result = await getBatchAiSuggestionsAction(nextBatchId);
-    setAiSuggestions(result.success ? result.data || [] : []);
-  }, []);
 
   const toggleAiLogs = useCallback(async () => {
     if (showAiLogs) {
@@ -1067,7 +1054,6 @@ export default function CsvImportApp({
     setSaveMsg(null);
     setIsDirty(false);
     const res = await getBatchProductsAction(nextBatchId, snapshotId);
-    if (!snapshotId) await loadAiSuggestions(nextBatchId);
     if (res.success && res.data) {
       setActiveSnapshotId(snapshotId || null);
       setProducts(res.data.products);
@@ -1142,9 +1128,8 @@ export default function CsvImportApp({
       if (requestInFlight || document.hidden) return;
       requestInFlight = true;
       try {
-        const [productsResult, suggestionsResult, runResult] = await Promise.all([
+        const [productsResult, runResult] = await Promise.all([
           getBatchProductsAction(batchId),
-          getBatchAiSuggestionsAction(batchId, false),
           getLatestBatchAiRunAction(batchId),
         ]);
         if (!isDirty && selectedIdx === null && productsResult.success && productsResult.data) {
@@ -1153,7 +1138,6 @@ export default function CsvImportApp({
           setColumns(productsResult.data.columns?.length ? productsResult.data.columns : DEFAULT_PRODUCT_COLUMNS);
           setBatchStage(productsResult.data.stage || "SCRAPED");
         }
-        setAiSuggestions(suggestionsResult.success ? suggestionsResult.data || [] : []);
         const run: any = runResult.success ? runResult.data : null;
         setLatestAiRun(run);
         setActiveAiRunMode(run?.mode || null);
@@ -1389,7 +1373,6 @@ export default function CsvImportApp({
               if (["completed", "failed", "cancelled"].includes(finalRun.status)) break;
             }
             await handleLoadBatch(targetBatchId);
-            if (mode === "variants" && finalRun?.status === "completed") setShowAiSuggestions(true);
             setActiveAiRunId(null);
             setSaveMsg(finalRun?.status === "cancelled"
               ? "AI-обработка остановлена. Готовые товары сохранены."
@@ -2188,34 +2171,6 @@ export default function CsvImportApp({
           </div>
         )}
         {/* Input Area */}
-        {isBatchSource && pendingAiSuggestions.length > 0 && (
-          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-violet-500/30 bg-violet-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="rounded-lg bg-violet-500/15 p-2 text-violet-300">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-bold text-white">Предложения ИИ</h3>
-                  <span className="rounded-full border border-violet-400/30 bg-violet-500/15 px-2 py-0.5 text-xs font-bold text-violet-200">
-                    {pendingAiSuggestions.length} ожидают решения
-                  </span>
-                </div>
-                <p className="mt-1 truncate text-xs text-slate-400">
-                  {pendingAiSuggestions.slice(0, 5).map((item) => item.payload?.name || item.payload?.label || item.canonical_key).join(" · ")}
-                  {pendingAiSuggestions.length > 5 ? ` · ещё ${pendingAiSuggestions.length - 5}` : ""}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setShowAiSuggestions(true)}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-500"
-            >
-              <Sparkles className="h-4 w-4" />
-              Открыть предложения
-            </button>
-          </div>
-        )}
 
         {/* Input Area */}
         {products.length === 0 && !isBatchSource && (
@@ -3338,19 +3293,6 @@ export default function CsvImportApp({
       />
       {showPriceRules && supplierId && (
         <SupplierPriceRulesDialog supplierId={supplierId} supplierName={initialSupplierName || "Поставщик"} onClose={() => setShowPriceRules(false)} />
-      )}
-      {showAiSuggestions && batchId && (
-        <BatchAiReviewDialog
-          batchId={batchId}
-          batchName={initialSupplierName || fileName}
-          onReviewed={() => loadAiSuggestions(batchId)}
-          onClose={(familiesApproved) => {
-            setShowAiSuggestions(false);
-            loadAiSuggestions(batchId);
-            // Одобренные ИИ семьи сразу получают согласованные названия цветов.
-            if (familiesApproved) void handleAiProcess("family_names");
-          }}
-        />
       )}
     </div>
   );

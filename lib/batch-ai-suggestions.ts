@@ -476,14 +476,10 @@ function observedColors(payload: any, nextColor?: unknown) {
   ].flatMap(normalizedColorTokens))].sort()
 }
 
-function suggestionsFromOutput(normalized: any) {
-  const suggestions = [...(normalized.suggestions || [])]
-  if (normalized.subcategorySuggestion?.name) {
-    suggestions.push({ ...normalized.subcategorySuggestion, kind: 'subcategory', code: normalized.subcategorySuggestion.name })
-  }
-  // Цветовые семейства ИИ не предлагает: suggestions с kind=color_family больше
-  // не создаются, остальные виды предложений остаются как были.
-  return suggestions
+function suggestionsFromOutput(_normalized: any): any[] {
+  // ИИ не предлагает ни цветовые семьи, ни новые атрибуты, ни подкатегории:
+  // из ответа модели предложения не создаются никогда.
+  return []
 }
 
 async function catalogSubcategories(client: QueryClient, parentId?: string) {

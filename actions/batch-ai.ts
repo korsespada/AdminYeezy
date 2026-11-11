@@ -95,6 +95,7 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
+import { abortAiRun, isAiCancelledError, registerAiRunController, throwIfAiCancelled, withAiAbortSignal } from '@/lib/ai-cancellation'
 import { loadBatchAiProxies, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, saveBatchAiProxies } from '@/lib/batch-ai-proxies'
 import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
@@ -1051,6 +1052,10 @@ export async function refreshAiProviderModelsAction(providerId: string) {
 
 export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
   await requireAdmin()
+  // Визуальный поиск цветовых семей ИИ («variants») создавал предложения на
+  // одобрение. ИИ больше не предлагает ни семьи, ни атрибуты: семьи задаёт
+  // постобработка поставщика.
+  if (mode === 'variants') return { success: false, error: 'Поиск цветовых семей ИИ отключён: семьи задаёт постобработка поставщика' }
   return startBatchAiRun(batchId, mode, productId)
 }
 
@@ -1505,15 +1510,36 @@ async function processOpenRouterRun(runId: string, context: any, settings: Batch
   let cursor = 0
   // Параллельная обработка включена всегда: число потоков задаётся глобально в «Настройках ИИ».
   const concurrency = Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))
-  const workers = Array.from({ length: Math.min(concurrency, items.rows.length) }, async () => {
+  const total = items.rows.length
+  const logPrefix = batchAiRunLogPrefix(runId, context)
+  const startedAt = Date.now()
+  const counts = { completed: 0, failed: 0, cancelled: 0 }
+  console.log(`${logPrefix}: старт, товаров ${total}, потоков ${Math.min(concurrency, total)}, модель ${settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel}`)
+  const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
     while (cursor < items.rows.length) {
       const item = items.rows[cursor++]
-      await processOpenRouterItem(item, context, settings)
+      const itemStartedAt = Date.now()
+      const result = await processOpenRouterItem(item, context, settings)
+      if (result.outcome === 'skipped') continue
+      counts[result.outcome] += 1
+      const done = counts.completed + counts.failed + counts.cancelled
+      const seconds = Math.round((Date.now() - itemStartedAt) / 1000)
+      const verb = result.outcome === 'completed' ? 'готов' : result.outcome === 'failed' ? 'ошибка' : 'остановлен'
+      console.log(`${logPrefix}: товар ${item.product_id} ${verb} за ${seconds} с (${done}/${total})${result.error ? `: ${result.error.slice(0, 300)}` : ''}`)
     }
   })
   await Promise.all(workers)
+  const minutes = Math.round((Date.now() - startedAt) / 60_000)
+  console.log(`${logPrefix}: завершён за ${minutes} мин — готово ${counts.completed}, ошибок ${counts.failed}, остановлено ${counts.cancelled}, пропущено ${total - counts.completed - counts.failed - counts.cancelled}`)
   await finalizeRun(runId)
 }
+
+function batchAiRunLogPrefix(runId: string, context: any) {
+  const name = String(context?.batch?.name || context?.batch?.id || '').slice(0, 80)
+  return `AI-запуск ${runId.slice(0, 8)}${name ? ` «${name}»` : ''}`
+}
+
+type BatchAiItemResult = { outcome: 'completed' | 'failed' | 'cancelled' | 'skipped'; error?: string }
 
 function batchAiNormalizationOptions(input: any, context: any) {
   return {
@@ -1624,7 +1650,19 @@ const BATCH_AI_ITEM_HEARTBEAT_MS = 30_000
 
 // Все запросы к модели внутри товара записываются в учёт расхода с привязкой
 // к выгрузке, запуску и товару.
-async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings) {
+async function processOpenRouterItem(item: any, context: any, settings: BatchAiSettings): Promise<BatchAiItemResult> {
+  // Каждый товар работает под своим сигналом: «Остановить» обрывает текущий
+  // запрос к модели, а не ждёт, пока товар пройдёт все шаги.
+  const controller = new AbortController()
+  const unregister = registerAiRunController(String(item.run_id), controller)
+  try {
+    return await withAiAbortSignal(controller.signal, () => processOpenRouterItemWithUsage(item, context, settings, controller))
+  } finally {
+    unregister()
+  }
+}
+
+function processOpenRouterItemWithUsage(item: any, context: any, settings: BatchAiSettings, controller: AbortController) {
   return withAiUsageContext({
     feature: 'batch_ai',
     batchId: context?.batch?.id ? String(context.batch.id) : null,
@@ -1633,10 +1671,10 @@ async function processOpenRouterItem(item: any, context: any, settings: BatchAiS
     productId: item?.product_id ? Number(item.product_id) : null,
     supplierId: context?.batch?.supplier_id ? Number(context.batch.supplier_id) : null,
     providerId: settings.providerId || settings.activeProviderId || null,
-  }, () => processOpenRouterItemWork(item, context, settings))
+  }, () => processOpenRouterItemWork(item, context, settings, controller))
 }
 
-async function processOpenRouterItemWork(item: any, context: any, settings: BatchAiSettings) {
+async function processOpenRouterItemWork(item: any, context: any, settings: BatchAiSettings, controller: AbortController): Promise<BatchAiItemResult> {
   let rawOutput: any = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
   try {
@@ -1646,12 +1684,19 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='queued' AND r.status IN ('queued','running')
       RETURNING i.id
     `, [item.id])
-    if (!claimed.rows[0]) return
+    if (!claimed.rows[0]) return { outcome: 'skipped' }
+    // Пульс заодно проверяет, что товар и запуск ещё живы. Запуск могли
+    // остановить из другого процесса или откатить снимком — тогда товар
+    // обрывается, а не держит провайдера до конца конвейера.
     heartbeat = setInterval(() => {
-      void scrapingQuery(
-        "UPDATE batch_ai_items SET updated_at=NOW() WHERE id=$1 AND status='running'",
-        [item.id],
-      ).catch(() => undefined)
+      void scrapingQuery(`
+        UPDATE batch_ai_items i SET updated_at=NOW()
+        FROM batch_ai_runs r
+        WHERE i.id=$1 AND i.status='running' AND r.id=i.run_id AND r.status IN ('queued','running')
+        RETURNING i.id
+      `, [item.id]).then((result) => {
+        if (!result.rows[0]) controller.abort()
+      }).catch(() => undefined)
     }, BATCH_AI_ITEM_HEARTBEAT_MS)
     const input = item.input_snapshot
     const sheets = await buildBatchAiContactSheets(input.photoUrls || [])
@@ -1701,8 +1746,9 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
           console.warn(`Повторная проверка дублей семьи ${input.familyName}: ${error?.message || error}`)
         }
       }
+      throwIfAiCancelled()
       await applyCompletedFamilyNaming(item, groups)
-      return
+      return { outcome: 'completed' }
     }
     const initialMeasurementPhotoIndexes = batchAiMeasurementPhotoIndexes(raw, input.photoUrls || [])
     const requestedInspectionIndexes = input.fullSizeRefinementEnabled && Array.isArray(raw?.inspect_full_size_indexes)
@@ -1794,13 +1840,17 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
         rawOutput = repairedRaw
       }
     }
+    throwIfAiCancelled()
     if (input.mediaSeoOnly) await applyCompletedMediaSeoItem(item, normalized)
     else if (normalized.skipProduct) await applySkippedProduct(item, normalized, context)
     else if (input.colorSplitOnly && normalized.variants?.length === 1) await applyCompletedItem(item, normalized.variants[0].normalized, context)
     else if (input.colorSplitOnly) await applyCompletedColorSplit(item, normalized, context)
     else if (input.variantScanOnly) await applyCompletedVariantScan(item, normalized)
     else await applyCompletedItem(item, normalized, context)
+    return { outcome: 'completed' }
   } catch (error: any) {
+    // Остановленный товар уже помечен отменённым: ошибкой его не записываем.
+    if (isAiCancelledError(error)) return { outcome: 'cancelled' }
     const failed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='failed',error_message=$2,output=$3::jsonb,completed_at=NOW(),updated_at=NOW()
       FROM batch_ai_runs r
@@ -1810,6 +1860,9 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
     if (failed.rows[0] && !item.input_snapshot?.variantScanOnly && !item.input_snapshot?.measurementRecoveryOnly && !item.input_snapshot?.mediaSeoOnly && !item.input_snapshot?.familyNamingOnly) {
       await scrapingQuery('UPDATE products SET ai_error=$2,updated_at=NOW() WHERE id=$1', [item.product_id, String(error.message || error).slice(0, 4000)])
     }
+    return failed.rows[0]
+      ? { outcome: 'failed', error: String(error.message || error) }
+      : { outcome: 'cancelled' }
   } finally {
     if (heartbeat) clearInterval(heartbeat)
     await touchBatchOperation(String(context.batch.id), String(item.run_id)).catch(() => undefined)
@@ -2402,16 +2455,11 @@ async function finalizeRun(runId: string) {
       }
       if (promoteBatch) {
         await scrapingQuery("UPDATE scraping_batches SET stage='AI_PROCESSED',updated_at=NOW() WHERE id=$1", [currentRun.batch_id])
-        const sequenceScan = false
         // Когда выгрузка обработана целиком — полной обработкой, повтором или
-        // по выбору, — согласуются названия семей. Автоматического поиска новых
-        // семейств ИИ больше не запускает: цветовые семейства ИИ не предлагает.
-        if (currentRun?.mode === 'family_names') {
-          nextMode = sequenceScan ? 'variants' : null
-        } else if (await batchNeedsFamilyNaming(String(currentRun.batch_id))) {
+        // по выбору, — согласуются названия семей. Поиска новых семейств ИИ не
+        // запускает: цветовые семейства ИИ не предлагает.
+        if (currentRun?.mode !== 'family_names' && await batchNeedsFamilyNaming(String(currentRun.batch_id))) {
           nextMode = 'family_names'
-        } else if (currentRun?.mode === 'full' && sequenceScan) {
-          nextMode = 'variants'
         }
         // Переобработка только названий и описаний не запускает согласование
         // семей и подбор вариантов: оператор просил поменять текст, а не партию.
@@ -2585,6 +2633,10 @@ export async function stopBatchAiRunAction(runId: string) {
       `, [runId])
     }
     await client.query('COMMIT')
+    // Товары, которые уже ждут ответа модели, обрываются сразу; в другом
+    // процессе их остановит проверка в пульсе товара.
+    const aborted = abortAiRun(runId)
+    console.log(`AI-запуск ${runId.slice(0, 8)}: остановлен оператором, оборвано товаров в работе: ${aborted}`)
     revalidatePath('/admin/batches')
     return { success: true }
   } catch (error: any) {

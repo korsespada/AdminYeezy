@@ -3,6 +3,7 @@ import { openRouterChatCompletion } from '@/lib/openrouter'
 import { byesuChatCompletion } from '@/lib/byesu'
 import { anthropicMessagesCompletion } from '@/lib/anthropic'
 import { withAiUsageContext, type AiUsageFeature } from '@/lib/ai-usage'
+import { aiCancellableDelay, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
 import { isProviderTimeoutError, providerProtocol, reasoningRequestParams, type AiReasoningMode } from '@/lib/ai-providers'
 import { resizeImageUrl } from '@/lib/image'
 import { extractExplicitShoeAttributes, inferExplicitShoeGender, inferShoeGender } from '@/lib/product-attributes'
@@ -33,8 +34,6 @@ export type BatchAiProcessingOptions = {
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
   preserveAllPhotos?: boolean
-  suggestSubcategories?: boolean
-  suggestAttributes?: boolean
 }
 
 export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
@@ -43,8 +42,6 @@ export const DEFAULT_BATCH_AI_PROCESSING_OPTIONS: BatchAiProcessingOptions = {
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
   preserveAllPhotos: false,
-  suggestSubcategories: false,
-  suggestAttributes: false,
 }
 
 export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProcessingOptions {
@@ -55,9 +52,6 @@ export function normalizeBatchAiProcessingOptions(value: unknown): BatchAiProces
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
     preserveAllPhotos: source.preserveAllPhotos === true,
-    // Таксономия каталога закрыта: AI выбирает только значения из справочников.
-    suggestSubcategories: false,
-    suggestAttributes: false,
   }
 }
 
@@ -874,7 +868,8 @@ export async function withBatchAiPromptCacheFallback<T>(key: string, request: (c
   try {
     return await request(true)
   } catch (error) {
-    if (isRetryableBatchAiError(error)) throw error
+    // Остановленный запуск не должен уходить повторным запросом без кэша.
+    if (isRetryableBatchAiError(error) || isAiCancelledError(error)) throw error
     const result = await request(false)
     promptCacheRejectedBy.add(key)
     console.warn(`AI batch: ${key} отклонил cache_control, кэш промпта отключён: ${String((error as Error)?.message || error).slice(0, 500)}`)
@@ -1100,6 +1095,7 @@ export function isBatchAiRequestTimeout(error: unknown) {
  * англоязычными маркерами, и зависший запрос падал без единого повтора.
  */
 export function isRetryableBatchAiError(error: unknown) {
+  if (isAiCancelledError(error)) return false
   if (isBatchAiRequestTimeout(error)) return true
   const record = error as { code?: unknown; cause?: { code?: unknown } } | null
   const networkCodePattern = /^(ECONN|ETIMEDOUT|EAI_AGAIN|UND_ERR|EPIPE|ENOTFOUND|EHOSTUNREACH|ENETUNREACH)/i
@@ -1114,6 +1110,7 @@ export function isRetryableBatchAiError(error: unknown) {
 async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
   let lastError: unknown
   for (let attempt = 1; attempt <= 5; attempt += 1) {
+    throwIfAiCancelled()
     try {
       return await operation()
     } catch (error) {
@@ -1123,7 +1120,7 @@ async function withBatchAiRetry<T>(operation: () => Promise<T>, label: string) {
       if (!retryable || attempt >= maxAttempts) throw error
       const waitMs = Math.min(30_000, 1_000 * (2 ** (attempt - 1)))
       console.warn(`${label}: временная ошибка, повтор ${attempt + 1}/${maxAttempts} через ${waitMs} мс: ${String((error as Error)?.message || error)}`)
-      await new Promise((resolve) => setTimeout(resolve, waitMs))
+      await aiCancellableDelay(waitMs)
     }
   }
   throw lastError
@@ -1407,7 +1404,8 @@ export function normalizeBatchAiOutput(raw: any, input: {
     ) attributes[canonicalCode] = value
   }
   const resolvedBrand = choose(proposed.brand, input.brandIds, original.brand)
-  const suggestions: any[] = []
+  // Таксономия каталога закрыта: ИИ выбирает только значения из справочников
+  // и не предлагает новые атрибуты, подкатегории или цветовые семьи.
   const dictionaryByCode = new Map<string, Map<string, string>>()
   for (const item of input.attributeDictionaryValues || []) {
     const code = String(item.attribute_code || '')
@@ -1459,17 +1457,12 @@ export function normalizeBatchAiOutput(raw: any, input: {
     const code = canonicalBatchSuggestionKey(suggestion?.code || suggestion?.label, 'attribute')
     if (code && input.attributeCodes.has(code)) {
       if (suggestion?.value !== undefined && suggestion?.value !== null) attributes[code] = resolveDictionaryValue(code, suggestion.value)
-    } else if (processingOptions.suggestAttributes && !input.knownAttributeCodes?.has(code)) {
-      suggestions.push({ ...suggestion, code: code || suggestion?.code })
     }
   }
   for (const [code, value] of Object.entries(proposed.catalog_attributes || {})) {
     const canonicalCode = canonicalBatchSuggestionKey(code, 'attribute')
     if (canonicalCode === 'materials') attributes[canonicalCode] = normalizeMaterials(resolveDictionaryValue(canonicalCode, value))
     else if (input.attributeCodes.has(canonicalCode)) attributes[canonicalCode] = resolveDictionaryValue(canonicalCode, value)
-    else if (processingOptions.suggestAttributes && !input.knownAttributeCodes?.has(canonicalCode)) {
-      suggestions.push({ code: canonicalCode || code, label: code, value, reason: 'Новый код из результата AI' })
-    }
   }
   if (attributes.materials !== undefined) attributes.materials = normalizeMaterials(attributes.materials)
   moveInsulationToFilling(attributes, input.attributeCodes, [original.description, proposed.description].filter(Boolean).join('\n'))
@@ -1660,11 +1653,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
   }
   if (attributes.stones !== undefined && !/(ювелир|бижутер)/i.test(categoryAndSubcategoryName)) {
     delete attributes.stones
-    for (let index = suggestions.length - 1; index >= 0; index -= 1) {
-      if (canonicalBatchSuggestionKey(suggestions[index]?.code || suggestions[index]?.label, 'attribute') === 'stones') {
-        suggestions.splice(index, 1)
-      }
-    }
   }
   const categoryName = normalizedName(input.categoryNames?.get(category))
   const canWriteAttribute = (code: string) => (
@@ -1828,9 +1816,6 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (!subcategory || isGenericShoeSubcategory(input.subcategoryNames?.get(subcategory))) {
       throw new Error('Для категории «Обувь» требуется конкретная подкатегория вместо общей «Туфли»')
     }
-    if (processingOptions.suggestSubcategories && subcategorySuggestion && !canonicalFromSuggestion) {
-      throw new Error('Для категории «Обувь» нельзя создавать новую подкатегорию: выберите существующий тип конструкции')
-    }
   }
 
   const rawConfidence = Number(proposed.confidence || 0)
@@ -1962,7 +1947,7 @@ export function normalizeBatchAiOutput(raw: any, input: {
       variant_group_key: original.variant_group_key || null,
       variant_group_name: original.variant_group_name || null,
     },
-    suggestions,
+    suggestions: [],
     subcategorySuggestion: null,
     colorFamily: rawColorFamily,
     chromoffCategory,

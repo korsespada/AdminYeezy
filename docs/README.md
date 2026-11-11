@@ -11,7 +11,6 @@
 - [Batch AI workflow](./batch-ai-workflow.md) — AI processing and review flow.
 - [AI usage](./ai-usage.md) — учёт токенов и стоимости ИИ, цены моделей, DeepSeek.
 - [Export history](./exports.md) — export history, stages and publication.
-- [Video matches](./video-matches.md) — attaching supplier videos to catalog products.
 - [Медиа в S3](./s3-media.md) — схема ключей, Cache-Control и уборка неиспользуемых файлов.
 - [Deployment runbook](./deployment-runbook.md) — validation and release order.
 - [Coolify deployment](./coolify-deployment.md) — environment and operations.

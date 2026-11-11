@@ -1259,7 +1259,7 @@ export async function refreshRailsProductSlugs(externalIds: string[]) {  const i
 }
 
 /**
- * Явный адрес товара для раздела «Видео → товары» и обработки карточек поставщика.
+ * Явный адрес товара в Rails: фиксирует slug отдельным вызовом.
  *
  * Rails пересчитывает канонический slug на каждой записи (`Catalog::ProductSlug`),
  * поэтому адрес ставится отдельным вызовом: backend параметризует значение,

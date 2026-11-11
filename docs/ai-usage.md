@@ -14,8 +14,10 @@
 - Привязка к выгрузке, запуску, товару и поставщику берётся из контекста
   (`withAiUsageContext` в `lib/ai-usage.ts`, `AsyncLocalStorage`). Обработка
   товара выгрузки (`processOpenRouterItem`) ставит `feature = batch_ai`; другие
-  вызовы помечаются `usageFeature`: `card_updates`, `chromoff`, `david_studio`,
+  вызовы помечаются `usageFeature`: `chromoff`, `david_studio`,
   `measurement_templates`, `provider_test`. Остальное попадает в `other`.
+  `card_updates` остаётся только в старых записях: раздел обработки карточек
+  удалён 2026-11-11.
 - Токены разбираются из `usage` ответа (`lib/ai-usage-pricing.ts`):
   - OpenAI-совместимый: `prompt_tokens`, `completion_tokens`, кэш —
     `prompt_cache_hit_tokens` (DeepSeek) или `prompt_tokens_details.cached_tokens`,

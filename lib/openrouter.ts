@@ -3,6 +3,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 import { SocksProxyAgent } from 'socks-proxy-agent'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
 import { recordAiUsage } from '@/lib/ai-usage'
+import { bindAiAbortToRequest, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
 import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
 const OPENROUTER_CHAT_URL = new URL('https://openrouter.ai/api/v1/chat/completions')
@@ -111,6 +112,7 @@ function sendOpenRouterRequest(
   label: string,
 ): Promise<OpenRouterPayload> {
   return new Promise((resolve, reject) => {
+    throwIfAiCancelled()
     const request = https.request(target, {
       method: 'POST',
       agent,
@@ -155,10 +157,13 @@ function sendOpenRouterRequest(
     request.setTimeout(openRouterTimeoutMs(), () => {
       request.destroy(providerTimeoutError(label, openRouterTimeoutMs()))
     })
+    const unbindAbort = bindAiAbortToRequest(request)
+    request.on('close', unbindAbort)
     request.on('error', (error: NodeJS.ErrnoException) => {
-      // Тайм-аут сохраняем как тайм-аут: раньше он подменялся сообщением об
-      // отказе соединения, и batch AI не повторял такой запрос.
-      if (isProviderTimeoutError(error)) {
+      // Тайм-аут и остановку запуска сохраняем как есть: раньше тайм-аут
+      // подменялся сообщением об отказе соединения, и batch AI не повторял
+      // такой запрос.
+      if (isProviderTimeoutError(error) || isAiCancelledError(error)) {
         reject(error)
         return
       }

@@ -263,8 +263,6 @@ function normalizeSupplierAiProcessingOptions(value: FormDataEntryValue | null) 
     reorderFirstPhoto: source.reorderFirstPhoto === true,
     skipModelOnlyAlbum: source.skipModelOnlyAlbum === true,
     preserveAllPhotos: source.preserveAllPhotos === true,
-    suggestSubcategories: source.suggestSubcategories === true,
-    suggestAttributes: source.suggestAttributes === true,
   }
 }
 
@@ -670,6 +668,7 @@ export interface ExportHistoryBatch {
   ai_run_id?: string | null
   ai_completed_count?: number
   ai_failed_count?: number
+  ai_total_count?: number
   product_count?: number
   ai_product_count?: number
   active_operation?: string | null
@@ -801,6 +800,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai.status as ai_run_status,
         ai.completed_count as ai_completed_count,
         ai.failed_count as ai_failed_count,
+        ai.total_count as ai_total_count,
         pc.product_count,
         pc.ai_product_count,
         pc.ai_updated_at,
@@ -811,8 +811,19 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       LEFT JOIN scraping_batches b ON b.id = t.batch_id
       LEFT JOIN export_folders f ON f.id = b.folder_id
       LEFT JOIN LATERAL (
-        SELECT id, status, completed_count, failed_count FROM batch_ai_runs
-        WHERE batch_id=b.id ORDER BY created_at DESC LIMIT 1
+        SELECT r.id, r.status, r.total_count,
+               -- Во время запуска счётчики берутся из товаров: в самом запуске
+               -- они обновляются только при завершении.
+               CASE WHEN r.status IN ('queued','running') THEN live.completed ELSE r.completed_count END AS completed_count,
+               CASE WHEN r.status IN ('queued','running') THEN live.failed ELSE r.failed_count END AS failed_count
+        FROM batch_ai_runs r
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) FILTER (WHERE i.status='completed')::int AS completed,
+                 COUNT(*) FILTER (WHERE i.status='failed')::int AS failed
+          FROM batch_ai_items i
+          WHERE i.run_id=r.id AND r.status IN ('queued','running')
+        ) live ON TRUE
+        WHERE r.batch_id=b.id ORDER BY r.created_at DESC LIMIT 1
       ) ai ON TRUE
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS product_count,
@@ -874,6 +885,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
             ai_run_id: row.ai_run_id || null,
             ai_completed_count: Number(row.ai_completed_count || 0),
             ai_failed_count: Number(row.ai_failed_count || 0),
+            ai_total_count: Number(row.ai_total_count || 0),
             product_count: Number(row.product_count || 0),
             ai_product_count: Number(row.ai_product_count || 0),
             ai_updated_at: row.ai_updated_at || null,
@@ -992,6 +1004,7 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
         ai_run_id: batch.ai_run_id,
         ai_completed_count: batch.ai_completed_count,
         ai_failed_count: batch.ai_failed_count,
+        ai_total_count: batch.ai_total_count,
         product_count: batch.product_count,
         ai_product_count: batch.ai_product_count,
         active_operation: batch.active_operation,

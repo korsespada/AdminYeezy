@@ -210,7 +210,7 @@ describe('batch AI normalization', () => {
 
     const stillDisabled = normalizeBatchAiOutput(output, {
       ...baseInput,
-      processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, suggestSubcategories: true, suggestAttributes: true },
+      processingOptions: normalizeBatchAiProcessingOptions({ suggestSubcategories: true, suggestAttributes: true }),
     })
     expect(stillDisabled.suggestions).toEqual([])
     expect(stillDisabled.subcategorySuggestion).toBeNull()
@@ -479,7 +479,7 @@ describe('batch AI normalization', () => {
       subcategoryIds: new Set(['bags-generic']),
       attributeCodes: new Set(['colors']),
       priceRuleKeys: new Set(['known-rule']),
-      processingOptions: { ...DEFAULT_BATCH_AI_PROCESSING_OPTIONS, suggestAttributes: true },
+      processingOptions: normalizeBatchAiProcessingOptions({ suggestAttributes: true }),
     })
 
     expect(result.product.brand).toBe('chanel')

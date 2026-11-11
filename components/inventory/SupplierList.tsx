@@ -21,8 +21,6 @@ type SupplierAiProcessingOptions = {
   reorderFirstPhoto: boolean
   skipModelOnlyAlbum: boolean
   preserveAllPhotos: boolean
-  suggestSubcategories: boolean
-  suggestAttributes: boolean
 }
 
 const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
@@ -31,8 +29,6 @@ const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
   preserveAllPhotos: false,
-  suggestSubcategories: false,
-  suggestAttributes: false,
 }
 
 type SzwegoStatsFeed = {

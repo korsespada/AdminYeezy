@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, Film, Ruler, Users, Package, Settings2 } from 'lucide-react'
+import { BarChart3, Ruler, Users, Package, Settings2 } from 'lucide-react'
 
 const PRIMARY_TABS = [
   { label: 'История выгрузок', href: '/admin/batches', icon: Package },
@@ -11,7 +11,6 @@ const PRIMARY_TABS = [
 
 // Вспомогательные разделы выгрузок стоят справа, рядом с «Настройками ИИ».
 const TOOL_TABS = [
-  { label: 'Видео → товары', href: '/admin/video-matches', icon: Film },
   { label: 'Шаблоны замеров', href: '/admin/measurement-templates', icon: Ruler },
   { label: 'Использование', href: '/admin/ai-usage', icon: BarChart3 },
   { label: 'Настройки ИИ', href: '/admin/ai-rules', icon: Settings2 },

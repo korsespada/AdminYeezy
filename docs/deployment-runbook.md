@@ -118,11 +118,9 @@ npm run db:audit:batches
 При старте также выполняется `db:migrate:chromoff-ai`; она создаёт технические
 таблицы очереди `chromoff_ai_runs` и `chromoff_ai_items` в scraping DB.
 
-При старте также выполняется `db:migrate:product-video-matches`; она создаёт
-таблицы раздела «Видео → товары» (`product_video_matches`,
-`product_video_match_scope`) в scraping DB. Без неё страница
-`/admin/video-matches` не откроется, поэтому миграция включена в команду запуска
-контейнера, а не только в `db:migrate:scraping`.
+Раздел `/admin/video-matches` удалён 2026-11-11, его миграции
+(`product-video-matches`, `product-card-updates`) больше не запускаются при
+старте. Таблицы этих разделов в scraping DB остались как есть.
 
 Команда идемпотентна. В том числе она создаёт блокировки операций, реестр публикаций, уникальный активный запуск парсера на поставщика и ограничения связей задач/партий/товаров.
 
@@ -145,7 +143,6 @@ Smoke-check AdminYeezy:
 https://admin.yuconcierge.com/login
 https://admin.yuconcierge.com/admin/home
 https://admin.yuconcierge.com/admin
-https://admin.yuconcierge.com/admin/video-matches
 https://admin.yuconcierge.com/admin/crm
 https://admin.yuconcierge.com/admin/crm/orders
 https://admin.yuconcierge.com/admin/crm/customers
