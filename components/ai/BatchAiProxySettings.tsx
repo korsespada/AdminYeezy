@@ -6,9 +6,7 @@ import {
   checkBatchAiProxiesAction,
   deleteBatchAiProxyAction,
   getBatchAiProxiesAction,
-  getBatchAiProxyAllProvidersAction,
   saveBatchAiProxyAction,
-  setBatchAiProxyAllProvidersAction,
 } from '@/actions/batch-ai'
 
 type ProxyStatus = 'unknown' | 'ok' | 'fail'
@@ -48,8 +46,8 @@ function formatCheckedAt(value: string | null) {
 }
 
 /**
- * Прокси для ИИ в «Настройках ИИ». BYESU ходит через пул всегда, остальные
- * провайдеры — при включённом флажке «Все провайдеры ИИ через прокси».
+ * Прокси для ИИ в «Настройках ИИ». Через пул идут провайдеры с флажком
+ * «Через прокси» (по умолчанию — только BYESU).
  *
  * С сервера админки крупные запросы к byesu.com по HTTP/1.1 не доходят, поэтому
  * карточки идут через прокси. Один адрес — единая точка отказа, здесь ведётся
@@ -64,13 +62,11 @@ export default function BatchAiProxySettings() {
   const [url, setUrl] = useState('')
   const [label, setLabel] = useState('')
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const [allProviders, setAllProviders] = useState(false)
 
   const load = useCallback(async () => {
-    const [result, scope] = await Promise.all([getBatchAiProxiesAction(), getBatchAiProxyAllProvidersAction()])
+    const result = await getBatchAiProxiesAction()
     if (result.success) setRows(result.data as ProxyRow[])
     else setError('Не удалось загрузить прокси')
-    if (scope.success) setAllProviders(Boolean(scope.data))
     setLoading(false)
   }, [])
 
@@ -103,29 +99,10 @@ export default function BatchAiProxySettings() {
         <div>
           <h2 className="text-lg font-semibold text-white">Прокси для ИИ</h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-400">
-            Запросы к byesu.com идут через прокси всегда: напрямую с сервера большие тела с фотографиями не доходят.
+            Через этот список идут провайдеры с флажком «Через прокси» в их настройках выше; по умолчанию он включён
+            только у BYESU — напрямую с сервера большие тела с фотографиями до byesu.com не доходят.
             Если прокси перестаёт отвечать, обработка сама пробует следующий по списку.
           </p>
-          <label className="mt-3 flex max-w-3xl items-start gap-2 text-sm text-slate-200">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4 accent-indigo-500"
-              checked={allProviders}
-              disabled={busy !== null || loading}
-              onChange={(event) => {
-                const next = event.target.checked
-                void run('scope', async () => {
-                  const result = await setBatchAiProxyAllProvidersAction(next)
-                  if (result.success) setAllProviders(next)
-                  return result
-                })
-              }}
-            />
-            <span>
-              Все провайдеры ИИ через прокси
-              <span className="block text-xs text-slate-500">OpenRouter, Anthropic-совместимые, DeepSeek и остальные провайдеры тоже идут через этот список. Выключено — только BYESU.</span>
-            </span>
-          </label>
         </div>
         <button
           type="button"

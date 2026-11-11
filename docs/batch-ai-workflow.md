@@ -412,13 +412,16 @@ ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW();
 упавшим и запрос уходит через следующий. Ошибки содержимого и остановка запуска
 прокси не меняют.
 
-- BYESU (`byesu.com`) ходит через пул всегда.
-- Флажок «Все провайдеры ИИ через прокси»
-  (`app_settings.batch_ai_proxy_all_providers`) направляет через тот же пул
-  остальные провайдеры: OpenAI-совместимые (OpenRouter, DeepSeek и др.,
-  `lib/openrouter.ts`) и Anthropic-совместимые (`lib/anthropic.ts`, при флажке —
-  node `https` с агентом прокси вместо `fetch`). Выключен — они идут напрямую
-  или через прежний `OPENROUTER_PROXY_URL`.
+- Какие провайдеры идут через пул, решает флажок «Через прокси» в настройках
+  каждого сохранённого провайдера (`ai_providers.use_proxy`,
+  `updateAiProviderUseProxyAction`). Флажок не задан (старые провайдеры,
+  колонка `NULL`) — через пул идёт только BYESU (`byesu.com`), остальные
+  напрямую. Колонку добавляет `npm run db:migrate:ai-usage` при старте.
+- Флажок доходит до всех клиентов: OpenAI-совместимых (OpenRouter, DeepSeek и
+  др., `lib/openrouter.ts`), BYESU (`lib/byesu.ts`) и Anthropic-совместимых
+  (`lib/anthropic.ts`, через пул — node `https` с агентом вместо `fetch`).
+  «Проверить» у провайдера идёт тем же путём. Без флажка OpenAI-совместимые
+  идут напрямую или через прежний `OPENROUTER_PROXY_URL`.
 - `BYESU_PROXY_URL` используется только для byesu.com и только пока список пуст.
 - «Проверить все» проверяет соединение с byesu.com; доступность других хостов
   через прокси зависит от настроек самого прокси.

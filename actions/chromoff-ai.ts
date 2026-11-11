@@ -115,7 +115,7 @@ async function hydrateProviderCredentials(settings: ChromoffAiSettings): Promise
   const providerId = String(settings.providerId || settings.activeProviderId || '').trim()
   if (!providerId) return settings
   const result = await scrapingQuery(
-    'SELECT id,kind,name,base_url,api_key_ciphertext,model FROM ai_providers WHERE id=$1',
+    'SELECT id,kind,name,base_url,api_key_ciphertext,model,use_proxy FROM ai_providers WHERE id=$1',
     [providerId],
   )
   const row = result.rows[0]
@@ -126,6 +126,7 @@ async function hydrateProviderCredentials(settings: ChromoffAiSettings): Promise
     providerName: String(row.name || ''),
     providerBaseUrl: String(row.base_url || ''),
     providerApiKey: decryptProviderApiKey(row.api_key_ciphertext),
+    providerUseProxy: typeof row.use_proxy === 'boolean' ? row.use_proxy : null,
     openrouterModel: row.kind === 'openrouter' ? String(row.model || '') : settings.openrouterModel,
     byesuModel: row.kind === 'byesu' ? String(row.model || '') : settings.byesuModel,
   }

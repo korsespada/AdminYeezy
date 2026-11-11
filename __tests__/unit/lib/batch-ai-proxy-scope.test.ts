@@ -8,25 +8,21 @@ vi.mock('@/lib/db', () => ({
       const value = settings.get(String(params[0]))
       return { rows: value === undefined ? [] : [{ value }] }
     }
-    if (/INSERT INTO app_settings/i.test(sql)) {
-      settings.set(String(params[0]), String(params[1]))
-      return { rows: [] }
-    }
     return { rows: [] }
   }),
 }))
 
 import {
   isByesuHostname,
-  proxyPoolAppliesTo,
+  providerUsesProxy,
+  proxyPoolEnabled,
   resolveBatchAiProxies,
-  saveProxyAllProviders,
   withProxyFailover,
 } from '@/lib/batch-ai-proxies'
 
 const POOL = JSON.stringify([{ id: 'a', url: 'http://user:pass@1.1.1.1:8888', status: 'ok', latencyMs: 100 }])
 
-describe('proxy pool scope', () => {
+describe('per-provider proxy flag', () => {
   beforeEach(() => {
     settings.clear()
     delete process.env.BYESU_PROXY_URL
@@ -38,23 +34,20 @@ describe('proxy pool scope', () => {
     expect(isByesuHostname('openrouter.ai')).toBe(false)
   })
 
-  it('applies the pool to BYESU always and to others only with the flag', async () => {
-    expect(await proxyPoolAppliesTo('byesu.com')).toBe(true)
-    expect(await proxyPoolAppliesTo('openrouter.ai')).toBe(false)
-    await saveProxyAllProviders(true)
-    expect(await proxyPoolAppliesTo('openrouter.ai')).toBe(true)
-    await saveProxyAllProviders(false)
-    expect(await proxyPoolAppliesTo('api.anthropic.com')).toBe(false)
+  it('uses the provider flag and defaults to BYESU only', () => {
+    expect(proxyPoolEnabled('byesu.com')).toBe(true)
+    expect(proxyPoolEnabled('openrouter.ai')).toBe(false)
+    expect(proxyPoolEnabled('openrouter.ai', true)).toBe(true)
+    expect(proxyPoolEnabled('byesu.com', false)).toBe(false)
+    expect(providerUsesProxy('https://byesu.com/v1', null)).toBe(true)
+    expect(providerUsesProxy('https://api.deepseek.com', null)).toBe(false)
+    expect(providerUsesProxy('https://api.deepseek.com', true)).toBe(true)
+    expect(providerUsesProxy('not a url', null)).toBe(false)
   })
 
-  it('sends other providers directly while the flag is off', async () => {
+  it('sends a flagged request through the stored pool', async () => {
     settings.set('batch_ai_proxies', POOL)
     const attempt = vi.fn(async (agent: unknown) => agent)
-    const direct = await withProxyFailover(attempt, { hostname: 'openrouter.ai' })
-    expect(direct.proxyUrl).toBeNull()
-    expect(attempt).toHaveBeenCalledWith(undefined)
-
-    await saveProxyAllProviders(true)
     const proxied = await withProxyFailover(attempt, { hostname: 'openrouter.ai' })
     expect(proxied.proxyUrl).toMatch(/^http:\/\/user:pass@1\.1\.1\.1:8888/)
   })

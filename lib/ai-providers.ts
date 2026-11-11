@@ -19,6 +19,8 @@ export type AiProviderRecord = {
   pricing?: AiPricingTable
   /** `disabled` — запросы уходят без размышлений модели (DeepSeek, OpenRouter). */
   reasoning?: AiReasoningMode
+  /** Флажок «Через прокси»: запросы идут через пул прокси из «Настроек ИИ». */
+  useProxy?: boolean
   createdAt: string
   updatedAt: string
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
 import { BookOpen, Bot, CheckCircle2, Cpu, Image, Pencil, PlayCircle, Plus, RefreshCw, Save, ShieldAlert, Trash2, X } from 'lucide-react'
-import { createAiProviderAction, updateAiProviderPricingAction, updateAiProviderReasoningAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
+import { createAiProviderAction, updateAiProviderPricingAction, updateAiProviderReasoningAction, updateAiProviderUseProxyAction, createBatchAiCatalogCategoryAction, createBatchAiCatalogSubcategoryAction, deleteAiProviderAction, refreshAiProviderModelsAction, testAiProviderAction, updateAiProviderAction, updateBatchAiSettingsAction } from '@/actions/batch-ai'
 import type { BatchAiSettings } from '@/lib/batch-ai'
 import type { BatchAiCategoryRule } from '@/lib/batch-ai-category-rules'
 import type { AiProviderRecord } from '@/lib/ai-providers'
@@ -290,6 +290,10 @@ export default function AIRulesEditor({ initialSettings, initialCategories, init
                   placeholder="Название модели"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm text-white outline-none focus:border-indigo-500"
                 />}
+                <ProxyToggle
+                  provider={activeSavedProvider}
+                  onSaved={(useProxy) => setProviders((current) => current.map((item) => item.id === activeSavedProvider.id ? { ...item, useProxy } : item))}
+                />
                 {supportsReasoningToggle(activeSavedProvider.baseUrl) && (
                   <ReasoningToggle
                     provider={activeSavedProvider}
@@ -562,6 +566,48 @@ function ModelPricingEditor({ provider, model, onSaved }: {
         {status && <span className={`text-xs ${status.type === 'success' ? 'text-emerald-300' : 'text-red-300'}`}>{status.text}</span>}
       </div>
     </div>
+  )
+}
+
+/**
+ * Флажок провайдера «Через прокси»: его запросы идут через пул из блока
+ * «Прокси для ИИ». Каждый провайдер включается отдельно.
+ */
+function ProxyToggle({ provider, onSaved }: {
+  provider: AiProviderRecord
+  onSaved: (useProxy: boolean) => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const save = (useProxy: boolean) => startTransition(async () => {
+    setError(null)
+    const result = await updateAiProviderUseProxyAction(provider.id, useProxy)
+    if (!result.success) {
+      setError(result.error || 'Не удалось сохранить')
+      return
+    }
+    onSaved(Boolean(result.data?.useProxy))
+  })
+
+  return (
+    <label className="flex items-start gap-3 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 accent-indigo-500"
+        checked={provider.useProxy === true}
+        disabled={pending}
+        onChange={(event) => save(event.target.checked)}
+      />
+      <span className="space-y-1">
+        <span className="block text-sm font-semibold text-white">Через прокси</span>
+        <span className="block text-xs leading-relaxed text-slate-500">
+          Запросы этого провайдера идут через список из блока «Прокси для ИИ» с переключением на следующий прокси при сбое.
+          Выключено — напрямую. Сохраняется сразу и действует для новых запросов.
+        </span>
+        {error && <span className="block text-xs text-red-300">{error}</span>}
+      </span>
+    </label>
   )
 }
 

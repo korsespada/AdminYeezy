@@ -96,7 +96,7 @@ import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
 import { abortAiRun, isAiCancelledError, registerAiRunController, throwIfAiCancelled, withAiAbortSignal } from '@/lib/ai-cancellation'
-import { loadBatchAiProxies, loadProxyAllProviders, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, saveBatchAiProxies, saveProxyAllProviders } from '@/lib/batch-ai-proxies'
+import { loadBatchAiProxies, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, providerUsesProxy, saveBatchAiProxies } from '@/lib/batch-ai-proxies'
 import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { hasProductTranslationColumns } from '@/lib/product-translation-columns'
@@ -150,7 +150,7 @@ export async function getBatchAiSettingsAction() {
   const result = await scrapingQuery('SELECT key, value FROM app_settings WHERE key=ANY($1::text[])', [SETTINGS_KEYS])
   const values = Object.fromEntries(result.rows.map((row) => [row.key, row.value]))
   const configuredProviders = await scrapingQuery(`
-    SELECT id,name,kind,base_url,model,models,pricing,reasoning_mode,created_at,updated_at
+    SELECT id,name,kind,base_url,model,models,pricing,reasoning_mode,use_proxy,created_at,updated_at
     FROM ai_providers ORDER BY updated_at DESC, created_at DESC
   `).catch(() => ({ rows: [] }))
   const activeProviderId = String(values.batch_ai_provider_id || '').trim() || null
@@ -169,6 +169,7 @@ export async function getBatchAiSettingsAction() {
     models: Array.isArray(row.models) ? row.models : [],
     hasApiKey: true,
     pricing: normalizePricingTable(row.pricing), reasoning: normalizeReasoningMode(row.reasoning_mode),
+    useProxy: providerUsesProxy(String(row.base_url || ''), typeof row.use_proxy === 'boolean' ? row.use_proxy : null),
     createdAt: String(row.created_at || ''),
     updatedAt: String(row.updated_at || ''),
   }))
@@ -943,12 +944,15 @@ export async function testAiProviderAction(providerId: string) {
   if (!id) return { success: false, error: 'Провайдер не указан' }
   try {
     const result = await scrapingQuery(
-      'SELECT base_url,api_key_ciphertext,model,models FROM ai_providers WHERE id=$1',
+      'SELECT base_url,api_key_ciphertext,model,models,use_proxy FROM ai_providers WHERE id=$1',
       [id],
     )
     const row = result.rows[0]
     if (!row) return { success: false, error: 'Провайдер не найден' }
     const apiKey = decryptProviderApiKey(row.api_key_ciphertext)
+    // Проверка идёт тем же путём, что и обработка: через прокси, если у
+    // провайдера включён флажок «Через прокси».
+    const useProxy = typeof row.use_proxy === 'boolean' ? row.use_proxy : null
     const models = await fetchProviderModels(row.base_url, apiKey).catch(() => [])
     const model = String(row.model || '').trim() || models[0]?.value || ''
     if (!model) return { success: false, error: 'Не удалось определить модель. Укажите её в редактировании провайдера.' }
@@ -959,13 +963,13 @@ export async function testAiProviderAction(providerId: string) {
           messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
           temperature: 0,
           max_tokens: 8,
-        }, { baseUrl: row.base_url, apiKey })
+        }, { baseUrl: row.base_url, apiKey, useProxy })
       : await openRouterChatCompletion({
           model,
           messages: [{ role: 'user', content: 'Ответь одним словом: OK' }],
           temperature: 0,
           max_tokens: 1,
-        }, {}, { baseUrl: row.base_url, apiKey }))
+        }, {}, { baseUrl: row.base_url, apiKey, useProxy }))
     if (providerProtocol(row.base_url) === 'anthropic') {
       if (!Array.isArray(payload?.content) || payload.content.length === 0) throw new Error('Endpoint вернул ответ без content')
     } else if (!Array.isArray(payload?.choices) || payload.choices.length === 0) {
@@ -997,6 +1001,20 @@ export async function updateAiProviderPricingAction(providerId: string, model: s
   revalidatePath('/admin/ai-rules')
   revalidatePath('/admin/ai-usage')
   return { success: true, data: { pricing } }
+}
+
+/**
+ * Флажок провайдера «Через прокси»: запросы к нему идут через пул прокси из
+ * «Настроек ИИ». Без явного значения через пул идёт только BYESU.
+ */
+export async function updateAiProviderUseProxyAction(providerId: string, useProxy: boolean) {
+  await requireAdmin()
+  const id = String(providerId || '').trim()
+  if (!id) return { success: false, error: 'Провайдер не указан' }
+  const updated = await scrapingQuery('UPDATE ai_providers SET use_proxy=$2,updated_at=NOW() WHERE id=$1 RETURNING id', [id, useProxy === true])
+  if (!updated.rows[0]) return { success: false, error: 'Провайдер не найден' }
+  revalidatePath('/admin/ai-rules')
+  return { success: true, data: { useProxy: useProxy === true } }
 }
 
 /** Размышления модели провайдера: `disabled` экономит токены выхода и время. */
@@ -3197,18 +3215,6 @@ function normalizeProxyDraft(input: { id?: string | null; url?: string; label?: 
 export async function getBatchAiProxiesAction() {
   await requireAdmin()
   return { success: true, data: await loadBatchAiProxies() }
-}
-
-/** Флажок «Все провайдеры ИИ через прокси»: BYESU ходит через пул всегда. */
-export async function getBatchAiProxyAllProvidersAction() {
-  await requireAdmin()
-  return { success: true, data: await loadProxyAllProviders() }
-}
-
-export async function setBatchAiProxyAllProvidersAction(enabled: boolean) {
-  await requireAdmin()
-  await saveProxyAllProviders(enabled === true)
-  return { success: true, data: enabled === true }
 }
 
 export async function saveBatchAiProxyAction(input: { id?: string | null; url?: string; label?: string; enabled?: boolean }) {

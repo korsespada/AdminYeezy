@@ -3,7 +3,7 @@ import https from 'node:https'
 
 import { recordAiUsage } from '@/lib/ai-usage'
 import { AiRequestCancelledError, bindAiAbortToRequest, currentAiAbortSignal, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
-import { proxyPoolAppliesTo, withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
+import { proxyPoolEnabled, withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv, providerMessagesUrl } from '@/lib/ai-providers'
 
 const ANTHROPIC_DEFAULT_TIMEOUT_MS = 300_000
@@ -61,14 +61,14 @@ function headers(baseUrl: string, apiKey: string) {
 
 export async function anthropicMessagesCompletion(
   requestBody: Record<string, any>,
-  connection: { baseUrl?: string; apiKey?: string } = {},
+  connection: { baseUrl?: string; apiKey?: string; useProxy?: boolean | null } = {},
 ): Promise<AnthropicPayload> {
   const apiKey = connection.apiKey?.trim()
   if (!apiKey) throw new Error('API-ключ Anthropic не задан')
   const baseUrl = connection.baseUrl?.trim() || 'https://api.anthropic.com'
   const startedAt = Date.now()
   try {
-    const payload = await sendAnthropicRequest(requestBody, baseUrl, apiKey)
+    const payload = await sendAnthropicRequest(requestBody, baseUrl, apiKey, connection.useProxy)
     recordAiUsage({ target: providerMessagesUrl(baseUrl), protocol: 'anthropic', model: requestBody.model, payload, startedAt })
     return payload
   } catch (error) {
@@ -79,14 +79,14 @@ export async function anthropicMessagesCompletion(
 
 type RawResponse = { status: number; ok: boolean; contentLength: number; text: string }
 
-async function sendAnthropicRequest(requestBody: Record<string, any>, baseUrl: string, apiKey: string): Promise<AnthropicPayload> {
+async function sendAnthropicRequest(requestBody: Record<string, any>, baseUrl: string, apiKey: string, useProxy?: boolean | null): Promise<AnthropicPayload> {
   throwIfAiCancelled()
   const url = providerMessagesUrl(baseUrl)
   const body = JSON.stringify(requestBody)
   const requestHeaders = headers(baseUrl, apiKey)
-  // При флажке «Все провайдеры ИИ через прокси» запрос идёт через пул прокси
+  // При флажке провайдера «Через прокси» запрос идёт через пул прокси
   // (node https с агентом), иначе — прежним fetch напрямую.
-  const response = await proxyPoolAppliesTo(new URL(url).hostname)
+  const response = proxyPoolEnabled(new URL(url).hostname, useProxy)
     ? (await withProxyFailover((agent) => postAnthropicViaNode(url, requestHeaders, body, agent), { hostname: new URL(url).hostname })).value
     : await postAnthropicViaFetch(url, requestHeaders, body)
 

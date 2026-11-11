@@ -9,9 +9,8 @@ import { isProviderTimeoutError } from '@/lib/ai-providers'
 
 /**
  * Пул прокси для запросов к ИИ, который оператор ведёт в «Настройках ИИ».
- * BYESU ходит через пул всегда; остальные провайдеры (OpenRouter-совместимые,
- * Anthropic-совместимые, DeepSeek и т.д.) — только при включённом флажке
- * «Все провайдеры ИИ через прокси» (`app_settings.batch_ai_proxy_all_providers`).
+ * Через пул идёт провайдер с флажком «Через прокси» (`ai_providers.use_proxy`).
+ * Флажок не задан — по умолчанию через пул идёт только BYESU (byesu.com).
  *
  * Зачем: с сервера админки крупные тела (contact sheets с картинками) до
  * byesu.com по HTTP/1.1 не доходят — соединение рвётся или висит до таймаута,
@@ -37,7 +36,6 @@ export type BatchAiProxy = {
 }
 
 const SETTINGS_KEY = 'batch_ai_proxies'
-const ALL_PROVIDERS_KEY = 'batch_ai_proxy_all_providers'
 const PROBE_URL = 'https://byesu.com/v1/models'
 const PROBE_TIMEOUT_MS = 12_000
 
@@ -134,26 +132,25 @@ export function isByesuHostname(hostname: string) {
   return host === 'byesu.com' || host.endsWith('.byesu.com')
 }
 
-export async function loadProxyAllProviders(): Promise<boolean> {
-  const result = await scrapingQuery('SELECT value FROM app_settings WHERE key=$1', [ALL_PROVIDERS_KEY]).catch(() => ({ rows: [] as any[] }))
-  return String(result.rows[0]?.value || '').trim() === 'true'
-}
-
-export async function saveProxyAllProviders(enabled: boolean) {
-  await scrapingQuery(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES($1,$2,NOW())
-     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-    [ALL_PROVIDERS_KEY, enabled ? 'true' : 'false'],
-  )
-}
-
 /**
- * Идёт ли запрос к этому хосту через пул. BYESU — всегда; остальные — только
- * при включённом флажке. Без хоста (старые вызовы) считаем запрос к BYESU.
+ * Идёт ли запрос провайдера через пул. `useProxy` — флажок «Через прокси»
+ * у провайдера; не задан (старые провайдеры, запросы без провайдера) — через
+ * пул идёт только BYESU.
  */
-export async function proxyPoolAppliesTo(hostname?: string) {
-  if (!hostname || isByesuHostname(hostname)) return true
-  return loadProxyAllProviders()
+export function proxyPoolEnabled(hostname: string, useProxy?: boolean | null) {
+  if (typeof useProxy === 'boolean') return useProxy
+  return isByesuHostname(hostname)
+}
+
+/** Значение флажка для интерфейса: явное или умолчание по адресу провайдера. */
+export function providerUsesProxy(baseUrl: string, useProxy?: boolean | null) {
+  let hostname = ''
+  try {
+    hostname = new URL(String(baseUrl || '')).hostname
+  } catch {
+    hostname = ''
+  }
+  return proxyPoolEnabled(hostname, useProxy)
 }
 
 export async function resolveBatchAiProxies(hostname?: string): Promise<BatchAiProxy[]> {
@@ -218,7 +215,8 @@ async function recordProxyResult(url: string, ok: boolean, latencyMs: number | n
 export type ProxyAttemptResult<T> = { value: T; proxyUrl: string | null }
 
 /**
- * Выполняет запрос через первый рабочий прокси из списка. На сетевой ошибке
+ * Выполняет запрос через пул (решение «через прокси или нет» принимает
+ * вызывающий код по `proxyPoolEnabled`). На сетевой ошибке
  * помечает прокси упавшим и пробует следующий; когда список кончился —
  * последняя ошибка уходит наверх. Пустой список означает прямой запрос.
  */
@@ -226,7 +224,7 @@ export async function withProxyFailover<T>(
   attempt: (agent: ReturnType<typeof createProxyAgent> | undefined) => Promise<T>,
   options: { hostname?: string } = {},
 ): Promise<ProxyAttemptResult<T>> {
-  const candidates = await proxyPoolAppliesTo(options.hostname) ? await resolveBatchAiProxies(options.hostname) : []
+  const candidates = await resolveBatchAiProxies(options.hostname)
   if (!candidates.length) {
     return { value: await attempt(undefined), proxyUrl: null }
   }

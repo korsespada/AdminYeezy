@@ -3,7 +3,7 @@ import https from 'node:https'
 import { recordAiUsage } from '@/lib/ai-usage'
 import { bindAiAbortToRequest, isAiCancelledError, throwIfAiCancelled } from '@/lib/ai-cancellation'
 import { isProviderTimeoutError, providerConnectionError, providerTimeoutError, providerTimeoutMsFromEnv } from '@/lib/ai-providers'
-import { withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
+import { proxyPoolEnabled, withProxyFailover, type BatchAiProxyAgent } from '@/lib/batch-ai-proxies'
 
 const BYESU_CHAT_URL = 'https://byesu.com/v1/chat/completions'
 const BYESU_MODELS_URL = 'https://byesu.com/v1/models'
@@ -199,7 +199,7 @@ export async function getByesuModels(): Promise<ByesuModelOption[]> {
 
 export async function byesuChatCompletion(
   requestBody: Record<string, any>,
-  connection: { baseUrl?: string; apiKey?: string } = {},
+  connection: { baseUrl?: string; apiKey?: string; useProxy?: boolean | null } = {},
 ): Promise<ByesuPayload> {
   const legacy = byesuApiKey(requestBody.model)
   const apiKey = connection.apiKey?.trim() || legacy.apiKey
@@ -213,7 +213,7 @@ export async function byesuChatCompletion(
     : BYESU_CHAT_URL
   const startedAt = Date.now()
   try {
-    const payload = await sendByesuRequest(target, apiKey, requestBody)
+    const payload = await sendByesuRequest(target, apiKey, requestBody, connection.useProxy)
     recordAiUsage({ target, protocol: 'openai', model: requestBody.model, payload, startedAt })
     return payload
   } catch (error) {
@@ -222,11 +222,15 @@ export async function byesuChatCompletion(
   }
 }
 
-async function sendByesuRequest(target: string, apiKey: string, requestBody: Record<string, any>): Promise<ByesuPayload> {
+async function sendByesuRequest(target: string, apiKey: string, requestBody: Record<string, any>, useProxy?: boolean | null): Promise<ByesuPayload> {
   const body = JSON.stringify(requestBody)
-  // Прокси берутся из списка «Настроек ИИ»: при обрыве запрос уходит через
+  // Прокси берутся из списка «Настроек ИИ», если у провайдера включён флажок
+  // «Через прокси» (по умолчанию для byesu.com): при обрыве запрос уходит через
   // следующий рабочий адрес (см. lib/batch-ai-proxies).
-  const { value: response } = await withProxyFailover((agent) => postByesuJson(target, apiKey, body, agent), { hostname: new URL(target).hostname })
+  const hostname = new URL(target).hostname
+  const response = proxyPoolEnabled(hostname, useProxy)
+    ? (await withProxyFailover((agent) => postByesuJson(target, apiKey, body, agent), { hostname })).value
+    : await postByesuJson(target, apiKey, body, undefined)
 
   if (response.contentLength > BYESU_MAX_RESPONSE_BYTES) {
     throw new Error('Ответ BYESU превышает допустимый размер')

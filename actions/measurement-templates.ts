@@ -145,13 +145,15 @@ async function measurementRecognitionSettings(): Promise<BatchAiSettings> {
 
   let providerBaseUrl = ''
   let providerApiKey = ''
+  let providerUseProxy: boolean | null = null
   if (settings.activeProviderId) {
-    const result = await scrapingQuery('SELECT kind,base_url,api_key_ciphertext,model FROM ai_providers WHERE id=$1', [String(settings.activeProviderId)])
+    const result = await scrapingQuery('SELECT kind,base_url,api_key_ciphertext,model,use_proxy FROM ai_providers WHERE id=$1', [String(settings.activeProviderId)])
     const configured = result.rows[0]
     if (!configured) throw new Error('Выбранный AI-провайдер не найден')
     if (configured.kind !== provider) throw new Error('Настройки AI-провайдера изменились, обновите страницу')
     providerBaseUrl = String(configured.base_url || '')
     providerApiKey = decryptProviderApiKey(String(configured.api_key_ciphertext || ''))
+    providerUseProxy = typeof configured.use_proxy === 'boolean' ? configured.use_proxy : null
     if (configured.kind === 'openrouter') settings.openrouterModel = String(configured.model || settings.openrouterModel)
     if (configured.kind === 'byesu') settings.byesuModel = String(configured.model || settings.byesuModel)
   }
@@ -170,6 +172,7 @@ async function measurementRecognitionSettings(): Promise<BatchAiSettings> {
     categoryRules: [],
     providerBaseUrl,
     providerApiKey,
+    providerUseProxy,
   }
 }
 

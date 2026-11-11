@@ -63,6 +63,8 @@ export type BatchAiSettings = {
   providerBaseUrl?: string
   providerApiKey?: string
   providerReasoning?: AiReasoningMode
+  /** Флажок «Через прокси» провайдера; не задан — через пул только BYESU. */
+  providerUseProxy?: boolean | null
   openrouterModel: string
   byesuModel: string
   temperature: number
@@ -74,7 +76,7 @@ export type BatchAiSettings = {
 }
 
 export type AiCompletionSettings = Pick<BatchAiSettings,
-  'provider' | 'providerBaseUrl' | 'providerApiKey' | 'providerReasoning' | 'openrouterModel' | 'byesuModel' | 'temperature' | 'maxTokens'
+  'provider' | 'providerBaseUrl' | 'providerApiKey' | 'providerReasoning' | 'providerUseProxy' | 'openrouterModel' | 'byesuModel' | 'temperature' | 'maxTokens'
 >
 
 export function restoreRetryProductsFromSnapshots(products: any[], sourceRows: Array<{ product_id?: number; source_product?: unknown }>) {
@@ -892,10 +894,12 @@ async function requestBatchAiJson(input: {
     ? (body: Record<string, any>) => byesuChatCompletion(body, {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
+        useProxy: input.settings.providerUseProxy,
       })
     : (body: Record<string, any>) => openRouterChatCompletion(body, {}, {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
+        useProxy: input.settings.providerUseProxy,
       })
   const cacheKey = `${input.settings.provider}:${input.settings.providerBaseUrl || ''}:${model}`
   const request = () => withBatchAiPromptCacheFallback(cacheKey, (cacheSharedPrefix) => (protocol === 'anthropic'
@@ -908,6 +912,7 @@ async function requestBatchAiJson(input: {
       }, {
         baseUrl: input.settings.providerBaseUrl,
         apiKey: input.settings.providerApiKey,
+        useProxy: input.settings.providerUseProxy,
       }), input.label)
     : withBatchAiRetry(() => completion({
         model,

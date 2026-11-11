@@ -50,6 +50,8 @@ async function migrate() {
     await client.query("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS pricing JSONB NOT NULL DEFAULT '{}'::jsonb")
     // 'disabled' — запросы без размышлений модели (DeepSeek thinking, OpenRouter reasoning).
     await client.query("ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS reasoning_mode TEXT NOT NULL DEFAULT 'default'")
+    // Флажок «Через прокси»: NULL — умолчание (через пул прокси только byesu.com).
+    await client.query('ALTER TABLE ai_providers ADD COLUMN IF NOT EXISTS use_proxy BOOLEAN')
     await client.query('COMMIT')
     console.log('ai_usage_events ready')
   } catch (error) {

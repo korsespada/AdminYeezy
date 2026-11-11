@@ -15,6 +15,8 @@ export type ChromoffAiSettings = {
   providerName?: string
   providerBaseUrl?: string
   providerApiKey?: string
+  /** Флажок «Через прокси» провайдера; не задан — через пул только BYESU. */
+  providerUseProxy?: boolean | null
   openrouterModel: string
   byesuModel: string
   temperature: number
