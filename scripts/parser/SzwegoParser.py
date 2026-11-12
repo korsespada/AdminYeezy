@@ -260,6 +260,33 @@ def _item_has_szwego_tag_id(value, wanted_id, parent_key=""):
 
     return any(_item_has_szwego_tag_id(child, wanted, key) for key, child in value.items())
 
+def _split_szwego_filter_ids(raw):
+    """Id выбранных тегов/категорий Szwego.
+
+    Админка хранит выбор как строки `label=id` (мультивыбор — по строке на
+    значение), а Szwego сопоставляет публикации только по голому id. Принимаем
+    обе формы и оба разделителя, чтобы старые настройки поставщика продолжали
+    работать.
+    """
+    ids = []
+    for chunk in re.split(r"[\r\n,;]+", str(raw or "")):
+        value = chunk.strip().strip("\"'")
+        if not value:
+            continue
+        if "=" in value:
+            value = value.rsplit("=", 1)[1].strip().strip("\"'")
+        if value and value not in ids:
+            ids.append(value)
+    # Id Szwego числовые. Если подпись сама содержала разделитель, отбрасываем
+    # получившийся из неё мусор, чтобы фильтр не ушёл на несуществующий id.
+    numeric = [value for value in ids if value.isdigit()]
+    return numeric or ids
+
+
+def _item_has_any_szwego_tag_id(item, wanted_ids):
+    return any(_item_has_szwego_tag_id(item, wanted) for wanted in wanted_ids)
+
+
 def _item_tag_labels(item):
     """Human-readable tag labels of one post (used by the preview statistics)."""
     labels = []
@@ -291,15 +318,17 @@ def _album_params(album_id, timestamp, bulk_limit=0):
         params["limit"] = bulk_limit
     return params
 
-def fetch_album_page(session, headers, album_id, mode, timestamp, bulk_limit=0, tag_id="", group_id=""):
+def fetch_album_page(session, headers, album_id, mode, timestamp, bulk_limit=0, tag_ids=(), group_ids=()):
     """Одна страница альбома. mode: images | all | video."""
     url = SZWEGO_BASE + MODE_ENDPOINTS[mode]
     params = _album_params(album_id, timestamp, bulk_limit)
-    if mode == "images" and group_id:
-        params["tagGroupId"] = group_id
+    # Альбомный источник принимает один фильтр на запрос: с несколькими id
+    # Szwego отвечает пустым списком, поэтому берётся первый выбранный.
+    if mode == "images" and group_ids:
+        params["tagGroupId"] = group_ids[0]
         response = request_with_retry(session, "POST", url, params=params, data={"tagList": "[]"}, headers=headers)
-    elif mode == "images" and tag_id:
-        response = request_with_retry(session, "POST", url, params=params, data={"tagList": f"[{tag_id}]"}, headers=headers)
+    elif mode == "images" and tag_ids:
+        response = request_with_retry(session, "POST", url, params=params, data={"tagList": f"[{tag_ids[0]}]"}, headers=headers)
     else:
         response = request_with_retry(session, "GET", url, params=params, headers=headers)
     if not response:
@@ -315,18 +344,20 @@ def fetch_page_resilient(session, headers, args, mode, timestamp, bulk_limit):
     (истёкшая сессия, закрытый магазин) возвращаются как есть: повторять их
     бессмысленно, а оператору нужен точный текст.
     """
-    data = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, args.tag_id, args.group_id)
+    tag_ids = getattr(args, "tag_ids", None) or _split_szwego_filter_ids(getattr(args, "tag_id", ""))
+    group_ids = getattr(args, "group_ids", None) or _split_szwego_filter_ids(getattr(args, "group_id", ""))
+    data = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, tag_ids, group_ids)
     if data is None or data.get("success") or not bulk_limit:
         return data, bulk_limit
     if data.get("errcode") != 1001002:
         return data, bulk_limit
 
-    retry = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, args.tag_id, args.group_id)
+    retry = fetch_album_page(session, headers, args.album_id, mode, timestamp, bulk_limit, tag_ids, group_ids)
     if retry is not None and retry.get("success"):
         return retry, bulk_limit
 
     print(f"⚠️ Szwego отклонил limit={bulk_limit} ({data.get('errcode')}: {data.get('errmsg')}); переходим на постраничный режим.", file=sys.stderr)
-    return fetch_album_page(session, headers, args.album_id, mode, timestamp, 0, args.tag_id, args.group_id), 0
+    return fetch_album_page(session, headers, args.album_id, mode, timestamp, 0, tag_ids, group_ids), 0
 
 def _shop_info(data):
     """Метаданные просматриваемого магазина: имя, аватар, всего постов, онлайн."""
@@ -648,8 +679,9 @@ def collect_feed_stats(session, headers, args, mode, progress_label):
             feed["shop"] = _shop_info(data)
             feed["album_total_posts"] = (result.get("targetAlbum") or {}).get("totalItemCount")
         # Тег в единой и видео-ленте отбирается по самой публикации, как в экспорте.
-        if mode in ("all", "video") and args.tag_id:
-            items = [item for item in raw_items if _item_has_szwego_tag_id(item, args.tag_id)]
+        selected_tags = getattr(args, "tag_ids", None) or _split_szwego_filter_ids(getattr(args, "tag_id", ""))
+        if mode in ("all", "video") and selected_tags:
+            items = [item for item in raw_items if _item_has_any_szwego_tag_id(item, selected_tags)]
             feed["tag_skipped"] = feed.get("tag_skipped", 0) + (len(raw_items) - len(items))
         else:
             items = raw_items
@@ -720,7 +752,7 @@ def run_stats(args, session, headers):
         "min_photos": args.min_photos,
         # Без явного порога у каждого источника своё поведение по умолчанию.
         "min_desc": args.min_desc if args.min_desc is not None else {"images": 10, "all": 0, "video": 0},
-        "tag_id": args.tag_id or None,
+        "tag_id": ", ".join(args.tag_ids) or None,
     }
     print("SZWEGO_STATS:" + json.dumps(stats, ensure_ascii=False))
     return stats
@@ -749,8 +781,8 @@ def main():
         help="Включить закреплённые поставщиком посты (isTop) в выгрузку",
     )
     parser.add_argument("--end_date", help="Stop date (YYYY-MM-DD)")
-    parser.add_argument("--group_id", default="", help="Group ID filter")
-    parser.add_argument("--tag_id", default="", help="Tag ID filter")
+    parser.add_argument("--group_id", default="", help="Group ID filter (id, или label=id, или несколько строк)")
+    parser.add_argument("--tag_id", default="", help="Tag ID filter (id, или label=id, или несколько строк)")
     parser.add_argument("--output", default="szwego.json", help="Output path")
     parser.add_argument("--format", choices=("json", "csv"), default="json", help="Output format")
     parser.add_argument("--min_photos", type=int, default=3)
@@ -770,6 +802,14 @@ def main():
     
     parser.add_argument('--get_avatar', action='store_true', help='Only fetch shop avatar and exit')
     args = parser.parse_args()
+
+    # Настройки поставщика хранят тег/категорию как `label=id` (мультивыбор —
+    # по строке на значение), а Szwego понимает только id. Нормализуем один раз,
+    # чтобы фильтр не сравнивал id с подписью.
+    args.tag_ids = _split_szwego_filter_ids(args.tag_id)
+    args.group_ids = _split_szwego_filter_ids(args.group_id)
+    args.tag_id = args.tag_ids[0] if args.tag_ids else ""
+    args.group_id = args.group_ids[0] if args.group_ids else ""
 
     # Headers
     headers = {
@@ -840,8 +880,10 @@ def main():
     bulk_limit = 0 if args.no_bulk else max(0, min(args.limit, BULK_LIMIT_MAX))
 
     print(f"Starting parse for Album: {args.album_id} (mode: {args.parse_mode}, limit: {bulk_limit or 'default'})")
-    if args.group_id: print(f"Group: {args.group_id}")
-    if args.tag_id: print(f"Tag: {args.tag_id}")
+    if args.group_ids: print(f"Group: {', '.join(args.group_ids)}")
+    if args.tag_ids: print(f"Tag: {', '.join(args.tag_ids)}")
+    if len(args.tag_ids) > 1 and args.parse_mode == "images":
+        print("⚠️ Альбомный источник фильтрует по одному тегу Szwego: берётся первый выбранный.", file=sys.stderr)
 
     shop_info = {}
     expected_total = None
@@ -880,8 +922,8 @@ def main():
             items = raw_items
             # В единой ленте и в видео-ленте тег выбирается сервером не всегда,
             # поэтому отбор идёт по тегам самой публикации.
-            if args.parse_mode in ("all", "video") and args.tag_id:
-                items = [item for item in raw_items if _item_has_szwego_tag_id(item, args.tag_id)]
+            if args.parse_mode in ("all", "video") and args.tag_ids:
+                items = [item for item in raw_items if _item_has_any_szwego_tag_id(item, args.tag_ids)]
 
             page_saved = 0
             date_skip_count = 0
@@ -984,7 +1026,7 @@ def main():
         # Полнота выгрузки проверяется только там, где источник отдаёт все посты
         # альбома без локальных фильтров. Закрепы входят в totalItemCount, но по
         # умолчанию не выгружаются, поэтому они прибавляются к собранному.
-        if args.parse_mode == "all" and expected_total and not args.end_date and not args.tag_id and not args.group_id:
+        if args.parse_mode == "all" and expected_total and not args.end_date and not args.tag_ids and not args.group_ids:
             collected = len(all_rows) + pinned_skipped
             if collected < expected_total:
                 print(f"⚠️ Szwego сообщает {expected_total} постов, собрано {collected} (из них закреплённых {pinned_skipped}). Проверьте Cookie и повторите выгрузку.", file=sys.stderr)
@@ -1014,8 +1056,13 @@ def main():
             print("❌ В альбоме только закреплённые публикации. Включите их флагом --include_pinned.", file=sys.stderr)
         else:
             detail = ", ".join(f"{reason}: {count}" for reason, count in sorted(skip_reasons.items())) or "совпадений нет"
+            scope_note = ""
+            if args.tag_ids:
+                scope_note = f" Фильтр по тегу Szwego: {', '.join(args.tag_ids)}."
+            elif args.group_ids:
+                scope_note = f" Фильтр по категории Szwego: {', '.join(args.group_ids)}."
             print(
-                f"❌ Под настройки поставщика не подошла ни одна публикация ({detail}). "
+                f"❌ Под настройки поставщика не подошла ни одна публикация ({detail}).{scope_note} "
                 f"Проверьте пороги «мин. фото» и «мин. символов» или выберите другой источник.",
                 file=sys.stderr,
             )
