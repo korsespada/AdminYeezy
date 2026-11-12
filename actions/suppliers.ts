@@ -12,7 +12,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
 import { runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { getActiveSupplierPostProcess } from '@/lib/supplier-post-process'
-import { deleteRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsSupplierFacets, invalidateRailsCatalogCaches } from '@/lib/rails-admin'
+import { archiveRailsAdminProductsByExternalIds, getRailsCatalogLookups, getRailsSupplierFacets, invalidateRailsCatalogCaches } from '@/lib/rails-admin'
 import { protectedCatalogExternalIds } from '@/lib/batch-history'
 import { claimBatchOperation, releaseBatchOperation } from '@/lib/batch-operation-lock'
 import { rollbackBatchAction } from '@/actions/batch-ai'
@@ -31,10 +31,6 @@ import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/bat
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
-
-// Предпросмотр альбома идёт крупными страницами API: Szwego принимает limit до
-// 3999, поэтому весь альбом укладывается в единицы запросов вместо сотен.
-const SZWEGO_STATS_PAGE_LIMIT = 3000
 
 // --- Suppliers CRUD ---
 
@@ -131,6 +127,27 @@ export async function getSuppliersAction(): Promise<ActionResponse> {
       row.allowed_subcategory_names = row.allowed_subcategory_ids.map((id: string) => names.get(`subcategory:${id}`) || id)
     }
     return { success: true, data: res.rows }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+// Сколько уникальных external_id каждого поставщика сейчас опубликовано на сайте
+// по реестру batch_publications. Снятие партии в архив очищает её записи,
+// поэтому архивные товары сюда не попадают; повторные публикации не задваиваются.
+export async function getSupplierSiteCountsAction(): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const res = await scrapingQuery(`
+      SELECT b.supplier_id, COUNT(DISTINCT bp.external_id)::int AS site_count
+      FROM batch_publications bp
+      JOIN scraping_batches b ON b.id = bp.batch_id
+      WHERE b.supplier_id IS NOT NULL AND b.catalog_deleted_at IS NULL
+      GROUP BY b.supplier_id
+    `)
+    const counts: Record<number, number> = {}
+    for (const row of res.rows) counts[Number(row.supplier_id)] = Number(row.site_count) || 0
+    return { success: true, data: counts }
   } catch (err: any) {
     return { success: false, error: err.message }
   }
@@ -266,6 +283,11 @@ function normalizeSupplierAiProcessingOptions(value: FormDataEntryValue | null) 
   }
 }
 
+// Заметка оператора о поставщике: видна иконкой в ленте выгрузок.
+function normalizeSupplierOperatorNote(value: FormDataEntryValue | null) {
+  return String(value || '').replace(/\r\n/g, '\n').trim().slice(0, 2000)
+}
+
 export async function createSupplierAction(formData: FormData): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -315,11 +337,12 @@ export async function createSupplierAction(formData: FormData): Promise<ActionRe
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
     const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
     const ai_processing_options = normalizeSupplierAiProcessingOptions(formData.get('ai_processing_options'))
+    const operator_note = normalizeSupplierOperatorNote(formData.get('operator_note'))
 
     const res = await scrapingQuery(
-      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options, ai_visual_examples, first_photo_screenshot_filter)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb,$35) RETURNING id`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter]
+      `INSERT INTO suppliers (name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, allowed_category_ids, allowed_subcategory_ids, allowed_brand_ids, min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, default_attributes, szwego_parse_mode, ai_processing_options, ai_visual_examples, first_photo_screenshot_filter, operator_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32,$33::jsonb,$34::jsonb,$35,$36) RETURNING id`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter, operator_note]
     )
 
     revalidatePath('/admin/suppliers')
@@ -387,6 +410,7 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
     const parse_tags_enabled = formData.get('parse_tags_enabled') === 'on'
     const default_attributes = normalizeSupplierAttributeCodes(formData.get('default_attributes'))
     const ai_processing_options = normalizeSupplierAiProcessingOptions(formData.get('ai_processing_options'))
+    const operator_note = normalizeSupplierOperatorNote(formData.get('operator_note'))
 
     await scrapingQuery(
       `UPDATE suppliers SET name=$1, album_id=$2, group_id=$3, tag_id=$4, 
@@ -394,9 +418,9 @@ export async function updateSupplierAction(id: number, formData: FormData): Prom
        allowed_category_ids=$8::jsonb,allowed_subcategory_ids=$9::jsonb,allowed_brand_ids=$10::jsonb,
        min_photos=$11,max_on_model_media=$12,min_desc_len=$13,brand_tags=$14,
        default_price=$15,default_gender=$16,
-       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,ai_visual_examples=$34::jsonb,first_photo_screenshot_filter=$35,updated_at=NOW()
-       WHERE id=$36`,
-      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter, id]
+       ai_photo_enabled=$17,ai_cache_enabled=$18,ai_deep_search_enabled=$19,ai_resize_enabled=$20,ai_instructions=$21,avatar_url=$22,cookie=$23,post_process_script=$24,post_process_enabled=$25,ai_photo_models=$26,ai_photo_instructions=$27,ai_parallel_enabled=$28,ai_parallel_count=$29,parse_tags_enabled=$30,default_attributes=$31::jsonb,szwego_parse_mode=$32,ai_processing_options=$33::jsonb,ai_visual_examples=$34::jsonb,first_photo_screenshot_filter=$35,operator_note=$36,updated_at=NOW()
+       WHERE id=$37`,
+      [name, album_id, group_id, tag_id, default_category, default_subcategory, default_brand, JSON.stringify(allowed_category_ids), JSON.stringify(allowed_subcategory_ids), JSON.stringify(allowed_brand_ids), min_photos, max_on_model_media, min_desc_len, brand_tags, default_price, default_gender, ai_photo_enabled, ai_cache_enabled, ai_deep_search_enabled, ai_resize_enabled, ai_instructions, avatar_url, cookie, post_process_script, post_process_enabled, ai_photo_models, ai_photo_instructions, ai_parallel_enabled, ai_parallel_count, parse_tags_enabled, JSON.stringify(default_attributes), szwego_parse_mode, JSON.stringify(ai_processing_options), JSON.stringify(ai_visual_examples), first_photo_screenshot_filter, operator_note, id]
     )
 
     revalidatePath('/admin/suppliers')
@@ -532,65 +556,6 @@ export async function discoverSupplierSzwegoTagsAction(supplierId: number): Prom
   }
 }
 
-export async function fetchSupplierSzwegoStatsAction(supplierId: number, tagId?: string): Promise<ActionResponse> {
-  try {
-    await requireAdmin()
-    const res = await scrapingQuery('SELECT album_id, cookie, min_photos, min_desc_len FROM suppliers WHERE id=$1', [supplierId])
-    const supplier = res.rows[0]
-    if (!supplier) return { success: false, error: 'Поставщик не найден' }
-
-    const cookie = supplier.cookie || process.env.DEFAULT_SZWEGO_COOKIE || ''
-    if (!cookie) return { success: false, error: 'Для предпросмотра нужен действующий Cookie Szwego у поставщика' }
-
-    const scriptPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'scripts', 'parser', 'SzwegoParser.py')
-    const args = [
-      /*turbopackIgnore: true*/ scriptPath,
-      '--album_id', supplier.album_id,
-      '--cookie', cookie,
-      '--stats',
-      // Крупная страница API: предпросмотр всего альбома укладывается в единицы запросов.
-      '--limit', String(SZWEGO_STATS_PAGE_LIMIT),
-    ]
-    // Пороги передаются так же, как при выгрузке: без значения парсер берёт
-    // своё поведение по умолчанию для выбранного источника.
-    if (Number(supplier.min_photos) > 0) args.push('--min_photos', String(Number(supplier.min_photos)))
-    if (Number(supplier.min_desc_len) > 0) args.push('--min_desc', String(Number(supplier.min_desc_len)))
-    if (tagId) args.push('--tag_id', tagId)
-
-    return new Promise((resolve) => {
-      const pythonProcess = spawn(process.env.PYTHON_PATH || 'python', args)
-      let stdout = ''
-      let stderr = ''
-      const timeout = setTimeout(() => {
-        pythonProcess.kill()
-        resolve({ success: false, error: 'Предпросмотр Szwego не завершился за 5 минут' })
-      }, 300_000)
-
-      pythonProcess.stdout.on('data', (data) => { stdout += data.toString() })
-      pythonProcess.stderr.on('data', (data) => { stderr += data.toString() })
-      pythonProcess.on('error', (error) => {
-        clearTimeout(timeout)
-        resolve({ success: false, error: `Не удалось запустить парсер Szwego: ${error.message}` })
-      })
-      pythonProcess.on('close', (code) => {
-        clearTimeout(timeout)
-        const resultLine = stdout.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_STATS:'))
-        if (code !== 0 || !resultLine) {
-          const scraperError = stderr.split(/\r?\n/).find((line) => line.startsWith('SZWEGO_STATS_ERROR:'))
-          return resolve({ success: false, error: scraperError?.replace('SZWEGO_STATS_ERROR:', '').trim() || stderr || 'Szwego не вернул статистику альбома' })
-        }
-        try {
-          return resolve({ success: true, data: JSON.parse(resultLine.replace('SZWEGO_STATS:', '')) })
-        } catch {
-          return resolve({ success: false, error: 'Получена некорректная статистика от Szwego' })
-        }
-      })
-    })
-  } catch (err: any) {
-    return { success: false, error: err.message }
-  }
-}
-
 export async function deleteSupplierAction(id: number): Promise<ActionResponse> {
   try {
     await requireAdmin()
@@ -686,7 +651,7 @@ function normalizeTaskStatus(status: string | null, resultPath: string | null) {
 
 function normalizeBatchStatus(stage: string | null, files: ExportHistoryFile[], catalogDeletedAt?: string | null) {
   if (stage === 'DELETED_FROM_DB') return 'Удалено из БД'
-  if (catalogDeletedAt) return 'Каталог удалён'
+  if (catalogDeletedAt) return 'В архиве'
   if (stage === 'PUSHED') return 'Запушено в БД'
   if (stage === 'AI_PROCESSED') return 'Обработано ИИ'
   if (files.some((file) => file.status === 'Запущено')) return 'Запущено'
@@ -1141,6 +1106,26 @@ async function importScrapedProductsTransaction(taskId: number, supplier: any, p
     throw error
   } finally {
     client.release()
+  }
+}
+
+/** Сохраняет порядок поставщиков в ленте выгрузок (перетаскивание). */
+export async function reorderSuppliersAction(ids: number[]): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const ordered = Array.from(new Set((Array.isArray(ids) ? ids : []).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0)))
+    if (!ordered.length) return { success: false, error: 'Пустой порядок поставщиков' }
+    await scrapingQuery(
+      `UPDATE suppliers s
+       SET feed_position = o.pos::int
+       FROM unnest($1::bigint[]) WITH ORDINALITY AS o(id, pos)
+       WHERE s.id = o.id`,
+      [ordered],
+    )
+    revalidatePath('/admin/batches')
+    return { success: true, data: ordered.length }
+  } catch (err: any) {
+    return { success: false, error: err.message }
   }
 }
 
@@ -1827,8 +1812,9 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
             ? [...new Set([...publishableExternalIds, ...legacyExternalIds])]
             : []
 
-        // Удаляем опубликованные товары из основного Rails-каталога именно по external_id.
-        let catalogDeletedCount = 0
+        // Снимаем опубликованные товары с сайта по external_id: Rails переводит
+        // их в архив, не удаляя. Новая публикация того же external_id вернёт их.
+        const catalogDeletedCount = 0
         let catalogArchivedCount = 0
         let catalogFailedCount = 0
         const requiresCatalogDeletion = canTouchCatalog
@@ -1836,17 +1822,16 @@ export async function deleteBatchAction(batchId: string, options: { replaceShare
           throw new Error('Основной каталог можно очищать только у опубликованной партии')
         }
         if (requiresCatalogDeletion && !process.env.RAILS_API_URL) {
-          throw new Error('Нельзя удалить опубликованную партию: не настроен RAILS_API_URL')
+          throw new Error('Нельзя убрать опубликованную партию с сайта: не настроен RAILS_API_URL')
         }
         if (externalIds.length > 0 && process.env.RAILS_API_URL) {
-          const result = await deleteRailsAdminProductsByExternalIds(externalIds)
-          catalogDeletedCount = result.deleted
-          catalogArchivedCount = result.archived
+          const result = await archiveRailsAdminProductsByExternalIds(externalIds)
+          catalogArchivedCount = result.archived + result.alreadyArchived
           catalogFailedCount = result.failed.length
         }
 
         if (catalogOnly) {
-          if (catalogFailedCount > 0) throw new Error('Не все товары удалось удалить из основного каталога')
+          if (catalogFailedCount > 0) throw new Error('Не все товары удалось перенести в архив на сайте')
           await scrapingQuery('DELETE FROM batch_publications WHERE batch_id=$1', [batchId])
           await scrapingQuery('UPDATE scraping_batches SET catalog_deleted_at=NOW(), updated_at=NOW() WHERE id=$1', [batchId])
           try { await redis.del('catalog:all') } catch (redisErr: any) { console.warn('Redis clear cache error:', redisErr.message) }

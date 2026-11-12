@@ -16,14 +16,14 @@ export function batchPublishPreviewMessage(input: BatchPublishPreviewCounts): st
   const missingCount = Math.max(0, Number(input.missingCount || 0))
   const leftover = !input.replaceMissing && missingCount > 0
     ? `В каталоге останутся товары, которых нет в партии: ${missingCount}\n`
-      + 'Удалить их можно только режимом «Заменить каталог текущей версией».\n'
+      + 'Убрать их в архив можно только режимом «Заменить каталог текущей версией».\n'
     : ''
   return 'Предпросмотр публикации\n\n'
     + `Всего в партии: ${input.total}\n`
     + `Новых: ${input.newCount}\n`
     + `Будет обновлено: ${input.updateCount}\n`
     + `Будет пропущено: ${input.skippedCount}\n`
-    + `Будет удалено из каталога: ${input.deleteCount}\n`
+    + `Будет убрано в архив: ${input.deleteCount}\n`
     + leftover
     + `Видео к переносу в S3: ${input.videoCount}\n\n`
     + 'Продолжить публикацию?'

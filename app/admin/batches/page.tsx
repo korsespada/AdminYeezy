@@ -1,20 +1,26 @@
-import { getExportHistoryAction } from '@/actions/suppliers'
-import ExportHistoryList from '@/components/import/ExportHistoryList'
+import {
+  getExportHistoryAction,
+  getSupplierCatalogLookupsAction,
+  getSupplierSiteCountsAction,
+  getSuppliersAction,
+} from '@/actions/suppliers'
+import ExportFeed from '@/components/import/ExportFeed'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import ImportTabs from '@/components/ui/ImportTabs'
-import { getExportFoldersAction } from '@/actions/batch-ai'
 
 export const dynamic = 'force-dynamic'
 
 export default async function BatchesPage() {
-  // История выгрузок и папки читаются из одной scraping-БД независимо друг от
-  // друга: параллельный запрос убирает второе ожидание при открытии раздела.
-  const [res, foldersResult] = await Promise.all([
+  // Единая лента: поставщики, их партии и счётчики сайта читаются
+  // параллельно, справочники каталога нужны окну настроек поставщика.
+  const [res, suppliersResult, lookupsResult, siteCountsResult] = await Promise.all([
     getExportHistoryAction(),
-    getExportFoldersAction(),
+    getSuppliersAction(),
+    getSupplierCatalogLookupsAction(),
+    getSupplierSiteCountsAction(),
   ])
 
-  if (!res.success) {
+  if (!res.success || !suppliersResult.success) {
     const db = res.data?.kind === 'scraping_db_unreachable' ? res.data.db : null
 
     return (
@@ -24,7 +30,7 @@ export default async function BatchesPage() {
           <Alert className="border-red-500/30 bg-red-950/30 text-red-100">
             <AlertTitle className="text-base text-red-200">Выгрузка временно недоступна</AlertTitle>
             <AlertDescription className="space-y-4 text-red-100/90">
-              <p>{res.error}</p>
+              <p>{res.error || suppliersResult.error}</p>
               {db && (
                 <div className="rounded-lg border border-red-500/20 bg-slate-950/50 p-4 text-sm text-slate-200">
                   <div className="font-semibold text-white">Текущее подключение без секретов</div>
@@ -52,7 +58,12 @@ export default async function BatchesPage() {
     <div className="min-w-0 p-4 sm:p-8">
       <div className="mx-auto max-w-[1800px] space-y-6 sm:space-y-8">
         <ImportTabs />
-        <ExportHistoryList initialData={res.data} initialFolders={foldersResult.data || []} />
+        <ExportFeed
+          initialSuppliers={suppliersResult.data}
+          catalogLookups={lookupsResult.success ? lookupsResult.data : { brands: [], categories: [], subcategories: [] }}
+          initialBatches={res.data}
+          initialSiteCounts={siteCountsResult.success ? siteCountsResult.data : {}}
+        />
       </div>
     </div>
   )

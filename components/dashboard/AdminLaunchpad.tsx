@@ -15,7 +15,6 @@ import {
   Tags,
   Trash2,
   Truck,
-  Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -61,17 +60,10 @@ const sections = [
   },
   {
     title: 'Выгрузки',
-    description: 'Партии из scraping-контура, AI-обработка и публикация через Rails import API.',
+    description: 'Единая лента поставщиков: выгрузка, AI-обработка, публикация и настройки поставщика.',
     href: '/admin/batches',
     icon: RefreshCw,
     tone: 'text-orange-300',
-  },
-  {
-    title: 'Поставщики',
-    description: 'Поставщики, альбомы, настройки парсинга и технические данные AdminYeezy.',
-    href: '/admin/suppliers',
-    icon: Users,
-    tone: 'text-emerald-300',
   },
   {
     title: 'Шаблоны замеров',

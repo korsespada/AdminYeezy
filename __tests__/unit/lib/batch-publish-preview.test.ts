@@ -16,7 +16,7 @@ describe('batch publish preview message', () => {
   it('называет товары, которые останутся в каталоге после удаления их из партии', () => {
     const message = batchPublishPreviewMessage({ ...base, missingCount: 2 })
 
-    expect(message).toContain('Будет удалено из каталога: 0')
+    expect(message).toContain('Будет убрано в архив: 0')
     expect(message).toContain('В каталоге останутся товары, которых нет в партии: 2')
     expect(message).toContain('«Заменить каталог текущей версией»')
   })
@@ -28,7 +28,7 @@ describe('batch publish preview message', () => {
     expect(message).toContain('Продолжить публикацию?')
   })
 
-  it('в режиме замены каталога показывает удаление вместо предупреждения', () => {
+  it('в режиме замены каталога показывает перенос в архив вместо предупреждения', () => {
     const message = batchPublishPreviewMessage({
       ...base,
       deleteCount: 2,
@@ -36,7 +36,7 @@ describe('batch publish preview message', () => {
       replaceMissing: true,
     })
 
-    expect(message).toContain('Будет удалено из каталога: 2')
+    expect(message).toContain('Будет убрано в архив: 2')
     expect(message).not.toContain('останутся товары')
   })
 })

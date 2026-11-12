@@ -2645,23 +2645,25 @@ async function existingRailsExternalIds(externalIds) {
   return new Set((await existingRailsProducts(externalIds)).keys());
 }
 
-async function deleteRailsProductsByExternalIds(externalIds) {
+// Товары, которых больше нет в партии, не удаляются из Rails, а уходят в архив:
+// новая публикация того же external_id снимет архив с той же записи.
+async function archiveRailsProductsByExternalIds(externalIds) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))];
-  let deleted = 0;
+  let archived = 0;
   const failed = [];
   for (let index = 0; index < ids.length; index += 50) {
-    const result = await fetchJsonWithRetry(railsApiUrl('/admin/products/bulk_destroy'), {
-      method: 'DELETE',
+    const result = await fetchJsonWithRetry(railsApiUrl('/admin/products/bulk_archive'), {
+      method: 'PATCH',
       headers: {
         Authorization: `Bearer ${await railsAdminToken()}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ external_ids: ids.slice(index, index + 50) }),
-    }, 'Rails bulk delete');
-    deleted += Number(result.deleted || 0);
+    }, 'Rails bulk archive');
+    archived += Number(result.archived || 0) + Number(result.already_archived || 0);
     failed.push(...(result.failed || []));
   }
-  return { requested: ids.length, deleted, failed };
+  return { requested: ids.length, archived, failed };
 }
 
 function railsUpdatePayload(product) {
@@ -3249,11 +3251,11 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     const knownExternalIds = await getBatchKnownExternalIds(batchId);
     const missingExternalIds = knownExternalIds.filter((externalId) => !targetExternalIds.has(externalId));
     if (missingExternalIds.length > 0) {
-      const deletionResult = await deleteRailsProductsByExternalIds(missingExternalIds);
-      deleted = Number(deletionResult.deleted || 0);
-      deleteFailed = deletionResult.failed || [];
+      const archiveResult = await archiveRailsProductsByExternalIds(missingExternalIds);
+      deleted = Number(archiveResult.archived || 0);
+      deleteFailed = archiveResult.failed || [];
       if (deleteFailed.length > 0) {
-        throw new Error(`Удаление товаров, отсутствующих в snapshot, завершилось с ошибками: ${deleteFailed.slice(0, 10).map((item) => item.external_id || item.error || String(item)).join('; ')}`);
+        throw new Error(`Перенос в архив товаров, отсутствующих в партии, завершился с ошибками: ${deleteFailed.slice(0, 10).map((item) => item.external_id || item.error || String(item)).join('; ')}`);
       }
     }
   }
@@ -3308,7 +3310,7 @@ module.exports = {
   existingRailsProducts,
   familyCheckSkipped,
   existingRailsPhotoMap,
-  deleteRailsProductsByExternalIds,
+  archiveRailsProductsByExternalIds,
   getBatch,
   getBatchKnownExternalIds,
   getBatchProducts,

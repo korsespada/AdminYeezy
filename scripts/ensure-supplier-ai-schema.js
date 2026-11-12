@@ -18,7 +18,9 @@ async function ensureSupplierAiSchema() {
       ALTER TABLE suppliers
         ADD COLUMN IF NOT EXISTS ai_processing_options JSONB NOT NULL DEFAULT '{}'::jsonb,
         ADD COLUMN IF NOT EXISTS ai_visual_examples JSONB NOT NULL DEFAULT '[]'::jsonb,
-        ADD COLUMN IF NOT EXISTS price_ai_instructions TEXT NOT NULL DEFAULT ''
+        ADD COLUMN IF NOT EXISTS price_ai_instructions TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS operator_note TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS feed_position INTEGER
     `)
     await client.query('COMMIT')
     console.log('Supplier AI schema is ready')

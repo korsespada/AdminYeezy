@@ -1,29 +1,8 @@
-import { getSupplierCatalogLookupsAction, getSuppliersAction } from '@/actions/suppliers'
-import SupplierList from '@/components/inventory/SupplierList'
-import ImportTabs from '@/components/ui/ImportTabs'
-import AdminHeader from '@/components/ui/AdminHeader'
+import { redirect } from 'next/navigation'
 
-export const dynamic = 'force-dynamic'
-
-export default async function SuppliersPage() {
-  const [res, lookupsResult] = await Promise.all([
-    getSuppliersAction(),
-    getSupplierCatalogLookupsAction(),
-  ])
-
-  if (!res.success) {
-    return <div className="p-4 bg-red-900/20 text-red-400 rounded-lg">Ошибка загрузки поставщиков: {res.error}</div>
-  }
-
-  return (
-    <div className="p-4 sm:p-8">
-      <div className="mx-auto max-w-[1800px] space-y-6 sm:space-y-8">
-        <ImportTabs />
-        <SupplierList
-          initialData={res.data}
-          catalogLookups={lookupsResult.success ? lookupsResult.data : { brands: [], categories: [], subcategories: [] }}
-        />
-      </div>
-    </div>
-  )
+// Поставщики живут в единой ленте «Выгрузки»; ?supplier=ID открывает там его настройки.
+export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ supplier?: string }> }) {
+  const { supplier } = await searchParams
+  const id = Number(supplier)
+  redirect(Number.isInteger(id) && id > 0 ? `/admin/batches?supplier=${id}` : '/admin/batches')
 }

@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, Ruler, Users, Package, Settings2 } from 'lucide-react'
+import { BarChart3, Ruler, Package, Settings2 } from 'lucide-react'
 
+// Поставщики и история выгрузок объединены в одну ленту «Выгрузки».
 const PRIMARY_TABS = [
-  { label: 'История выгрузок', href: '/admin/batches', icon: Package },
-  { label: 'Поставщики', href: '/admin/suppliers', icon: Users },
+  { label: 'Выгрузки', href: '/admin/batches', icon: Package },
 ]
 
 // Вспомогательные разделы выгрузок стоят справа, рядом с «Настройками ИИ».

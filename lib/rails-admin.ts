@@ -3174,22 +3174,24 @@ export async function deleteRailsAdminProduct(id: string) {
   await railsFetch(`/admin/products/${id}`, { method: 'DELETE' })
 }
 
-export async function deleteRailsAdminProductsByExternalIds(externalIds: string[]) {
+// Снятие партии с сайта переводит товары Rails в архив, а не удаляет их:
+// повторная публикация с тем же external_id снимает архив с той же записи.
+export async function archiveRailsAdminProductsByExternalIds(externalIds: string[]) {
   const ids = [...new Set(externalIds.map((value) => String(value || '').trim()).filter(Boolean))]
-  let deleted = 0
   let archived = 0
+  let alreadyArchived = 0
   const failed: any[] = []
 
   for (let index = 0; index < ids.length; index += 50) {
     const chunk = ids.slice(index, index + 50)
-    const result = await railsFetch<{ deleted?: number; archived?: number; failed?: any[] }>(`/admin/products/bulk_destroy`, {
-      method: 'DELETE',
+    const result = await railsFetch<{ archived?: number; already_archived?: number; failed?: any[] }>(`/admin/products/bulk_archive`, {
+      method: 'PATCH',
       body: JSON.stringify({ external_ids: chunk }),
     })
-    deleted += Number(result.deleted || 0)
     archived += Number(result.archived || 0)
+    alreadyArchived += Number(result.already_archived || 0)
     failed.push(...(result.failed || []))
   }
 
-  return { requested: ids.length, deleted, archived, failed }
+  return { requested: ids.length, archived, alreadyArchived, failed }
 }

@@ -102,7 +102,9 @@ npm run db:audit:batches
 
 При старте также выполняется узкая идемпотентная миграция
 `db:migrate:supplier-ai`, которая гарантирует наличие
-`suppliers.ai_processing_options`. Это покрывает redeploy после обновлений
+`suppliers.ai_processing_options`, `suppliers.operator_note` (комментарий к
+поставщику в ленте выгрузок) и `suppliers.feed_position` (свой порядок
+поставщиков в ленте). Это покрывает redeploy после обновлений
 настроек поставщика и не заменяет полную `db:migrate:scraping` перед крупным
 изменением схемы.
 

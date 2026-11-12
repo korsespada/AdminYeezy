@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus, Trash2, Play, ExternalLink, Calendar, X, PlusCircle, RefreshCw, Image as ImageIcon, Star, HelpCircle, ClipboardPaste, Upload } from 'lucide-react'
-import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, fetchSupplierSzwegoStatsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
+import { createSupplierAction, updateSupplierAction, deleteSupplierAction, startScrapingAction, fetchSupplierAvatarAction, discoverSupplierSzwegoTagsAction, toggleSupplierFavoriteAction, uploadSupplierAiVisualExampleAction } from '@/actions/suppliers'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
 import { normalizeSupplierAttributeCodes } from '@/lib/supplier-attributes'
@@ -29,31 +29,6 @@ const DEFAULT_SUPPLIER_AI_PROCESSING_OPTIONS: SupplierAiProcessingOptions = {
   reorderFirstPhoto: false,
   skipModelOnlyAlbum: false,
   preserveAllPhotos: false,
-}
-
-type SzwegoStatsFeed = {
-  posts: number
-  unique_goods: number
-  pinned: number
-  with_video: number
-  text_only: number
-  kept: number
-  skipped?: Record<string, number>
-  photos?: Record<string, number>
-  description?: Record<string, number>
-  months?: Record<string, number>
-  top_tags?: { label: string; count: number }[]
-  first_post?: string | null
-  last_post?: string | null
-  error?: string
-}
-
-type SzwegoAlbumStats = {
-  album_id: string
-  album_total_posts?: number | null
-  shop?: { name?: string; totalItemCount?: number; icon?: string; isFollowed?: boolean }
-  filters?: { min_photos?: number; min_desc?: number; tag_id?: string | null }
-  modes: Record<SzwegoParseMode, SzwegoStatsFeed>
 }
 
 interface Supplier {
@@ -100,6 +75,8 @@ interface Supplier {
   parse_tags_enabled: boolean
   is_favorite?: boolean
   has_post_process_script?: boolean
+  operator_note?: string | null
+  feed_position?: number | null
 }
 
 function CompactBadge({ tone, children }: { tone: 'indigo' | 'cyan' | 'slate' | 'emerald'; children: React.ReactNode }) {
@@ -162,12 +139,29 @@ type SupplierCatalogLookups = {
   subcategories: CatalogLookup[]
 }
 
+export type SupplierListItem = Supplier
+
+/** Действия поставщика, которые единая лента выгрузок вызывает из своих строк. */
+export type SupplierListApi = {
+  suppliers: Supplier[]
+  openSettings: (supplier?: Supplier | null) => void
+  openScrape: (supplierId: number) => void
+  toggleFavorite: (supplierId: number) => void
+  fetchAllAvatars: () => void
+  isFetchingAvatars: boolean
+}
+
 export default function SupplierList({
   initialData,
   catalogLookups,
+  children,
+  onScrapeStarted,
 }: {
   initialData: Supplier[]
   catalogLookups: SupplierCatalogLookups
+  /** Своя разметка списка вместо карточек; окна настроек и запуска остаются здесь. */
+  children?: (api: SupplierListApi) => React.ReactNode
+  onScrapeStarted?: (supplierId: number) => void
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -201,9 +195,6 @@ export default function SupplierList({
   const [endDate, setEndDate] = useState('')
   const [overrideValue, setOverrideValue] = useState('') // Format: "type:id"
   const [overrideMode, setOverrideMode] = useState<SzwegoParseMode>('all')
-  const [isStatsLoading, setIsStatsLoading] = useState(false)
-  const [statsResult, setStatsResult] = useState<SzwegoAlbumStats | null>(null)
-  const [statsError, setStatsError] = useState('')
 
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const closeSupplierModal = React.useCallback(() => setIsModalOpen(false), [])
@@ -310,7 +301,8 @@ export default function SupplierList({
         parse_tags_enabled: false,
         post_process_enabled: false,
         first_photo_screenshot_filter: false,
-        is_favorite: false
+        is_favorite: false,
+        operator_note: '',
       })
       setModalTags([])
     }
@@ -518,24 +510,11 @@ export default function SupplierList({
 
     const res = await startScrapingAction(selectedSupplierId, endDate, tag, group, mode)
     if (res.success) {
-      alert('Выгрузка запущена! Проверьте статус в разделе "Выгрузки".')
       setIsScrapingModalOpen(false)
+      if (onScrapeStarted) onScrapeStarted(selectedSupplierId)
+      else alert('Выгрузка запущена! Проверьте статус в разделе "Выгрузки".')
     } else {
       alert(res.error)
-    }
-  }
-
-  const handleLoadSzwegoStats = async (tagId?: string) => {
-    if (!selectedSupplierId) return
-    setIsStatsLoading(true)
-    setStatsError('')
-    setStatsResult(null)
-    const res = await fetchSupplierSzwegoStatsAction(selectedSupplierId, tagId)
-    setIsStatsLoading(false)
-    if (res.success && res.data) {
-      setStatsResult(res.data as SzwegoAlbumStats)
-    } else {
-      setStatsError(res.error || 'Szwego не вернул статистику')
     }
   }
 
@@ -560,14 +539,44 @@ export default function SupplierList({
 
   const getOptimizedAvatarUrl = (url: string | null | undefined) => resizeImageUrl(url, imagePresets.avatar)
 
+  const openScrape = (supplierId: number) => {
+    setSelectedSupplierId(supplierId)
+    setIsScrapingModalOpen(true)
+    setOverrideValue('')
+    setOverrideMode('all')
+  }
+
+  const handleDeleteFromModal = async () => {
+    if (!editingSupplier?.id) return
+    if (!confirm(`Удалить поставщика «${editingSupplier.name}»? Его партии останутся в истории выгрузок.`)) return
+    const res = await deleteSupplierAction(editingSupplier.id)
+    if (!res.success) {
+      alert(res.error)
+      return
+    }
+    setSuppliers(prev => prev.filter(s => s.id !== editingSupplier.id))
+    setIsModalOpen(false)
+    router.refresh()
+  }
+
   const favoriteCount = suppliers.filter((supplier) => supplier.is_favorite).length
   const visibleSuppliers = suppliers.filter((supplier) => {
     if (showFavoritesOnly && !supplier.is_favorite) return false
     return true
   })
 
+  const api: SupplierListApi = {
+    suppliers,
+    openSettings: (supplier = null) => handleOpenModal(supplier),
+    openScrape,
+    toggleFavorite: (supplierId) => { void toggleFavorite(supplierId) },
+    fetchAllAvatars: () => { void handleFetchAllAvatars() },
+    isFetchingAvatars: isFetchingAll,
+  }
+
   return (
     <div className="space-y-6">
+      {children ? children(api) : (<>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <h2 className="flex items-center gap-3 text-2xl font-bold text-white">
           Управление поставщиками
@@ -679,12 +688,7 @@ export default function SupplierList({
                 <button
                 onClick={(event) => {
                   event.stopPropagation()
-                  setSelectedSupplierId(s.id);
-                  setIsScrapingModalOpen(true);
-                  setOverrideValue(''); // Reset to default
-                  setOverrideMode('all');
-                  setStatsResult(null);
-                  setStatsError('');
+                  openScrape(s.id)
                 }}
                 className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700 px-2.5 py-1.5 text-xs text-white transition hover:bg-indigo-600"
               >
@@ -695,6 +699,7 @@ export default function SupplierList({
           )
         })}
       </div>
+      </>)}
 
       {/* Supplier Modal */}
       {isModalOpen && createPortal(
@@ -734,6 +739,18 @@ export default function SupplierList({
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Название (для админки)</label>
                       <input name="name" defaultValue={editingSupplier?.name} required className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-emerald-500" />
+                    </div>
+                    <div>
+                      <label htmlFor="supplier-operator-note" className="block text-sm text-slate-400 mb-1">Комментарий</label>
+                      <textarea
+                        id="supplier-operator-note"
+                        name="operator_note"
+                        defaultValue={editingSupplier?.operator_note || ''}
+                        maxLength={2000}
+                        rows={3}
+                        placeholder="Заметка для себя. В ленте выгрузок появится иконка рядом с поставщиком, текст виден при наведении."
+                        className="w-full resize-y bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm text-white outline-none focus:border-amber-500"
+                      />
                     </div>
                     <div>
                       <label className="block text-sm text-slate-400 mb-1">Album ID (Szwego)</label>
@@ -1151,6 +1168,11 @@ export default function SupplierList({
               </div>
 
               <div className="p-6 bg-slate-900/50 border-t border-slate-700 flex justify-end gap-3">
+                {editingSupplier && editingSupplier.id !== 0 && (
+                  <button type="button" onClick={handleDeleteFromModal} className="mr-auto inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-red-300 transition-colors hover:bg-red-500/10">
+                    <Trash2 className="h-4 w-4" /> Удалить поставщика
+                  </button>
+                )}
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-2 text-slate-400 hover:text-white transition-colors">Отмена</button>
                 <button type="submit" className="px-8 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-600/20 active:scale-95 transition-all">Сохранить всё</button>
               </div>
@@ -1174,7 +1196,7 @@ export default function SupplierList({
                   <label className="block text-sm font-medium text-slate-400 mb-2">Источник Szwego</label>
                   <select
                     value={overrideMode}
-                    onChange={(e) => { setOverrideMode(normalizeSzwegoParseMode(e.target.value)); setStatsResult(null); setStatsError('') }}
+                    onChange={(e) => setOverrideMode(normalizeSzwegoParseMode(e.target.value))}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none focus:border-indigo-500"
                   >
                     <option value="all">{SZWEGO_PARSE_MODE_LABELS.all}</option>
@@ -1211,61 +1233,6 @@ export default function SupplierList({
                   </div>
                   ) : null
                 })()}
-
-                <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-slate-300">Предпросмотр альбома</p>
-                      <p className="text-xs text-slate-500">Сколько постов даст каждый источник и сколько пройдёт пороги. Крупные страницы API: один запрос вместо десятков.</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const tag = overrideValue.startsWith('tag:') ? overrideValue.split(':')[1] : undefined
-                        void handleLoadSzwegoStats(tag)
-                      }}
-                      disabled={isStatsLoading}
-                      className="shrink-0 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-xs text-white transition-colors inline-flex items-center gap-1.5"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${isStatsLoading ? 'animate-spin' : ''}`} />
-                      {isStatsLoading ? 'Считаю…' : 'Показать'}
-                    </button>
-                  </div>
-                  {statsError && <p className="mt-2 text-xs text-red-300">{statsError}</p>}
-                  {statsResult && (
-                    <div className="mt-3 space-y-2 text-xs text-slate-300">
-                      <p className="text-slate-400">
-                        {statsResult.shop?.name || 'Альбом'}: всего постов {statsResult.album_total_posts ?? '—'}
-                        {statsResult.shop?.totalItemCount ? ` (Szwego: ${statsResult.shop.totalItemCount})` : ''}
-                      </p>
-                      {(['all', 'video'] as const).map((modeKey) => {
-                        const feed = statsResult.modes?.[modeKey]
-                        if (!feed) return null
-                        return (
-                          <div key={modeKey} className="rounded-lg bg-slate-800/60 px-2.5 py-2">
-                            <span className="text-slate-200">{SZWEGO_PARSE_MODE_LABELS[modeKey]}</span>
-                            {feed.error ? (
-                              <span className="text-red-300"> — ошибка: {feed.error}</span>
-                            ) : (
-                              <>
-                                {' '}— пройдёт <span className="text-emerald-300">{feed.kept}</span> из {feed.posts}
-                                {feed.with_video ? ` · с видео ${feed.with_video}` : ''}
-                                {feed.skipped && Object.keys(feed.skipped).length > 0 && (
-                                  <span className="text-slate-500"> · отсев: {Object.entries(feed.skipped).map(([reason, count]) => `${reason} ${count}`).join(', ')}</span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        )
-                      })}
-                      {statsResult.modes?.video?.top_tags?.length ? (
-                        <p className="text-slate-500">
-                          Теги видео: {statsResult.modes.video.top_tags.slice(0, 6).map((tag) => `${tag.label} (${tag.count})`).join(', ')}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
-                </div>
 
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Остановиться на дате</label>
