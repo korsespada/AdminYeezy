@@ -24,13 +24,19 @@ const CONSENSUS_ATTRIBUTES = [
 ];
 
 // Физические признаки: пустое значение дополняется, но два разных непустых
-// значения означают, что в семье разные изделия.
+// значения означают, что в семье разные изделия. Это предупреждение, а не
+// блокировка: у сумок цвета действительно идут с разной фурнитурой (золото и
+// серебро), а габариты ИИ читает по фото с разбросом в сантиметр. Бренд, пол,
+// классификация, цена и размерная сетка остаются жёсткими.
 const PHYSICAL_ATTRIBUTES = [
   { key: 'hardware_color', label: 'цвет фурнитуры' },
   { key: 'dimensions', label: 'габариты' },
   { key: 'bag_width_cm', label: 'ширина сумки' },
   { key: 'bag_height_cm', label: 'высота сумки' },
 ];
+
+const SEVERITY_ERROR = 'error';
+const SEVERITY_WARNING = 'warning';
 
 function text(value) {
   return String(value ?? '').trim();
@@ -127,9 +133,10 @@ function groupsDescription(groups) {
   return groups.map((group) => group.products.map(productRef).join(', ')).join(' / ');
 }
 
-function issue(field, label, groups, products) {
+function issue(field, label, groups, products, severity = SEVERITY_ERROR) {
   return {
     field,
+    severity,
     message: `${label} различается (${groupsDescription(groups)})`,
     productIds: products.map((product) => product.id),
   };
@@ -422,7 +429,7 @@ function alignColorFamily(members) {
   for (const attribute of PHYSICAL_ATTRIBUTES) {
     const { winner, groups } = consensus(ordered, (product) => attributesOf(product)[attribute.key]);
     if (groups.length > 1) {
-      issues.push(issue(attribute.key, attribute.label, groups, groups.flatMap((group) => group.products)));
+      issues.push(issue(attribute.key, attribute.label, groups, groups.flatMap((group) => group.products), SEVERITY_WARNING));
       continue;
     }
     if (!winner) continue;
@@ -521,7 +528,7 @@ function colorFamilyIssues(members, options = {}) {
 
   for (const attribute of PHYSICAL_ATTRIBUTES) {
     const groups = consensus(ordered, (product) => attributesOf(product)[attribute.key]).groups;
-    if (groups.length > 1) issues.push(issue(attribute.key, attribute.label, groups, ordered));
+    if (groups.length > 1) issues.push(issue(attribute.key, attribute.label, groups, ordered, SEVERITY_WARNING));
   }
 
   if (options.sizing !== false) {

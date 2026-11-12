@@ -4461,6 +4461,50 @@ function FamilyAlignmentDialog({
   for (const conflict of result.conflicts) {
     byFamily.set(conflict.familyKey, [...(byFamily.get(conflict.familyKey) || []), conflict]);
   }
+  const blocking = result.conflicts.filter((conflict) => conflict.severity !== "warning");
+  const warnings = result.conflicts.filter((conflict) => conflict.severity === "warning");
+  const blockedFamilies = new Set(blocking.map((conflict) => conflict.familyKey)).size;
+
+  const renderFamilies = (conflicts: ColorFamilyConflict[], tone: "blocking" | "warning") => {
+    const families = new Map<string, ColorFamilyConflict[]>();
+    for (const conflict of conflicts) {
+      families.set(conflict.familyKey, [...(families.get(conflict.familyKey) || []), conflict]);
+    }
+    return [...families.entries()].map(([familyKey, items]) => {
+      const products = [...new Map(items.flatMap((item) => item.products).map((product) => [product.id, product])).values()];
+      return (
+        <div
+          key={familyKey}
+          className={`rounded-xl border p-3 ${tone === "blocking" ? "border-amber-500/30 bg-amber-500/5" : "border-slate-600/60 bg-slate-800/40"}`}
+        >
+          <div className="text-sm font-semibold text-white">{items[0].family || "Семья без названия"}</div>
+          <ul className="mt-1.5 space-y-1">
+            {items.map((item) => (
+              <li
+                key={item.message}
+                className={`flex gap-1.5 text-xs ${tone === "blocking" ? "text-amber-200" : "text-slate-300"}`}
+              >
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span className="break-words">{item.message}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {products.map((product) => (
+              <button
+                type="button"
+                key={product.id}
+                onClick={() => { onOpenProduct(product.id); onClose(); }}
+                className="max-w-full truncate rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:border-violet-400 hover:text-white"
+              >
+                {product.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    });
+  };
 
   return createPortal(
     <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/80 p-4" onMouseDown={onClose}>
@@ -4470,6 +4514,7 @@ function FamilyAlignmentDialog({
             <h2 className="font-semibold text-white">Выравнивание цветовых семей</h2>
             <p className="mt-1 text-xs text-slate-400">
               Проверено семей: {result.families} · изменено товаров: {result.updated} · с конфликтами: {byFamily.size}
+              {blockedFamilies > 0 ? ` · остановят публикацию: ${blockedFamilies}` : ""}
             </p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white" aria-label="Закрыть"><X className="h-5 w-5" /></button>
@@ -4481,38 +4526,28 @@ function FamilyAlignmentDialog({
               Конфликтов нет, семьи не остановят публикацию.
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-xs text-slate-400">
-                Эти семьи остановят публикацию. Исправьте товары вручную или исключите лишний товар из семьи, затем выровняйте снова.
-              </p>
-              {[...byFamily.entries()].map(([familyKey, conflicts]) => {
-                const products = [...new Map(conflicts.flatMap((conflict) => conflict.products).map((product) => [product.id, product])).values()];
-                return (
-                  <div key={familyKey} className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-                    <div className="text-sm font-semibold text-white">{conflicts[0].family || "Семья без названия"}</div>
-                    <ul className="mt-1.5 space-y-1">
-                      {conflicts.map((conflict) => (
-                        <li key={conflict.message} className="flex gap-1.5 text-xs text-amber-200">
-                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          <span className="break-words">{conflict.message}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {products.map((product) => (
-                        <button
-                          type="button"
-                          key={product.id}
-                          onClick={() => { onOpenProduct(product.id); onClose(); }}
-                          className="max-w-full truncate rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-[11px] text-slate-200 hover:border-violet-400 hover:text-white"
-                        >
-                          {product.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="space-y-5">
+              {blocking.length === 0 ? (
+                <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
+                  <CheckCircle className="h-4 w-4 shrink-0" />
+                  Блокирующих конфликтов нет — публикация пройдёт.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-amber-200/90">
+                    Эти семьи остановят публикацию. Исправьте товары вручную или исключите лишний товар из семьи, затем выровняйте снова.
+                  </p>
+                  {renderFamilies(blocking, "blocking")}
+                </div>
+              )}
+              {warnings.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-400">
+                    Предупреждения: у цветов различаются фурнитура или габариты. Публикацию не останавливают — проверьте, только если это действительно один товар.
+                  </p>
+                  {renderFamilies(warnings, "warning")}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -2918,12 +2918,22 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   const lookups = await loadLegacyLookupMaps();
   // Rails группирует витрину по variant_group_key, поэтому семья с разными
   // брендом, классификацией, ценой или сеткой не должна уйти в каталог.
+  // Физические признаки (фурнитура, габариты) — предупреждение: у сумок цвета
+  // действительно идут с разной фурнитурой, а габариты ИИ читает с разбросом.
   // Для поставщиков из app_settings.family_check_skip_suppliers проверка
-  // остаётся диагностикой: семьи собраны вручную, цены и габариты у цветов
-  // действительно разные, и блокировать публикацию нельзя.
+  // остаётся диагностикой целиком: семьи собраны вручную, цены и габариты у
+  // цветов действительно разные, и блокировать публикацию нельзя.
   const familyIssues = batchColorFamilyIssues(products.map((product) => withoutBagSizes(product, lookups)));
-  if (familyIssues.length > 0) {
-    const details = familyIssues.slice(0, 20)
+  const familyWarnings = familyIssues.filter((entry) => entry.severity === 'warning');
+  const familyBlocks = familyIssues.filter((entry) => entry.severity !== 'warning');
+  if (familyWarnings.length > 0) {
+    const details = familyWarnings.slice(0, 20)
+      .map((entry) => `«${entry.family}»: ${entry.message}`)
+      .join('\n');
+    console.warn(`[batch-publish] цветовые семьи: предупреждения, публикация продолжается:\n${details}`);
+  }
+  if (familyBlocks.length > 0) {
+    const details = familyBlocks.slice(0, 20)
       .map((entry) => `«${entry.family}»: ${entry.message}`)
       .join('\n');
     if (await familyCheckSkipped(batch.supplier_id)) {

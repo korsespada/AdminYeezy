@@ -308,6 +308,16 @@ describe('colorFamilyIssues', () => {
     expect(colorFamilyIssues(family, { sizing: false })).toEqual([])
   })
 
+  it('reports hardware and dimensions as warnings, not blockers', () => {
+    const issues = colorFamilyIssues([
+      member(1, 'Чёрный', { attributes: { hardware_color: 'Золотой', dimensions: '20 × 12 × 5 см' } }),
+      member(2, 'Бежевый', { attributes: { hardware_color: 'Серебристый', dimensions: '21 × 13 × 6 см' } }),
+    ])
+
+    expect(issues.map((entry: any) => entry.field)).toEqual(['hardware_color', 'dimensions'])
+    expect(issues.every((entry: any) => entry.severity === 'warning')).toBe(true)
+  })
+
   it('accepts an aligned family', () => {
     const family = [member(1, 'Чёрный'), member(2, 'Бежевый'), member(3, 'Зелёный')]
     const aligned = alignColorFamily(family)

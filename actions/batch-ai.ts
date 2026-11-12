@@ -2893,12 +2893,13 @@ async function reviewBatchAiSuggestion(
       SELECT id,external_id,batch_id,source_position,brand,category,subcategory,gender,price,price_source,attributes
       FROM products WHERE id=ANY($1::int[])
     `, [row.affected_product_ids.map(Number)])
-    // Семью из предложения ИИ сервер не «чинит»: разные бренд, классификация,
-    // цена или физические признаки означают разные товары. Сетку выровняет шаг ниже.
+    // Семью из предложения ИИ сервер не «чинит»: разные бренд, классификация и
+    // цена означают разные товары. Фурнитура и габариты у цветов расходятся
+    // законно, поэтому это предупреждение, а не отказ. Сетку выровняет шаг ниже.
     const familyIssues = [
       ...colorFamilyAlignment().colorFamilyIssues(familyProducts.rows, { sizing: false, colors: false }),
       ...colorFamilyAlignment().alignColorFamily(familyProducts.rows).issues.filter((entry) => entry.field === 'measurements'),
-    ]
+    ].filter((entry) => entry.severity !== 'warning')
     if (familyIssues.length > 0) {
       return {
         success: false,

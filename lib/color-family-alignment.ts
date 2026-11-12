@@ -3,6 +3,9 @@ import { getScrapingClient, scrapingQuery } from '@/lib/db'
 
 export type ColorFamilyIssue = {
   field: string
+  // 'warning' — физические признаки (фурнитура, габариты): публикацию не
+  // останавливают, только пишутся в лог и в диалог.
+  severity?: 'error' | 'warning'
   message: string
   productIds: number[]
   family?: string
@@ -24,6 +27,7 @@ type ColorFamilyAlignmentModule = {
 export type ColorFamilyConflict = {
   familyKey: string
   family: string
+  severity: 'error' | 'warning'
   message: string
   products: Array<{ id: number, name: string }>
 }
@@ -142,6 +146,7 @@ export async function batchColorFamilyConflicts(batchId: string): Promise<ColorF
     return {
       familyKey: String(members[0]?.variant_group_key || ''),
       family: entry.family || '',
+      severity: entry.severity === 'warning' ? 'warning' as const : 'error' as const,
       message: entry.message,
       products: members.map((row) => ({ id: Number(row.id), name: String(row.name || row.external_id || row.id) })),
     }
