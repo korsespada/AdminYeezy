@@ -243,7 +243,28 @@ function standaloneMention(text: string, pattern: RegExp) {
   return null
 }
 
+// «Серый костюм: куртка на молнии и прямые брюки» — комплект, а куртка и
+// брюки лишь его состав. Поэтому слово «комплект»/«костюм» в именительном
+// падеже проверяется раньше типов вещей. Падежные формы («в комплекте»,
+// «с комплектом») и прилагательное «костюмные брюки» комплектом не являются.
+const SET_NOUNS = new Set(['комплект', 'комплекты', 'костюм', 'костюмы'])
+const SWIMWEAR_SET_ADJECTIVE = /^(?:купальн|плавательн|пляжн)/u
+
+function setSubcategory(text: string) {
+  const words = text.split(/[^a-zа-яё0-9]+/u).filter(Boolean)
+  const index = words.findIndex((word) => SET_NOUNS.has(word))
+  if (index < 0) return ''
+  if (index > 0 && SWIMWEAR_SET_ADJECTIVE.test(words[index - 1])) return 'Купальники'
+  return 'Комплекты'
+}
+
 function inferFromText(text: string, prose: boolean) {
+  // В описании «комплект» чаще значит комплектацию («комплект поставки»),
+  // поэтому главное слово комплекта читается только из названия.
+  if (!prose) {
+    const set = setSubcategory(text)
+    if (set) return set
+  }
   const accept = (pattern: RegExp) => (prose ? Boolean(standaloneMention(text, pattern)) : pattern.test(text))
   if (isShearlingOuterwear(text) && accept(/(дубленк|shearling|sheepskin|овчин|羊皮毛一体|皮毛一体)/u)) {
     return 'Дублёнки'

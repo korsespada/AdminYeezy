@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiImageDataUrl, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection } from '@/lib/batch-ai'
+import { batchAiDescriptionEvidenceProfile, batchAiImageDataUrl, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOperatorNote, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection, withBatchAiOperatorNote } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -22,6 +22,35 @@ describe('batch AI normalization', () => {
     expect(prompt).toContain('Бренды:')
     expect(prompt).not.toContain('Товар:')
     expect(prompt).not.toContain('上衣270')
+  })
+
+  it('appends the operator note for manually selected products and keeps it in the set recheck', () => {
+    const base = ['Бренды: []', 'Товар: {"name":"套装短裤"}'].join('\n\n')
+    expect(withBatchAiOperatorNote(base, '   ')).toBe(base)
+    expect(withBatchAiOperatorNote(base, undefined)).toBe(base)
+
+    const prompt = withBatchAiOperatorNote(base, '  Это не комплект:\r\n\r\n на фото только шорты  ')
+    expect(prompt.startsWith(base)).toBe(true)
+    expect(prompt).toContain('УКАЗАНИЕ ОПЕРАТОРА (человек вручную проверил эти товары): Это не комплект:\nна фото только шорты')
+    expect(prompt).toContain('важнее исходного текста товара, инструкции поставщика')
+
+    const recheck = buildBatchAiVisualSetCorrectionPrompt(prompt)
+    expect(recheck).toContain('УКАЗАНИЕ ОПЕРАТОРА')
+    expect(recheck).not.toContain('套装短裤')
+
+    expect(normalizeBatchAiOperatorNote('a'.repeat(1500))).toHaveLength(1000)
+  })
+
+  it('does not let a multi-item size chart turn a single garment into a set', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Считай вещи только по товарным фотографиям, а не по таблице размеров')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('это «Шорты», а не «Комплекты»')
+  })
+
+  it('defines how an unsplit card with several garments is handled', () => {
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Одна модель в нескольких цветах')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('«Доступные цвета: …»')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Две и более разные вещи, которые продаются вместе')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Две разные модели, которые продаются отдельно')
   })
 
   it('hides legacy generic subcategories from the AI context', () => {

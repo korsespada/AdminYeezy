@@ -12,7 +12,8 @@ export default async function BatchProductsPage({
   searchParams: Promise<{ snapshot?: string | string[] }>
 }) {
   const [{ batchId }, query] = await Promise.all([params, searchParams])
-  const result = await getExportHistoryAction()
+  // Только эта выгрузка, а не вся лента на 500 строк.
+  const result = await getExportHistoryAction(batchId)
   if (!result.success) throw new Error(result.error || 'Не удалось открыть выгрузку')
 
   const batch = result.data.find((item: any) => !item.isSynthetic && item.id === batchId)

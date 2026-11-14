@@ -53,6 +53,8 @@ export interface CsvProduct {
     supplier_published_on?: string | null
     translations?: Record<string, any>
     photo_alts_en?: string[]
+    /** Есть ли у товара EN-перевод; сам перевод в списке не передаётся. */
+    has_en?: boolean
 }
 
 export interface Lookups {
@@ -150,6 +152,64 @@ function normalizeBatchProduct(row: any): CsvProduct {
       || null,
     translations: row.translations && typeof row.translations === 'object' && !Array.isArray(row.translations) ? row.translations : {},
     photo_alts_en: Array.isArray(row.photo_alts_en) ? row.photo_alts_en.map(String) : [],
+  }
+}
+
+// Список товаров выгрузки без перевода: translations и photo_alts_en весят до
+// 4 МБ на выгрузку, а нужны только в открытой карточке. Ключей нет вовсе
+// (а не пустые значения): сохранение пишет перевод, только если поле пришло,
+// поэтому товар из списка не затирает перевод в БД. has_en — для счётчика.
+const BATCH_PRODUCT_LIST_SELECT = `
+  SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description, p.slug, p.photo_alts, p.photo_slugs,
+    p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
+    p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.variant_group_name, p.ai_error,
+    p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
+    COALESCE(((to_jsonb(p)->'translations'->'en') - 'status' - 'source_digest' - 'translated_at') <> '{}'::jsonb, false) AS has_en
+  FROM products p`
+
+function normalizeBatchListProduct(row: any): CsvProduct {
+  const { translations: _translations, photo_alts_en: _photoAltsEn, ...product } = normalizeBatchProduct(row)
+  return { ...product, has_en: row.has_en === true } as CsvProduct
+}
+
+async function loadBatchListProducts(batchId: string, ids?: number[]) {
+  const res = ids
+    ? await scrapingQuery(`${BATCH_PRODUCT_LIST_SELECT}
+        WHERE p.batch_id = $1 AND p.id = ANY($2::int[])
+        ORDER BY p.source_position ASC NULLS LAST, p.id ASC`, [batchId, ids])
+    : await scrapingQuery(`${BATCH_PRODUCT_LIST_SELECT}
+        WHERE p.batch_id = $1
+        ORDER BY p.source_position ASC NULLS LAST, p.id ASC`, [batchId])
+  return res.rows.map(normalizeBatchListProduct)
+}
+
+/** Товары партии по id в форме списка — для точечного обновления при опросе. */
+export async function getBatchProductsByIdsAction(batchId: string, ids: number[]) {
+  try {
+    await requireAdmin()
+    const safeIds = [...new Set(ids.map(Number).filter(Number.isInteger))].slice(0, 1000)
+    if (!batchId || safeIds.length === 0) return { success: true, data: [] as CsvProduct[] }
+    return { success: true, data: await loadBatchListProducts(batchId, safeIds) }
+  } catch (err: any) {
+    return { success: false, error: err.message, data: [] as CsvProduct[] }
+  }
+}
+
+/** Перевод одного товара для открытой карточки. */
+export async function getBatchProductTranslationAction(batchId: string, productId: number) {
+  try {
+    await requireAdmin()
+    const id = Number(productId)
+    if (!batchId || !Number.isInteger(id)) throw new Error('Не указан товар')
+    const res = await scrapingQuery(`
+      SELECT to_jsonb(p)->'translations' AS translations, to_jsonb(p)->'photo_alts_en' AS photo_alts_en
+      FROM products p WHERE p.id=$1 AND p.batch_id=$2
+    `, [id, batchId])
+    if (!res.rows[0]) throw new Error('Товар не найден в партии')
+    const normalized = normalizeBatchProduct({ ...res.rows[0] })
+    return { success: true, data: { translations: normalized.translations, photo_alts_en: normalized.photo_alts_en } }
+  } catch (err: any) {
+    return { success: false, error: err.message }
   }
 }
 
@@ -650,22 +710,14 @@ export async function getBatchProductsAction(batchId: string, snapshotId?: strin
       }
     }
 
-    let res = await scrapingQuery(`
-      SELECT p.id, p.external_id, p.name, p.description, p.h1, p.seo_title, p.seo_description, p.slug, p.photo_alts, p.photo_slugs,
-        p.price, p.price_source, p.status, p.brand, p.category, p.subcategory, p.gender,
-        p.photos, p.attributes, p.batch_id, p.ai_processed, p.variant_group_key, p.variant_group_name, p.ai_error,
-        p.ai_confidence, p.source_position, p.supplier_published_on, p.created_at, p.updated_at,
-        to_jsonb(p)->'translations' AS translations, to_jsonb(p)->'photo_alts_en' AS photo_alts_en
-      FROM products p
-      WHERE p.batch_id = $1
-      ORDER BY p.source_position ASC NULLS LAST, p.id ASC
-    `, [batchId])
-
-    const batch = await scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId])
+    const [products, batch] = await Promise.all([
+      loadBatchListProducts(batchId),
+      scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId]),
+    ])
     return {
       success: true,
       data: {
-        products: res.rows.map(normalizeBatchProduct),
+        products,
         columns: BATCH_PRODUCT_COLUMNS,
         delimiter: ';',
         stage: batch.rows[0]?.stage || 'SCRAPED',
@@ -948,7 +1000,10 @@ export async function updateBatchProductAction(identifier: string | number, patc
       'ai_confidence',
     ].includes(key))
 
-    if (keys.length === 0) return { success: true }
+    // Перевод правится в карточке (переключатель RU/EN). Раньше этих ключей не
+    // было в списке разрешённых, и правка EN молча терялась при автосохранении.
+    const translationPatch = patch.translations !== undefined || patch.photo_alts_en !== undefined
+    if (keys.length === 0 && !translationPatch) return { success: true }
 
     const values: any[] = []
     const setClauses = keys.map((key, index) => {
@@ -963,6 +1018,20 @@ export async function updateBatchProductAction(identifier: string | number, patc
         : `${key}=$${index + 1}`
     })
     if (keys.includes('price')) setClauses.push("price_source='manual'")
+    if (translationPatch && await hasProductTranslationColumns({ query: scrapingQuery })) {
+      if (patch.translations !== undefined) {
+        const translations = patch.translations && typeof patch.translations === 'object' && !Array.isArray(patch.translations)
+          ? patch.translations
+          : {}
+        values.push(JSON.stringify(translations))
+        setClauses.push(`translations=$${values.length}::jsonb`)
+      }
+      if (patch.photo_alts_en !== undefined) {
+        values.push(JSON.stringify(Array.isArray(patch.photo_alts_en) ? patch.photo_alts_en.map(String) : []))
+        setClauses.push(`photo_alts_en=$${values.length}::jsonb`)
+      }
+    }
+    if (setClauses.length === 0) return { success: true }
 
     const isNumericId = String(identifier).match(/^\d+$/)
     values.push(identifier)

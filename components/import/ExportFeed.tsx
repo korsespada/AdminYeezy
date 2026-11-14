@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Archive,
@@ -29,8 +29,6 @@ import {
   deleteBatchAction,
   deleteExportBatchFromAdminAction,
   deleteExportFileFromAdminAction,
-  getExportHistoryAction,
-  getSupplierSiteCountsAction,
   reorderSuppliersAction,
   type ExportHistoryBatch,
   type ExportHistoryFile,
@@ -271,19 +269,46 @@ export default function ExportFeed({
     }
   }
 
-  const refresh = useCallback(async () => {
+  // Лента читается обычным GET (/api/batches/feed), а не серверными экшенами:
+  // экшены и переходы App Router идут одной очередью, и пока опрос ленты
+  // ждал ответа, клик по выгрузке не открывал её. Запрос в полёте один,
+  // при уходе со страницы он отменяется.
+  const refreshRequest = useRef<AbortController | null>(null)
+  // Фоновый опрос пропускает тик, если ответ ещё не пришёл; явное обновление
+  // (кнопка, после действия) отменяет старый запрос, чтобы не показать
+  // данные, прочитанные до изменения.
+  const refresh = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+    if (refreshRequest.current) {
+      if (background) return
+      refreshRequest.current.abort()
+    }
+    const controller = new AbortController()
+    refreshRequest.current = controller
     setIsRefreshing(true)
-    const [history, counts] = await Promise.all([getExportHistoryAction(), getSupplierSiteCountsAction()])
-    if (history.success) setBatches(history.data)
-    if (counts.success && counts.data) setSiteCounts(counts.data)
-    setNow(Date.now())
-    setIsRefreshing(false)
+    try {
+      const response = await fetch('/api/batches/feed', { cache: 'no-store', signal: controller.signal })
+      const payload = response.ok ? await response.json() : null
+      if (payload?.success) {
+        setBatches(payload.data.batches)
+        if (payload.data.siteCounts) setSiteCounts(payload.data.siteCounts)
+        setNow(Date.now())
+      }
+    } catch {
+      // Отменённый или сорвавшийся опрос не мешает работе: следующий тик повторит.
+    } finally {
+      if (refreshRequest.current === controller) refreshRequest.current = null
+      if (!controller.signal.aborted) setIsRefreshing(false)
+    }
   }, [])
+
+  useEffect(() => () => refreshRequest.current?.abort(), [])
 
   const hasRunning = batches.some((batch) => RUNNING_KINDS.includes(batchFeedKind(batch)))
   useEffect(() => {
     if (!hasRunning) return
-    const interval = setInterval(refresh, 3000)
+    const interval = setInterval(() => {
+      if (!document.hidden) void refresh({ background: true })
+    }, 3000)
     return () => clearInterval(interval)
   }, [hasRunning, refresh])
 
@@ -790,7 +815,9 @@ function SupplierRow({ row, dnd, ...props }: FeedBodyProps & { row: FeedRow; dnd
           <ProductBar counts={row.counts} />
         </div>
 
-        <div className="col-start-3 row-start-1 flex items-center justify-end gap-1.5 xl:col-start-auto xl:row-start-auto" onClick={(event) => event.stopPropagation()}>
+        {/* На телефоне кнопки идут отдельной строкой под поставщиком, чтобы
+            не сжимать его имя; с sm — справа в первой строке. */}
+        <div className="col-span-2 col-start-2 flex flex-wrap items-center justify-start gap-1.5 sm:col-span-1 sm:col-start-3 sm:row-start-1 sm:justify-end xl:col-start-auto xl:row-start-auto" onClick={(event) => event.stopPropagation()}>
           {supplier && (
             <button
               type="button"

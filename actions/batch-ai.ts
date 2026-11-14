@@ -34,6 +34,8 @@ import {
   shouldRunBatchAiVisualSetCorrection,
   normalizeBatchAiOutput,
   normalizeBatchAiProcessingOptions,
+  normalizeBatchAiOperatorNote,
+  withBatchAiOperatorNote,
   DEFAULT_BATCH_AI_PROCESSING_OPTIONS,
   CHROMOFF_AUTO_SUPPLIER_IDS,
   filterLegacySubcategoriesForAi,
@@ -54,6 +56,7 @@ import {
   upsertRailsCatalogAttributeValue,
 } from '@/lib/rails-admin'
 import { recordBatchSnapshot } from '@/lib/batch-snapshots'
+import { batchSnapshotsWithCounts } from '@/lib/batch-snapshot-counts'
 import { activeBatchOperation, claimBatchOperation, releaseBatchOperation, touchBatchOperation } from '@/lib/batch-operation-lock'
 import {
   normalizeProductsCatalogReferences,
@@ -1068,16 +1071,27 @@ export async function refreshAiProviderModelsAction(providerId: string) {
   }
 }
 
-export async function startBatchAiAction(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
+export async function startBatchAiAction(
+  batchId: string,
+  mode: BatchAiRunMode = 'full',
+  productId?: number | number[],
+  options: { operatorNote?: string } = {},
+) {
   await requireAdmin()
   // Визуальный поиск цветовых семей ИИ («variants») создавал предложения на
   // одобрение. ИИ больше не предлагает ни семьи, ни атрибуты: семьи задаёт
   // постобработка поставщика.
   if (mode === 'variants') return { success: false, error: 'Поиск цветовых семей ИИ отключён: семьи задаёт постобработка поставщика' }
-  return startBatchAiRun(batchId, mode, productId)
+  // Указание оператора относится к товарам, которые он выделил и проверил
+  // вручную, поэтому принимается только для обработки выбранных товаров.
+  const operatorNote = normalizeBatchAiOperatorNote(options.operatorNote)
+  if (operatorNote && !['selection', 'retry_selection'].includes(mode)) {
+    return { success: false, error: 'Указание для ИИ доступно только для выбранных товаров' }
+  }
+  return startBatchAiRun(batchId, mode, productId, operatorNote)
 }
 
-async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[]) {
+async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', productId?: number | number[], operatorNote = '') {
   const runId = crypto.randomUUID()
   let operationClaimed = false
   try {
@@ -1164,6 +1178,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
         : settings.systemPrompt || DEFAULT_BATCH_AI_SYSTEM_PROMPT,
       supplierInstructions,
       processingOptions: normalizedProcessingOptions,
+      ...(operatorNote ? { operatorNote } : {}),
     }
     if (!['variants', 'media_seo'].includes(mode)) {
       await snapshotBatch(
@@ -1326,7 +1341,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           : priceRuleHints(context.priceRules, promptProduct)
         const priceReferenceUrls = priceRules.flatMap((rule) => rule.reference_images || [])
         const splitAlbumColors = normalizedProcessingOptions.splitAlbumColors && ['sample', 'full'].includes(mode)
-        const userPrompt = mode === 'media_seo'
+        const userPrompt = withBatchAiOperatorNote(mode === 'media_seo'
           ? buildBatchMediaSeoPrompt(promptProduct, brandName, generatedSlug)
           : mode === 'split_colors' || splitAlbumColors
           ? buildBatchAiColorSplitPrompt({
@@ -1360,7 +1375,7 @@ async function startBatchAiRun(batchId: string, mode: BatchAiRunMode = 'full', p
           chromoffCategories: context.chromoffCategories,
           categoryRules: settings.categoryRules,
           processingOptions: normalizedProcessingOptions,
-        })
+        }), operatorNote)
         await scrapingQuery(`
           INSERT INTO batch_ai_items(id,run_id,product_id,external_id,input_snapshot)
           VALUES($1,$2,$3,$4,$5::jsonb)
@@ -2613,6 +2628,54 @@ export async function getLatestBatchAiRunAction(batchId: string) {
   return { success: true, data: await getBatchAiRun(String(latest.rows[0].id)) }
 }
 
+/**
+ * Состояние открытой выгрузки для опроса страницы. Раньше страница каждые 3 с
+ * забирала все товары (до 17 МБ JSON у выгрузки на 4–5 тысяч товаров). Теперь
+ * опрос получает этап, последний ИИ-запуск, число товаров и id товаров, чьи
+ * элементы запуска изменились после `since`. Сами товары страница дозапрашивает
+ * точечно. Как и прежний опрос, вызов доводит завершённый запуск до конца и
+ * возвращает в очередь зависшие товары.
+ */
+export async function getBatchLiveStateAction(batchId: string, since?: string | null) {
+  await requireAdmin()
+  const [clock, batch, count, latest] = await Promise.all([
+    // Запас 5 с: элемент, записанный транзакцией, начатой до курсора, не теряется.
+    scrapingQuery("SELECT (NOW() - INTERVAL '5 seconds') AS cursor"),
+    scrapingQuery('SELECT stage FROM scraping_batches WHERE id=$1', [batchId]),
+    scrapingQuery('SELECT COUNT(*)::int AS count FROM products WHERE batch_id=$1', [batchId]),
+    scrapingQuery('SELECT id FROM batch_ai_runs WHERE batch_id=$1 ORDER BY created_at DESC LIMIT 1', [batchId]),
+  ])
+  let run: any = null
+  let changedProductIds: number[] = []
+  const runId = latest.rows[0]?.id ? String(latest.rows[0].id) : null
+  if (runId) {
+    await finalizeRun(runId)
+    await resumeStaleOpenRouterRun(runId)
+    run = await getBatchAiRun(runId)
+    const sinceDate = since ? new Date(since) : null
+    if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
+      const changed = await scrapingQuery(`
+        SELECT DISTINCT product_id FROM batch_ai_items
+        WHERE run_id=$1 AND product_id IS NOT NULL AND (updated_at > $2 OR completed_at > $2)
+        LIMIT 1001
+      `, [runId, sinceDate.toISOString()])
+      changedProductIds = changed.rows.map((row) => Number(row.product_id)).filter(Number.isInteger)
+    }
+  }
+  return {
+    success: true,
+    data: {
+      cursor: new Date(clock.rows[0].cursor).toISOString(),
+      stage: batch.rows[0]?.stage || 'SCRAPED',
+      productCount: Number(count.rows[0]?.count || 0),
+      run,
+      changedProductIds: changedProductIds.slice(0, 1000),
+      // Слишком много изменений сразу — проще перечитать список целиком.
+      fullReload: changedProductIds.length > 1000,
+    },
+  }
+}
+
 export async function getBatchAiRunLogsAction(runId: string, limit = 500) {
   await requireAdmin()
   const safeLimit = Math.min(1000, Math.max(50, Number(limit) || 500))
@@ -2668,10 +2731,10 @@ export async function stopBatchAiRunAction(runId: string) {
 export async function getBatchSnapshotsAction(batchId: string) {
   await requireAdmin()
   const result = await scrapingQuery(`
-    SELECT id,stage,label,jsonb_array_length(products)::int AS items_count,settings_snapshot,created_at
+    SELECT id,stage,label,settings_snapshot,created_at
     FROM batch_snapshots WHERE batch_id=$1 ORDER BY created_at DESC
   `, [batchId])
-  return { success: true, data: result.rows }
+  return { success: true, data: await batchSnapshotsWithCounts(result.rows) }
 }
 
 export async function rollbackBatchAction(batchId: string, snapshotId: string) {

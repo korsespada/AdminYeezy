@@ -86,6 +86,21 @@ describe('batch product server actions', () => {
     expect(mocks.scrapingQuery).toHaveBeenCalledWith(expect.stringContaining('WHERE p.batch_id = $1'), ['batch-1'])
   })
 
+  it('omits translations from the batch list so saving the list cannot wipe them', async () => {
+    const { getBatchProductsAction } = await import('@/actions/csv-import')
+    mocks.scrapingQuery
+      .mockResolvedValueOnce({ rows: [{ id: 8, external_id: 'ext-2', name: 'P', photos: [], has_en: true }] })
+      .mockResolvedValueOnce({ rows: [{ stage: 'AI_PROCESSED' }] })
+
+    const res = await getBatchProductsAction('batch-1')
+    const product = res.data?.products[0] as Record<string, unknown>
+
+    expect(product.has_en).toBe(true)
+    expect('translations' in product).toBe(false)
+    expect('photo_alts_en' in product).toBe(false)
+    expect(mocks.scrapingQuery.mock.calls[0][0]).not.toContain("'translations' AS translations")
+  })
+
   it('saves a full batch inside a transaction and prunes removed rows', async () => {
     const { saveBatchProductsAction } = await import('@/actions/csv-import')
     mocks.scrapingQuery

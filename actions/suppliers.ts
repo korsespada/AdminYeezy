@@ -31,6 +31,7 @@ import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/bat
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
+import { batchSnapshotsWithCounts } from '@/lib/batch-snapshot-counts'
 
 // --- Suppliers CRUD ---
 
@@ -731,9 +732,11 @@ function formatScrapingConnectionError(err: any) {
   ].join(' ')
 }
 
-export async function getExportHistoryAction(): Promise<ActionResponse> {
+/** Лента выгрузок; с batchId — только эта выгрузка (страница выгрузки). */
+export async function getExportHistoryAction(batchId?: string | null): Promise<ActionResponse> {
   try {
     await requireAdmin()
+    const onlyBatchId = typeof batchId === 'string' && batchId.trim() ? batchId.trim() : null
     const res = await scrapingQuery(`
       SELECT
         t.id,
@@ -804,9 +807,10 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
       LEFT JOIN batch_operation_locks op
         ON op.batch_id=b.id AND op.updated_at > NOW() - INTERVAL '2 minutes'
       WHERE COALESCE(b.stage, '') <> 'ADMIN_DELETED'
+        AND ($1::text IS NULL OR t.batch_id = $1::text)
       ORDER BY COALESCE(b.created_at, t.created_at) DESC, t.created_at DESC
       LIMIT 500
-    `)
+    `, [onlyBatchId])
 
     const grouped = new Map<string, { batch: any, files: ExportHistoryFile[] }>()
 
@@ -870,12 +874,12 @@ export async function getExportHistoryAction(): Promise<ActionResponse> {
     const snapshotsByBatch = new Map<string, any[]>()
     if (realBatchIds.length > 0) {
       const snapshots = await scrapingQuery(`
-        SELECT id,batch_id,stage,label,jsonb_array_length(products)::int AS items_count,created_at
+        SELECT id,batch_id,stage,label,created_at
         FROM batch_snapshots
         WHERE batch_id=ANY($1::text[])
         ORDER BY created_at ASC
       `, [realBatchIds])
-      for (const snapshot of snapshots.rows) {
+      for (const snapshot of await batchSnapshotsWithCounts(snapshots.rows)) {
         const list = snapshotsByBatch.get(String(snapshot.batch_id)) || []
         list.push(snapshot)
         snapshotsByBatch.set(String(snapshot.batch_id), list)

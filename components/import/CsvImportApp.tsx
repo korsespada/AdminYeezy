@@ -54,6 +54,7 @@ import {
   saveLocalCsvAction,
   getBatchProductBeforeAiAction,
   getBatchProductsAction,
+  getBatchProductTranslationAction,
   saveBatchProductsAction,
   updateBatchProductAction,
   assignBatchVariantFamilyAction,
@@ -76,7 +77,6 @@ import {
   alignBatchColorFamiliesAction,
   getBatchAiRunAction,
   getBatchAiRunLogsAction,
-  getLatestBatchAiRunAction,
   rollbackBatchProductAiAction,
   startBatchAiAction,
   startBatchMediaSeoAction,
@@ -114,6 +114,24 @@ const DEFAULT_PRODUCT_COLUMNS = [
 ];
 
 const PRODUCTS_PER_LAZY_PAGE = 100;
+
+/**
+ * Статус ИИ-запуска для циклов ожидания. Читается обычным GET, чтобы ожидание
+ * не занимало очередь серверных экшенов, которую делят переходы App Router.
+ * Если последний запуск выгрузки уже другой, используется прежний экшен.
+ */
+async function fetchBatchAiRun(batchId: string, runId: string) {
+  try {
+    const response = await fetch(`/api/batches/live-state?${new URLSearchParams({ batchId })}`, { cache: "no-store" });
+    const payload = response.ok ? await response.json() : null;
+    if (payload?.success && payload.data?.run && String(payload.data.run.id) === String(runId)) {
+      return { success: true as const, data: payload.data.run };
+    }
+  } catch {
+    // Ниже — запасной путь через серверный экшен.
+  }
+  return getBatchAiRunAction(runId);
+}
 
 const CSV_CORE_KEYS = new Set([
   ...DEFAULT_PRODUCT_COLUMNS.map((column) => column.key),
@@ -185,7 +203,8 @@ function useGridColumnCount(viewMode: "cards" | "photos" | "rows", cardColumns: 
   }, []);
   if (width >= 1024) return cardColumns;
   if (viewMode === "photos") return 4;
-  return width >= 640 ? 2 : 1;
+  // На телефоне и планшете минимум две карточки в ряд.
+  return width >= 768 ? 3 : 2;
 }
 
 function approvedVariantGroupKey(product: CsvProduct) {
@@ -655,6 +674,7 @@ export default function CsvImportApp({
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkSubcategory, setBulkSubcategory] = useState("");
   const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkAiNote, setBulkAiNote] = useState("");
   const [bulkMeasurements, setBulkMeasurements] = useState<unknown>(null);
   const [supplierId, setSupplierId] = useState<number | null>(initialSupplierId);
   const [batchId, setBatchId] = useState<string | null>(initialSnapshotId ? null : initialBatchId);
@@ -892,11 +912,35 @@ export default function CsvImportApp({
   const aiRemainingCount = products.length - aiReadyCount;
   const enReadyCount = useMemo(
     () => products.filter((product) => {
+      // В списке выгрузки перевода нет, только флаг has_en; полный перевод
+      // есть у снимков, CSV и у товаров, открытых в карточке.
+      if (product.translations === undefined) return product.has_en === true
       const english = (product as any).translations?.en
       return english && Object.keys(english).some((key) => !["status", "source_digest", "translated_at"].includes(key))
     }).length,
     [products],
   );
+
+  // Перевод товара не входит в список выгрузки (до 4 МБ на партию) и
+  // подгружается при открытии карточки только для этого товара.
+  const selectedProductId = selectedIdx !== null ? products[selectedIdx]?.id : undefined;
+  const selectedNeedsTranslation = selectedIdx !== null && products[selectedIdx]?.translations === undefined;
+  useEffect(() => {
+    if (!batchId || isSnapshotSource || !selectedNeedsTranslation) return;
+    const id = Number(selectedProductId);
+    if (!Number.isInteger(id)) return;
+    let cancelled = false;
+    getBatchProductTranslationAction(batchId, id).then((result) => {
+      if (cancelled || !result.success || !result.data) return;
+      const { translations, photo_alts_en } = result.data;
+      setProducts((prev) => prev.map((product) => (
+        Number(product.id) === id && product.translations === undefined
+          ? { ...product, translations, photo_alts_en }
+          : product
+      )));
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [batchId, isSnapshotSource, selectedProductId, selectedNeedsTranslation]);
   const aiErrorProducts = useMemo(
     () => products.filter((product) => !(product.ai_processed === true || product.ai_processed === "true") && Boolean(product.ai_error)),
     [products],
@@ -973,6 +1017,9 @@ export default function CsvImportApp({
   const visibleProducts = useMemo(() => visibleUnits.flatMap((unit) => unit.products), [visibleUnits]);
   const hasMoreVisibleProducts = visibleUnits.length < productUnits.length;
   const gridColumns = useGridColumnCount(viewMode, cardColumns);
+  // Позиция товара в общем массиве для отрисовки плиток: indexOf на каждую
+  // плитку при 5 тысячах товаров стоил сотни тысяч сравнений на перерисовку.
+  const productIndexByRef = useMemo(() => new Map(products.map((product, index) => [product, index])), [products]);
   const lazyLoadSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -1121,43 +1168,100 @@ export default function CsvImportApp({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId, initialBatchId, isSnapshotSource, isRunningCustomScript]);
 
+  // Опрос открытой выгрузки. Раньше каждые 3 с через серверный экшен
+  // перечитывались все товары (до 17 МБ у больших выгрузок), а экшен ещё и
+  // держал очередь роутера. Теперь GET /api/batches/live-state отдаёт этап,
+  // ИИ-запуск и только товары, которые запуск изменил после курсора. Список
+  // перечитывается целиком, лишь когда изменилось число товаров или запуск
+  // закончился (после него сервер выравнивает семьи и названия).
+  const liveStateRef = useRef({ isDirty, selectedIdx, productCount: products.length });
+  useEffect(() => {
+    liveStateRef.current = { isDirty, selectedIdx, productCount: products.length };
+  }, [isDirty, selectedIdx, products.length]);
   useEffect(() => {
     if (!batchId || isSnapshotSource) return;
-    let requestInFlight = false;
-    const refreshDynamicState = async () => {
-      if (requestInFlight || document.hidden) return;
-      requestInFlight = true;
-      try {
-        const [productsResult, runResult] = await Promise.all([
-          getBatchProductsAction(batchId),
-          getLatestBatchAiRunAction(batchId),
-        ]);
-        if (!isDirty && selectedIdx === null && productsResult.success && productsResult.data) {
-          const nextProducts = productsResult.data.products;
-          setProducts(nextProducts);
-          setColumns(productsResult.data.columns?.length ? productsResult.data.columns : DEFAULT_PRODUCT_COLUMNS);
-          setBatchStage(productsResult.data.stage || "SCRAPED");
-        }
-        const run: any = runResult.success ? runResult.data : null;
-        setLatestAiRun(run);
-        setActiveAiRunMode(run?.mode || null);
-        const running = Boolean(run && ["preparing", "queued", "running"].includes(run.status));
-        setActiveAiRunId(running ? String(run.id) : null);
-        setIsProcessing(running);
-        setAiProgress(running ? {
-          current: Number(run.completed_count || 0) + Number(run.failed_count || 0),
-          total: Number(run.total_count || products.length),
-          failed: Number(run.failed_count || 0),
-        } : null);
-        setAiQueue(running ? run.queue_items || [] : []);
-      } finally {
-        requestInFlight = false;
-      }
+    let cancelled = false;
+    let timer: number | undefined;
+    let cursor: string | null = null;
+    let wasRunning = false;
+    // Полное перечитывание откладывается, пока открыта карточка или есть
+    // несохранённые правки, и выполняется на первом свободном тике.
+    let pendingFullReload = false;
+    let controller: AbortController | null = null;
+
+    const applyRun = (run: any) => {
+      setLatestAiRun(run);
+      setActiveAiRunMode(run?.mode || null);
+      const running = Boolean(run && ["preparing", "queued", "running"].includes(run.status));
+      setActiveAiRunId(running ? String(run.id) : null);
+      setIsProcessing(running);
+      setAiProgress(running ? {
+        current: Number(run.completed_count || 0) + Number(run.failed_count || 0),
+        total: Number(run.total_count || liveStateRef.current.productCount),
+        failed: Number(run.failed_count || 0),
+      } : null);
+      setAiQueue(running ? run.queue_items || [] : []);
+      return running;
     };
-    refreshDynamicState();
-    const interval = window.setInterval(refreshDynamicState, 3000);
-    return () => window.clearInterval(interval);
-  }, [batchId, isDirty, selectedIdx, products.length, isSnapshotSource]);
+
+    const poll = async () => {
+      let running = wasRunning;
+      if (!document.hidden) {
+        controller = new AbortController();
+        try {
+          const query = new URLSearchParams({ batchId });
+          if (cursor) query.set("since", cursor);
+          const response = await fetch(`/api/batches/live-state?${query}`, { cache: "no-store", signal: controller.signal });
+          const payload = response.ok ? await response.json() : null;
+          if (!cancelled && payload?.success) {
+            const state = payload.data;
+            running = applyRun(state.run);
+            setBatchStage(state.stage || "SCRAPED");
+            const { isDirty: dirty, selectedIdx: selected, productCount } = liveStateRef.current;
+            const canApply = !dirty && selected === null;
+            const needsFullReload = pendingFullReload || state.fullReload || state.productCount !== productCount || (wasRunning && !running);
+            if (needsFullReload) {
+              pendingFullReload = true;
+              if (canApply) {
+                const reloaded = await getBatchProductsAction(batchId);
+                if (!cancelled && reloaded.success && reloaded.data) {
+                  setProducts(reloaded.data.products);
+                  cursor = state.cursor;
+                  pendingFullReload = false;
+                }
+              }
+            } else if (state.changedProducts?.length) {
+              if (canApply) {
+                const changed = new Map<string, CsvProduct>(state.changedProducts.map((product: CsvProduct) => [String(product.id), product]));
+                // Перевод в списке не передаётся: у открытого ранее товара он
+                // остаётся из карточки, а не стирается обновлением.
+                setProducts((prev) => prev.map((product) => {
+                  const next = changed.get(String(product.id));
+                  if (!next) return product;
+                  return product.translations === undefined ? next : { ...next, translations: product.translations, photo_alts_en: product.photo_alts_en };
+                }));
+                cursor = state.cursor;
+              }
+            } else {
+              cursor = state.cursor;
+            }
+            wasRunning = running;
+          }
+        } catch {
+          // Сетевой сбой или отмена: следующий тик повторит запрос.
+        } finally {
+          controller = null;
+        }
+      }
+      if (!cancelled) timer = window.setTimeout(poll, running ? 3000 : 10000);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [batchId, isSnapshotSource]);
 
   const persistBatchProducts = async (nextProducts: CsvProduct[]) => {
     if (isSnapshotSource) {
@@ -1306,7 +1410,7 @@ export default function CsvImportApp({
     }
   };
 
-  const handleAiProcess = async (requestedMode?: "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "text_only" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[]) => {
+  const handleAiProcess = async (requestedMode?: "full" | "variants" | "selection" | "retry_selection" | "reprocess" | "text_only" | "recover_measurements" | "media_seo" | "split_colors" | "family_names", selectedProductIds?: number[], operatorNote?: string) => {
     const targetBatchId = batchId || initialBatchId;
     if (!targetBatchId) {
       setSaveMsg("AI-обработка доступна только для JSONB-партии из истории выгрузок.");
@@ -1332,7 +1436,7 @@ export default function CsvImportApp({
         setActiveAiRunMode(mode);
         const result = mode === "media_seo"
           ? await startBatchMediaSeoAction(targetBatchId, selectedProductIds)
-          : await startBatchAiAction(targetBatchId, mode, selectedProductIds);
+          : await startBatchAiAction(targetBatchId, mode, selectedProductIds, operatorNote ? { operatorNote } : undefined);
         if (result.success) {
           const data: any = "data" in result ? result.data : null;
           if (data?.runId) {
@@ -1351,7 +1455,7 @@ export default function CsvImportApp({
             let finalRun: any = null;
             for (let attempt = 0; attempt < 200; attempt += 1) {
               await new Promise((resolve) => setTimeout(resolve, 3000));
-              const run = await getBatchAiRunAction(data.runId);
+              const run = await fetchBatchAiRun(targetBatchId, String(data.runId));
               if (!run.success) break;
               finalRun = run.data;
               setLatestAiRun(finalRun);
@@ -1432,7 +1536,7 @@ export default function CsvImportApp({
           setActiveAiRunId(String(data.runId));
           for (let attempt = 0; attempt < 200; attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 3000));
-            const run = await getBatchAiRunAction(data.runId);
+            const run = await fetchBatchAiRun(batchId, String(data.runId));
             if (!run.success || ["completed", "failed", "cancelled"].includes(run.data?.status)) break;
           }
           setActiveAiRunId(null);
@@ -2894,12 +2998,14 @@ export default function CsvImportApp({
             </div>
             <div
               className={viewMode === "rows"
-                ? "mb-48 overflow-x-auto rounded-xl border border-slate-700 bg-slate-900"
-                : `grid grid-flow-row-dense pb-48 ${viewMode === "photos" ? "grid-cols-4 gap-1.5 sm:gap-2.5" : "grid-cols-1 gap-5 sm:grid-cols-2"} ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
+                // Строки нужны только на широком экране; на телефоне и планшете
+                // те же товары идут карточками по две-три в ряд.
+                ? "mb-48 grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:block lg:overflow-x-auto lg:rounded-xl lg:border lg:border-slate-700 lg:bg-slate-900"
+                : `grid grid-flow-row-dense pb-48 ${viewMode === "photos" ? "grid-cols-4 gap-1.5 sm:gap-2.5" : "grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 md:gap-4"} ${cardColumns === 4 ? 'lg:grid-cols-4' : cardColumns === 5 ? 'lg:grid-cols-5' : cardColumns === 6 ? 'lg:grid-cols-6' : cardColumns === 7 ? 'lg:grid-cols-7' : cardColumns === 8 ? 'lg:grid-cols-8' : cardColumns === 9 ? 'lg:grid-cols-9' : 'lg:grid-cols-10'}`
               }
             >
               {viewMode === "rows" && (
-                <div className="grid min-w-[1160px] grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                <div className="hidden min-w-[1160px] lg:grid grid-cols-[minmax(400px,2.4fr)_64px_64px_70px_minmax(150px,0.8fr)_minmax(190px,1fr)_136px_42px] items-center gap-3 border-b border-slate-700 bg-slate-950/80 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
                   <div>Китайский исходный текст</div>
                   <div>№</div>
                   <div>Фото</div>
@@ -2912,7 +3018,7 @@ export default function CsvImportApp({
               )}
               {(() => {
               const renderProduct = (product: CsvProduct, inFamilyBlock = false) => {
-                const realIndex = products.indexOf(product);
+                const realIndex = productIndexByRef.get(product) ?? -1;
                 const selectionOrder = selectedForMerge.indexOf(realIndex);
                 const adminProduct = {
                   id: String(product.id || product.external_id || realIndex),
@@ -3143,6 +3249,40 @@ export default function CsvImportApp({
                 </div>
               </div>
 
+              <div className="flex flex-col gap-2">
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Указание для ИИ к выбранным (необязательно)</span>
+                  <textarea
+                    value={bulkAiNote}
+                    onChange={(event) => setBulkAiNote(event.target.value.slice(0, 1000))}
+                    rows={2}
+                    maxLength={1000}
+                    placeholder="Например: это не комплект, на всех фото одна вещь — шорты; таблица размеров от другого товара"
+                    className="w-full resize-y rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white outline-none transition-colors placeholder:text-slate-500 focus:border-violet-500"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    "Это не комплект: на всех фото одна вещь. Определи её тип и подкатегорию по фото, таблицу размеров другой вещи не используй.",
+                    "Это комплект из двух разных вещей: назови обе вещи и выбери «Комплекты».",
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setBulkAiNote(preset)}
+                      className="rounded-full border border-slate-600 px-3 py-1 text-xs text-slate-300 transition-colors hover:border-violet-500 hover:text-white"
+                    >
+                      {preset.split(":")[0]}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[11px] text-slate-500">
+                    Уйдёт в промпт только этих товаров при «{selectedForMerge.every((index) => (
+                      products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
+                    )) ? "Повторить ИИ из исходника" : "Обработать с ИИ"}» · {bulkAiNote.length}/1000
+                  </span>
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-end gap-3">
                 <button
                   onClick={() => setSelectedForMerge([])}
@@ -3160,7 +3300,9 @@ export default function CsvImportApp({
                     const retryFromSource = selectedForMerge.every((index) => (
                       products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
                     ));
-                    await handleAiProcess(retryFromSource ? "retry_selection" : "selection", ids);
+                    const note = bulkAiNote.trim();
+                    setBulkAiNote("");
+                    await handleAiProcess(retryFromSource ? "retry_selection" : "selection", ids, note || undefined);
                   }}
                   disabled={isProcessing || !batchId}
                   className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
