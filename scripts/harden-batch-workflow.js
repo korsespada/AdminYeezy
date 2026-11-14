@@ -125,6 +125,31 @@ async function migrate() {
       ) current
       WHERE b.id=current.id AND b.items_count<>current.count
     `)
+    // Снимок SCRAPED — граница восстановления: без него постобработку нельзя
+    // применить повторно, а стадия молча прочитает уже обработанные карточки.
+    // Чистки истории снимок и так не трогают, поэтому запрет закрывает только
+    // ручные/app-обходные удаления; осознанная очистка — через SET LOCAL.
+    await client.query(`
+      CREATE OR REPLACE FUNCTION protect_scraped_snapshot() RETURNS trigger
+      LANGUAGE plpgsql AS $fn$
+      BEGIN
+        IF OLD.stage = 'SCRAPED'
+           AND COALESCE(current_setting('yu.allow_scraped_snapshot_delete', true), '') <> 'on'
+           AND EXISTS (SELECT 1 FROM scraping_batches b WHERE b.id = OLD.batch_id) THEN
+          RAISE EXCEPTION 'Снимок SCRAPED (Сырой товар) выгрузки % защищён: без него нельзя повторно применить постобработку. Осознанная очистка: SET LOCAL yu.allow_scraped_snapshot_delete = on.', OLD.batch_id
+            USING ERRCODE = 'restrict_violation',
+                  HINT = 'raw snapshot is the recovery boundary for supplier post-processing';
+        END IF;
+        RETURN OLD;
+      END
+      $fn$
+    `)
+    await client.query(`DROP TRIGGER IF EXISTS batch_snapshots_protect_scraped ON batch_snapshots`)
+    await client.query(`
+      CREATE TRIGGER batch_snapshots_protect_scraped
+        BEFORE DELETE ON batch_snapshots
+        FOR EACH ROW EXECUTE FUNCTION protect_scraped_snapshot()
+    `)
     await client.query('COMMIT')
     console.log('Batch workflow hardening migration complete')
   } catch (error) {
