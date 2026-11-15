@@ -196,6 +196,22 @@ export async function failPhotoCleanJob(id: string, leaseToken: string, error: s
   return Boolean(failed.rowCount)
 }
 
+/**
+ * Возвращает задание в очередь без пометки сбоем: источник временно не отдаёт
+ * оригинал (403/429/5xx). Счётчик attempts сохраняется — по нему воркер решает,
+ * когда перестать ждать источник и пометить кадр сбоем.
+ */
+export async function releasePhotoCleanJob(id: string, leaseToken: string, error: string): Promise<boolean> {
+  const released = await scrapingQuery(
+    `UPDATE photo_clean_jobs
+        SET status = 'pending', error = $3, lease_token = NULL, lease_expires_at = NULL, worker_id = NULL,
+            updated_at = NOW()
+      WHERE id = $1 AND lease_token = $2 AND status = 'claimed'`,
+    [id, leaseToken, String(error || '').slice(0, 2000)],
+  )
+  return Boolean(released.rowCount)
+}
+
 export async function listPhotoCleanJobs(filter: {
   supplier?: string
   sourceProduct?: string

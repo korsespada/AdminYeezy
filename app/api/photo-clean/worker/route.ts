@@ -6,6 +6,7 @@ import {
   failPhotoCleanJob,
   heartbeatPhotoCleanJobs,
   photoCleanStats,
+  releasePhotoCleanJob,
 } from '@/lib/photo-clean-jobs'
 
 export const dynamic = 'force-dynamic'
@@ -69,6 +70,13 @@ export async function POST(request: NextRequest) {
       const failed = await failPhotoCleanJob(String(body.job_id || ''), String(body.lease_token || ''),
                                              String(body.error || ''))
       if (!failed) return NextResponse.json({ error: 'lease_lost' }, { status: 409 })
+      return NextResponse.json({ ok: true })
+    }
+
+    if (body.action === 'release') {
+      const released = await releasePhotoCleanJob(String(body.job_id || ''), String(body.lease_token || ''),
+                                                  String(body.error || ''))
+      if (!released) return NextResponse.json({ error: 'lease_lost' }, { status: 409 })
       return NextResponse.json({ ok: true })
     }
 

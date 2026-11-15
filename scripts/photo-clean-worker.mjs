@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { HeadBucketCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import s3CacheControl from './lib/s3-cache-control.js'
 import dotenv from 'dotenv'
 
@@ -85,13 +85,49 @@ async function api(body) {
   return payload
 }
 
-async function download(url, target) {
-  const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow', signal: AbortSignal.timeout(120000) })
-  if (!response.ok) throw new Error(`источник вернул HTTP ${response.status}`)
+// Shopify CDN временами отвечает 403/429 на всё подряд (несколько минут), а потом
+// снова отдаёт те же файлы. Такой ответ — не сбой кадра: повторяем с паузой, а если
+// источник так и не ожил — возвращаем задание в очередь и ждём, не сжигая пачку.
+const DOWNLOAD_RETRY_DELAYS_MS = [3000, 15000]
+const SOURCE_PAUSE_MS = Number(process.env.PHOTO_CLEAN_SOURCE_PAUSE_MS || 120000)
+// После стольких взятий в работу с блокировкой источника кадр помечается сбоем.
+const MAX_SOURCE_ATTEMPTS = 5
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+class SourceError extends Error {
+  constructor(message, retryable) {
+    super(message)
+    this.retryable = retryable
+  }
+}
+
+async function downloadOnce(url, target) {
+  let response
+  try {
+    response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, redirect: 'follow', signal: AbortSignal.timeout(120000) })
+  } catch (error) {
+    throw new SourceError(`источник недоступен: ${error.cause?.code || error.message}`, true)
+  }
+  if (!response.ok) {
+    const retryable = response.status === 403 || response.status === 408 || response.status === 429 || response.status >= 500
+    throw new SourceError(`источник вернул HTTP ${response.status}`, retryable)
+  }
   const buffer = Buffer.from(await response.arrayBuffer())
-  if (!buffer.length) throw new Error('источник вернул пустой файл')
+  if (!buffer.length) throw new SourceError('источник вернул пустой файл', true)
   await writeFile(target, buffer)
   return buffer.length
+}
+
+async function download(url, target) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await downloadOnce(url, target)
+    } catch (error) {
+      if (!error.retryable || attempt >= DOWNLOAD_RETRY_DELAYS_MS.length) throw error
+      await sleep(DOWNLOAD_RETRY_DELAYS_MS[attempt])
+    }
+  }
 }
 
 /**
@@ -202,12 +238,39 @@ class Cleaner {
   }
 }
 
+// Ошибки доступа к S3 — это настройка машины, а не кадра: воркер останавливается,
+// а не сжигает очередь.
+const S3_ACCESS_ERRORS = new Set(['InvalidAccessKeyId', 'SignatureDoesNotMatch', 'AccessDenied', 'NoSuchBucket'])
+
+/** AWS SDK при нестандартном ответе S3 пишет в message «UnknownError» — достаём код и HTTP-статус. */
+function s3ErrorMessage(error) {
+  const code = error?.Code || error?.name || 'S3Error'
+  const status = error?.$metadata?.httpStatusCode
+  const detail = error?.message && error.message !== 'UnknownError' && error.message !== code ? `: ${error.message}` : ''
+  return `S3 ${code}${status ? ` (HTTP ${status})` : ''}${detail}`
+}
+
 async function uploadFile(key, file, contentType) {
   const body = readFileSync(file)
-  await s3.send(new PutObjectCommand({
-    Bucket: bucketName, Key: key, Body: body, ContentType: contentType, CacheControl: cacheControlForKey(key),
-  }))
+  try {
+    await s3.send(new PutObjectCommand({
+      Bucket: bucketName, Key: key, Body: body, ContentType: contentType, CacheControl: cacheControlForKey(key),
+    }))
+  } catch (error) {
+    const wrapped = new Error(s3ErrorMessage(error))
+    wrapped.s3Access = S3_ACCESS_ERRORS.has(error?.Code || error?.name)
+    throw wrapped
+  }
   return s3PublicUrl(key)
+}
+
+/** Проверка ключей S3 до первого фото: с неверным ключом каждый кадр чистился бы впустую. */
+async function checkS3() {
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: bucketName }))
+  } catch (error) {
+    throw new Error(`нет доступа к S3 (${s3ErrorMessage(error)}). Проверьте S3_ACCESS_KEY и S3_SECRET_KEY в .env — они должны совпадать с ключами админки в Coolify`)
+  }
 }
 
 function jobLabel(job) {
@@ -217,6 +280,11 @@ function jobLabel(job) {
 async function failJob(job, error) {
   log(`  ошибка на ${jobLabel(job)}: ${error.message}`)
   await api({ action: 'fail', job_id: job.id, lease_token: job.lease_token, error: error.message }).catch(() => {})
+}
+
+/** Вернуть задание в очередь без пометки сбоем (источник временно недоступен). */
+async function releaseJob(job, reason) {
+  await api({ action: 'release', job_id: job.id, lease_token: job.lease_token, error: reason }).catch(() => {})
 }
 
 /** Скачивание оригинала. Не бросает: ошибка возвращается в объекте, чтобы предзагрузка не роняла процесс. */
@@ -283,18 +351,39 @@ async function finishJob(job, { report, files }) {
  */
 async function processBatch(cleaner, jobs, isStopping) {
   const finishing = []
+  let sourceBlocked = false
+  let s3Error = null
   let next = prepareJob(jobs[0])
   for (let index = 0; next; index++) {
     const prepared = await next
     next = index + 1 < jobs.length && !isStopping() ? prepareJob(jobs[index + 1]) : null
     const { job } = prepared
     if (prepared.error) {
-      await failJob(job, new Error(`не скачал оригинал: ${prepared.error.message}`))
+      const reason = `не скачал оригинал: ${prepared.error.message}`
+      if (prepared.error.retryable && Number(job.attempts || 0) < MAX_SOURCE_ATTEMPTS) {
+        // Источник блокирует: остаток пачки не трогаем, всё возвращаем в очередь.
+        sourceBlocked = true
+        log(`  ${jobLabel(job)}: ${reason} — возвращаю в очередь`)
+        await releaseJob(job, reason)
+        if (next) {
+          const skipped = await next
+          if (skipped.dir) rmSync(skipped.dir, { recursive: true, force: true })
+          next = null
+        }
+        for (const rest of jobs.slice(index + 1)) await releaseJob(rest, 'источник временно недоступен')
+        break
+      }
+      await failJob(job, new Error(reason))
     } else {
       try {
         const result = await cleanJob(cleaner, prepared)
         finishing.push(finishJob(job, result)
-          .catch((error) => failJob(job, error))
+          .catch(async (error) => {
+            if (!error.s3Access) return failJob(job, error)
+            s3Error = error
+            log(`  ${jobLabel(job)}: ${error.message} — возвращаю в очередь`)
+            await releaseJob(job, error.message)
+          })
           .finally(() => rmSync(prepared.dir, { recursive: true, force: true })))
       } catch (error) {
         rmSync(prepared.dir, { recursive: true, force: true })
@@ -302,19 +391,26 @@ async function processBatch(cleaner, jobs, isStopping) {
       }
     }
     // Остановка: дочищенное догружаем, остальные задания вернутся в очередь по истечении lease.
-    if (isStopping()) break
+    if (isStopping() || s3Error) break
   }
   if (next) {
     const skipped = await next
     if (skipped.dir) rmSync(skipped.dir, { recursive: true, force: true })
   }
   await Promise.all(finishing)
+  if (s3Error) {
+    // Незавершённые задания пачки — обратно в очередь; уже закрытые ответят lease_lost, это нормально.
+    for (const rest of jobs) await releaseJob(rest, s3Error.message)
+    throw new Error(`${s3Error.message}: воркер остановлен. Проверьте S3_ACCESS_KEY и S3_SECRET_KEY в .env`)
+  }
+  return { sourceBlocked }
 }
 
 async function main() {
   if (!bucketName) throw new Error('S3_BUCKET не задан')
   if (!existsSync(PYTHON)) throw new Error(`нет интерпретатора: ${PYTHON}`)
   if (!existsSync(MODEL)) throw new Error(`нет модели LaMa: ${MODEL} (скачайте её скриптом чистки) — либо укажите PHOTO_CLEAN_MODEL`)
+  await checkS3()
   log(`воркер ${WORKER_ID} → ${ADMIN_URL}, за раз беру ${LIMIT} фото`)
 
   let stopping = false
@@ -341,8 +437,13 @@ async function main() {
       continue
     }
 
-    await processBatch(cleaner, jobs, () => stopping)
+    const { sourceBlocked } = await processBatch(cleaner, jobs, () => stopping)
     if (stopping || hasFlag('--once')) return
+    if (sourceBlocked) {
+      log(`источник фото блокирует запросы — пауза ${Math.round(SOURCE_PAUSE_MS / 1000)} с, задания ждут в очереди`)
+      await sleep(SOURCE_PAUSE_MS)
+      if (stopping) return
+    }
   }
 }
 
