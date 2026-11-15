@@ -11,6 +11,9 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  # Свой реестр на сервере Beget: оттуда не открывается ghcr.io, поэтому Coolify
+  # скачивает образ отсюда (Yeezy-Site: ops/registry, docs/deployment/BEGET_SERVER.md).
+  MIRROR_IMAGE: registry.yuconcierge.com/adminyeezy
   # Панель и приложение задаются repository variables, чтобы смена сервера
   # не требовала правки workflow. Без COOLIFY_APP_UUID образ только собирается.
   COOLIFY_URL: ${{ vars.COOLIFY_URL }}
@@ -71,6 +74,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: registry.yuconcierge.com
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
       # Сначала собираем локально и проверяем, что в образ не попали секреты,
       # и только потом пушим: проверка должна срабатывать до публикации.
       - uses: docker/build-push-action@v6
@@ -108,9 +116,11 @@ jobs:
         run: |
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
+          docker tag "$IMAGE:$GITHUB_SHA" "$MIRROR_IMAGE:$GITHUB_SHA"
+          docker push "$MIRROR_IMAGE:$GITHUB_SHA"
 
       # Приложение в Coolify — Docker-образ с тегом :production: перед деплоем
-      # тег переводится на этот коммит, Coolify скачивает его из GHCR.
+      # тег переводится на этот коммит, Coolify скачивает его из своего реестра.
       - name: Deploy to Coolify
         env:
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
@@ -121,6 +131,7 @@ jobs:
             exit 0
           fi
           docker buildx imagetools create -t "$IMAGE:production" "$IMAGE:$GITHUB_SHA"
+          docker buildx imagetools create -t "$MIRROR_IMAGE:production" "$MIRROR_IMAGE:$GITHUB_SHA"
           curl -fsS --retry 3 --connect-timeout 20 --max-time 120 -X POST \
             -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" \
             "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
