@@ -32,6 +32,7 @@ type ChromoffSearchParams = {
   source?: 'auto' | 'manual'
   sourceSupplier?: string
   aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
+  stock?: string
   chromoffCategory?: string
   chromoffSubcategory?: string
 }
@@ -95,6 +96,7 @@ export default async function ChromoffPage({
         source: filters.source,
         sourceSupplierId: filters.sourceSupplier || undefined,
         aiStatus: filters.aiStatus,
+        inStock: params.stock === 'in_stock',
         published: filters.published === 'all' ? undefined : filters.published === 'published',
       }),
       getRailsCatalogLookups(),

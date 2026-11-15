@@ -19,6 +19,7 @@ import {
   rejectRailsCrmWalletWithdrawal,
   restoreRailsAdminProductFromTrash,
   setRailsAdminProductSlug,
+  updateRailsAdminProductStock,
 } from '@/lib/rails-admin'
 
 describe('rails admin product adapter', () => {
@@ -133,6 +134,35 @@ describe('rails admin product adapter', () => {
     expect(JSON.parse(init.body)).toEqual({ product: { slug: 'hermes-birkin-25-89-noir-silver-swift-her-46911' } })
     expect(result.slug).toBe('hermes-birkin-25-89-noir-silver-swift-her-46911')
     expect(result.slug_locked).toBe(true)
+  })
+
+  it('writes stock per size through the dedicated endpoint and maps it back', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        product: {
+          id: 'product-1',
+          name: 'Chrome Hearts Ring',
+          price_cents: 4_500_000,
+          variants: [
+            { id: 'variant-m', size: 'M', stock_quantity: 2 },
+            { id: 'variant-l', size: 'L', stock_quantity: null },
+          ],
+        },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await updateRailsAdminProductStock('product-1', [{ id: 'variant-m', stock_quantity: 2.7 }, { id: 'variant-l', stock_quantity: -3 }])
+
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://rails.example.test/api/v1/admin/products/product-1/stock')
+    const init = fetchMock.mock.calls[0][1]
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ variants: [{ id: 'variant-m', stock_quantity: 2 }, { id: 'variant-l', stock_quantity: 0 }] })
+    expect(result.variants).toEqual([
+      { id: 'variant-m', size: 'M', color: null, stock_quantity: 2 },
+      { id: 'variant-l', size: 'L', color: null, stock_quantity: 0 },
+    ])
   })
 
   it('searches a plain product name without matching slugs of renamed products', () => {    const params = buildRailsAdminProductsParams({

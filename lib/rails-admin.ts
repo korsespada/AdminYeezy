@@ -7,6 +7,7 @@ import {
   type ProductColorVariant,
   type ProductFilterFacets,
   type ProductMedia,
+  type ProductStockVariant,
   type SeoAiBatch,
   type SeoAiBatchPreview,
   type SeoAiGeneration,
@@ -231,6 +232,8 @@ export interface RailsChromoffListing {
   chromoff_category_reason?: string | null
   /** Фильтр подкатегории, который Rails посчитал для витрины. */
   chromoff_filter?: string | null
+  /** Хотя бы один активный размер лежит у магазина (остаток > 0). */
+  in_stock?: boolean
   metadata?: Record<string, unknown>
   description?: string
   external_id?: string
@@ -782,6 +785,16 @@ function normalizeRailsMedia(product: any): ProductMedia[] {
   }))
 }
 
+function mapRailsStockVariants(variants: unknown): ProductStockVariant[] {
+  if (!Array.isArray(variants)) return []
+  return variants.map((variant: any) => ({
+    id: String(variant.id),
+    size: variant.size || null,
+    color: variant.color || null,
+    stock_quantity: Math.max(0, Number(variant.stock_quantity) || 0),
+  }))
+}
+
 export function mapRailsProduct(product: any): Product {
   const category = product.category || {}
   const categoryId = category.parent_id ? String(category.parent_id) : String(category.id || '')
@@ -859,6 +872,7 @@ export function mapRailsProduct(product: any): Product {
     attributes: catalogAttributes,
     variant_group_key: product.variant_group_key || null,
     color_variants: colorVariants,
+    variants: mapRailsStockVariants(product.variants),
     created: product.created_at || '',
     updated: product.updated_at || '',
     collectionId: '',
@@ -1014,6 +1028,7 @@ export async function listRailsChromoffListings(options: {
   source?: 'auto' | 'manual'
   sourceSupplierId?: string
   aiStatus?: 'ai_assigned' | 'mapped' | 'needs_review' | 'manual'
+  inStock?: boolean
 } = {}): Promise<RailsChromoffListingList> {
   const params = new URLSearchParams()
   params.set('page', String(options.page || 1))
@@ -1032,6 +1047,7 @@ export async function listRailsChromoffListings(options: {
   if (options.source) params.set('source', options.source)
   if (options.sourceSupplierId) params.set('source_supplier_id', options.sourceSupplierId)
   if (options.aiStatus) params.set('ai_status', options.aiStatus)
+  if (options.inStock) params.set('in_stock', 'true')
 
   const result = await railsFetch<{ listings: RailsChromoffListing[]; supplier_options?: RailsChromoffSupplierOption[]; assignable_supplier_options?: RailsChromoffSupplierOption[]; meta?: { total?: number; pages?: number } }>(
     `/admin/chromoff/listings?${params}`
@@ -2956,6 +2972,20 @@ export async function createRailsAdminProduct(formData: FormData) {
   const result = await railsFetch<{ product: any }>('/admin/products', {
     method: 'POST',
     body: JSON.stringify(productFormDataToRailsPayload(formData, { applyDefaults: true })),
+  })
+  return mapRailsProduct(result.product)
+}
+
+/**
+ * Остаток по размерам пишется отдельным вызовом: обычное сохранение формы
+ * пересобирает размеры из catalog_attributes и остаток не передаёт.
+ */
+export async function updateRailsAdminProductStock(id: string, variants: Array<{ id: string; stock_quantity: number }>) {
+  const result = await railsFetch<{ product: any }>(`/admin/products/${encodeURIComponent(id)}/stock`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      variants: variants.map((variant) => ({ id: variant.id, stock_quantity: Math.max(0, Math.trunc(variant.stock_quantity) || 0) })),
+    }),
   })
   return mapRailsProduct(result.product)
 }

@@ -126,6 +126,14 @@ export interface ProductSupplierOption {
  * Product type used by the admin UI. It preserves legacy field names consumed
  * by existing components while exposing Rails CRM fields used by edit forms.
  */
+/** Вариант товара в Rails и его остаток у магазина. */
+export interface ProductStockVariant {
+  id: string
+  size: string | null
+  color: string | null
+  stock_quantity: number
+}
+
 export interface Product {
   id: string
   productId: string
@@ -173,6 +181,8 @@ export interface Product {
   attributes?: Record<string, any>
   variant_group_key?: string | null
   color_variants?: ProductColorVariant[]
+  /** Активные варианты Rails с остатком: >0 — размер лежит у магазина («В наличии»). */
+  variants?: ProductStockVariant[]
   created: string
   updated: string
   collectionId: string

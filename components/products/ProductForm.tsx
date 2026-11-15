@@ -30,6 +30,7 @@ import { isPriceOnRequest } from '@/lib/product-pricing'
 import CatalogAttributeFields from '@/components/catalog-attributes/CatalogAttributeFields'
 import MeasurementImageRecognizer from '@/components/catalog-attributes/MeasurementImageRecognizer'
 import ProductSizeRecommendationPreview from '@/components/products/ProductSizeRecommendationPreview'
+import ProductStockEditor from '@/components/products/ProductStockEditor'
 import { normalizeCatalogAttributes } from '@/lib/catalog-attribute-values'
 import { applyMeasurementTableAttributes } from '@/lib/measurement-templates'
 import type { CatalogAttributeDefinition } from '@/lib/catalog-attribute-schema'
@@ -1435,6 +1436,8 @@ export default function ProductForm({
               />
               <ProductSizeRecommendationPreview value={catalogAttributes.size_recommendation} />
             </div>
+
+            {product?.id && <ProductStockEditor product={product} />}
 
             {product?.color_variants && product.color_variants.length > 1 && (
               <section className="space-y-3 rounded-lg border border-violet-500/25 bg-violet-500/5 p-3">

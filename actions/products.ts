@@ -8,6 +8,7 @@ import {
   moveRailsAdminProductToTrash,
   restoreRailsAdminProductFromTrash,
   updateRailsAdminProduct,
+  updateRailsAdminProductStock,
   translateRailsAdminProduct,
   translateRailsAdminEntity,
   reviewRailsAdminTranslation,
@@ -44,6 +45,20 @@ export async function updateProductAction(id: string, formData: FormData): Promi
   } catch (error: any) {
     console.error('Update product error:', error)
     return { success: false, error: error.message || 'Failed to update product' }
+  }
+}
+
+export async function updateProductStockAction(
+  id: string,
+  variants: Array<{ id: string; stock_quantity: number }>,
+): Promise<ActionResponse> {
+  try {
+    await requireAdmin()
+    const product = await updateRailsAdminProductStock(id, variants)
+    return { success: true, data: product }
+  } catch (error: any) {
+    console.error('Update product stock error:', error)
+    return { success: false, error: error.message || 'Failed to update stock' }
   }
 }
 
