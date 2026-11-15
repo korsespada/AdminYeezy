@@ -41,6 +41,7 @@ export const DAVID_STUDIO_AI_INSTRUCTION = [
   'Заполняй catalog_attributes только кодами из группы «Все категории» и группы той категории, которую сам выбрал. Не переноси код из чужой категории и не оставляй пустую строку вместо значения.',
   'Обязательно заполни те характеристики выбранной категории, которые подтверждены исходным текстом или фотографиями: металл, пробу, камни, тип застёжки, материал, цвет. Отсутствие подтверждения — не повод пропустить характеристику, но и выдумывать значение нельзя.',
   'Клатчи, ремни, картхолдеры и сумки описываются как обычный товар: конструкция, фактура, фурнитура и видимые детали важнее общих слов.',
+  'product.subcategory заполняй обязательно — id самой конкретной подкатегории из справочника «Подкатегории», а product.category — её родитель. Картхолдеры и кошельки — «Кошельки и картхолдеры», ремни — «Ремни», брелоки, пуговицы и прочие мелкие аксессуары — «Другое».',
 ].join('\n')
 
 /**
@@ -154,7 +155,16 @@ export function davidPromptLookups(input: {
       return { id: String(category.id), name: parent ? `${parent.name} / ${category.name}` : String(category.name) }
     })
 
-  return { brands, categories, subcategories, chromoffCategories }
+  // Раздел Chromoff → подкатегория каталога, к которой он привязан. В промпт не
+  // идёт: нужен серверу, когда модель выбрала раздел Chromoff, но не подкатегорию.
+  const subcategoryIdByName = new Map(subcategories.map((subcategory) => [normalizedName(subcategory.name), subcategory.id]))
+  const chromoffSubcategoryIds: Record<string, string> = {}
+  for (const category of input.chromoffCategories) {
+    const subcategoryId = subcategoryIdByName.get(normalizedName(category.catalog_category?.name))
+    if (subcategoryId) chromoffSubcategoryIds[String(category.id)] = subcategoryId
+  }
+
+  return { brands, categories, subcategories, chromoffCategories, chromoffSubcategoryIds }
 }
 
 /** Правила категорий «Настроек ИИ» только для категорий David. */

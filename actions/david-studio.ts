@@ -19,6 +19,7 @@ import {
 } from '@/lib/photo-clean-jobs'
 import { buildBatchAiContactSheets, runBatchAiOpenRouter, GLOBAL_BATCH_AI_CATALOG_RULES } from '@/lib/batch-ai'
 import { getBatchAiSettingsAction } from '@/actions/batch-ai'
+import { hydrateBatchAiSettings, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import {
   DAVID_BRAND_NAME,
   DAVID_SUPPLIER_NAME,
@@ -248,10 +249,21 @@ function revalidateDavidPage() {
   }
 }
 
-async function loadDavidAiSettings() {
+/**
+ * Настройки ИИ как в «Выгрузках»: провайдер, сохранённый в интерфейсе, с
+ * расшифрованным ключом. Без hydrate ключа нет, и вызов уходил во встроенный
+ * OpenRouter с ошибкой «OPENROUTER_API_KEY не задан».
+ */
+async function loadDavidAiSettings(): Promise<{ settings: any; error?: undefined } | { settings: null; error: string }> {
   const settingsResult = await getBatchAiSettingsAction()
-  if (!settingsResult.success || !settingsResult.data) return null
-  return settingsResult.data as any
+  if (!settingsResult.success || !settingsResult.data) {
+    return { settings: null, error: 'Не удалось прочитать настройки ИИ в «Выгрузках»' }
+  }
+  try {
+    return { settings: requireSavedBatchAiProvider(await hydrateBatchAiSettings(settingsResult.data as any)) }
+  } catch (error: any) {
+    return { settings: null, error: String(error?.message || error) }
+  }
 }
 
 /**
@@ -308,8 +320,8 @@ async function runDavidDraft(handle: string, settings: any) {
 }
 
 export async function generateDavidDraftAction(handle: string) {
-  const settings = await loadDavidAiSettings()
-  if (!settings) return { success: false as const, error: 'Не удалось прочитать настройки ИИ в «Выгрузках»' }
+  const { settings, error } = await loadDavidAiSettings()
+  if (!settings) return { success: false as const, error: error || 'Не удалось прочитать настройки ИИ' }
   return runDavidDraft(handle, settings)
 }
 
@@ -371,8 +383,8 @@ async function processDavidAiQueue(settings: any) {
 export async function queueDavidDraftsAction(handles: string[]) {
   const unique = [...new Set((handles || []).map((handle) => String(handle || '').trim()).filter(Boolean))].slice(0, 500)
   if (!unique.length) return { success: false as const, error: 'Не выбрано ни одного товара' }
-  const settings = await loadDavidAiSettings()
-  if (!settings) return { success: false as const, error: 'Не удалось прочитать настройки ИИ в «Выгрузках»' }
+  const { settings, error } = await loadDavidAiSettings()
+  if (!settings) return { success: false as const, error: error || 'Не удалось прочитать настройки ИИ' }
 
   let queued = 0
   let noPhotos = 0
@@ -431,7 +443,7 @@ export async function resumeDavidAiQueueAction() {
   const running = Number(state.rows[0]?.running || 0)
   // Пока кто-то считает, второй обработчик не нужен: свободный поток сам возьмёт очередь.
   if (queued && !running && !davidAiQueueActive) {
-    const settings = await loadDavidAiSettings()
+    const { settings } = await loadDavidAiSettings()
     if (settings) after(() => processDavidAiQueue(settings))
   }
   return { success: true as const, data: { queued, running } }

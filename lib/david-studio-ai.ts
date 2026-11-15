@@ -31,6 +31,8 @@ export interface DavidAiSnapshot {
   categories: any[]
   subcategories: any[]
   chromoffCategories: Array<{ id: string; name: string }>
+  /** Раздел Chromoff → привязанная подкатегория каталога (запасной выбор подкатегории). */
+  chromoffSubcategoryIds?: Record<string, string>
   attributeCodes: string[]
   attributeDefinitions: any[]
 }
@@ -191,6 +193,7 @@ export async function prepareDavidDraft(input: {
         categories: lookups.categories,
         subcategories: lookups.subcategories,
         chromoffCategories,
+        chromoffSubcategoryIds: lookups.chromoffSubcategoryIds,
         attributeCodes: attributeDefinitions.map((definition) => definition.code),
         attributeDefinitions,
       },
@@ -234,6 +237,21 @@ export function buildDavidDraftAiOutput(raw: unknown, snapshot: DavidAiSnapshot)
     chromoffCategories: snapshot.chromoffCategories || [],
   })
   const proposed = normalized?.product || {}
+
+  // Модель иногда выбирает только верхнюю категорию («Аксессуары») без подкатегории,
+  // а на экране ревью выбор идёт по подкатегориям. Тогда берём подкатегорию, к
+  // которой привязан уверенно выбранный раздел Chromoff, и её родителя.
+  if (!proposed.subcategory) {
+    const chromoffId = String((normalized as any)?.chromoffCategory?.id || '')
+    const fallbackSubcategory = chromoffId ? snapshot.chromoffSubcategoryIds?.[chromoffId] : ''
+    const fallbackRow = fallbackSubcategory
+      ? (snapshot.subcategories || []).find((row: any) => String(row.id) === fallbackSubcategory)
+      : null
+    if (fallbackRow) {
+      proposed.subcategory = String(fallbackRow.id)
+      proposed.category = String(fallbackRow.parent_id || fallbackRow.category || proposed.category || '')
+    }
+  }
 
   const categoryName = lookupName(snapshot.categories, proposed.category)
   const subcategoryName = lookupName(snapshot.subcategories, proposed.subcategory)
