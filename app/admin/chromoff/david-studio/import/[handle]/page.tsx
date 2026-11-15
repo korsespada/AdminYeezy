@@ -6,12 +6,19 @@ import { scrapingQuery } from '@/lib/db'
 import { getRailsCatalogLookups, listRailsChromoffCategories } from '@/lib/rails-admin'
 import { listPhotoCleanJobs } from '@/lib/photo-clean-jobs'
 import { listDavidPhotoExclusions } from '@/lib/david-photo-exclusions'
-import { DAVID_SUPPLIER_NAME, davidPriceRange, davidProductVariantAttributes, type DavidCatalogProduct } from '@/lib/david-studio-import'
+import {
+  DAVID_SUPPLIER_NAME,
+  davidPriceRange,
+  davidProductVariantAttributes,
+  davidPromptLookups,
+  davidRulePriceRub,
+  type DavidCatalogProduct,
+} from '@/lib/david-studio-import'
 import { loadDavidStudioCatalog } from '@/lib/david-studio-catalog-server'
 
 export const dynamic = 'force-dynamic'
 
-/** Рабочий экран товара David: чистка фото, ИИ-черновик, создание или привязка к товару Chromoff. */
+/** Рабочий экран товара David: чистка фото, ИИ-черновик и создание товара Chromoff. */
 export default async function DavidImportPage({
   params,
   searchParams,
@@ -36,12 +43,19 @@ export default async function DavidImportPage({
     listDavidPhotoExclusions(handle).catch(() => [] as string[]),
   ])
 
+  // Те же справочники, что видит ИИ: Chromoff без одежды и обуви.
+  const scoped = davidPromptLookups({
+    brands: lookups.brands as any[],
+    categories: lookups.categories as any[],
+    subcategories: lookups.subcategories as any[],
+    chromoffCategories: chromoffCategories as any[],
+  })
   const categoryNames = new Map<string, string>()
-  for (const category of lookups.categories as any[]) categoryNames.set(String(category.id), String(category.name))
-  const categories = (lookups.subcategories as any[])
+  for (const category of scoped.categories) categoryNames.set(category.id, category.name)
+  const categories = scoped.subcategories
     .map((subcategory) => ({
-      id: String(subcategory.id),
-      name: `${categoryNames.get(String(subcategory.parent_id)) || 'Без категории'} / ${subcategory.name}`,
+      id: subcategory.id,
+      name: `${categoryNames.get(subcategory.parent_id) || 'Без категории'} / ${subcategory.name}`,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, 'ru'))
 
@@ -61,6 +75,7 @@ export default async function DavidImportPage({
           title={product.title}
           sourceUrl={product.url || `https://www.david-studio.com/products/${product.handle}`}
           priceLabel={davidPriceRange(product).label}
+          rulePriceRub={davidRulePriceRub(product)}
           photos={photos.map((photo) => ({
             id: photo.id,
             sourceKey: photo.sourceKey,
@@ -79,7 +94,7 @@ export default async function DavidImportPage({
           variantMeasurements={variantAttributes.measurements}
           variantNotSizes={variantAttributes.notSizes}
           categories={categories}
-          chromoffCategories={chromoffCategories.map((category) => ({ id: String(category.id), name: String(category.name) }))}
+          chromoffCategories={[...scoped.chromoffCategories].sort((left, right) => left.name.localeCompare(right.name, 'ru'))}
         />
       </div>
     </main>

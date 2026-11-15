@@ -9,6 +9,7 @@ import {
   DAVID_SUPPLIER_NAME,
   buildDavidAiPrompt,
   davidProductVariantAttributes,
+  davidPromptLookups,
   mergeDavidCatalogAttributes,
   normalizeDavidAiOutput,
   type DavidCatalogProduct,
@@ -133,7 +134,6 @@ export async function davidReadyPhotoUrls(handle: string): Promise<string[]> {
  */
 export async function prepareDavidDraft(input: {
   handle: string
-  targetProductId: string | null
   settings: any
 }): Promise<
   | { success: true; data: { promptProduct: Record<string, any>; userPrompt: string; photoUrls: string[]; snapshot: DavidAiSnapshot; product: DavidCatalogProduct } }
@@ -147,13 +147,22 @@ export async function prepareDavidDraft(input: {
     return { success: false as const, error: 'Нет очищенных фото: сначала поставьте их в очередь и дождитесь воркера' }
   }
 
-  await ensureDavidDraft(input.handle, input.targetProductId ? 'existing' : 'new', input.targetProductId, product)
+  // Привязки к существующему товару больше нет: черновик всегда про новый товар.
+  await ensureDavidDraft(input.handle, 'new', null, product)
 
-  const [lookups, chromoffCategories, attributeDefinitions] = await Promise.all([
+  const [rawLookups, rawChromoffCategories, attributeDefinitions] = await Promise.all([
     getRailsCatalogLookups(),
     listRailsChromoffCategories(),
     getCatalogAttributeDefinitions(),
   ])
+  // Только справочники Chromoff без одежды и обуви: они же проверяют ответ модели.
+  const lookups = davidPromptLookups({
+    brands: rawLookups.brands as any[],
+    categories: rawLookups.categories as any[],
+    subcategories: rawLookups.subcategories as any[],
+    chromoffCategories: rawChromoffCategories as any[],
+  })
+  const chromoffCategories = lookups.chromoffCategories
 
   const { promptProduct, userPrompt } = buildDavidAiPrompt({
     product,
@@ -163,7 +172,7 @@ export async function prepareDavidDraft(input: {
     categories: lookups.categories as any,
     subcategories: lookups.subcategories as any,
     attributes: attributeDefinitions as any,
-    chromoffCategories: chromoffCategories.map((category) => ({ id: category.id, name: category.name })),
+    chromoffCategories,
   })
 
   return {
@@ -181,7 +190,7 @@ export async function prepareDavidDraft(input: {
         brands: lookups.brands,
         categories: lookups.categories,
         subcategories: lookups.subcategories,
-        chromoffCategories: chromoffCategories.map((category) => ({ id: category.id, name: category.name })),
+        chromoffCategories,
         attributeCodes: attributeDefinitions.map((definition) => definition.code),
         attributeDefinitions,
       },

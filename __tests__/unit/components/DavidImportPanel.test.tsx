@@ -13,7 +13,6 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('@/actions/david-studio', () => ({
-  attachDavidPhotosAction: vi.fn(),
   createDavidChromoffProductAction: vi.fn(),
   excludeDavidPhotoAction: vi.fn(),
   generateDavidDraftAction: vi.fn(),
@@ -21,7 +20,6 @@ vi.mock('@/actions/david-studio', () => ({
   clearDavidWatermarkMarkAction: vi.fn(),
   requeueDavidProblemPhotosAction: vi.fn(),
   restoreDavidPhotoAction: vi.fn(),
-  searchChromoffProductsAction: vi.fn(),
   startDavidPhotoCleaningAction: vi.fn(),
 }))
 

@@ -40,8 +40,189 @@ export const DAVID_STUDIO_AI_INSTRUCTION = [
   'Размерный ряд и замеры приходят из вариантов поставщика и подставляются сервером: sizes и measurements не заполняй и не выдумывай.',
   'Заполняй catalog_attributes только кодами из группы «Все категории» и группы той категории, которую сам выбрал. Не переноси код из чужой категории и не оставляй пустую строку вместо значения.',
   'Обязательно заполни те характеристики выбранной категории, которые подтверждены исходным текстом или фотографиями: металл, пробу, камни, тип застёжки, материал, цвет. Отсутствие подтверждения — не повод пропустить характеристику, но и выдумывать значение нельзя.',
-  'Клатчи, ремни, сумки и одежда описываются как обычный товар: конструкция, фактура, фурнитура и видимые детали важнее общих слов.',
+  'Клатчи, ремни, картхолдеры и сумки описываются как обычный товар: конструкция, фактура, фурнитура и видимые детали важнее общих слов.',
 ].join('\n')
+
+/**
+ * David — только Chromoff: украшения, картхолдеры, ремни, брелоки, немного сумок.
+ * В промпт идёт только то, куда его товары реально попадают; остальные справочники
+ * и правила — десятки тысяч лишних символов на каждый товар.
+ *
+ * Категория каталога → разрешённые подкатегории (null — все). Картхолдеры, ремни,
+ * брелоки и пуговицы в каталоге лежат в «Аксессуарах», поэтому оттуда берём только
+ * эти три подкатегории.
+ */
+export const DAVID_CATALOG_SCOPE: Record<string, string[] | null> = {
+  'Ювелирные изделия': null,
+  Сумки: null,
+  Аксессуары: ['Ремни', 'Кошельки и картхолдеры', 'Другое'],
+}
+
+/** Корни дерева Chromoff, которые берутся целиком (остальное — по категории каталога). */
+export const DAVID_CHROMOFF_ROOTS = ['Изделия из серебра', 'Сумки']
+
+/** Группы характеристик, которые David не нужны, если область состоит только из них. */
+const DAVID_EXCLUDED_ATTRIBUTE_SCOPE_PARTS = ['Одежда', 'Обувь', 'Часы', 'Бижутерия', 'Чемоданы', 'Багаж']
+
+const normalizedName = (value: unknown) => String(value || '').trim().toLocaleLowerCase('ru-RU')
+const DAVID_CATEGORY_NAMES = new Set(Object.keys(DAVID_CATALOG_SCOPE).map(normalizedName))
+const DAVID_EXCLUDED_ATTRIBUTE_PARTS = new Set(DAVID_EXCLUDED_ATTRIBUTE_SCOPE_PARTS.map(normalizedName))
+
+export function isDavidCatalogCategoryName(name: unknown) {
+  return DAVID_CATEGORY_NAMES.has(normalizedName(name))
+}
+
+/** Группа характеристик не нужна David, если её область — только одежда, обувь, часы и т. п. */
+export function isDavidExcludedAttributeScope(scope: string) {
+  const parts = String(scope || '').split(/,|\sи\s/u).map((part) => normalizedName(part)).filter(Boolean)
+  return parts.length > 0 && parts.every((part) => DAVID_EXCLUDED_ATTRIBUTE_PARTS.has(part))
+}
+
+/** Родитель подкатегории в справочнике Rails лежит в `category` (у старых данных — в `parent_id`). */
+export function davidSubcategoryParentId(subcategory: Record<string, any>) {
+  return String(subcategory?.parent_id || subcategory?.category || '')
+}
+
+type RawLookup = Record<string, any>
+type RawChromoffCategory = {
+  id: string
+  name: string
+  parent_id?: string | null
+  active?: boolean | null
+  catalog_category?: { name?: string | null } | null
+}
+
+/**
+ * Справочники для промпта David: только разрешённые категории, без SEO-текстов.
+ * Бренд у David один и подставляется сервером, поэтому весь справочник брендов
+ * (~38 тыс. символов) модели не нужен.
+ */
+export function davidPromptLookups(input: {
+  brands: RawLookup[]
+  categories: RawLookup[]
+  subcategories: RawLookup[]
+  chromoffCategories: RawChromoffCategory[]
+}) {
+  const scopeByName = new Map(Object.entries(DAVID_CATALOG_SCOPE).map(([name, subs]) => [
+    normalizedName(name),
+    subs ? new Set(subs.map(normalizedName)) : null,
+  ]))
+  const categories = input.categories
+    .filter((category) => isDavidCatalogCategoryName(category.name))
+    .map((category) => ({ id: String(category.id), name: String(category.name || '') }))
+  const allowedSubsByCategoryId = new Map(
+    categories.map((category) => [category.id, scopeByName.get(normalizedName(category.name)) ?? null]),
+  )
+  const subcategories = input.subcategories
+    .filter((subcategory) => {
+      const parentId = davidSubcategoryParentId(subcategory)
+      if (!allowedSubsByCategoryId.has(parentId)) return false
+      const allowed = allowedSubsByCategoryId.get(parentId)
+      return !allowed || allowed.has(normalizedName(subcategory.name))
+    })
+    .map((subcategory) => ({
+      id: String(subcategory.id),
+      name: String(subcategory.name || ''),
+      parent_id: davidSubcategoryParentId(subcategory),
+    }))
+  const brands = input.brands
+    .filter((brand) => normalizedName(brand.name) === normalizedName(DAVID_BRAND_NAME))
+    .map((brand) => ({ id: String(brand.id), name: String(brand.name || '') }))
+
+  // Категории Chromoff — дерево. Берём включённые разделы под корнями
+  // DAVID_CHROMOFF_ROOTS, а из остальных веток — только разделы, привязанные к
+  // разрешённой подкатегории каталога (например «Аксессуары / Ремни»).
+  const chromoffById = new Map(input.chromoffCategories.map((category) => [String(category.id), category]))
+  const allowedCatalogNames = new Set(subcategories.map((subcategory) => normalizedName(subcategory.name)))
+  const roots = new Set(DAVID_CHROMOFF_ROOTS.map(normalizedName))
+  const chromoffActive = (category: RawChromoffCategory): boolean => {
+    if (category.active === false) return false
+    const parent = category.parent_id ? chromoffById.get(String(category.parent_id)) : null
+    return parent ? chromoffActive(parent) : true
+  }
+  const chromoffRoot = (category: RawChromoffCategory): RawChromoffCategory => {
+    const parent = category.parent_id ? chromoffById.get(String(category.parent_id)) : null
+    return parent ? chromoffRoot(parent) : category
+  }
+  const chromoffCategories = input.chromoffCategories
+    .filter((category) => chromoffActive(category) && (
+      roots.has(normalizedName(chromoffRoot(category).name))
+      || (Boolean(category.parent_id) && allowedCatalogNames.has(normalizedName(category.catalog_category?.name)))
+    ))
+    .map((category) => {
+      const parent = category.parent_id ? chromoffById.get(String(category.parent_id)) : null
+      return { id: String(category.id), name: parent ? `${parent.name} / ${category.name}` : String(category.name) }
+    })
+
+  return { brands, categories, subcategories, chromoffCategories }
+}
+
+/** Правила категорий «Настроек ИИ» только для категорий David. */
+export function davidCategoryRules<T extends { categoryName: string }>(rules: T[] | null | undefined): T[] {
+  return (rules || []).filter((rule) => isDavidCatalogCategoryName(rule.categoryName))
+}
+
+/**
+ * Пункты общих промптов «Выгрузок», которые касаются только одежды и обуви:
+ * размерные ряды, комплекты, таблицы замеров, примеры текстов про худи и пуховик.
+ * Сопоставление по началу пункта: если текст промпта поменяют, пункт просто
+ * останется в запросе — промпт не сломается, станет лишь длиннее.
+ */
+const DAVID_APPAREL_BULLET_PREFIXES = [
+  'Числовые размеры одежды',
+  'Для одежды',
+  'Для обуви',
+  'Не назначай «Комплекты»',
+  'Считай вещи только',
+  'Карточка, в которой показано несколько вещей',
+  'Сначала сопоставь каждую таблицу замеров',
+  'Для одного товара сохраняй только одну',
+  'Если на одном фото есть одновременно «尺码表',
+  'Только для подтверждённого комплекта',
+  'measurements заполняй',
+]
+
+export function davidScopedPromptText(text: string | null | undefined) {
+  const lines = String(text || '').split('\n')
+  const kept: string[] = []
+  let skippingBullet = false
+  let skippingExample = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    // Примеры текстов для одежды: от «Пример уровня текста для …» до следующего
+    // заголовка раздела (строка заглавными буквами).
+    if (/^Пример уровня текста для /u.test(trimmed)) {
+      skippingExample = true
+      continue
+    }
+    if (skippingExample) {
+      if (trimmed && /^[А-ЯЁA-Z][А-ЯЁA-Z ,.-]{3,}$/u.test(trimmed)) skippingExample = false
+      else continue
+    }
+    const bullet = line.match(/^- (.*)$/u)
+    if (bullet) {
+      skippingBullet = DAVID_APPAREL_BULLET_PREFIXES.some((prefix) => bullet[1].startsWith(prefix))
+      if (skippingBullet) continue
+    } else if (skippingBullet && /^\s+\S/u.test(line)) {
+      // Вложенные подпункты удалённого пункта.
+      continue
+    } else {
+      skippingBullet = false
+    }
+    kept.push(line)
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+/**
+ * Цена David в рублях по правилу 2026-09-25: большая цена поставщика в USD × 172
+ * (× 2 × 86), вверх до целой тысячи. Нет цены у поставщика — null.
+ */
+export function davidRulePriceRub(product: Pick<DavidCatalogProduct, 'price_min' | 'price_max'>) {
+  const usd = Math.max(Number(product.price_max ?? 0) || 0, Number(product.price_min ?? 0) || 0)
+  if (!(usd > 0)) return null
+  return Math.ceil((usd * 172) / 1000) * 1000
+}
 
 export interface DavidCatalogImage {
   position?: number | null
@@ -135,6 +316,9 @@ export function buildDavidAttributeSchema(definitions: Array<BatchAiAttributeDef
   for (const definition of definitions) {
     if (definition.active === false) continue
     const scope = String(definition.category_scope || 'Все категории').trim() || 'Все категории'
+    // Группы только одежды, обуви, часов, бижутерии и чемоданов David не нужны;
+    // смешанные вроде «Одежда, сумки и аксессуары» остаются.
+    if (isDavidExcludedAttributeScope(scope)) continue
     const list = groups.get(scope) || []
     list.push({
       code: definition.code,
@@ -171,7 +355,7 @@ export function buildDavidAiPrompt(input: {
     // Реестр уходит картой «область категории → коды»: модель обязана заполнять
     // характеристики по схеме той категории, которую выбрала сама.
     attributes: buildDavidAttributeSchema(input.attributes) as unknown as BatchAiAttributeDefinition[],
-    categoryRules: input.settings.categoryRules,
+    categoryRules: davidCategoryRules(input.settings.categoryRules),
     chromoffMode: true,
     chromoffCategories: input.chromoffCategories,
   })
@@ -266,16 +450,20 @@ export function buildDavidRailsProductPayload(input: {
   attributes?: Record<string, unknown>
   sizes?: string[]
   media: ReturnType<typeof buildDavidMediaPayload>
+  /** Цена в рублях; 0 — «Цена по запросу» (Rails ставит price_on_request). */
+  priceRub?: number | null
 }) {
   const sizes = [...new Set((input.sizes || []).map((size) => String(size).trim()).filter(Boolean))]
   const externalId = davidExternalId(input.handle)
+  const priceCents = Math.max(0, Math.round(Number(input.priceRub) || 0)) * 100
+  const priceSource = priceCents > 0 ? 'manual' : 'not_assigned'
   return {
     external_id: externalId,
     name: input.name,
     description: input.description,
     h1: input.h1 || input.name,
     seo_description: input.seoDescription || '',
-    price_cents: 0,
+    price_cents: priceCents,
     currency: 'RUB',
     status: 'active',
     indexing_status: 'indexable',
@@ -294,7 +482,7 @@ export function buildDavidRailsProductPayload(input: {
       sku: size ? `${externalId}-${davidSizeSkuSuffix(size)}` : undefined,
       size,
       color: null,
-      price_cents: 0,
+      price_cents: priceCents,
       status: 'active',
       metadata: { generated_from: 'catalog_attributes.sizes' },
     })),
@@ -304,7 +492,7 @@ export function buildDavidRailsProductPayload(input: {
       source_handle: input.handle,
       source_supplier_name: DAVID_SUPPLIER_NAME,
       storefront: 'chromoff',
-      price_source: 'not_assigned',
+      price_source: priceSource,
     },
   }
 }

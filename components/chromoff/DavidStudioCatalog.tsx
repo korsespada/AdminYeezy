@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
-import { CheckCircle2, ExternalLink, ImageOff, Loader2, RotateCcw, Search, Upload, XCircle } from 'lucide-react'
+import { CheckCircle2, ExternalLink, ImageOff, Loader2, RotateCcw, Search, Sparkles, Upload, XCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -26,7 +26,7 @@ import type {
   DavidStudioSummary,
 } from '@/lib/david-studio-catalog'
 import type { DavidProductStatus } from '@/lib/david-studio-status'
-import { startDavidPhotoCleaningBatchAction } from '@/actions/david-studio'
+import { queueDavidDraftsAction, resumeDavidAiQueueAction, startDavidPhotoCleaningBatchAction } from '@/actions/david-studio'
 import DavidPhotoQueueDialog from '@/components/chromoff/DavidPhotoQueueDialog'
 
 const BASE_PATH = '/admin/chromoff/david-studio'
@@ -74,14 +74,20 @@ export default function DavidStudioCatalog({
 
   const statusOf = (handle: string): DavidProductStatus | undefined => statuses[handle]
   const cleaningAnywhere = Object.values(statuses).some((status) => status.cleaning)
+  const aiAnywhere = Object.values(statuses).some((status) => status.draftStatus === 'ai_queued' || status.draftStatus === 'ai_running')
   const selectedSet = new Set(selected)
 
-  // Пока воркер чистит выбранные фото, показываем прогресс без ручного обновления.
+  // Пока воркер чистит фото или ИИ считает черновики, показываем прогресс без
+  // ручного обновления. Для ИИ заодно подхватываем очередь, если сервер
+  // перезапускался посреди пачки.
   useEffect(() => {
-    if (!cleaningAnywhere) return
-    const timer = setInterval(() => router.refresh(), 5000)
+    if (!cleaningAnywhere && !aiAnywhere) return
+    const timer = setInterval(() => {
+      if (aiAnywhere) resumeDavidAiQueueAction().catch(() => undefined)
+      router.refresh()
+    }, aiAnywhere ? 10000 : 5000)
     return () => clearInterval(timer)
-  }, [cleaningAnywhere, router])
+  }, [cleaningAnywhere, aiAnywhere, router])
 
   const toggleSelected = (handle: string, checked: boolean) => {
     setSelected((current) => (checked
@@ -102,6 +108,24 @@ export default function DavidStudioCatalog({
           kind: 'ok',
           text: `В очередь: товаров ${result.data.products}, новых заданий ${result.data.created}, уже было ${result.data.existing}. Чистит локальный воркер.`,
         })
+        setSelected([])
+        router.refresh()
+      } catch (error) {
+        setMessage({ kind: 'error', text: error instanceof Error ? error.message : 'Сервер вернул ошибку без описания' })
+      }
+    })
+  }
+
+  const startBatchAi = () => {
+    setMessage(null)
+    startTransition(async () => {
+      try {
+        const result = await queueDavidDraftsAction(selected)
+        if (!result.success) {
+          setMessage({ kind: 'error', text: result.error })
+          return
+        }
+        setMessage({ kind: 'ok', text: `${result.data.message}. Черновики считаются в фоне.` })
         setSelected([])
         router.refresh()
       } catch (error) {
@@ -376,8 +400,21 @@ export default function DavidStudioCatalog({
                 {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 Очистить фото выбранных ({selected.length})
               </Button>
+              <Button
+                type="button"
+                onClick={startBatchAi}
+                disabled={isPending || selected.length === 0}
+                title="Черновик ИИ для выбранных товаров с очищенными фото; уже опубликованные пропускаются"
+                className="bg-sky-600 text-white hover:bg-sky-500"
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                Обработать ИИ выбранные ({selected.length})
+              </Button>
               {cleaningAnywhere && (
                 <span className="text-xs text-amber-300">чистка идёт в фоне, прогресс обновляется сам</span>
+              )}
+              {aiAnywhere && (
+                <span className="text-xs text-sky-300">ИИ считает черновики в фоне</span>
               )}
               {message && (
                 <span className={`text-xs ${message.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}>{message.text}</span>
@@ -396,7 +433,7 @@ export default function DavidStudioCatalog({
                 >
                   <label
                     className="absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded bg-slate-900/85"
-                    title="Выбрать товар для массовой чистки фото"
+                    title="Выбрать товар для массовой чистки фото или обработки ИИ"
                     onClick={(event) => event.stopPropagation()}
                   >
                     <input
@@ -452,6 +489,15 @@ export default function DavidStudioCatalog({
                         <Badge variant="outline" className="border-amber-500/40 bg-slate-900/80 text-amber-200">
                           очищено {status.photosDone}/{status.photosExpected}
                           {status.photosFailed ? `, сбоев ${status.photosFailed}` : ''}
+                        </Badge>
+                      )}
+                      {status?.draftStatus === 'ai_queued' && (
+                        <Badge variant="outline" className="border-sky-500/40 bg-slate-900/80 text-sky-200">ИИ: в очереди</Badge>
+                      )}
+                      {status?.draftStatus === 'ai_running' && (
+                        <Badge className="bg-sky-500/20 text-sky-100 hover:bg-sky-500/20">
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ИИ считает
                         </Badge>
                       )}
                       {status?.draftStatus === 'ai_error' && (

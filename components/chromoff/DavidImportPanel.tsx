@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { AlertTriangle, CheckCircle2, Eye, ImageOff, Loader2, RefreshCw, RotateCcw, Search, Sparkles, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Eye, ImageOff, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2 } from 'lucide-react'
 import {
-  attachDavidPhotosAction,
   createDavidChromoffProductAction,
   excludeDavidPhotoAction,
   generateDavidDraftAction,
@@ -13,7 +12,6 @@ import {
   markDavidWatermarkAction,
   clearDavidWatermarkMarkAction,
   restoreDavidPhotoAction,
-  searchChromoffProductsAction,
   startDavidPhotoCleaningAction,
 } from '@/actions/david-studio'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -39,12 +37,13 @@ type Draft = {
   error: string | null
   rails_product_id: string | null
   chromoff_listing_id: string | null
+  /** Цена, с которой товар уже создан (₽). */
+  price_rub?: number | null
   /** Метка обновления черновика: по ней поля ревью перечитывают ответ ИИ. */
   updated_at: string | null
 } | null
 
 type Option = { id: string; name: string; parent_id?: string | null }
-type FoundProduct = { id: string; name: string; photos: number; photo: string; category: string; price: number; externalId: string; attributes: Record<string, unknown> }
 
 const VERDICT_LABEL: Record<string, string> = {
   ok: 'вотермарка убрана',
@@ -54,6 +53,8 @@ const VERDICT_LABEL: Record<string, string> = {
 
 const DRAFT_LABEL: Record<string, string> = {
   draft: 'не запускался',
+  ai_queued: 'в очереди ИИ',
+  ai_running: 'ИИ считает',
   ai_ready: 'готов',
   ai_error: 'ошибка',
   created: 'товар создан',
@@ -92,6 +93,7 @@ export default function DavidImportPanel({
   title,
   sourceUrl,
   priceLabel,
+  rulePriceRub = null,
   photos,
   draft,
   variantSizes,
@@ -105,6 +107,8 @@ export default function DavidImportPanel({
   title: string
   sourceUrl: string
   priceLabel: string
+  /** Цена по правилу David (USD × 172, вверх до тысячи) — подставляется в поле цены. */
+  rulePriceRub?: number | null
   photos: Photo[]
   draft: Draft
   variantSizes: string[]
@@ -117,7 +121,6 @@ export default function DavidImportPanel({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [tab, setTab] = useState<'new' | 'existing'>('new')
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const [viewer, setViewer] = useState<Photo | null>(null)
   const [viewOriginal, setViewOriginal] = useState(false)
@@ -135,12 +138,14 @@ export default function DavidImportPanel({
   const [chromoffCategoryId, setChromoffCategoryId] = useState<string>(ai.chromoffCategory?.id || '')
   const [gender, setGender] = useState<string>(ai.gender || '')
   const [publish, setPublish] = useState(true)
-
-  const [query, setQuery] = useState('')
-  const [found, setFound] = useState<FoundProduct[]>([])
-  const [targetId, setTargetId] = useState<string>('')
-  const [zeroPrice, setZeroPrice] = useState<boolean>(false)
-  const [publishTarget, setPublishTarget] = useState<boolean>(false)
+  // Цена по правилу David подставляется сразу; оператор может поправить или
+  // стереть (пусто или 0 — «Цена по запросу»).
+  const [priceRub, setPriceRub] = useState<string>(() => {
+    const initial = draft?.price_rub ?? rulePriceRub
+    return initial ? String(initial) : ''
+  })
+  const priceValue = Math.round(Number(priceRub.replace(/s/g, '').replace(',', '.')) || 0)
+  const priceInvalid = priceRub.trim() !== '' && (!Number.isFinite(Number(priceRub.replace(/s/g, '').replace(',', '.'))) || priceValue < 0)
 
   const counts = useMemo(() => {
     const result: Record<string, number> = { pending: 0, claimed: 0, done: 0, failed: 0 }
@@ -180,7 +185,6 @@ export default function DavidImportPanel({
 
   const attributes = reviewableAttributes(ai.attributes)
   const measurements = measurementRows(variantMeasurements)
-  const targetProduct = found.find((item) => item.id === targetId) || null
 
   const excludedSet = useMemo(() => new Set(excluded), [excluded])
   const visiblePhotos = photos.filter((photo) => !excludedSet.has(photo.sourceKey))
@@ -264,10 +268,7 @@ export default function DavidImportPanel({
           {draft?.status === 'ai_error' && (
             <button
               type="button"
-              onClick={() => run(
-                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
-                'Черновик посчитан',
-              )}
+              onClick={() => run(() => generateDavidDraftAction(handle), 'Черновик посчитан')}
               disabled={pending}
               className="mt-2 inline-flex h-8 items-center gap-2 rounded-md border border-slate-600 bg-slate-700 px-3 text-xs text-slate-100 hover:bg-slate-600 disabled:opacity-50"
             >
@@ -572,25 +573,7 @@ export default function DavidImportPanel({
         )}
       </div>
 
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setTab('new')}
-          className={`h-10 rounded-md px-4 text-sm ${tab === 'new' ? 'bg-slate-100 text-slate-900' : 'border border-slate-600 bg-slate-800 text-slate-200'}`}
-        >
-          Новый товар в Chromoff
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('existing')}
-          className={`h-10 rounded-md px-4 text-sm ${tab === 'existing' ? 'bg-slate-100 text-slate-900' : 'border border-slate-600 bg-slate-800 text-slate-200'}`}
-        >
-          К существующему товару
-        </button>
-      </div>
-
-      {tab === 'new' ? (
-        <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-800/60 p-5">
+      <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-800/60 p-5">
           {draft?.rails_product_id ? (
             <p className="flex items-center gap-2 text-sm text-emerald-300">
               <CheckCircle2 className="h-4 w-4" />
@@ -660,12 +643,23 @@ export default function DavidImportPanel({
                 {priceLabel || '—'}
               </div>
             </div>
-            <div className="text-sm text-slate-300">
-              Цена в каталоге
-              <div className="mt-1 flex h-10 items-center rounded-md border border-slate-700 bg-slate-900/60 px-3 text-slate-200">
-                0 ₽ — витрина покажет «Цена по запросу» и не даст оформить заказ
-              </div>
-            </div>
+            <label className="block text-sm text-slate-300">
+              Цена в каталоге, ₽
+              <input
+                value={priceRub}
+                onChange={(event) => setPriceRub(event.target.value)}
+                inputMode="numeric"
+                placeholder="пусто — «Цена по запросу»"
+                aria-invalid={priceInvalid}
+                className={`mt-1 h-10 w-full rounded-md border bg-slate-900 px-3 text-slate-100 ${priceInvalid ? 'border-rose-500' : 'border-slate-600'}`}
+              />
+              <span className="mt-1 block text-[11px] text-slate-500">
+                {rulePriceRub
+                  ? `по правилу David: ${rulePriceRub.toLocaleString('ru-RU')} ₽ (цена поставщика × 172, вверх до тысячи)`
+                  : 'у поставщика нет цены — правило не применить'}
+                {priceValue > 0 ? '' : ' · сейчас: «Цена по запросу», заказ оформить нельзя'}
+              </span>
+            </label>
           </div>
 
           <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">
@@ -687,124 +681,33 @@ export default function DavidImportPanel({
           </div>
 
         </div>
-      ) : (
-        <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-800/60 p-5">
-          <div className="flex gap-2">
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Поиск товара Chromoff по названию"
-                   className="h-10 flex-1 rounded-md border border-slate-600 bg-slate-900 px-3 text-slate-100" />
-            <button
-              type="button"
-              disabled={pending || !query.trim()}
-              onClick={() => run(async () => {
-                const result = await searchChromoffProductsAction(query)
-                if (result.success) setFound(result.data)
-                return result as any
-              }, 'Найдено')}
-              className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-600 bg-slate-700 px-4 text-sm text-slate-100 hover:bg-slate-600 disabled:opacity-50"
-            >
-              <Search className="h-4 w-4" /> Найти
-            </button>
-          </div>
-
-          {found.length > 0 && (
-            <div className="divide-y divide-slate-700 overflow-hidden rounded-lg border border-slate-700">
-              {found.map((item) => (
-                <label key={item.id} className="flex cursor-pointer items-center justify-between gap-3 bg-slate-900/60 px-3 py-2 text-sm">
-                  <span className="flex min-w-0 items-center gap-3">
-                    <input
-                      type="radio"
-                      name="target"
-                      checked={targetId === item.id}
-                      onChange={() => {
-                        setTargetId(item.id)
-                        // У товара, созданного этим импортом, цена обязана быть 0,
-                        // и он должен быть виден в Chromoff.
-                        const isDavid = item.externalId.startsWith('david-studio-')
-                        setZeroPrice(isDavid)
-                        setPublishTarget(isDavid)
-                      }}
-                    />
-                    {item.photo ? (
-                      <Image
-                        src={item.photo}
-                        alt={item.name}
-                        width={48}
-                        height={48}
-                        unoptimized
-                        className="h-12 w-12 shrink-0 rounded border border-slate-700 object-cover"
-                      />
-                    ) : (
-                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-slate-700 text-slate-600">
-                        <ImageOff className="h-4 w-4" />
-                      </span>
-                    )}
-                    <span className="min-w-0 truncate text-slate-100">{item.name}</span>
-                    {item.externalId.startsWith('david-studio-') && (
-                      <span className="rounded bg-violet-500/20 px-1.5 py-0.5 text-[10px] text-violet-200">товар David</span>
-                    )}
-                  </span>
-                  <span className="text-xs text-slate-400">{item.category} · фото {item.photos} · {item.price} ₽</span>
-                </label>
-              ))}
-            </div>
-          )}
-
-          <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
-            <p className="font-semibold text-slate-100">Что будет записано</p>
-            <ul className="mt-1 list-inside list-disc space-y-0.5">
-              <li>фото: {readyPhotos.length} очищенных кадров (уже имеющиеся пропускаются);</li>
-              <li>характеристики и замеры: пишутся только те поля, которых у товара ещё нет;</li>
-              <li>размеры из вариантов David: {variantSizes.length ? variantSizes.join(', ') : 'нет'};</li>
-              <li>название, описание и категории существующего товара не меняются.</li>
-            </ul>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" checked={zeroPrice} onChange={(event) => setZeroPrice(event.target.checked)} />
-            обнулить цену товара и вариантов (правило David: цена 0)
-          </label>
-
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input type="checkbox" checked={publishTarget} onChange={(event) => setPublishTarget(event.target.checked)} />
-            сделать товар активным (скрытый товар не виден и в Chromoff)
-          </label>
-
-          <p className="text-xs text-slate-400">
-            Фото, характеристики и замеры, которые уже есть у товара, не перетираются.
-          </p>
-        </div>
-      )}
 
       {/* Главные действия всегда на виду: длинные формы не заставляют искать кнопку. */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-700 bg-slate-900/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="min-w-0 text-xs text-slate-400">
-            <span className="text-slate-300">{tab === 'new' ? 'Новый товар в Chromoff' : 'Привязка к существующему'}</span>
-            {tab === 'existing' && targetProduct ? <span> · {targetProduct.name}</span> : null}
+            <span className="text-slate-300">Новый товар в Chromoff</span>
+            <span className="ml-2 text-slate-500">цена: {priceValue > 0 ? `${priceValue.toLocaleString('ru-RU')} ₽` : 'по запросу'}</span>
             <span className="ml-2 text-slate-500">кадров к импорту: {readyPhotos.length}</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => run(
-                () => generateDavidDraftAction(handle, tab === 'existing' ? targetId || null : null),
-                'Черновик посчитан',
-              )}
+              onClick={() => run(() => generateDavidDraftAction(handle), 'Черновик посчитан')}
               disabled={pending || !readyPhotos.length}
               className="inline-flex h-10 items-center gap-2 rounded-md bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50"
             >
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               Сделать черновик ИИ
             </button>
-            {tab === 'new' ? (
-              <>
+            <>
                 <label className="flex items-center gap-2 text-sm text-slate-300">
                   <input type="checkbox" checked={publish} onChange={(event) => setPublish(event.target.checked)} />
                   публиковать
                 </label>
                 <button
                   type="button"
-                  disabled={pending || !name || !categoryId || !chromoffCategoryId}
+                  disabled={pending || priceInvalid || !name || !categoryId || !chromoffCategoryId}
                   onClick={() => run(() => createDavidChromoffProductAction({
                     handle,
                     name,
@@ -816,6 +719,7 @@ export default function DavidImportPanel({
                     photoAlts: Array.isArray(ai.photoAlts) ? ai.photoAlts : [],
                     seoDescription: ai.seoDescription || '',
                     published: publish,
+                    priceRub: priceValue,
                   }), 'Товар создан в Chromoff')}
                   className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
@@ -823,27 +727,6 @@ export default function DavidImportPanel({
                   Создать товар только для Chromoff
                 </button>
               </>
-            ) : (
-              <button
-                type="button"
-                disabled={pending || !targetId || !readyPhotos.length}
-                onClick={() => run(
-                  () => attachDavidPhotosAction({
-                    handle,
-                    productId: targetId,
-                    photoAlts: Array.isArray(ai.photoAlts) ? ai.photoAlts : [],
-                    attributes: ai.attributes || {},
-                    zeroPrice,
-                    publish: publishTarget,
-                  }),
-                  'Записано в товар',
-                )}
-                className="inline-flex h-10 items-center gap-2 rounded-md bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Присоединить к существующему ({readyPhotos.length})
-              </button>
-            )}
           </div>
         </div>
       </div>
