@@ -11,8 +11,8 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  # Свой реестр на сервере Beget: оттуда не открывается ghcr.io, поэтому Coolify
-  # скачивает образ отсюда (Yeezy-Site: ops/registry, docs/deployment/BEGET_SERVER.md).
+  # Свой реестр на сервере Beget, запасной: Coolify пока скачивает из GHCR через
+  # обход на Reg.ru (Yeezy-Site: ops/registry, docs/deployment/BEGET_SERVER.md).
   MIRROR_IMAGE: registry.yuconcierge.com/adminyeezy
   # Панель и приложение задаются repository variables, чтобы смена сервера
   # не требовала правки workflow. Без COOLIFY_APP_UUID образ только собирается.
@@ -74,7 +74,9 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Свой реестр необязателен: канал из GitHub Actions до Beget бывает очень медленным.
       - uses: docker/login-action@v3
+        continue-on-error: true
         with:
           registry: registry.yuconcierge.com
           username: ${{ secrets.REGISTRY_USER }}
@@ -116,11 +118,18 @@ jobs:
         run: |
           docker push "$IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:latest"
+
+      - name: Push image to own registry
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ steps.img.outputs.app }}
+        run: |
           docker tag "$IMAGE:$GITHUB_SHA" "$MIRROR_IMAGE:$GITHUB_SHA"
           docker push "$MIRROR_IMAGE:$GITHUB_SHA"
 
       # Приложение в Coolify — Docker-образ с тегом :production: перед деплоем
-      # тег переводится на этот коммит, Coolify скачивает его из своего реестра.
+      # тег переводится на этот коммит, Coolify скачивает его из GHCR.
       - name: Deploy to Coolify
         env:
           COOLIFY_DEPLOY_TOKEN: ${{ secrets.COOLIFY_DEPLOY_TOKEN }}
@@ -131,7 +140,7 @@ jobs:
             exit 0
           fi
           docker buildx imagetools create -t "$IMAGE:production" "$IMAGE:$GITHUB_SHA"
-          docker buildx imagetools create -t "$MIRROR_IMAGE:production" "$MIRROR_IMAGE:$GITHUB_SHA"
+          timeout 300 docker buildx imagetools create -t "$MIRROR_IMAGE:production" "$MIRROR_IMAGE:$GITHUB_SHA"             || echo "::warning::own registry tag :production not updated"
           curl -fsS --retry 3 --connect-timeout 20 --max-time 120 -X POST \
             -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" \
             "$COOLIFY_URL/api/v1/deploy?uuid=$COOLIFY_APP_UUID&force=false"
