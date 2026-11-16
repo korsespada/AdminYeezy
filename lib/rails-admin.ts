@@ -290,6 +290,7 @@ export interface RailsChromoffReviewInput {
   status: 'draft' | 'published'
   featured?: boolean
   position?: number
+  legacy_key?: string | null
   items: RailsChromoffReviewItem[]
   photo_src?: string | null
   photo_alt?: string | null

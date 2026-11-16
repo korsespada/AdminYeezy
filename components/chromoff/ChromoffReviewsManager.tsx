@@ -2,8 +2,13 @@
 
 import { useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Check, ImagePlus, Loader2, Plus, Save, Star, Trash2 } from 'lucide-react'
-import { deleteChromoffReviewAction, saveChromoffReviewAction } from '@/actions/chromoff-reviews'
+import { ArrowLeft, Check, ImagePlus, Loader2, Plus, RefreshCw, Save, Star, Trash2 } from 'lucide-react'
+import {
+  deleteChromoffReviewAction,
+  importSiteChromoffReviewsAction,
+  saveChromoffReviewAction,
+} from '@/actions/chromoff-reviews'
+import { missingSiteChromoffReviews } from '@/lib/chromoff-review-seed'
 import type { RailsChromoffReview, RailsChromoffReviewInput } from '@/lib/rails-admin'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -215,7 +220,22 @@ export default function ChromoffReviewsManager({ initialReviews }: { initialRevi
     })
   }
 
+  function importFromSite() {
+    startTransition(async () => {
+      const result = await importSiteChromoffReviewsAction()
+      if (result.reviews) {
+        const next = [...result.reviews].sort(sortReviews)
+        setReviews(next)
+        if (!form.id && next[0]) setForm(toForm(next[0]))
+      }
+      setMessage(result.success
+        ? { tone: 'ok', text: `Перенесено с сайта: ${result.created ?? 0}. Отзывы без фото — черновиками, на главной их и сейчас нет.` }
+        : { tone: 'error', text: result.message || 'Не удалось перенести отзывы с сайта.' })
+    })
+  }
+
   const publishedCount = reviews.filter((review) => review.status === 'published').length
+  const missingFromSite = missingSiteChromoffReviews(reviews).length
 
   return (
     <div className="min-h-full bg-slate-900 px-4 py-5 text-slate-200 sm:p-6">
@@ -235,6 +255,19 @@ export default function ChromoffReviewsManager({ initialReviews }: { initialRevi
             <Button asChild variant="outline" className="border-slate-700 bg-slate-800 text-slate-200">
               <Link href="/admin/chromoff"><ArrowLeft className="h-4 w-4" />К каталогу</Link>
             </Button>
+            {missingFromSite > 0 ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isPending}
+                onClick={importFromSite}
+                className="border-violet-500/50 bg-violet-500/10 text-violet-100"
+                title="Отзывы из статичного резерва chromoff.store, которых ещё нет в админке"
+              >
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Перенести с сайта ({missingFromSite})
+              </Button>
+            ) : null}
             <Button type="button" onClick={startNew}><Plus className="h-4 w-4" />Новый отзыв</Button>
           </div>
         </header>
@@ -279,7 +312,8 @@ export default function ChromoffReviewsManager({ initialReviews }: { initialRevi
 
             {reviews.length === 0 ? (
               <p className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-                Пока нет ни одного отзыва. Начните с «Новый отзыв».
+                Пока нет ни одного отзыва. Сайт сейчас показывает статичный резерв — перенесите его кнопкой
+                «Перенести с сайта» или начните с «Новый отзыв».
               </p>
             ) : null}
           </aside>
