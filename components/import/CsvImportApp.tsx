@@ -93,7 +93,7 @@ import SupplierPriceRulesDialog from "@/components/import/SupplierPriceRulesDial
 import { MeasurementsField, SizeRecommendationField } from "@/components/catalog-attributes/CatalogAttributeFields";
 import MeasurementImageRecognizer from "@/components/catalog-attributes/MeasurementImageRecognizer";
 import MeasurementTemplatePicker from "@/components/import/MeasurementTemplatePicker";
-import { applyMeasurementTableAttributes } from "@/lib/measurement-templates";
+import { applyMeasurementTableAttributes, normalizeProductMeasurements } from "@/lib/measurement-templates";
 import { formatImportAttributeValue, isGenericImportAttribute } from "@/lib/catalog-attribute-display";
 import { getCatalogAttributeDefinition } from "@/lib/catalog-attribute-schema";
 import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from "@/lib/supplier-publication";
@@ -3988,6 +3988,13 @@ function CsvProductDrawer({
   const categoryName = (lookups?.categories || []).find((category) => category.id === local.category)?.name || local.category;
   const isClothing = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "одежда";
   const isShoe = String(categoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "обувь";
+  // Таблица замеров нужна и аксессуарам: у ремней это соответствие обхвата
+  // талии европейскому размеру. Раньше блок показывался только одежде и обуви,
+  // поэтому записанная скриптом таблица в карточке ремня была не видна.
+  const subcategoryName = (lookups?.subcategories || []).find((subcategory) => subcategory.id === local.subcategory)?.name || "";
+  const isBelt = String(subcategoryName).trim().toLocaleLowerCase("ru-RU").replace(/ё/g, "е") === "ремни";
+  const hasMeasurementsTable = Boolean(normalizeProductMeasurements(attributes.measurements));
+  const showsMeasurements = isClothing || isShoe || isBelt || hasMeasurementsTable;
   const updateAttribute = (oldKey: string, nextKey: string, nextValue: string) => {
     const next = { ...attributes };
     if (oldKey !== nextKey) delete next[oldKey];
@@ -4405,7 +4412,7 @@ function CsvProductDrawer({
                 </div>
               </div>
               <div className="space-y-3 border-t border-slate-800 pt-4">
-                {(isClothing || isShoe) && <div className="space-y-2">
+                {showsMeasurements && <div className="space-y-2">
                   <div className="rounded-lg border border-indigo-500/25 bg-indigo-500/5 p-2.5">
                     <div className="mb-2 text-[11px] font-semibold text-indigo-100">Распознать таблицу по фото</div>
                     <MeasurementImageRecognizer

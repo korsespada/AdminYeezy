@@ -684,6 +684,74 @@ last, never attached on-model photos, dropped cards without a recognised brand
 and removed a first photo shared by two cards. Its brand list used the old
 `filter_task_152.py` ids, so the current version replaces it.
 
+## Женская одежда 4 (supplier 21)
+
+DB-backed version 3 (active). The source lives in
+`supplier_post_process_scripts`; nothing is committed under `scripts/parser/`.
+Evidence is the immutable `SCRAPED` snapshot of batch
+`1cb5ffe6-9a8c-402c-bbea-abb41eb1045a` — 6223 albums, feed 2025-11 … 2026-11-16,
+808 blocks → 614 cards (15 colour families / 33 cards). The v2 run produced 691
+cards; the operator removed the 77 cards without a catalogue brand by hand and
+asked v3 to drop them in the script instead.
+
+The feed is newest-first and separates products with a photo-less album whose
+caption is exactly `-` (811 separators). A normal block is 5-8 albums: the
+`尺寸表` size chart, three one-photo lookbook cards that repeat photos of the
+description album, the long brand/marketing album (`𝐌𝐢𝐮𝐌𝐢*26new🪄…`,
+`𝗣𝗿𝗮𝗱*26new🪄…`, `Ralph Lauren26new🪄…`) with the model photos, and the
+`实拍细节图 <code>` detail album. Some blocks add extra colour/GW/styling
+albums or a purchase receipt (`yb购入凭证`).
+
+Gallery order is fixed: detail album(s) → description album's model photos →
+size chart(s) last. The supplier's detail template is 1) the item styled with a
+companion piece (a jumper with trousers, a skirt with a jacket, a hat with a
+scarf), 2) a back or second angle, 3) the clean front shot. The operator
+corrected the rule on 2026-11-16: the **third** photo becomes the first one
+(v1/v2 put the second photo first). Lookbook singles, receipts and extra
+colour/GW/styling albums contribute no photos. A block with several detail
+albums stays one card only for a two-piece set (`两件套`/`➕`), a reversible item
+(`双面穿`) or two quality versions (`高版本`/`跑量版`); then `实拍细节图`
+photos come first, followed by the rare
+`外层实拍图`/`内里实拍图`/`背心实拍图`/`实拍今天 <code>` albums.
+
+Several **coded** detail albums are the same model in different colours
+(`黑白双色`, `三色可选`): one card per colour — its own detail gallery plus the
+shared size chart — linked with a 32-hex `variant_group_key` (md5 of
+`womens4|<brand id>|<description>`) and a readable `variant_group_name` such as
+`Miu Miu 流苏字母羊毛针织围巾`. Members carry
+`attributes.album_colour_index` and `attributes.color_family_source_ids`; the
+description album's model photos are not attached because they show every
+colour at once, and the AI `family_names` stage names each colour. This fixed
+the reported scarf `#34` and gloves `#35` cards, which mixed two colours.
+
+The description is the brand/marketing album; `name` is never written — the AI
+stage names the card. Blocks without a detail album or without a description
+album are dropped (45 + 9 blocks), as are 13 supplier dumps of more than 12
+albums (several products under one separator), 76 Chrome Hearts blocks and 77
+blocks whose brand is absent from the reference book (SCULPTO, Urba, Madhappy,
+Palace, Stussy, Supreme, Jaded London, Pushbutton, Carne Bollente, Lululemon,
+Wild Donkey …). A card without a catalogue brand is never added.
+
+The brand is resolved from the leading code — `MiuMi`, `Prad`, `Dio`,
+`Chane`/`Chan`, `Celin`, `LOEW`, `Moncle`, `Lv`, `Saint Lauren`/`YSL`,
+`Acne Studio`, `Ralph Lauren`, `LP`, `Brunello Cucinell`, `Thom Brown`,
+`Alexanderwan`, `Vivi ennewestwood`, `WE11DONE`, `Open Y`, `ShuShuTon`,
+`Balenciag`, `Herme` — to the canonical `catalog_id_mappings` id, with
+`attributes.brand_name`/`brand_alias`. Chrome Hearts is never published
+(`Chrome Hearts`, `Chrome Heart`, `ch克罗心`, `CH甜酷…`).
+
+Scarves (`围巾`, `围脖`, `丝巾`, `方巾`, `头巾`), hats (`冷帽`, `针织帽`,
+`毛线帽`, `帽子`, `帽`), gloves (`手套`), shawls (`披肩`, `披巾`, `斗篷`) and
+caps (`鸭舌帽`, `棒球帽`, `渔夫帽`, `遮阳帽`, `贝雷帽`) are written to the
+`Аксессуары` category (`1bd865aa-f058-4db2-aeb7-8e9bc7d191dd`) with the
+matching subcategory, recognised by the head noun that ends the product title,
+so a `连帽` hoodie or a `帽子可拆卸` parka stays clothing. 26 cards of this
+batch are accessories.
+
+Cards carry `attributes.album_merge_version`, `album_source_positions`,
+`detail_source_positions`, `description_source_position` and
+`size_chart_source_positions`; a second run returns the input unchanged.
+
 ## Женская одежда (supplier 18)
 
 DB-backed version 2 (active). The source lives in
@@ -756,7 +824,7 @@ albums 1855 sit in the 656 cards and 858 do not: 98 `GW图`, 58 spare size cards
 of the dropped belts, socks and small cards; 75% of all photos survive into the
 cards. Reposts that differ only in photos are not deduplicated.
 
-## Женская одежда 2
+## Женская одежда ZP 2 (supplier 64)
 
 The DB-backed post-process for `Женская одежда ZP 2` reads the supplier's
 newest-first timeline of separator blocks. Every block opens with a photo-less
@@ -804,6 +872,81 @@ as `attributes.description_source_id`, `model_source_id`,
 (`zp2_blocks_v1`) makes a second run return the cards unchanged. An album is
 attached only when its block holds exactly one such card (or one per gallery);
 ambiguous service cards are left unattached instead of guessed from adjacency.
+
+## Женская одежда 2 (supplier 19)
+
+Активна DB-версия 2 `Женская одежда 2 — блоки, модель, сетка, бренды,
+аксессуары v2 (16.11.2026)`, маркер
+`attributes.album_merge_version='womens2_blocks_v2'`, `post_process_enabled=true`.
+Проверена на полном сырье батча `dc3e8c63-4c83-4355-9dfb-46001257717b`
+(16.11.2026): 1613 альбомов, 191 разделитель, снимок `Сырой товар`. Батч уже
+был обработан версией 1 и AI (снимки `Обработан скриптом` 197 и `До AI ·
+full` 194, стадия `SCRIPT_PROCESSED`, 194 товара); версия 2 к нему не
+применялась — нужен повторный запуск пост-обработки, который перезапишет
+текущий обработанный слой.
+
+Лента newest-first, каждый блок закрыт альбомом без фото
+`🎀————————————🎀`. Внутри блока: одна `尺码表#` (1–2 фото), фото-альбомы
+модели с короткой подписью (`易梦玲同款`, `get杨幂同款`, `Waterloo风衣`,
+3–9 фото), одиночные фото без подписи, карточка товара (4+ фото и 90+
+символов либо 40+ с `Size`/`💰`/`颜色`, либо 3 фото с `Size`/`💰` у
+комплекта/аксессуара) и служебные карточки (`🧾ZP…购入`, `🆚`/`市场货`).
+
+Роли и склейка:
+
+- разделитель удаляется;
+- карточка товара сохраняет `external_id`, `source_position`, описание,
+  цену и статус; её фото идут первыми;
+- фото модели (альбомы и одиночные) приклеиваются к СЛЕДУЮЩЕЙ карточке
+  блока; если карточки после нет — к последней;
+- `尺码表#` добавляется последней КАЖДОЙ карточке блока (в батче `#2` идёт
+  к `#7` и `#13`, `#33` — к `#39`, `#42` — к `#48`);
+- служебные карточки, сравнения (`🆚`, `市场货`, `去年…今年`, `男款…女款`) и
+  `🧾ZP…购入` не входят в галерею и не становятся товарами;
+- порядок фото: карточка, альбом модели, одиночные, сетка последней.
+
+Если в блоке две карточки одной модели: одинаковый явный список `颜色：…`
+или пометка `双面` означают один товар (фото обеих карточек и более длинное
+описание): `#660+#664` — двустороннее пальто MM6, `#907+#912` — кофта
+Burberry в четырёх цветах. Иначе это разные цвета: два товара с общим
+`variant_group_key` = md5(`19|<brand id>|<title>`) и именем
+`<brand> <title>` (`#7` чёрный / `#13` беж, `#945`/`#949`,
+`#1462`/`#1467`, `#1585`/`#1589`), всего 4 семьи / 8 карточек. Комплект из
+двух вещей (разные цены или строка `上衣… 裤子…`) остаётся двумя товарами и
+в семью не попадает (`#144`/`#148`, `#155`/`#159`, `#456`/`#461`,
+`#763`/`#767`, `#827`/`#833`, `#1564`/`#1568`); обеим частям достаётся одна
+и та же сетка блока. Разные вещи с разными названиями (`#1359` шорты /
+`#1363` кардиган) остаются отдельными.
+
+Бренд читается из подписи карточки и пишется каноническим id из
+`catalog_id_mappings`: Burberry, Chanel, Prada, Moncler, Louis Vuitton,
+Miu Miu, Dior, Celine, Gucci, Loewe, Maison Margiela, Saint Laurent, Fendi,
+Hermes, Bottega Veneta, Loro Piana, Ami, Acne Studios, Balenciaga, Thom
+Browne, Ralph Lauren, Arcteryx, Canada Goose. Chrome Hearts не публикуется:
+6 блоков / 12 альбомов, 7 карточек. Товары без канонического бренда тоже не
+публикуются: два Skims (`#964`, `#968`) удалены, бренда Skims нет в
+справочнике. Ремни (`腰带`/`皮带`) не включаются: 5 карточек `#682`,
+`#1105`, `#1169`, `#1237`, `#1286` удалены.
+
+Аксессуары сразу получают `category = 1bd865aa-f058-4db2-aeb7-8e9bc7d191dd`
+(`Аксессуары`) и подкатегорию: `#128` перчатки → `Перчатки`
+(`b2fe2c25-faaf-40c6-bc3b-5cf7b7f378d3`), `#403` шарф → `Шарфы`
+(`24e18ada-19eb-4f7b-b830-2eb80d959732`), `#407` и `#448` шапки →
+`Шапки` (`5753e028-339f-4606-b456-758cce6442cd`), `#976`, `#992`, `#1333`
+кепки → `Кепки и бейсболки`
+(`c296a5b2-a5bb-46ab-8c9d-aba90b472c69`). Подкатегория пишется и в
+`attributes.accessory_type`.
+
+Preview на полном сырье: `1613 → 189` товаров, 4 семьи (8 карточек),
+7 карточек Chrome Hearts, 5 ремней, 2 Skims, 73 `🧾ZP…购入` и 3 карточки
+сравнения (`#127`, `#240`, `#1520`) удалены, две пары длинных карточек
+склеены; повторный запуск идемпотентен, пустой вход даёт 0, неизвестных и
+дублирующихся `external_id` нет. Примеры: `#7` — 13 фото (`#7` + модель
+`#3` + одиночные `#4-6` + сетка `#2`), `#13` — 16 фото (`#13` + `#9` +
+`#10-12` + `#2`), `#39` — 19 фото (`#39` + `#34` + `#36-38` + `#40` +
+`#33`), `#48` — 22 фото (`#48` + `#43` + `#45-47` + `#42`); `#403` шарф
+7 фото, `#407` шапка 6 фото. AI-нормализация и публикация в Rails для версии
+2 не запускались.
 
 ## Одежда МЖ 2
 
@@ -1915,6 +2058,68 @@ AVAILABLE») — реклама и не публикуется. Семья из 
 Cucinelli - Wool Suit»); товары получают первое описание, а второй альбом
 отброшен, потому что его фото — уже собранные обложки этих же двух цветов.
 AI-нормализация и публикация в Rails не запускались.
+
+## Женская верхняя одежда (supplier 23)
+
+Активная DB-backed версия `womens-outerwear-albums-1.py` (v1, 15.11.2026) живёт
+только в `supplier_post_process_scripts`; отдельного файла в репозитории нет,
+деплой для правки не нужен. Проверена на полном сыром снимке выгрузки
+`1c05f14d-5076-4bf7-951a-e0a2cb96ad14` (`Сырой товар`, 2026-11-14T15:56:56Z,
+6072 карточки, 2026-04-30 … 2026-11-14): `6072 → 2192` товара, сырой снимок не
+изменялся, стадия выгрузки осталась `SCRAPED`, флаг
+`suppliers.post_process_enabled` включён.
+
+Лента отдаётся новыми карточками вперёд: у одного товара впереди идут одиночные
+карточки-обложки (одно фото, иногда с видео в
+`attributes.szwego_video_url`), за ними — альбомы с полной галереей (4–13 фото)
+и английской подписью модели («Dior * Winter New Products … S-XL»). Номер `#N`
+в сетке — это `source_position + 1`. Разделение на товары:
+
+* всплеск = соседние карточки, у которых разница `attributes.szwego_timestamp`
+  не больше 240 с, а весь всплеск не длиннее 420 с. Замеры по примерам
+  оператора: максимальный разрыв внутри одного товара 149 с (`#11 → #10`),
+  минимальный разрыв между соседними товарами 253 с, максимальная длина товара
+  281 с (`#8 → #15`);
+* альбом — единица товара. Альбом с подписью только про изнанку («Can be worn
+  on both sides», «可正反两面穿») и альбом без подписи присоединяются к
+  ближайшему альбому с подписью того же всплеска (при равенстве — к более
+  новому): так `#14` попадает в товар `#13`;
+* серия одиночных карточек присоединяется к альбому, который идёт сразу за ней
+  в ленте. Серия длиннее 6 карточек оставляет только 6 ближайших к альбому
+  (больше 6 обложек у одного товара в выгрузке не встречается), а карточка со
+  своей подписью товара никогда не поглощается;
+* порядок галереи: обложки в порядке ленты, затем галерея альбома товара,
+  затем галереи присоединённых альбомов. Видео — ближайшее по времени к
+  главному фото; кадр-обложка видео в галерею не дублируется;
+* альбомы одного всплеска с одинаковой подписью и распознанным брендом —
+  цвета одной модели: остаются отдельными товарами, но получают стабильный
+  32-hex md5 `variant_group_key` и `variant_group_name` (нужно минимум два
+  участника с разными галереями). Без бренда в подписи семья не строится:
+  «🌼 Newly released in 2026» стоит на 16 разных альбомах;
+* бренд читается из подписи (`Dior`, `BRUNELLO CUCINELL*I`, `The Ro * w`,
+  `LoroPian*a`, `SAINT LAURE*N`, `Bottega vene*t^`, …) и записывается id из
+  `catalog_id_mappings` (`entity_type='brand'`) плюс читаемое имя в `name`;
+* служебные карточки канала («New shooting in progress», «The 2026 new model is
+  currently being filmed», «two thousand and twenty-six», «Taking Orders»,
+  «Received orders», «Outfit Recommendations», «Counter Map», «Color chart»,
+  только эмодзи) не являются товарами и в экспорт не попадают — на картинках
+  это рекламные коллажи из разных вещей (`#1625`, `#2389`, `#4874`, `#4875`).
+
+Примеры оператора воспроизводятся дословно: `#1–#7` → один товар с обложками
+`#4`, `#5`, `#6`, видео `#3`, галереей и описанием `#7`; `#8–#15` → товар
+`#13` (обложки `#10`, `#11`, `#12`, видео `#9`, галерея `#13`, изнанка `#14`)
+и отдельный товар `#15` в той же цветовой семье. Единственное отличие от
+формулировки оператора: кадр `#10` (почти дубль `#11` спереди) остаётся в
+галерее, потому что отличить его от `#11` детерминированно нельзя.
+
+Что осталось неоднозначным: 985 товаров из 2192 — одиночные карточки без
+своего альбома (тизеры и обложки, у которых альбом не попал в выгрузку); в
+областях, где поставщик залил десятки карточек одной секундой (около 15 %
+склеенных товаров), порядок внутри такой секунды условен, поэтому
+присоединение обложек там менее надёжно. Повторный запуск идемпотентен
+(`attributes.album_merge_version`), пустой вход даёт пустой выход, все
+`external_id` уникальны. AI-нормализация, публикация в Rails и стадия
+`runBatchPostProcessScript` не запускались.
 
 ## Мужская одежда (supplier 24)
 
@@ -3432,3 +3637,148 @@ runner'ом; повторный прогон на выходе даёт тот �
 «Сырой товар» от 14.11.2026 10:52). Стадия постобработки, AI-нормализация и
 публикация в Rails не запускались; флаг `post_process_enabled` у поставщика
 включён вместе с активацией версии.
+
+
+## Ювелирка (supplier 59)
+
+С 14.11.2026 активна DB-backed версия 1
+(`Ювелирка — только альбомы с фото и видео: ближайшее видео + второе фото первым
+v1 (14.11.2026)`, id `f80f5298-2951-4dbe-813f-1d72b1470807`, md5
+`e82d85a6fa6b24959431df6eba375eed`). Исходник живёт только в
+`supplier_post_process_scripts`, деплой не нужен; флаг `post_process_enabled`
+включён вместе с активацией.
+
+Оператор задал паттерн по скрину сетки (14.11.2026): нужны только альбомы с
+фото и видео. В ленте (новые сверху) товар поставщика — это ДВЕ карточки
+подряд: однокадровая карточка с видео и коротким названием (`铆钉耳环。`), сразу
+за ней альбом с реальными фото и полной подписью (`铆钉耳环 18K金。`). Примеры
+оператора: альбом `#8` + видео `#7`, альбом `#10` + видео `#9`.
+
+Правила:
+
+- Товар — только альбом (2+ фото), у которого непосредственно перед ним стоит
+  карточка видео. Однокадровые карточки (в том числе карточки-названия старых
+  выкладок 2024 года, где вместо видео шло название), видео без альбома и
+  свалки видео отбрасываются: сырой набор `11 559 -> 2 684` товара.
+- Видео берётся ближайшее к альбому; ссылка пишется в
+  `attributes.szwego_video_url`, кадр карточки видео — в
+  `szwego_video_poster_url`, время — в `szwego_video_timestamp`. В `photos`
+  видео не попадает.
+- Порядок фото: второе фото ставится первым, остальные сохраняют порядок
+  («просто всегда делай второе фото первым»): первым у поставщика обычно идёт
+  кадр с коробкой и сертификатом, вторым — товар в руке. Пример оператора
+  `#10`: было `[упаковка, серьги в руке, крупно, пара]`, стало
+  `[серьги в руке, упаковка, крупно, пара]`.
+- Описание, `external_id`, `source_position`, бренд и цена остаются от альбома;
+  в `attributes` пишутся `album_merge_version = jewelry-59-album-video-1`,
+  `album_main_position`, `album_source_positions`.
+
+Направление склейки подтверждено данными: у 2 684 пар «видео перед альбомом»
+название видео — префикс названия альбома в 1 978 случаях (74%), а у 2 590 пар
+«альбом, видео после» — только в 99 (4%), то есть видео всегда публикуется уже
+после альбома и приклеивать надо карточку слева.
+
+Разрыв публикации альбома и видео: медиана 31 с, p99 — 401 с. Час в
+`MAX_VIDEO_GAP_MS` отсекает три пары из свалок видео (`#3392`, `#3538`,
+`#4892`; разрыв 20–48 часов, соседнее видео принадлежит другому товару) — такие
+альбомы по правилу «только с видео» в каталог не идут.
+
+Альбомы, у которых видео стоит на самой карточке (старая выкладка 2023–2024,
+`客订出货随手拍 … 喜欢的来订。`), остаются товаром со своим видео: `#8427`,
+`#10550`, `#10558`, `#10560`.
+
+Preview на сыром наборе: `11 559 -> 2 684` товара (2023: 850, 2024: 81,
+2025: 741, 2026: 1 012), у всех 2–11 фото и своё видео; идемпотентность, пустой
+вход (0), уникальность `external_id`/`source_position` и отсутствие неизвестных
+id проверены runner'ом, повторный прогон — pass-through по маркеру. Визуально
+проверены первые десять товаров и середина списка: альбомные галереи без
+карточек деталей, первым идёт кадр с товаром в руке.
+
+Ограничения:
+
+- ближайшее видео иногда принадлежит соседнему товару, если поставщик
+  опубликовал альбом, а следом видео другого изделия (`#4805` 菱格无钻耳拍 <-
+  `coco耳钉`, `#3561`, `#11154`): в 26% пар название видео не является префиксом
+  названия альбома, но в основном это наборы (`菱格一套` <- `菱格戒指`,
+  `蛇手镯＋戒指` <- `蛇戒指`), а не ошибка;
+- перевыкладки не удаляются: 93 группы товаров с одинаковым набором фото
+  (187 товаров, до трёх копий); оператор об этом не просил, ключ (подпись +
+  набор фото) для отдельного правила уже виден;
+- цветовые семьи (`variant_group_key`) не строятся;
+- инструкции для ИИ (`suppliers.ai_instructions`) не написаны — следующий шаг;
+  бренд, `external_id`, `photos`, порядок фото и `attributes.szwego_video_url`
+  AI обязан сохранять.
+
+Батч `8fb7d698-ee44-4314-839c-139183623680` остаётся на этапе `SCRAPED`
+(11 559 позиций, единственный снимок «Сырой товар» от 14.11.2026 13:02 UTC).
+Стадия постобработки, AI-нормализация и публикация в Rails не запускались.
+
+## Ремни (supplier 56)
+
+С 16.11.2026 активна DB-backed версия 3
+(`Ремни — альбомы от 8 фото, бренд по тегу, цены, EU-размеры, без семей v3`,
+id `76b59c00-479c-4394-b240-f497aad957a1`, md5
+`53423f466ced72fcf64f18f33bb17591`); версии 1 (`82189b7a`, md5 `a83394ad…`) и
+2 (`96d8bbdf`, md5 `58f25f90…`) остаются точками отката. Исходник живёт только в
+`supplier_post_process_scripts`; деплой не нужен, флаг `post_process_enabled`
+включён вместе с активацией.
+
+Лента Szwego (27 432 карточки, батч `a015a0ee-816b-4372-8cc5-38160c0b1050`)
+устроена так: на каждый цвет поставщик выкладывает одиночные фото, следом
+коллекционную карточку `集合图` (5–6 снимков) и товарные альбомы по 8–16 снимков
+с описанием. Товаром каталога считается только альбом:
+
+- от 8 фото (`MIN_PHOTOS`) с описанием не короче 40 знаков без хвостового тега
+  поставщика (`MIN_DESCRIPTION`); одиночные фото, карточки `集合图` и посты без
+  текста отбрасываются. Восьмифоточные альбомы — такие же полные галереи
+  (товар в коробке, в руках, пряжка, упаковка), поэтому порог опущен до 8;
+- бренд берётся из тега альбома (`szwego_tags`, по одному тегу на альбом) и
+  приводится к каноническому id справочника Rails. Часть тегов выгрузки — это
+  бренды, которых в справочнике нет (Montblanc 28 альбомов, Schiaparelli 3), или
+  не ремни (брелоки `小马 Horse` 5, шарфы `丝巾`) — такие карточки не попадают в
+  каталог. Тег `Stephen/史帝芬` — это Stefano Ricci из справочника, он остаётся;
+- цена задаётся брендом: Hermes 21 000, Louis Vuitton / Dior / Gucci 20 000,
+  остальные 19 000; `price_source = script`;
+- в `attributes.sizes` пишутся все EU-размеры поставщика (75EU…110EU), в
+  `attributes.size_system` — `EU`, а соответствие «обхват талии → EU → код
+  длины» — в `attributes.measurements` (сетка 8 строк, код длины No.0…No.7);
+- цветовые семьи (`variant_group_key`) не строятся: с версии 3 каждая карточка
+  живёт сама по себе, отдельного ключа семьи у товара нет;
+- перевыкладка того же альбома (совпадающий набор фотографий) схлопывается в
+  первую карточку: таких альбомов на батче 90.
+
+Preview на сыром наборе: `27 432 → 8 680` товаров (8 фото — 1 739, 9 — 6 789,
+10–16 — 152). Отброшено: 94 карточки `集合图` от 8 фото, 174 альбома с коротким
+описанием, 37 альбомов отсутствующих брендов и не-ремней, 90 перевыкладок.
+Брендов в выгрузке 30: Louis Vuitton 2 147, Hermes 2 145, Chanel 1 010,
+Gucci 639, Dior 612, Celine 611.
+
+Текущая выгрузка батча уже переобработана версией 2, поэтому семейства из неё
+убраны отдельно: у 7 265 товаров очищены `variant_group_key`,
+`variant_group_name` и `attributes.album_family_run`, и то же самое сделано в
+трёх обработанных снимках (`Обработан скриптом`, `До AI · retry`,
+`Частично обработано ИИ`). Контрольная сумма `name + description + price +
+photos` по всем 8 680 строкам до и после правки совпадает, число фото (76 597) и
+сумма цен не изменились; снимок `Сырой товар` не тронут. Стадия батча осталась
+`SCRIPT_PROCESSED`.
+
+Таблица замеров в карточке ремня не отображалась, хотя скрипт записал её всем
+8 680 товарам: в редакторе карточки батча блок «Замеры» показывался только
+категориям `Одежда` и `Обувь` (`isClothing || isShoe`), а сам `measurements`
+исключён из общего списка характеристик (`STRUCTURED_IMPORT_ATTRIBUTE_CODES`), так
+что у ремней таблица не рисовалась ни до, ни после ИИ. Исправлено в
+`components/import/CsvImportApp.tsx`: блок показывается для подкатегории `Ремни`
+и для любого товара, у которого таблица уже есть. Правка видна только после
+деплоя AdminYeezy.
+
+Ограничения:
+
+- повторы «та же модель + тот же цвет + та же фурнитура» по тексту и по URL не
+  ловятся: у повтора другие снимки и другие ссылки, отличается он только
+  картинкой (белый Goyard Florida с чёрной и золотой пряжкой — четыре альбома,
+  из них два повтора). Детерминированно схлопываются только совпадающие наборы
+  фото; остальное ловится после ИИ-шага по `colors` + `hardware_color`, но
+  такого шага в пайплайне нет;
+- инструкции для ИИ (`suppliers.ai_instructions`) не написаны — следующий шаг:
+  не переносить код партии `JD###` в название и сохранять `brand`, `price`,
+  `attributes.sizes`, `attributes.measurements` и `photos`.
