@@ -1,4 +1,4 @@
-import { BATCH_AI_SIZE_WARNING_PREFIX } from '@/lib/batch-ai'
+import { BATCH_AI_NAME_WARNING_PREFIX, BATCH_AI_SIZE_WARNING_PREFIX } from '@/lib/batch-ai'
 import { getScrapingClient, scrapingQuery } from '@/lib/db'
 
 export type ColorFamilyIssue = {
@@ -79,7 +79,7 @@ export async function alignBatchColorFamilies(batchId: string, productIds: numbe
         // ai_error может содержать служебные предупреждения построчно; ошибку
         // самого AI-ответа (строку без известного префикса) шаг не трогает.
         const lines = String(member.ai_error || '').split('\n').filter(Boolean)
-        const serviceLines = lines.filter((line) => line.startsWith(FAMILY_ERROR_PREFIX) || line.startsWith(BATCH_AI_SIZE_WARNING_PREFIX))
+        const serviceLines = lines.filter((line) => line.startsWith(FAMILY_ERROR_PREFIX) || line.startsWith(BATCH_AI_SIZE_WARNING_PREFIX) || line.startsWith(BATCH_AI_NAME_WARNING_PREFIX))
         const familyLine = memberIssues.length > 0
           ? `${FAMILY_ERROR_PREFIX}«${label}»: ${memberIssues.map((entry) => entry.message).join('; ')}`
           : null

@@ -224,7 +224,8 @@ export const DEFAULT_BATCH_AI_SYSTEM_PROMPT = `Ты — редактор кат�
 
 NAME — название
 - Формула: [Цвет] [тип изделия] [модель или линейка, если подтверждена] [один главный отличительный признак]. Признак — то, чем товар отличается от соседнего в каталоге: материал («из замши», «из шерсти с кашемиром»), принт или декор («с принтом-граффити», «с вышитыми крестами»), конструкция («на молнии», «с капюшоном»).
-- 30–70 знаков, именительный падеж, с заглавной буквы, без точки, кавычек, эмодзи и артикулов.
+- Модель обязательна: если ты заполняешь model_name, name обязан содержать эту модель в том же написании, без бренда и без перевода, сразу после типа изделия: «Бежевая сумка Extra Pocket L19 из канваса и кожи». Ради длины убирай второстепенный признак, а не модель. Модель или линейка не считается суббрендом или коллекцией. Если model_name пуст, название без модели.
+- 30–70 знаков (с моделью допустимо до 90), именительный падеж, с заглавной буквы, без точки, кавычек, эмодзи и артикулов.
 - Тип изделия в name обязан совпадать с выбранной подкатегорией. Для подтверждённого комплекта называй комплект и его состав: «Белый спортивный костюм: худи на молнии и брюки с орнаментом».
 - Цвет — точный цвет основной вещи («графитовый», «молочный», «тёмно-синий»); для двух равнозначных цветов — составной цвет («чёрно-белый»).
 - Не больше двух уточнений через «с»/«из»: «Голубое худи из футера с граффити-принтом», а не «Голубое худи с принтом, вышивкой и карманом».
@@ -300,6 +301,7 @@ export const GLOBAL_BATCH_AI_CATALOG_RULES = `Обязательные прав�
 - Эти правила имеют приоритет над любыми противоречащими инструкциями из сохранённого системного промпта или настроек поставщика.
 - Бренд выбирай только из справочника и возвращай отдельным полем brand.
 - name — заголовок товара без бренда, суббренда/коллекции и артикула, но с точным цветом. Бренд не появляется в name ни в начале, ни в середине, ни в коллаборации «Бренд x Бренд». Пример: «Чёрный лонгслив с разноцветными крестами».
+- Если model_name заполнен, name и translations.en.name обязаны содержать эту модель в том же написании, без бренда и без перевода, сразу после типа изделия: «Бежевая сумка Extra Pocket L19 из канваса и кожи». Модель или линейка не является суббрендом или коллекцией. Ради длины убирай второстепенный признак, а не модель.
 - photo_alts — метаданные для SEO, а не видимое название: в каждом alt обязателен подтверждённый бренд, затем цвет и тип товара, ракурс и 1–2 видимые детали. Brand в name запрещён, а в alt нужен.
 - Состав и материал переноси как свойство товара, без ссылок на ярлык, бирку, маркировку и поставщика («по ярлыку», «на бирке указано», «по данным поставщика»). Страну производства и надписи Made in USA/China не упоминай.
 - Не возвращай h1, seo_title или seo_description. Сервер записывает h1 равным name; Rails формирует title и meta description из бренда, name и текущей цены.
@@ -1326,6 +1328,56 @@ export function nameWithoutBrands(value: string, brandValues: Iterable<string>) 
   return tidyProductName(name) || original
 }
 
+function compactNameText(value: unknown) {
+  return String(value || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, '')
+}
+
+/**
+ * Модель из model_name, которой нет в видимом названии, или пустая строка.
+ * ИИ заполнял model_name и упоминал модель в описании, но в name её пропускал:
+ * в выгрузке c5cd09a1 так вышло у 294 из 378 сумок. Сравнение идёт без
+ * регистра, пробелов и знаков, чтобы «LP 19» и «N/S Park» не считались
+ * пропуском. Бренд из модели убирается: в name он запрещён.
+ */
+export function batchAiModelMissingFromName(
+  product: { name?: unknown; attributes?: Record<string, any> | null } | null | undefined,
+  brandNames: Iterable<string> = [],
+) {
+  const brands = [...brandNames]
+  const rawModel = String(product?.attributes?.model_name || '').trim()
+  if (!rawModel || brands.some((brand) => compactNameText(brand) === compactNameText(rawModel))) return ''
+  const model = nameWithoutBrands(rawModel, brands)
+  const compactModel = compactNameText(model)
+  if (compactModel.length < 2) return ''
+  return compactNameText(product?.name).includes(compactModel) ? '' : model
+}
+
+/** Короткий текстовый запрос: переписать только name и translations.en.name. */
+export function buildBatchAiModelNamePrompt(input: { name: string; englishName?: string; modelName: string }) {
+  return [
+    `Название товара «${input.name}» не содержит модель «${input.modelName}», хотя ты указал её в model_name.`,
+    `Перепиши name по правилам раздела NAME: цвет, тип изделия, затем модель «${input.modelName}» в том же написании, без бренда и без перевода, затем не больше одного отличительного признака. Сохрани цвет и тип изделия; если не хватает длины, убери второстепенный признак, а не модель.`,
+    input.englishName
+      ? `Так же исправь английское название «${input.englishName}»: модель в нём тоже обязательна.`
+      : 'Верни и английское название с той же моделью.',
+    'Верни строго JSON {"product":{"name":"..."},"translations":{"en":{"name":"..."}}} без других полей и без markdown.',
+  ].join('\n')
+}
+
+/** Подставляет исправленные названия в исходный ответ ИИ, остальное не трогает. */
+export function applyBatchAiModelNameRepair(raw: any, repair: any) {
+  const name = String(repair?.product?.name || repair?.name || '').trim()
+  if (!name) return raw
+  const englishName = String(repair?.translations?.en?.name || '').trim()
+  return {
+    ...raw,
+    product: { ...(raw?.product || {}), name },
+    ...(englishName
+      ? { translations: { ...(raw?.translations || {}), en: { ...(raw?.translations?.en || {}), name: englishName } } }
+      : {}),
+  }
+}
+
 type ParsedDimensions = { width: number; height: number; depth?: number; value: string }
 
 function dimensionNumber(value: string) {
@@ -2166,6 +2218,14 @@ export const BATCH_AI_SIZE_WARNING_PREFIX = 'Размеры: '
 export function batchAiSizeWarning(missingSizes: string[]) {
   return missingSizes.length
     ? `${BATCH_AI_SIZE_WARNING_PREFIX}в тексте указаны ${missingSizes.join(', ')}, а в таблице замеров их нет. Проверьте фото размерной сетки.`
+    : null
+}
+
+export const BATCH_AI_NAME_WARNING_PREFIX = 'Название: '
+
+export function batchAiModelNameWarning(missingModel: string) {
+  return missingModel
+    ? `${BATCH_AI_NAME_WARNING_PREFIX}нет модели «${missingModel}» из атрибута «Модель». Проверьте название.`
     : null
 }
 

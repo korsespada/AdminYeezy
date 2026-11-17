@@ -28,6 +28,10 @@ import {
   normalizePriceRulesCatalogReferences,
   choosePriceFromAiInstructions,
   batchAiSizeWarning,
+  batchAiModelMissingFromName,
+  batchAiModelNameWarning,
+  buildBatchAiModelNamePrompt,
+  applyBatchAiModelNameRepair,
   restoreRetryProductsFromSnapshots,
   textSizesMissingFromMeasurements,
   shouldPreserveExistingPrice,
@@ -1829,7 +1833,41 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
           ...batchAiNormalizationOptions(input, context),
           measurementPhotoIndexes,
         })
-    const missingSizes = !input.mediaSeoOnly && !input.textOnly && !input.colorSplitOnly && !input.variantScanOnly && measurementPhotoIndexes.length
+    const productBrandNames = context.brands.map((row: any) => String(row.name || ''))
+    const missingModel = !input.mediaSeoOnly && !input.colorSplitOnly && !input.variantScanOnly && !normalized.skipProduct
+      ? batchAiModelMissingFromName(normalized.product, productBrandNames)
+      : ''
+    if (missingModel) {
+      // Модель подтверждена в model_name, но выпала из name: короткий текстовый
+      // запрос переписывает только названия. Если и он не помог, остаётся
+      // первое название, а предупреждение ставит applyCompletedItem.
+      try {
+        const repairRaw = await runBatchAiOpenRouter({
+          settings,
+          systemPrompt: input.systemPrompt,
+          userPrompt: buildBatchAiModelNamePrompt({
+            name: String(normalized.product?.name || ''),
+            englishName: String(normalized.product?.translations?.en?.name || ''),
+            modelName: missingModel,
+          }),
+          contactSheets: [],
+        })
+        const repairedRaw = applyBatchAiModelNameRepair(raw, repairRaw)
+        const repaired = normalizeBatchAiOutput(repairedRaw, {
+          ...batchAiNormalizationOptions(input, context),
+          measurementPhotoIndexes,
+        })
+        if (!batchAiModelMissingFromName(repaired.product, productBrandNames)) {
+          raw = repairedRaw
+          rawOutput = raw
+          normalized = repaired
+        }
+      } catch (error: any) {
+        if (isAiCancelledError(error)) throw error
+        console.warn(`Название без модели, товар ${input.product?.id}: ${String(error?.message || error).slice(0, 200)}`)
+      }
+    }
+    const missingSizes =!input.mediaSeoOnly && !input.textOnly && !input.colorSplitOnly && !input.variantScanOnly && measurementPhotoIndexes.length
       ? textSizesMissingFromMeasurements(input.product?.description, normalized.product?.attributes?.measurements)
       : []
     if (missingSizes.length) {
@@ -2391,7 +2429,10 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
     // Размер из текста поставщика не теряем, даже если таблица прочитана не полностью.
     product.attributes.sizes = [...new Set([...product.attributes.sizes, ...missingSizes])]
   }
-  const sizeWarning = batchAiSizeWarning(missingSizes)
+  const aiWarning = [
+    batchAiSizeWarning(missingSizes),
+    batchAiModelNameWarning(batchAiModelMissingFromName(product, context.brands.map((row: any) => String(row.name || '')))),
+  ].filter(Boolean).join('\n') || null
   const client = await getScrapingClient()
   try {
     await client.query('BEGIN')
@@ -2434,7 +2475,7 @@ async function applyCompletedItem(item: any, normalized: any, context: any) {
       product.seo_description, product.slug, product.brand, product.category, product.subcategory || null,
       product.gender || null, JSON.stringify(product.photos || []), JSON.stringify(product.photo_alts || []), JSON.stringify(product.attributes || {}),
       Number(product.price || 0), product.price_source || 'legacy', product.ai_confidence, product.supplier_published_on || null,
-      sizeWarning,
+      aiWarning,
       ...(withTranslations ? [JSON.stringify(product.translations || {}), JSON.stringify(product.photo_alts_en || [])] : []),
     ])
     await client.query(`

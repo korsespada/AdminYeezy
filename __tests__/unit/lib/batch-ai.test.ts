@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { batchAiDescriptionEvidenceProfile, batchAiImageDataUrl, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOperatorNote, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection, withBatchAiOperatorNote } from '@/lib/batch-ai'
+import { applyBatchAiModelNameRepair, batchAiModelMissingFromName, batchAiModelNameWarning, buildBatchAiModelNamePrompt, batchAiDescriptionEvidenceProfile, batchAiImageDataUrl, batchAiMeasurementPhotoIndexes, buildBatchAiColorSplitPrompt, buildBatchAiShadePrompt, buildBatchAiShadeRepairPrompt, buildBatchAiUserPrompt, buildBatchAiVisualSetCorrectionPrompt, batchAiSizeWarning, calculatePriceRulePrice, canonicalBatchSuggestionKey, choosePriceFromAiInstructions, DEFAULT_BATCH_AI_SYSTEM_PROMPT, moveInsulationToFilling, textSizesMissingFromMeasurements, DEFAULT_BATCH_AI_PROCESSING_OPTIONS, filterLegacySubcategoriesForAi, GLOBAL_BATCH_AI_CATALOG_RULES, isBatchAiRequestTimeout, isRetryableBatchAiError, matchingPriceRule, normalizeBatchAiOperatorNote, normalizeBatchAiOutput, normalizeBatchAiProcessingOptions, normalizePriceRulesCatalogReferences, parseBatchAiJson, priceFromAiInstructions, restoreRetryProductsFromSnapshots, shouldPreserveExistingPrice, shouldRunBatchAiVisualSetCorrection, withBatchAiOperatorNote } from '@/lib/batch-ai'
 import { decryptProviderApiKey, encryptProviderApiKey, normalizeProviderBaseUrl, providerChatUrl, providerMessagesUrl, providerModelsUrl, providerProtocol } from '@/lib/ai-providers'
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 
@@ -1916,5 +1916,36 @@ describe('batch AI original images', () => {
     } finally {
       globalThis.fetch = original
     }
+  })
+})
+
+describe('модель в названии товара', () => {
+  it('находит модель из model_name, которой нет в name', () => {
+    expect(batchAiModelMissingFromName({ name: 'Мятная сумка из зернистой кожи', attributes: { model_name: 'Extra Pocket L19' } })).toBe('Extra Pocket L19')
+    expect(batchAiModelMissingFromName({ name: 'Бежевая сумка Extra Pocket L19 из канваса', attributes: { model_name: 'Extra Pocket L19' } })).toBe('')
+  })
+
+  it('не считает пропуском другое написание, бренд и пустую модель', () => {
+    expect(batchAiModelMissingFromName({ name: 'Чёрная сумка LP 19 из кожи', attributes: { model_name: 'LP19' } })).toBe('')
+    expect(batchAiModelMissingFromName({ name: 'Чёрная замшевая сумка N/S Park Medium', attributes: { model_name: 'N/S Park Medium' } })).toBe('')
+    expect(batchAiModelMissingFromName({ name: 'Чёрная сумка', attributes: { model_name: 'Lemaire' } }, ['Lemaire'])).toBe('')
+    expect(batchAiModelMissingFromName({ name: 'Чёрная сумка Croissant', attributes: { model_name: 'Lemaire Croissant' } }, ['Lemaire'])).toBe('')
+    expect(batchAiModelMissingFromName({ name: 'Чёрная сумка', attributes: {} })).toBe('')
+  })
+
+  it('подставляет исправленные названия и не трогает остальной ответ', () => {
+    const raw = { product: { name: 'Мятная сумка', description: 'Текст' }, translations: { en: { name: 'Mint bag', description: 'Text' } } }
+    const repaired = applyBatchAiModelNameRepair(raw, { product: { name: 'Мятная сумка Extra Pocket L19' }, translations: { en: { name: 'Mint Extra Pocket L19 bag' } } })
+    expect(repaired.product).toEqual({ name: 'Мятная сумка Extra Pocket L19', description: 'Текст' })
+    expect(repaired.translations.en).toEqual({ name: 'Mint Extra Pocket L19 bag', description: 'Text' })
+    expect(applyBatchAiModelNameRepair(raw, {})).toBe(raw)
+  })
+
+  it('просит модель в промпте и даёт понятное предупреждение', () => {
+    expect(buildBatchAiModelNamePrompt({ name: 'Мятная сумка', modelName: 'Extra Pocket L19' })).toContain('модель «Extra Pocket L19» в том же написании')
+    expect(batchAiModelNameWarning('Extra Pocket L19')).toBe('Название: нет модели «Extra Pocket L19» из атрибута «Модель». Проверьте название.')
+    expect(batchAiModelNameWarning('')).toBeNull()
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Если model_name заполнен, name и translations.en.name обязаны содержать эту модель')
+    expect(DEFAULT_BATCH_AI_SYSTEM_PROMPT).toContain('Модель обязательна: если ты заполняешь model_name')
   })
 })
