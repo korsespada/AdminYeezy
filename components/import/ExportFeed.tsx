@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Database,
   Download,
+  FileCode2,
   ExternalLink,
   FolderOpen,
   GripVertical,
@@ -19,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Send,
   Search,
   Settings2,
   Square,
@@ -29,11 +31,13 @@ import {
   deleteBatchAction,
   deleteExportBatchFromAdminAction,
   deleteExportFileFromAdminAction,
+  previewBatchPublishAction,
+  pushBatchToCatalogAction,
   reorderSuppliersAction,
   type ExportHistoryBatch,
   type ExportHistoryFile,
 } from '@/actions/suppliers'
-import { restoreMissingRawSnapshotAction } from '@/actions/csv-import'
+import { restoreMissingRawSnapshotAction, runCustomSupplierScriptAction } from '@/actions/csv-import'
 import { startBatchAiAction, stopBatchAiRunAction } from '@/actions/batch-ai'
 import SupplierList, { type SupplierListApi, type SupplierListItem } from '@/components/inventory/SupplierList'
 import CsvModal from './CsvModal'
@@ -59,6 +63,7 @@ import {
   type SupplierFeedRow,
 } from '@/lib/export-feed'
 import { imagePresets, resizeImageUrl } from '@/lib/image'
+import { batchPublishPreviewMessage } from '@/lib/batch-publish-preview'
 
 type CatalogLookups = React.ComponentProps<typeof SupplierList>['catalogLookups']
 type FeedRow = SupplierFeedRow<SupplierListItem>
@@ -77,6 +82,7 @@ type ModalState = {
 
 const KIND_STYLES: Record<BatchFeedKind, string> = {
   scraping: 'border-teal-500/30 bg-teal-500/10 text-teal-300',
+  script_running: 'border-orange-500/40 bg-orange-500/15 text-orange-300',
   raw: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
   script: 'border-orange-500/40 bg-orange-500/15 text-orange-300',
   ai_running: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
@@ -155,6 +161,7 @@ function kindHint(batch: ExportHistoryBatch, kind: BatchFeedKind) {
   const count = batchProductCount(batch)
   switch (kind) {
     case 'scraping': return 'Парсер собирает посты'
+    case 'script_running': return `${fmt(count)} тов.`
     case 'raw': return `${fmt(count)} тов.`
     case 'script': return `${fmt(count)} тов.`
     case 'ai_running': return `${fmt(count)} тов. в партии`
@@ -450,6 +457,43 @@ export default function ExportFeed({
     })
   }
 
+  const runScript = (batch: ExportHistoryBatch) => {
+    if (!batch.supplier_id) return
+    const supplierId = batch.supplier_id
+    void runBatchAction(`script-${batch.id}`, async () => {
+      const result = await runCustomSupplierScriptAction(null, supplierId, batch.id, { background: true })
+      if (!result?.success) alert(`Ошибка скрипта: ${result?.error || 'unknown'}`)
+      await refresh()
+    })
+  }
+
+  // Публикация прямо из ленты: тот же предпросмотр и подтверждение, что и на
+  // странице выгрузки, затем фоновая публикация; ход виден в бейдже этапа.
+  const publishBatch = (batch: ExportHistoryBatch) => {
+    void runBatchAction(`publish-${batch.id}`, async () => {
+      const preview = await previewBatchPublishAction(batch.id, 'upsert', false)
+      if (!preview.success) {
+        alert(`Не удалось подготовить предпросмотр: ${preview.error || 'unknown'}`)
+        return
+      }
+      const data = (preview.data || {}) as Record<string, unknown>
+      const ok = window.confirm(batchPublishPreviewMessage({
+        total: Number(data.total || 0),
+        newCount: Number(data.newCount || 0),
+        updateCount: Number(data.updateCount || 0),
+        skippedCount: Number(data.skippedCount || 0),
+        deleteCount: Number(data.deleteCount || 0),
+        missingCount: Number(data.missingCount || 0),
+        videoCount: Number(data.videoCount || 0),
+        replaceMissing: false,
+      }))
+      if (!ok) return
+      const started = await pushBatchToCatalogAction(batch.id, 'upsert', null, false)
+      if (!started.success) alert(`Ошибка публикации: ${started.error || 'unknown'}`)
+      await refresh()
+    })
+  }
+
   const stopAi = (batch: ExportHistoryBatch) => {
     if (!batch.ai_run_id || !confirm('Остановить AI-обработку? Уже завершённые товары останутся сохранены.')) return
     void runBatchAction(`stop-ai-${batch.id}`, async () => {
@@ -481,6 +525,8 @@ export default function ExportFeed({
       openBatch={openBatch}
       openFile={openFile}
       startAi={startAi}
+      runScript={runScript}
+      publishBatch={publishBatch}
       stopAi={stopAi}
       archiveFromSite={archiveFromSite}
       deleteLocally={deleteLocally}
@@ -542,6 +588,8 @@ type FeedBodyProps = {
   openBatch: (batch: ExportHistoryBatch) => void
   openFile: (batch: ExportHistoryBatch, file: ExportHistoryFile) => void
   startAi: (batch: ExportHistoryBatch) => void
+  runScript: (batch: ExportHistoryBatch) => void
+  publishBatch: (batch: ExportHistoryBatch) => void
   stopAi: (batch: ExportHistoryBatch) => void
   archiveFromSite: (batch: ExportHistoryBatch) => void
   deleteLocally: (batch: ExportHistoryBatch) => void
@@ -886,7 +934,7 @@ function SupplierRow({ row, dnd, ...props }: FeedBodyProps & { row: FeedRow; dnd
                 )}
               </div>
               <div className="space-y-2">
-                {row.batches.map((batch, index) => <BatchRow key={batch.id} batch={batch} isCurrent={index === 0} supplierName={row.name} {...props} />)}
+                {row.batches.map((batch, index) => <BatchRow key={batch.id} batch={batch} isCurrent={index === 0} supplierName={row.name} hasScript={Boolean(row.supplier?.has_post_process_script)} {...props} />)}
               </div>
             </>
           )}
@@ -896,13 +944,18 @@ function SupplierRow({ row, dnd, ...props }: FeedBodyProps & { row: FeedRow; dnd
   )
 }
 
-function BatchRow({ batch, isCurrent, supplierName, ...props }: FeedBodyProps & { batch: ExportHistoryBatch; isCurrent: boolean; supplierName: string }) {
+function BatchRow({ batch, isCurrent, supplierName, hasScript, ...props }: FeedBodyProps & { batch: ExportHistoryBatch; isCurrent: boolean; supplierName: string; hasScript: boolean }) {
   const { pendingAction, openMenuId, setOpenMenuId } = props
   const kind = batchFeedKind(batch)
   const productCount = batchProductCount(batch)
   const aiProductCount = Number(batch.ai_product_count || 0)
   const aiRunning = isAiRunning(batch)
-  const canAi = !batch.isSynthetic && productCount > 0 && aiProductCount < productCount && !['deleted', 'scraping', 'publishing', 'pushed', 'archived'].includes(kind)
+  // Следующий шаг партии одной кнопкой: сырая партия поставщика со скриптом —
+  // «Обработка скриптом», после скрипта (или без скрипта) — ИИ, после ИИ —
+  // «Публикация в БД».
+  const canScript = !batch.isSynthetic && hasScript && kind === 'raw' && productCount > 0 && aiProductCount === 0 && Boolean(batch.supplier_id)
+  const canAi = !batch.isSynthetic && !canScript && productCount > 0 && aiProductCount < productCount && !['deleted', 'scraping', 'script_running', 'publishing', 'pushed', 'archived'].includes(kind)
+  const canPublish = !batch.isSynthetic && kind === 'ready' && productCount > 0
   const canArchive = !batch.isSynthetic && canDeletePublishedCatalog(batch.stage, batch.published_external_count, batch.catalog_deleted_at)
   const isBusy = Boolean(pendingAction?.endsWith(batch.id))
   // Название партии обычно «<Поставщик> - <дата>»: дату уже показываем сами,
@@ -971,6 +1024,18 @@ function BatchRow({ batch, isCurrent, supplierName, ...props }: FeedBodyProps & 
       </div>
 
       <div className="relative flex flex-wrap items-center justify-end gap-1.5">
+        {canScript && (
+          <button type="button" onClick={() => props.runScript(batch)} disabled={pendingAction === `script-${batch.id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-orange-600 px-2.5 text-xs font-semibold text-white hover:bg-orange-500 disabled:opacity-50">
+            {pendingAction === `script-${batch.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileCode2 className="h-3.5 w-3.5" />}
+            Обработка скриптом
+          </button>
+        )}
+        {canPublish && (
+          <button type="button" onClick={() => props.publishBatch(batch)} disabled={pendingAction === `publish-${batch.id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-600 px-2.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50">
+            {pendingAction === `publish-${batch.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+            {pendingAction === `publish-${batch.id}` ? 'Считаю…' : 'Публикация в БД'}
+          </button>
+        )}
         {canAi && !aiRunning && (
           <button type="button" onClick={() => props.startAi(batch)} disabled={pendingAction === `ai-${batch.id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-violet-500/30 bg-violet-500/10 px-2.5 text-xs font-medium text-violet-200 hover:bg-violet-500/20 disabled:opacity-50">
             {pendingAction === `ai-${batch.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}

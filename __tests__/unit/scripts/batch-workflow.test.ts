@@ -897,6 +897,88 @@ describe('publication attributes', () => {
   })
 })
 
+describe('publication planning', () => {
+  const lookups = {
+    categories: new Map(),
+    subcategories: new Map(),
+    railsCategoryIdsByName: new Map(),
+    railsSubcategoryIdsByParentAndName: new Map(),
+  }
+  const batch = { supplier_name: 'Supplier', supplier_avatar: null, supplier_album_id: 'album-1' }
+  const withContext = (product: any, railsProduct: any = null) => workflow.publicationContext(batch, lookups, product, railsProduct)
+  const item = (externalId: string, price: number) => ({
+    external_id: externalId,
+    name: `Товар ${externalId}`,
+    price,
+    photos: [`https://static.example/${externalId}.jpg`],
+    attributes: {},
+  })
+
+  it('looks up in Rails only products changed since the last publication', async () => {
+    const unchanged = item('same', 1000)
+    const changed = item('edited', 2000)
+    const fresh = item('fresh', 3000)
+    const sourceHash = (product: any) => workflow.publicationPayloadHash(withContext(product, null))
+    const previousToken = process.env.RAILS_ADMIN_TOKEN
+    const previousUrl = process.env.RAILS_API_URL
+    process.env.RAILS_ADMIN_TOKEN = 'test-token'
+    process.env.RAILS_API_URL = 'https://rails.example.test'
+    const querySpy = vi.spyOn(workflow.scrapingPool, 'query').mockImplementation(async (sql: any) => {
+      const text = String(sql)
+      if (text.includes('SELECT external_id,source_hash')) {
+        return { rows: [
+          { external_id: 'same', source_hash: sourceHash(unchanged) },
+          { external_id: 'edited', source_hash: sourceHash({ ...changed, price: 1500 }) },
+        ] }
+      }
+      if (text.includes('SELECT external_id,payload_hash')) return { rows: [{ external_id: 'edited', payload_hash: 'old' }] }
+      return { rows: [] }
+    })
+    const railsEdited = { id: 7, external_id: 'edited', media: [{ url: 'https://static.example/edited.jpg', original_url: 'https://static.example/edited.jpg' }] }
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (input: any) => {
+      const url = new URL(String(input))
+      const externalIds = url.searchParams.get('external_ids')?.split(',') || []
+      if (!externalIds.length) return new Response(JSON.stringify({ product: railsEdited }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ products: externalIds.includes('edited') ? [railsEdited] : [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    try {
+      const plan = await workflow.planBatchPublication({
+        batchId: 'batch-1',
+        products: [unchanged, changed, fresh],
+        mode: 'upsert',
+        withPublicationContext: withContext,
+      })
+      const lookedUp = fetchMock.mock.calls
+        .map((call) => new URL(String(call[0])).searchParams.get('external_ids'))
+        .filter(Boolean)
+      expect(lookedUp).toEqual(['edited,fresh'])
+      expect([...plan.locallyUnchanged]).toEqual(['same'])
+      expect([...plan.changedExistingExternalIds]).toEqual(['edited'])
+      expect([...plan.newExternalIds]).toEqual(['fresh'])
+
+      fetchMock.mockClear()
+      await workflow.planBatchPublication({
+        batchId: 'batch-1',
+        products: [unchanged, changed, fresh],
+        mode: 'upsert',
+        fullCheck: true,
+        withPublicationContext: withContext,
+      })
+      const fullLookup = fetchMock.mock.calls
+        .map((call) => new URL(String(call[0])).searchParams.get('external_ids'))
+        .filter(Boolean)
+      expect(fullLookup).toEqual(['same,edited,fresh'])
+    } finally {
+      fetchMock.mockRestore()
+      querySpy.mockRestore()
+      if (previousToken === undefined) delete process.env.RAILS_ADMIN_TOKEN
+      else process.env.RAILS_ADMIN_TOKEN = previousToken
+      if (previousUrl === undefined) delete process.env.RAILS_API_URL
+      else process.env.RAILS_API_URL = previousUrl
+    }
+  })
+})
+
 describe('publication size cleanup', () => {
   const lookups = {
     categories: new Map([['bags', 'Сумки'], ['accessories', 'Аксессуары']]),

@@ -61,8 +61,9 @@ describe('batchStatusProgress', () => {
 
   it('shows publish phase progress from the operation lock', async () => {
     const { batchStatusProgress } = await import('@/lib/batch-history')
-    expect(batchStatusProgress({ publishing: true, activeOperation: 'publish|media|120|500' })).toBe('фото 120/500')
-    expect(batchStatusProgress({ publishing: true, activeOperation: 'publish|publish|50|500' })).toBe('50/500')
+    expect(batchStatusProgress({ publishing: true, activeOperation: 'publish|media|120|500' })).toBe('фото: осталось 380 из 500 тов.')
+    expect(batchStatusProgress({ publishing: true, activeOperation: 'publish|media|120|500|1760|3000' }).replace(/\s/g, ' ')).toBe('фото: осталось 1 240 из 3 000')
+    expect(batchStatusProgress({ publishing: true, activeOperation: 'publish|publish|50|500' })).toBe('осталось 450 из 500 тов.')
     expect(batchStatusProgress({ publishing: true, activeOperation: 'cancel_requested|publish|lookup|5|40' })).toBe('проверка 5/40')
     expect(batchStatusProgress({ publishing: true, activeOperation: 'publish' })).toBe('')
   })

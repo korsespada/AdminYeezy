@@ -1,3 +1,4 @@
+import { publishProgressText } from './batch-publish-progress'
 export function shouldOpenBatchArtifactAsFile(resultPath?: string | null, snapshotId?: string | null) {
   return Boolean(resultPath && !resultPath.startsWith('db://') && !snapshotId)
 }
@@ -36,13 +37,11 @@ export function protectedCatalogExternalIds(
   return new Set([...candidates].filter((externalId) => protectedIds.has(externalId)))
 }
 
-const PUBLISH_PHASE_LABELS: Record<string, string> = { lookup: 'проверка', media: 'фото' }
-
 /**
  * Счётчик рядом со статусом в списке выгрузок: «Обработка ИИ (12/1036)»,
- * «Публикация в БД (фото 120/500)». Для ИИ считаются готовые и ошибочные
+ * «Публикация фото: осталось 380 из 500». Для ИИ считаются готовые и ошибочные
  * товары текущего запуска; для публикации — прогресс из блокировки операции
- * `publish|<этап>|<текущий>|<всего>`.
+ * `publish|<этап>|<текущий>|<всего>[|<фото готово>|<фото всего>]`.
  */
 export function batchStatusProgress(input: {
   publishing?: boolean
@@ -54,12 +53,15 @@ export function batchStatusProgress(input: {
 }) {
   if (input.publishing) {
     const operation = String(input.activeOperation || '').replace(/^cancel_requested\|/, '')
-    const [kind, phase, rawCurrent, rawTotal] = operation.split('|')
-    const total = Math.max(0, Number(rawTotal) || 0)
-    if (kind !== 'publish' || !total) return ''
-    const current = Math.min(total, Math.max(0, Number(rawCurrent) || 0))
-    const label = PUBLISH_PHASE_LABELS[phase || '']
-    return `${label ? `${label} ` : ''}${current}/${total}`
+    const [kind, phase, current, total, photoCurrent, photoTotal] = operation.split('|')
+    if (kind !== 'publish' || !(Number(total) > 0)) return ''
+    return publishProgressText({
+      phase,
+      current: Number(current),
+      total: Number(total),
+      photoCurrent: Number(photoCurrent),
+      photoTotal: Number(photoTotal),
+    })
   }
   if (input.aiRunning) {
     const total = Math.max(0, Number(input.aiTotalCount) || 0)

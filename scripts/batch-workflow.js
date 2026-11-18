@@ -2781,7 +2781,7 @@ function publicationPayloadHash(product) {
 
 async function ensurePublicationPayloadHashes() {
   await scrapingPool.query(
-    'ALTER TABLE batch_publications ADD COLUMN IF NOT EXISTS payload_hash TEXT',
+    'ALTER TABLE batch_publications ADD COLUMN IF NOT EXISTS payload_hash TEXT, ADD COLUMN IF NOT EXISTS source_hash TEXT',
   );
 }
 
@@ -2868,6 +2868,96 @@ async function familyCheckSkipped(supplierId) {
   }
 }
 
+function publicationContext(batch, lookups, product, railsProduct = null) {
+  const publicationProduct = withoutBagSizes(product, lookups);
+  return {
+    ...publicationProduct,
+    supplier_name: batch.supplier_name || null,
+    supplier_avatar: batch.supplier_avatar || null,
+    supplier_id: batch.supplier_album_id || null,
+    _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
+      ? railsProduct.metadata
+      : undefined,
+    // Обновление в Rails записывает translations как есть, без защиты
+    // проверенного перевода, поэтому проверенный перевод не отправляем.
+    ...(railsProduct?.translations?.en?.status === 'reviewed' ? { translations: undefined } : {}),
+    ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(publicationProduct, lookups, railsProduct) } : {}),
+    attributes: {
+      ...normalizeAttributes(publicationProduct.attributes),
+      ...(hostedVideo(publicationProduct, railsProduct).url ? { hosted_video_url: hostedVideo(publicationProduct, railsProduct).url } : {}),
+      ...(hostedVideo(publicationProduct, railsProduct).posterUrl ? { hosted_video_poster_url: hostedVideo(publicationProduct, railsProduct).posterUrl } : {}),
+    },
+  };
+};
+
+async function batchPublicationSourceHashes(batchId) {
+  const result = await scrapingPool.query(
+    'SELECT external_id,source_hash FROM batch_publications WHERE batch_id=$1 AND source_hash IS NOT NULL',
+    [batchId],
+  );
+  return new Map(result.rows.map((row) => [String(row.external_id), row.source_hash]));
+}
+
+/**
+ * Отпечаток товара в том виде, в каком он лежит в партии, без данных Rails.
+ * Записывается в batch_publications.source_hash после успешной публикации:
+ * совпал — товар с тех пор не меняли, и в Rails за ним ходить не нужно.
+ */
+function publicationSourceHash(withPublicationContext, product) {
+  return publicationPayloadHash(withPublicationContext(product, null));
+}
+
+async function recordPublicationSourceHashes(batchId, products, withPublicationContext, skipExternalIds = new Set()) {
+  const rows = products.flatMap((product) => {
+    const externalId = String(product.external_id || '').trim();
+    if (!externalId || skipExternalIds.has(externalId)) return [];
+    return [[externalId, publicationSourceHash(withPublicationContext, product)]];
+  });
+  if (!rows.length) return;
+  await scrapingPool.query(`
+    UPDATE batch_publications AS publication
+    SET source_hash=payload.source_hash
+    FROM UNNEST($2::text[],$3::text[]) AS payload(external_id,source_hash)
+    WHERE publication.batch_id=$1 AND publication.external_id=payload.external_id
+  `, [batchId, rows.map((row) => row[0]), rows.map((row) => row[1])]);
+}
+
+/**
+ * Что уйдёт в Rails при публикации. В режиме «Обновить изменённые» товары,
+ * чей отпечаток совпал с записанным при прошлой публикации, пропускаются без
+ * запроса в Rails: сверка с каталогом идёт только для изменённых и новых.
+ * fullCheck (замена каталога) и SEO-перевыкладка фото сверяют всю партию.
+ */
+async function planBatchPublication({ batchId, products, mode, fullCheck = false, withPublicationContext, onProgress }) {
+  await ensurePublicationPayloadHashes();
+  const seoMediaRun = await pendingSeoMediaRun(batchId);
+  const fastPath = mode === 'upsert' && !fullCheck && !seoMediaRun;
+  const sourceHashes = fastPath ? await batchPublicationSourceHashes(batchId) : new Map();
+  const locallyUnchanged = new Set();
+  if (fastPath) {
+    for (const product of products) {
+      const externalId = String(product.external_id || '').trim();
+      const stored = sourceHashes.get(externalId);
+      if (!stored || needsVideoTransfer(product)) continue;
+      if (stored === publicationSourceHash(withPublicationContext, product)) locallyUnchanged.add(externalId);
+    }
+  }
+  const lookupIds = products
+    .map((product) => String(product.external_id || '').trim())
+    .filter((externalId) => externalId && !locallyUnchanged.has(externalId));
+  const existingProducts = await existingRailsProducts(lookupIds, { includeDetails: mode === 'upsert', onProgress });
+  const previousPayloadHashes = mode === 'upsert' ? await batchPublicationHashes(batchId, lookupIds) : new Map();
+  const changedExistingExternalIds = new Set(products.flatMap((product) => {
+    const externalId = String(product.external_id || '').trim();
+    if (!existingProducts.has(externalId)) return [];
+    if (seoMediaRun) return [externalId];
+    if (needsVideoTransfer(product, existingProducts.get(externalId))) return [externalId];
+    return previousPayloadHashes.get(externalId) === publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId))) ? [] : [externalId];
+  }));
+  const newExternalIds = new Set(lookupIds.filter((externalId) => !existingProducts.has(externalId)));
+  return { existingProducts, changedExistingExternalIds, locallyUnchanged, newExternalIds, seoMediaRun };
+}
+
 async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (typeof options === 'function' && !onProgress) {
     onProgress = options;
@@ -2919,27 +3009,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   if (unfinished.length > 0) {
     throw new Error(`Публикация остановлена: ${unfinished.length} товаров ещё не обработаны ИИ`);
   }
-  const withPublicationContext = (product, railsProduct = null) => {
-    const publicationProduct = withoutBagSizes(product, lookups);
-    return {
-      ...publicationProduct,
-      supplier_name: batch.supplier_name || null,
-      supplier_avatar: batch.supplier_avatar || null,
-      supplier_id: batch.supplier_album_id || null,
-      _railsMetadata: railsProduct?.metadata && typeof railsProduct.metadata === 'object'
-        ? railsProduct.metadata
-        : undefined,
-      // Обновление в Rails записывает translations как есть, без защиты
-      // проверенного перевода, поэтому проверенный перевод не отправляем.
-      ...(railsProduct?.translations?.en?.status === 'reviewed' ? { translations: undefined } : {}),
-      ...(railsProduct ? { _railsCategoryId: railsUpdateCategoryId(publicationProduct, lookups, railsProduct) } : {}),
-      attributes: {
-        ...normalizeAttributes(publicationProduct.attributes),
-        ...(hostedVideo(publicationProduct, railsProduct).url ? { hosted_video_url: hostedVideo(publicationProduct, railsProduct).url } : {}),
-        ...(hostedVideo(publicationProduct, railsProduct).posterUrl ? { hosted_video_poster_url: hostedVideo(publicationProduct, railsProduct).posterUrl } : {}),
-      },
-    };
-  };
+  const withPublicationContext = (product, railsProduct = null) => publicationContext(batch, lookups, product, railsProduct);
 
   const seenExternalIds = new Set();
   const validationErrors = [];
@@ -2989,18 +3059,19 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     }
   }
   const mode = options.mode === 'upsert' ? 'upsert' : 'add';
-  await ensurePublicationPayloadHashes();
   if (onProgress) await onProgress({ phase: 'lookup', current: 0, total: products.length, success: 0, failed: 0 });
-  const existingProducts = await existingRailsProducts(
-    products.map((product) => product.external_id),
-    {
-      includeDetails: mode === 'upsert',
-      onProgress: onProgress
-        ? ({ current, total }) => onProgress({ phase: 'lookup', current, total, success: 0, failed: 0 })
-        : undefined,
-    },
-  );
-  reportPhaseTiming('lookup', { products: products.length, existing: existingProducts.size });
+  const plan = await planBatchPublication({
+    batchId,
+    products,
+    mode,
+    fullCheck: Boolean(options.deleteMissing),
+    withPublicationContext,
+    onProgress: onProgress
+      ? ({ current, total }) => onProgress({ phase: 'lookup', current, total, success: 0, failed: 0 })
+      : undefined,
+  });
+  const { existingProducts, changedExistingExternalIds, locallyUnchanged, seoMediaRun } = plan;
+  reportPhaseTiming('lookup', { products: products.length, existing: existingProducts.size, locallyUnchanged: locallyUnchanged.size });
   const existingExternalIds = new Set(existingProducts.keys());
   const existingHostedVideosBySource = new Map();
   for (const product of products) {
@@ -3011,25 +3082,14 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       existingHostedVideosBySource.set(sourceUrl, hosted);
     }
   }
-  const previousPayloadHashes = mode === 'upsert'
-    ? await batchPublicationHashes(batchId, products.map((product) => product.external_id))
-    : new Map();
-  const seoMediaRun = await pendingSeoMediaRun(batchId);
   if (seoMediaRun && mode !== 'upsert') {
     throw new Error('После генерации alt и slug используйте режим «Обновить каталог»');
   }
-  const changedExistingExternalIds = new Set(products.flatMap((product) => {
-    const externalId = String(product.external_id || '').trim();
-    if (!existingExternalIds.has(externalId)) return [];
-    if (seoMediaRun) return [externalId];
-    const attributes = normalizeAttributes(product.attributes);
-    if (needsVideoTransfer(product, existingProducts.get(externalId))) return [externalId];
-    return previousPayloadHashes.get(externalId) === publicationPayloadHash(withPublicationContext(product, existingProducts.get(externalId))) ? [] : [externalId];
-  }));
   const candidates = products
     .map((product, index) => ({ product, index }))
     .filter(({ product }) => {
       const externalId = String(product.external_id || '').trim();
+      if (locallyUnchanged.has(externalId)) return false;
       return !existingExternalIds.has(externalId) || (mode === 'upsert' && changedExistingExternalIds.has(externalId));
     });
   const updatedProducts = products.map((product) => ({ ...product }));
@@ -3037,7 +3097,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
   let prepared = 0;
   let imported = 0;
   let updated = 0;
-  const skippedUnchanged = mode === 'upsert' ? existingExternalIds.size - changedExistingExternalIds.size : 0;
+  const skippedUnchanged = mode === 'upsert' ? existingExternalIds.size - changedExistingExternalIds.size + locallyUnchanged.size : 0;
   let batchProductsChanged = false;
   const videoWarnings = [];
   const explicitSeoMediaRun = Boolean(seoMediaRun);
@@ -3105,6 +3165,11 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     return videoUploads.get(sourceUrl);
   };
   let completedProducts = 0;
+  // Фото считаются отдельно от товаров: статус публикации показывает, сколько
+  // фотографий ещё осталось перенести в S3.
+  const photoTotal = mediaPlans.reduce((sum, plan) => sum + plan.photos.length, 0);
+  let photoDone = 0;
+  if (onProgress) await onProgress({ phase: 'media', current: 0, total: candidates.length, success: 0, failed: 0, photoCurrent: 0, photoTotal });
 
   await runMediaTransfer(mediaPlans, {
     photoConcurrency: mediaUploadConcurrency(),
@@ -3115,6 +3180,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       const existingRailsUrl = plan.existingPhotoUrls.get(String(sourceUrl || '').trim());
       if (existingRailsUrl && !rewriteSeoMedia) {
         plan.photoResults[photoIndex] = { url: existingRailsUrl };
+        photoDone += 1;
         return;
       }
       const safeSlug = String(product.slug || safeExternalId).replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || safeExternalId;
@@ -3127,6 +3193,8 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
         plan.photoResults[photoIndex] = { url: await uploadPhotoIfNeeded(sourceUrl, key, { forceReencode: rewriteSeoMedia }) };
       } catch (error) {
         plan.photoResults[photoIndex] = { url: sourceUrl, error, photoIndex };
+      } finally {
+        photoDone += 1;
       }
     },
     transferVideo: async (planIndex) => {
@@ -3161,7 +3229,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       updatedProducts[plan.productIndex] = product;
       completedProducts += 1;
       if (!productFailed) prepared += 1;
-      const progress = { phase: 'media', current: completedProducts, total: candidates.length, success: prepared, failed: errors.length };
+      const progress = { phase: 'media', current: completedProducts, total: candidates.length, success: prepared, failed: errors.length, photoCurrent: photoDone, photoTotal };
       if (completedProducts % 10 === 0 || completedProducts === candidates.length) {
         // Разовый таймаут соединения с БД не должен обрывать многочасовой перенос медиа.
         await scrapingPool.query(
@@ -3316,6 +3384,9 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       }
     }
   }
+  // Отпечатки того, что теперь совпадает с каталогом: следующее «Обновить
+  // изменённые» пропустит эти товары без запроса в Rails.
+  await recordPublicationSourceHashes(batchId, updatedProducts, withPublicationContext, locallyUnchanged);
   await scrapingPool.query("UPDATE scraping_batches SET stage='PUSHED', catalog_deleted_at=NULL, updated_at=NOW() WHERE id=$1", [batchId]);
   reportPhaseTiming('publish', { imported, updated, deleted });
 
@@ -3336,6 +3407,52 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     clearInterval(heartbeat);
     await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
   }
+}
+
+/**
+ * Предпросмотр публикации по тем же правилам, что и сама публикация:
+ * «будет обновлено» — только изменённые с прошлой публикации товары, а не
+ * все, что уже есть в каталоге.
+ */
+async function previewBatchPublication(batchId, options = {}) {
+  const mode = options.mode === 'upsert' ? 'upsert' : 'add';
+  const replaceMissing = Boolean(options.replaceMissing);
+  const products = Array.isArray(options.sourceProducts)
+    ? options.sourceProducts.map((product) => normalizeProduct({ ...product, batch_id: batchId }))
+    : await getBatchProducts(batchId);
+  const batch = await getBatch(batchId);
+  const lookups = await loadLegacyLookupMaps();
+  const withPublicationContext = (product, railsProduct = null) => publicationContext(batch, lookups, product, railsProduct);
+  const withExternalId = products.filter((product) => String(product.external_id || '').trim());
+  const plan = await planBatchPublication({
+    batchId,
+    products: withExternalId,
+    mode,
+    fullCheck: replaceMissing,
+    withPublicationContext,
+  });
+  const targetIds = new Set(withExternalId.map((product) => String(product.external_id).trim()));
+  const knownIds = await getBatchKnownExternalIds(batchId);
+  const missingCount = knownIds.filter((externalId) => !targetIds.has(externalId)).length;
+  const existingCount = plan.existingProducts.size;
+  const changedCount = plan.changedExistingExternalIds.size;
+  const videoCount = withExternalId.filter((product) => {
+    const externalId = String(product.external_id).trim();
+    if (plan.locallyUnchanged.has(externalId)) return false;
+    if (mode === 'upsert' && plan.existingProducts.has(externalId) && !plan.changedExistingExternalIds.has(externalId)) return false;
+    if (mode === 'add' && plan.existingProducts.has(externalId)) return false;
+    return needsVideoTransfer(product, plan.existingProducts.get(externalId));
+  }).length;
+  return {
+    total: targetIds.size,
+    newCount: plan.newExternalIds.size,
+    updateCount: mode === 'upsert' ? changedCount : 0,
+    skippedCount: mode === 'upsert' ? existingCount - changedCount + plan.locallyUnchanged.size : existingCount,
+    deleteCount: replaceMissing ? missingCount : 0,
+    missingCount,
+    replaceMissing,
+    videoCount,
+  };
 }
 
 async function pushBatchSnapshotToCatalog(batchId, snapshotId, options = {}, onProgress) {
@@ -3396,6 +3513,10 @@ module.exports = {
   listFavoriteSuppliers,
   normalizeProductCatalogReferences,
   processBatchWithAi,
+  planBatchPublication,
+  previewBatchPublication,
+  publicationContext,
+  scrapingPool,
   pushBatchToCatalog,
   pushBatchSnapshotToCatalog,
   runBatchPostProcessScript,

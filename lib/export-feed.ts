@@ -7,6 +7,7 @@ import type { ExportHistoryBatch } from '@/actions/suppliers'
 
 export type BatchFeedKind =
   | 'scraping'
+  | 'script_running'
   | 'raw'
   | 'script'
   | 'ai_running'
@@ -19,6 +20,7 @@ export type BatchFeedKind =
 
 export const BATCH_FEED_LABELS: Record<BatchFeedKind, string> = {
   scraping: 'Выгрузка идёт',
+  script_running: 'Обработка скриптом',
   raw: 'Сырой',
   script: 'Обработан скриптом',
   ai_running: 'Обработка ИИ',
@@ -30,7 +32,7 @@ export const BATCH_FEED_LABELS: Record<BatchFeedKind, string> = {
   deleted: 'Удалено локально',
 }
 
-export const RUNNING_KINDS: BatchFeedKind[] = ['scraping', 'ai_running', 'publishing']
+export const RUNNING_KINDS: BatchFeedKind[] = ['scraping', 'script_running', 'ai_running', 'publishing']
 export const WAITING_KINDS: BatchFeedKind[] = ['raw', 'script', 'ready']
 
 export type ProductBucket = 'site' | 'push' | 'ready' | 'ai' | 'script' | 'raw' | 'err' | 'arch'
@@ -61,10 +63,15 @@ export function isPublishing(batch: Pick<ExportHistoryBatch, 'active_operation'>
   return Boolean(batch.active_operation?.includes('publish'))
 }
 
+export function isScriptRunning(batch: Pick<ExportHistoryBatch, 'active_operation'>) {
+  return String(batch.active_operation || '') === 'script'
+}
+
 export function batchFeedKind(batch: ExportHistoryBatch): BatchFeedKind {
   if (batch.status === 'Удалено из БД' || batch.stage === 'DELETED_FROM_DB') return 'deleted'
   if (isPublishing(batch)) return 'publishing'
   if (isAiRunning(batch)) return 'ai_running'
+  if (isScriptRunning(batch)) return 'script_running'
   if (batch.status === 'Запущено') return 'scraping'
   if (batch.catalog_deleted_at) return 'archived'
   if (batch.status === 'failed') return 'failed'
@@ -115,6 +122,9 @@ export function batchProductCounts(batch: ExportHistoryBatch, kind = batchFeedKi
       break
     case 'publishing':
       counts.push = total
+      break
+    case 'script_running':
+      counts.raw = total
       break
     case 'archived':
       counts.arch = total

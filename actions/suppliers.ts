@@ -1539,6 +1539,10 @@ async function runBatchPublish(batchId: string, mode: 'add' | 'upsert', snapshot
       const previous = lastReported.get(phase) ?? -5
       if (current !== 0 && current !== total && current - previous < 5) return
       lastReported.set(phase, current)
+      const photoTotal = Math.max(0, Number(progress?.photoTotal || 0))
+      const photoPart = phase === 'media' && photoTotal > 0
+        ? `|${Math.min(photoTotal, Math.max(0, Number(progress?.photoCurrent || 0)))}|${photoTotal}`
+        : ''
       progressWrite = progressWrite.then(async () => {
         let persisted
         try {
@@ -1547,7 +1551,7 @@ async function runBatchPublish(batchId: string, mode: 'add' | 'upsert', snapshot
              SET operation=$2,updated_at=NOW()
              WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
              RETURNING operation`,
-            [batchId, `publish|${phase}|${current}|${total}`],
+            [batchId, `publish|${phase}|${current}|${total}${photoPart}`],
           )
         } catch (error: any) {
           // Сбой соединения с БД не должен обрывать многочасовую публикацию:
@@ -1594,43 +1598,17 @@ export async function previewBatchPublishAction(
 ): Promise<ActionResponse> {
   try {
     await requireAdmin()
-    const products = snapshotId
-      ? await scrapingQuery('SELECT product FROM jsonb_array_elements((SELECT products FROM batch_snapshots WHERE id=$1 AND batch_id=$2)) AS product', [snapshotId, batchId])
-      : await scrapingQuery(`
-          SELECT jsonb_build_object('external_id', external_id, 'attributes', attributes) AS product
-          FROM products
-          WHERE batch_id=$1 AND external_id IS NOT NULL AND BTRIM(external_id) <> ''
-        `, [batchId])
-    const productRows = products.rows.map((row) => row.product || row)
-    const externalIds = [...new Set(productRows.map((row: any) => String(row.external_id || '').trim()).filter(Boolean))]
     const workflow = require('../scripts/batch-workflow')
-    const existing = await workflow.existingRailsProducts(externalIds)
-    const existingCount = existing.size
-    const newCount = Math.max(0, externalIds.length - existingCount)
-    // publishedMissing — товары, которые партия уже отдала в каталог, но которых
-    // больше нет в текущей версии. Даже в режиме «Обновить изменённые» они
-    // остаются на сайте, поэтому предпросмотр называет их отдельным числом.
-    const knownIds: string[] = await workflow.getBatchKnownExternalIds(batchId)
-    const targetIds = new Set(externalIds)
-    const publishedMissing = knownIds.filter((externalId) => !targetIds.has(externalId)).length
-    const deleteCount = replaceMissing ? publishedMissing : 0
-    const videoCount = productRows.filter((row: any) => {
-      const externalId = String(row.external_id || '').trim()
-      return workflow.needsVideoTransfer(row, existing.get(externalId))
-    }).length
-    return {
-      success: true,
-      data: {
-        total: externalIds.length,
-        newCount,
-        updateCount: mode === 'upsert' ? existingCount : 0,
-        skippedCount: mode === 'add' ? existingCount : 0,
-        deleteCount,
-        missingCount: publishedMissing,
-        replaceMissing,
-        videoCount,
-      },
-    }
+    const sourceProducts = snapshotId
+      ? (await scrapingQuery('SELECT product FROM jsonb_array_elements((SELECT products FROM batch_snapshots WHERE id=$1 AND batch_id=$2)) AS product', [snapshotId, batchId]))
+          .rows.map((row) => row.product)
+      : undefined
+    // Считает по тем же правилам, что и публикация: «будет обновлено» — только
+    // изменённые с прошлой публикации товары; missingCount — опубликованные
+    // товары партии, которых больше нет в текущей версии (остаются на сайте,
+    // пока не запущена замена каталога).
+    const data = await workflow.previewBatchPublication(batchId, { mode, replaceMissing, sourceProducts })
+    return { success: true, data }
   } catch (err: any) {
     return { success: false, error: err.message }
   }

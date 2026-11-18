@@ -35,7 +35,6 @@ import {
   Settings2,
   Users,
   MoreHorizontal,
-  ChevronDown,
   Undo2,
   BadgeRussianRuble,
   Palette,
@@ -68,7 +67,7 @@ import {
   type Lookups,
 } from "@/actions/csv-import";
 import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
-import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
+import { publishProgressRatio, publishProgressText, type BatchPublishProgress } from "@/lib/batch-publish-progress";
 import type { BatchPublishJob } from "@/lib/batch-publish-jobs";
 import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
@@ -617,13 +616,14 @@ export default function CsvImportApp({
   const [batchStage, setBatchStage] = useState("SCRAPED");
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [showPriceRules, setShowPriceRules] = useState(false);
-  const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [isPreparingPublish, setIsPreparingPublish] = useState(false);
   const [publishProgress, setPublishProgress] = useState<{
     phase: "lookup" | "media" | "publish";
     current: number;
     total: number;
+    photoCurrent?: number;
+    photoTotal?: number;
   } | null>(null);
   const [publishOperation, setPublishOperation] = useState<BatchPublishProgress | null>(null);
   const [isStoppingPublish, setIsStoppingPublish] = useState(false);
@@ -795,6 +795,8 @@ export default function CsvImportApp({
           phase: operation.phase || "publish",
           current: Number(operation.current || 0),
           total: Number(operation.total || products.length),
+          photoCurrent: Number(operation.photoCurrent || 0),
+          photoTotal: Number(operation.photoTotal || 0),
         });
       } else if (!isPushing) {
         setPublishProgress(null);
@@ -2078,12 +2080,12 @@ export default function CsvImportApp({
                             ? "Переносим фотографии"
                             : "Публикуем товары"}
                   </span>
-                  <span className="rounded-full bg-slate-950/60 px-2.5 py-1 text-sm font-bold text-slate-200">{publishProgress.current}/{publishProgress.total}</span>
+                  <span className="rounded-full bg-slate-950/60 px-2.5 py-1 text-sm font-bold text-slate-200">{publishProgressText(publishProgress)}</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-950/70">
                   <div
                     className={`h-full rounded-full transition-all ${publishOperation.stale ? "bg-amber-400" : "bg-emerald-400"}`}
-                    style={{ width: `${publishProgress.total > 0 ? Math.min(100, (publishProgress.current / publishProgress.total) * 100) : 0}%` }}
+                    style={{ width: `${publishProgressRatio(publishProgress) * 100}%` }}
                   />
                 </div>
                 <p className="mt-2 text-xs text-slate-400">
@@ -2227,81 +2229,41 @@ export default function CsvImportApp({
                 </button>
               )}
 
-              {!isSnapshotSource && (batchStage === "PUSHED" && !isProcessing ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={() => handlePush("upsert")}
-                    disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
-                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
-                    title="Отправить в каталог только товары, изменённые после предыдущей публикации; после генерации alt и slug фото будут перевыложены в WebP с новыми именами"
-                  >
-                    {(isPushing || isPreparingPublish) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    Обновить изменённые
-                  </button>
-                  <button
-                    onClick={handleReprocessAll}
-                    disabled={isProcessing}
-                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-500/40 bg-indigo-500/10 px-4 py-2.5 text-sm font-bold text-indigo-200 transition-all hover:bg-indigo-500/20 disabled:opacity-50"
-                    title="Создать снимок и заново применить актуальные AI-настройки ко всей партии"
-                  >
-                    <RefreshCw className="h-4 w-4" /> Переобработать ИИ
-                  </button>
-                  <span className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-sm font-bold text-emerald-300">
-                    <CheckCircle className="h-4 w-4" /> Запушено в БД
-                  </span>
-                </div>
-              ) : !canPublish || isProcessing ? (
-                isProcessing ? (
-                  <button
-                      onClick={handleStopAi}
-                      className="px-6 py-2.5 text-sm font-bold bg-red-600 hover:bg-red-500 text-white rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center gap-2"
-                  >
-                      <Square className="w-4 h-4 fill-current" />
-                      Стоп ИИ ({aiProgress ? `${aiProgress.current}/${aiProgress.total}` : "..."})
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => handleAiProcess("full")}
-                        className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
-                    >
-                        <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
-                        {aiReadyCount > 0 ? "Обработать ИИ остальные" : "Обработать ИИ"}
-                    </button>
-                  </div>
-                )
+              {!isSnapshotSource && (isProcessing ? (
+                <button
+                    onClick={handleStopAi}
+                    className="px-6 py-2.5 text-sm font-bold bg-red-600 hover:bg-red-500 text-white rounded-xl transition-all shadow-lg shadow-red-600/20 flex items-center gap-2"
+                >
+                    <Square className="w-4 h-4 fill-current" />
+                    Стоп ИИ ({aiProgress ? `${aiProgress.current}/${aiProgress.total}` : "..."})
+                </button>
+              ) : batchStage === "PUSHED" || canPublish ? (
+                // Одна кнопка публикации: в каталог уходят новые и изменённые с
+                // прошлой публикации товары. Замена каталога (с архивом
+                // пропавших) и «только новые» — в меню «…».
+                <button
+                  onClick={() => handlePush("upsert")}
+                  disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
+                  title={batchStage === "PUSHED"
+                    ? "Отправить в каталог новые товары и изменённые после прошлой публикации; остальные не трогаются"
+                    : "Опубликовать партию в каталог: совпавшие external_id обновить, остальные добавить"}
+                >
+                  {(isPushing || isPreparingPublish || publishOperation?.running) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {(isPushing || publishOperation?.running) && publishProgress
+                    ? `Публикация: ${publishProgressText(publishProgress)}`
+                    : isPreparingPublish
+                      ? "Ищу изменения…"
+                      : batchStage === "PUSHED" ? "Опубликовать изменения" : "Опубликовать в каталог"}
+                </button>
               ) : (
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowPublishMenu((value) => !value)}
-                      disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
-                      className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
-                    >
-                      {(isPushing || isPreparingPublish || publishOperation?.running) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {(isPushing || publishOperation?.running) && publishProgress
-                        ? `${publishProgress.phase === "lookup" ? "Проверка" : publishProgress.phase === "media" ? "Фото" : "Публикация"} ${publishProgress.current}/${publishProgress.total}`
-                        : "Публикация"}
-                      <ChevronDown className="h-4 w-4" />
-                    </button>
-                    {showPublishMenu && (
-                      <div className="absolute right-0 top-full z-30 mt-2 w-72 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
-                        <button onClick={() => { setShowPublishMenu(false); handlePush("upsert", true) }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-emerald-200 hover:bg-slate-800">
-                          <span className="block font-semibold">Заменить каталог текущей версией</span>
-                          <span className="text-xs text-slate-500">Обновить товары, добавить новые, отсутствующие в текущей БД-версии убрать в архив</span>
-                        </button>
-                        <button onClick={() => { setShowPublishMenu(false); handlePush("upsert") }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-slate-800">
-                          <span className="block font-semibold">Обновить и добавить</span>
-                          <span className="text-xs text-slate-500">Совпавшие external_id обновить, остальные добавить</span>
-                        </button>
-                        <button onClick={() => { setShowPublishMenu(false); handlePush("add") }} className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-white hover:bg-slate-800">
-                          <span className="block font-semibold">Добавить только новые</span>
-                          <span className="text-xs text-slate-500">Совпавшие external_id пропустить</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <button
+                    onClick={() => handleAiProcess("full")}
+                    className="px-6 py-2.5 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center gap-2"
+                >
+                    <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                    {aiReadyCount > 0 ? "Обработать ИИ остальные" : "Обработать ИИ"}
+                </button>
               ))}
 
               {isBatchSource && (
@@ -2318,6 +2280,7 @@ export default function CsvImportApp({
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
+                      {canPublish && batchStage !== "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("add") }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-200 hover:bg-slate-800"><Send className="h-4 w-4" />Добавить только новые<span className="block text-xs text-slate-500">Товары, уже существующие в каталоге, не трогать</span></button>}
                       {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Убрать в архив товары, которых нет в партии</span></button>}
                       {(batchStage === "AI_PROCESSED" || batchStage === "PUSHED") && <button onClick={handleReprocessTexts} title="ИИ перепишет только название и описание: цена, размеры, замеры, альты и фото не меняются" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sky-300 hover:bg-slate-800"><FileText className="h-4 w-4" />Переобработать названия и описания<span className="block text-xs text-slate-500">Цена, размеры, альты и фото не меняются</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
