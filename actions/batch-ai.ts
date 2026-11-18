@@ -102,7 +102,8 @@ import {
 import { normalizeBatchAiCategoryRules } from '@/lib/batch-ai-category-rules'
 import { hydrateBatchAiSettings as hydrateBatchAiSettingsFromLib, requireSavedBatchAiProvider } from '@/lib/batch-ai-settings'
 import { resetAiProviderPricingCache, withAiUsageContext } from '@/lib/ai-usage'
-import { abortAiRun, isAiCancelledError, registerAiRunController, throwIfAiCancelled, withAiAbortSignal } from '@/lib/ai-cancellation'
+import { abortAiRun, aiCancellableDelay, isAiCancelledError, registerAiRunController, throwIfAiCancelled, withAiAbortSignal } from '@/lib/ai-cancellation'
+import { batchAiRetryRoundDelayMs, shouldRetryBatchAiItem } from '@/lib/batch-ai-retry'
 import { loadBatchAiProxies, normalizeBatchAiProxies, normalizeProxyUrl, probeBatchAiProxy, providerUsesProxy, saveBatchAiProxies } from '@/lib/batch-ai-proxies'
 import { isValidPrice, normalizeModelName, normalizePricingTable, type AiModelPrice } from '@/lib/ai-usage-pricing'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
@@ -1543,32 +1544,80 @@ export async function startBatchMediaSeoAction(batchId: string, productIds?: num
 }
 
 async function processOpenRouterRun(runId: string, context: any, settings: BatchAiSettings) {
-  const items = await scrapingQuery("SELECT * FROM batch_ai_items WHERE run_id=$1 AND status='queued' ORDER BY created_at", [runId])
-  let cursor = 0
   // Параллельная обработка включена всегда: число потоков задаётся глобально в «Настройках ИИ».
   const concurrency = Math.max(1, Math.min(10, Math.round(finiteNumber(settings.concurrency, 5))))
-  const total = items.rows.length
   const logPrefix = batchAiRunLogPrefix(runId, context)
   const startedAt = Date.now()
-  const counts = { completed: 0, failed: 0, cancelled: 0 }
-  console.log(`${logPrefix}: старт, товаров ${total}, потоков ${Math.min(concurrency, total)}, модель ${settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel}`)
-  const workers = Array.from({ length: Math.min(concurrency, total) }, async () => {
-    while (cursor < items.rows.length) {
-      const item = items.rows[cursor++]
-      const itemStartedAt = Date.now()
-      const result = await processOpenRouterItem(item, context, settings)
-      if (result.outcome === 'skipped') continue
-      counts[result.outcome] += 1
-      const done = counts.completed + counts.failed + counts.cancelled
-      const seconds = Math.round((Date.now() - itemStartedAt) / 1000)
-      const verb = result.outcome === 'completed' ? 'готов' : result.outcome === 'failed' ? 'ошибка' : 'остановлен'
-      console.log(`${logPrefix}: товар ${item.product_id} ${verb} за ${seconds} с (${done}/${total})${result.error ? `: ${result.error.slice(0, 300)}` : ''}`)
+  const counts = { completed: 0, failed: 0, cancelled: 0, retrying: 0 }
+  let total = 0
+  // Круг 0 — основной проход. Товары, упавшие на временной ошибке, вернулись
+  // в очередь (см. shouldRetryBatchAiItem): следующий круг берёт их после паузы.
+  // Число попыток ограничено в самом товаре, поэтому круги конечны.
+  for (let round = 0; ; round += 1) {
+    if (round > 0) {
+      const waitMs = batchAiRetryRoundDelayMs(round)
+      console.log(`${logPrefix}: повтор упавших товаров, круг ${round}, через ${Math.round(waitMs / 1000)} с`)
+      if (!await waitForBatchAiRetryRound(runId, waitMs)) break
     }
-  })
-  await Promise.all(workers)
+    const items = await scrapingQuery("SELECT * FROM batch_ai_items WHERE run_id=$1 AND status='queued' ORDER BY created_at", [runId])
+    if (!items.rows.length) break
+    if (round === 0) {
+      total = items.rows.length
+      console.log(`${logPrefix}: старт, товаров ${total}, потоков ${Math.min(concurrency, total)}, модель ${settings.provider === 'byesu' ? settings.byesuModel : settings.openrouterModel}`)
+    }
+    let cursor = 0
+    const workers = Array.from({ length: Math.min(concurrency, items.rows.length) }, async () => {
+      while (cursor < items.rows.length) {
+        const item = items.rows[cursor++]
+        const itemStartedAt = Date.now()
+        const result = await processOpenRouterItem(item, context, settings)
+        if (result.outcome === 'skipped') continue
+        counts[result.outcome] += 1
+        const done = counts.completed + counts.failed + counts.cancelled
+        const seconds = Math.round((Date.now() - itemStartedAt) / 1000)
+        const verb = result.outcome === 'completed'
+          ? 'готов'
+          : result.outcome === 'failed'
+            ? 'ошибка'
+            : result.outcome === 'retrying' ? 'ошибка, будет повтор' : 'остановлен'
+        console.log(`${logPrefix}: товар ${item.product_id} ${verb} за ${seconds} с (${done}/${total})${result.error ? `: ${result.error.slice(0, 300)}` : ''}`)
+      }
+    })
+    await Promise.all(workers)
+  }
   const minutes = Math.round((Date.now() - startedAt) / 60_000)
-  console.log(`${logPrefix}: завершён за ${minutes} мин — готово ${counts.completed}, ошибок ${counts.failed}, остановлено ${counts.cancelled}, пропущено ${total - counts.completed - counts.failed - counts.cancelled}`)
+  console.log(`${logPrefix}: завершён за ${minutes} мин — готово ${counts.completed}, ошибок ${counts.failed}, повторов ${counts.retrying}, остановлено ${counts.cancelled}`)
   await finalizeRun(runId)
+}
+
+/**
+ * Пауза перед кругом повторов. Держит `started_at` запуска свежим, чтобы
+ * resumeStaleOpenRouterRun не принял ожидание за зависший запуск и не начал
+ * второй обработчик; «Остановить» прерывает паузу сразу. Возвращает false,
+ * если запуск остановлен.
+ */
+async function waitForBatchAiRetryRound(runId: string, waitMs: number) {
+  const controller = new AbortController()
+  const unregister = registerAiRunController(runId, controller)
+  try {
+    const deadline = Date.now() + waitMs
+    while (Date.now() < deadline) {
+      const alive = await scrapingQuery(`
+        UPDATE batch_ai_runs SET started_at=NOW(),updated_at=NOW()
+        WHERE id=$1 AND status IN ('queued','running')
+        RETURNING id
+      `, [runId]).catch(() => ({ rows: [{ id: runId }] }))
+      if (!alive.rows[0]) return false
+      try {
+        await aiCancellableDelay(Math.min(20_000, deadline - Date.now()), controller.signal)
+      } catch {
+        return false
+      }
+    }
+    return true
+  } finally {
+    unregister()
+  }
 }
 
 function batchAiRunLogPrefix(runId: string, context: any) {
@@ -1576,7 +1625,7 @@ function batchAiRunLogPrefix(runId: string, context: any) {
   return `AI-запуск ${runId.slice(0, 8)}${name ? ` «${name}»` : ''}`
 }
 
-type BatchAiItemResult = { outcome: 'completed' | 'failed' | 'cancelled' | 'skipped'; error?: string }
+type BatchAiItemResult = { outcome: 'completed' | 'failed' | 'cancelled' | 'skipped' | 'retrying'; error?: string }
 
 function batchAiNormalizationOptions(input: any, context: any) {
   return {
@@ -1714,14 +1763,16 @@ function processOpenRouterItemWithUsage(item: any, context: any, settings: Batch
 async function processOpenRouterItemWork(item: any, context: any, settings: BatchAiSettings, controller: AbortController): Promise<BatchAiItemResult> {
   let rawOutput: any = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
+  let attempts = 0
   try {
     const claimed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='running',attempts=attempts+1,updated_at=NOW()
       FROM batch_ai_runs r
       WHERE i.id=$1 AND i.run_id=r.id AND i.status='queued' AND r.status IN ('queued','running')
-      RETURNING i.id
+      RETURNING i.id,i.attempts
     `, [item.id])
     if (!claimed.rows[0]) return { outcome: 'skipped' }
+    attempts = Number(claimed.rows[0].attempts || 1)
     // Пульс заодно проверяет, что товар и запуск ещё живы. Запуск могли
     // остановить из другого процесса или откатить снимком — тогда товар
     // обрывается, а не держит провайдера до конца конвейера.
@@ -1922,6 +1973,19 @@ async function processOpenRouterItemWork(item: any, context: any, settings: Batc
   } catch (error: any) {
     // Остановленный товар уже помечен отменённым: ошибкой его не записываем.
     if (isAiCancelledError(error)) return { outcome: 'cancelled' }
+    const message = String(error.message || error).slice(0, 4000)
+    if (shouldRetryBatchAiItem(error, attempts)) {
+      // Товар возвращается в очередь своего запуска: processOpenRouterRun
+      // повторит его после паузы, остальные товары идут дальше. Последняя
+      // ошибка остаётся видна в очереди.
+      const requeued = await scrapingQuery(`
+        UPDATE batch_ai_items i SET status='queued',error_message=$2,completed_at=NULL,updated_at=NOW()
+        FROM batch_ai_runs r
+        WHERE i.id=$1 AND i.run_id=r.id AND i.status='running' AND r.status <> 'cancelled'
+        RETURNING i.id
+      `, [item.id, message]).catch(() => ({ rows: [] as any[] }))
+      if (requeued.rows[0]) return { outcome: 'retrying', error: message }
+    }
     const failed = await scrapingQuery(`
       UPDATE batch_ai_items i SET status='failed',error_message=$2,output=$3::jsonb,completed_at=NOW(),updated_at=NOW()
       FROM batch_ai_runs r
