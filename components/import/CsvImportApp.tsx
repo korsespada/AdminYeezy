@@ -619,6 +619,7 @@ export default function CsvImportApp({
   const [showPriceRules, setShowPriceRules] = useState(false);
   const [showPublishMenu, setShowPublishMenu] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [isPreparingPublish, setIsPreparingPublish] = useState(false);
   const [publishProgress, setPublishProgress] = useState<{
     phase: "lookup" | "media" | "publish";
     current: number;
@@ -1366,7 +1367,21 @@ export default function CsvImportApp({
 
     if (targetBatchId) {
       if (!isSnapshotSource) {
-        const preview = await previewBatchPublishAction(targetBatchId, mode, replaceMissing);
+        // Предпросмотр сверяет каждый external_id с Rails и на больших партиях
+        // идёт десятки секунд: без индикатора кнопка выглядит мёртвой, а
+        // оборванный запрос (таймаут прокси) раньше не давал никакого сообщения.
+        if (isPreparingPublish) return;
+        setIsPreparingPublish(true);
+        setSaveMsg(`Считаю предпросмотр публикации: сверяю ${products.length} товаров с каталогом…`);
+        let preview: Awaited<ReturnType<typeof previewBatchPublishAction>>;
+        try {
+          preview = await previewBatchPublishAction(targetBatchId, mode, replaceMissing);
+        } catch (error: any) {
+          setSaveMsg(`✗ Предпросмотр не ответил: ${error?.message || "unknown"}. Повторите публикацию.`);
+          return;
+        } finally {
+          setIsPreparingPublish(false);
+        }
         if (!preview.success) {
           setSaveMsg(`✗ Не удалось подготовить предпросмотр: ${preview.error || "unknown"}`);
           return;
@@ -1384,7 +1399,10 @@ export default function CsvImportApp({
             replaceMissing,
           }),
         );
-        if (!shouldContinue) return;
+        if (!shouldContinue) {
+          setSaveMsg("Публикация отменена.");
+          return;
+        }
       }
       setIsPushing(true);
       setPublishProgress({ phase: "lookup", current: 0, total: products.length });
@@ -2200,11 +2218,11 @@ export default function CsvImportApp({
               {isSnapshotSource && initialBatchId && ["SCRIPT_PROCESSED", "AI_PROCESSED", "PUSHED"].includes(batchStage) && aiRemainingCount === 0 && (
                 <button
                   onClick={() => handlePush("upsert")}
-                  disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                  disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
                   title="Обновить Rails-каталог данными этого snapshot и удалить товары этой партии, которых в нём нет"
                 >
-                  {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  {(isPushing || isPreparingPublish) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Пушить этот snapshot в каталог
                 </button>
               )}
@@ -2213,11 +2231,11 @@ export default function CsvImportApp({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handlePush("upsert")}
-                    disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                    disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
                     className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/20 transition-all hover:bg-emerald-500 disabled:opacity-50"
                     title="Отправить в каталог только товары, изменённые после предыдущей публикации; после генерации alt и slug фото будут перевыложены в WebP с новыми именами"
                   >
-                    {isPushing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {(isPushing || isPreparingPublish) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                     Обновить изменённые
                   </button>
                   <button
@@ -2257,10 +2275,10 @@ export default function CsvImportApp({
                   <div className="relative">
                     <button
                       onClick={() => setShowPublishMenu((value) => !value)}
-                      disabled={isPushing || Boolean(publishOperation?.running || publishOperation?.stale)}
+                      disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)}
                       className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50"
                     >
-                      {(isPushing || publishOperation?.running) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      {(isPushing || isPreparingPublish || publishOperation?.running) ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                       {(isPushing || publishOperation?.running) && publishProgress
                         ? `${publishProgress.phase === "lookup" ? "Проверка" : publishProgress.phase === "media" ? "Фото" : "Публикация"} ${publishProgress.current}/${publishProgress.total}`
                         : "Публикация"}
@@ -2300,7 +2318,7 @@ export default function CsvImportApp({
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
                       {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
-                      {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Убрать в архив товары, которых нет в партии</span></button>}
+                      {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Убрать в архив товары, которых нет в партии</span></button>}
                       {(batchStage === "AI_PROCESSED" || batchStage === "PUSHED") && <button onClick={handleReprocessTexts} title="ИИ перепишет только название и описание: цена, размеры, замеры, альты и фото не меняются" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sky-300 hover:bg-slate-800"><FileText className="h-4 w-4" />Переобработать названия и описания<span className="block text-xs text-slate-500">Цена, размеры, альты и фото не меняются</span></button>}
                       {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
                       {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
