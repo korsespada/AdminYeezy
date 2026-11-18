@@ -29,6 +29,7 @@ import {
 } from '@/lib/scraping-files'
 import { currentBatchHistoryStatus, effectiveBatchHistoryStage } from '@/lib/batch-history'
 import { BATCH_PUBLISH_STALE_MS, parseBatchPublishProgress } from '@/lib/batch-publish-progress'
+import { startBatchPublishJob } from '@/lib/batch-publish-jobs'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
 import { normalizeSzwegoParseMode, type SzwegoParseMode } from '@/lib/szwego-parse-mode'
 import { batchSnapshotsWithCounts } from '@/lib/batch-snapshot-counts'
@@ -1502,46 +1503,72 @@ export async function updateBatchStageAction(batchId: string, stage: 'SCRAPED' |
     }
 }
 
+/**
+ * Запускает публикацию партии в фоне и сразу отвечает `{ jobId }`.
+ * Прогресс и итог браузер читает через `GET /api/batches/publish-progress`:
+ * публикация больших партий идёт часами и не должна зависеть от HTTP-запроса.
+ */
 export async function pushBatchToCatalogAction(batchId: string, mode: 'add' | 'upsert' = 'add', snapshotId?: string | null, replaceMissing = false): Promise<ActionResponse> {
     try {
         await requireAdmin()
-        const workflow = require('../scripts/batch-workflow')
-        const lastReported = new Map<string, number>()
-        let progressWrite = Promise.resolve()
-        const onProgress = async (progress: any) => {
-          const phase = ['lookup', 'media', 'publish'].includes(progress?.phase) ? progress.phase : 'publish'
-          const current = Math.max(0, Number(progress?.current || 0))
-          const total = Math.max(0, Number(progress?.total || 0))
-          const previous = lastReported.get(phase) ?? -5
-          if (current !== 0 && current !== total && current - previous < 5) return
-          lastReported.set(phase, current)
-          progressWrite = progressWrite.then(async () => {
-            const persisted = await scrapingQuery(
-              `UPDATE batch_operation_locks
-               SET operation=$2,updated_at=NOW()
-               WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
-               RETURNING operation`,
-              [batchId, `publish|${phase}|${current}|${total}`],
-            )
-            if (!persisted.rows[0]) throw new Error('Публикация остановлена пользователем')
-          })
-          await progressWrite
+        const lock = await scrapingQuery(
+          'SELECT operation,updated_at FROM batch_operation_locks WHERE batch_id=$1',
+          [batchId],
+        )
+        if (lock.rows[0]) {
+          const progress = parseBatchPublishProgress(lock.rows[0].operation, lock.rows[0].updated_at)
+          if (!progress.stale) {
+            return { success: false, error: progress.running ? 'Публикация этой выгрузки уже идёт' : 'Выгрузка уже обрабатывается другим процессом' }
+          }
         }
-        const result = snapshotId
-          ? await workflow.pushBatchSnapshotToCatalog(batchId, snapshotId, { mode: 'upsert' }, onProgress)
-          : await workflow.pushBatchToCatalog(batchId, { mode, deleteMissing: replaceMissing }, onProgress)
-        try {
-            await redis.del('catalog:all')
-        } catch (redisErr: any) {
-            console.warn('Redis clear cache error:', redisErr.message)
-        }
-        revalidatePath('/admin')
-        revalidatePath('/admin/batches')
-        revalidatePath('/admin/scraping')
-        return { success: true, data: result }
+        const { job, alreadyRunning } = startBatchPublishJob(batchId, () => runBatchPublish(batchId, mode, snapshotId, replaceMissing))
+        return { success: true, data: { jobId: job.id, alreadyRunning } }
     } catch (err: any) {
         return { success: false, error: err.message }
     }
+}
+
+async function runBatchPublish(batchId: string, mode: 'add' | 'upsert', snapshotId: string | null | undefined, replaceMissing: boolean) {
+    const workflow = require('../scripts/batch-workflow')
+    const lastReported = new Map<string, number>()
+    let progressWrite = Promise.resolve()
+    const onProgress = async (progress: any) => {
+      const phase = ['lookup', 'media', 'publish'].includes(progress?.phase) ? progress.phase : 'publish'
+      const current = Math.max(0, Number(progress?.current || 0))
+      const total = Math.max(0, Number(progress?.total || 0))
+      const previous = lastReported.get(phase) ?? -5
+      if (current !== 0 && current !== total && current - previous < 5) return
+      lastReported.set(phase, current)
+      progressWrite = progressWrite.then(async () => {
+        let persisted
+        try {
+          persisted = await scrapingQuery(
+            `UPDATE batch_operation_locks
+             SET operation=$2,updated_at=NOW()
+             WHERE batch_id=$1 AND operation NOT LIKE 'cancel_requested|%'
+             RETURNING operation`,
+            [batchId, `publish|${phase}|${current}|${total}`],
+          )
+        } catch (error: any) {
+          // Сбой соединения с БД не должен обрывать многочасовую публикацию:
+          // счётчик обновится следующим шагом, блокировку держит heartbeat.
+          console.warn(`[batch-publish] progress not saved for ${batchId}: ${error?.message || error}`)
+          return
+        }
+        if (!persisted.rows[0]) throw new Error('Публикация остановлена пользователем')
+      })
+      await progressWrite
+    }
+    const result = snapshotId
+      ? await workflow.pushBatchSnapshotToCatalog(batchId, snapshotId, { mode: 'upsert' }, onProgress)
+      : await workflow.pushBatchToCatalog(batchId, { mode, deleteMissing: replaceMissing }, onProgress)
+    try {
+        await redis.del('catalog:all')
+    } catch (redisErr: any) {
+        console.warn('Redis clear cache error:', redisErr.message)
+    }
+    revalidatePathsSafely('/admin', '/admin/batches', '/admin/scraping')
+    return result
 }
 
 /**

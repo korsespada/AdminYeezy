@@ -69,6 +69,7 @@ import {
 } from "@/actions/csv-import";
 import { previewBatchPublishAction, pushBatchToCatalogAction, stopBatchPublishAction } from "@/actions/suppliers";
 import type { BatchPublishProgress } from "@/lib/batch-publish-progress";
+import type { BatchPublishJob } from "@/lib/batch-publish-jobs";
 import type { BatchScriptProgress } from "@/lib/batch-script-progress";
 import { batchPublishSyncDecision } from "@/lib/batch-publish-sync";
 import { batchPublishPreviewMessage } from "@/lib/batch-publish-preview";
@@ -625,6 +626,10 @@ export default function CsvImportApp({
   } | null>(null);
   const [publishOperation, setPublishOperation] = useState<BatchPublishProgress | null>(null);
   const [isStoppingPublish, setIsStoppingPublish] = useState(false);
+  // id фоновой публикации, итог которой ждёт эта страница.
+  const pendingPublishJobIdRef = useRef<string | null>(null);
+  const publishJobSeenRef = useRef(false);
+  const applyPublishJobOutcomeRef = useRef<(job: BatchPublishJob) => void>(() => undefined);
   const [result, setResult] = useState<{
     success: number;
     updated: number;
@@ -764,8 +769,26 @@ export default function CsvImportApp({
         cache: "no-store",
       }).then((result) => result.ok ? result.json() : null).catch(() => null);
       if (cancelled || !response?.success) return;
-      const operation = response.data as BatchPublishProgress;
+      const operation = response.data as BatchPublishProgress & { job?: BatchPublishJob | null };
       setPublishOperation(operation);
+      const job = operation.job || null;
+      const firstPoll = !publishJobSeenRef.current;
+      publishJobSeenRef.current = true;
+      if (job?.status === "running" && !pendingPublishJobIdRef.current) {
+        // Страницу открыли или обновили во время публикации: ждём её итог.
+        pendingPublishJobIdRef.current = job.id;
+        setIsPushing(true);
+      } else if (job && job.status !== "running") {
+        const awaited = pendingPublishJobIdRef.current === job.id;
+        const recent = job.finishedAt && Date.now() - new Date(job.finishedAt).getTime() < 60 * 60 * 1000;
+        if (awaited || (firstPoll && recent)) {
+          pendingPublishJobIdRef.current = null;
+          applyPublishJobOutcomeRef.current(job);
+          setIsPushing(false);
+          setPublishProgress(null);
+          return;
+        }
+      }
       if (operation.running || operation.stale) {
         setPublishProgress({
           phase: operation.phase || "publish",
@@ -1366,31 +1389,45 @@ export default function CsvImportApp({
       setIsPushing(true);
       setPublishProgress({ phase: "lookup", current: 0, total: products.length });
       try {
-        const pushResult = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId, replaceMissing);
-        if (pushResult.success) {
-          setResult({
-            success: Number(pushResult.data?.success || 0),
-            updated: Number(pushResult.data?.updated || 0),
-            skipped: Number(pushResult.data?.skippedExisting || 0) + Number(pushResult.data?.skippedUnchanged || 0),
-            failed: Number(pushResult.data?.failed || 0),
-            errors: pushResult.data?.errors || [],
-          });
-          const videoWarnings = Array.isArray(pushResult.data?.videoWarnings) ? pushResult.data.videoWarnings : [];
-          setSaveMsg(`✓ Новых: ${Number(pushResult.data?.success || 0)}, обновлено: ${Number(pushResult.data?.updated || 0)}, в архив: ${Number(pushResult.data?.deleted || 0)}, без изменений: ${Number(pushResult.data?.skippedUnchanged || 0)}, уже существовало: ${Number(pushResult.data?.skippedExisting || 0)}${videoWarnings.length ? ` · видео с ошибками: ${videoWarnings.length}` : ""}`);
-          setBatchStage("PUSHED");
-        } else {
-          setSaveMsg(`✗ Ошибка публикации: ${pushResult.error || "unknown"}`);
+        // Действие только запускает фоновую публикацию; итог придёт через
+        // опрос /api/batches/publish-progress (см. applyPublishJobOutcome).
+        const started = await pushBatchToCatalogAction(targetBatchId, isSnapshotSource ? "upsert" : mode, activeSnapshotId, replaceMissing);
+        if (started.success && started.data?.jobId) {
+          pendingPublishJobIdRef.current = String(started.data.jobId);
+          setSaveMsg("Публикация идёт на сервере. Страницу можно закрыть — прогресс и итог сохранятся.");
+          return;
         }
+        setSaveMsg(`✗ Ошибка публикации: ${started.error || "unknown"}`);
       } catch (error: any) {
-        setSaveMsg(`✗ Ошибка публикации: ${error.message || "unknown"}`);
-      } finally {
-        setIsPushing(false);
-        setPublishProgress(null);
+        setSaveMsg(`✗ Не удалось запустить публикацию: ${error.message || "unknown"}. Обновите страницу: если публикация запустилась, прогресс появится.`);
       }
+      setIsPushing(false);
+      setPublishProgress(null);
       return;
     }
 
   };
+
+  const applyPublishJobOutcome = (job: BatchPublishJob) => {
+    if (job.status === "failed") {
+      setSaveMsg(`✗ Ошибка публикации: ${job.error || "unknown"}`);
+      return;
+    }
+    const data = (job.result || {}) as any;
+    setResult({
+      success: Number(data.success || 0),
+      updated: Number(data.updated || 0),
+      skipped: Number(data.skippedExisting || 0) + Number(data.skippedUnchanged || 0),
+      failed: Number(data.failed || 0),
+      errors: data.errors || [],
+    });
+    const videoWarnings = Array.isArray(data.videoWarnings) ? data.videoWarnings : [];
+    setSaveMsg(`✓ Новых: ${Number(data.success || 0)}, обновлено: ${Number(data.updated || 0)}, в архив: ${Number(data.deleted || 0)}, без изменений: ${Number(data.skippedUnchanged || 0)}, уже существовало: ${Number(data.skippedExisting || 0)}${videoWarnings.length ? ` · видео с ошибками: ${videoWarnings.length}` : ""}`);
+    setBatchStage("PUSHED");
+  };
+  useEffect(() => {
+    applyPublishJobOutcomeRef.current = applyPublishJobOutcome;
+  });
 
   const handleStopPublish = async () => {
     const targetBatchId = batchId || initialBatchId;

@@ -1015,6 +1015,9 @@ function chunkArray(items, size) {
   return chunks;
 }
 
+// Публикация обновляет блокировку чаще, чем её признают зависшей (5 минут).
+const PUBLISH_HEARTBEAT_MS = 30_000;
+
 // Общий пул фото всей партии: скачивание, WebP и PutObject.
 function mediaUploadConcurrency() {
   const configured = Number(process.env.MEDIA_UPLOAD_CONCURRENCY || 8);
@@ -2847,6 +2850,17 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     RETURNING owner_id
   `, [batchId, operationOwnerId]);
   if (!operation.rows[0]) throw new Error('Выгрузка уже обрабатывается другим процессом');
+  // Счётчик в блокировке двигается только когда товар готов целиком, а товар с
+  // видео ждёт перекодирования: при двух ffmpeg и тысячах роликов прогресс
+  // может стоять дольше 5 минут, и живая публикация выглядела бы зависшей
+  // (её предлагалось сбросить). Heartbeat доказывает, что процесс жив.
+  const heartbeat = setInterval(() => {
+    scrapingPool.query(
+      'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
+      [batchId, operationOwnerId],
+    ).catch((error) => console.warn(`[batch-publish] heartbeat failed for ${batchId}: ${error.message}`));
+  }, PUBLISH_HEARTBEAT_MS);
+  heartbeat.unref?.();
   try {
   const publishStartedAt = Date.now();
   let phaseStartedAt = publishStartedAt;
@@ -3117,10 +3131,11 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
       if (!productFailed) prepared += 1;
       const progress = { phase: 'media', current: completedProducts, total: candidates.length, success: prepared, failed: errors.length };
       if (completedProducts % 10 === 0 || completedProducts === candidates.length) {
+        // Разовый таймаут соединения с БД не должен обрывать многочасовой перенос медиа.
         await scrapingPool.query(
           'UPDATE batch_operation_locks SET updated_at=NOW() WHERE batch_id=$1 AND owner_id=$2',
           [batchId, operationOwnerId],
-        );
+        ).catch((error) => console.warn(`[batch-publish] lock touch failed for ${batchId}: ${error.message}`));
       }
       if (onProgress) await onProgress(progress);
     },
@@ -3286,6 +3301,7 @@ async function pushBatchToCatalog(batchId, options = {}, onProgress) {
     railsImportBatchIds: importBatches.filter(Boolean),
   };
   } finally {
+    clearInterval(heartbeat);
     await scrapingPool.query('DELETE FROM batch_operation_locks WHERE batch_id=$1 AND owner_id=$2', [batchId, operationOwnerId]).catch(() => undefined);
   }
 }

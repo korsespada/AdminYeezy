@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isAdminAuthError, requireAdmin } from '@/lib/admin-session'
 import { scrapingQuery } from '@/lib/db'
 import { parseBatchPublishProgress } from '@/lib/batch-publish-progress'
+import { getBatchPublishJob } from '@/lib/batch-publish-jobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,11 @@ export async function GET(request: Request) {
     )
     return NextResponse.json({
       success: true,
-      data: parseBatchPublishProgress(result.rows[0]?.operation, result.rows[0]?.updated_at),
+      data: {
+        ...parseBatchPublishProgress(result.rows[0]?.operation, result.rows[0]?.updated_at),
+        // Итог последней фоновой публикации этой партии в текущем процессе.
+        job: getBatchPublishJob(batchId),
+      },
     }, { headers: noStoreHeaders })
   } catch (error: any) {
     if (isAdminAuthError(error)) {

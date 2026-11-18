@@ -26,16 +26,31 @@ function ffprobePath() {
   return process.env.FFPROBE_PATH || 'ffprobe';
 }
 
+// Битый ролик может подвесить ffmpeg; публикация держит блокировку heartbeat-ом,
+// поэтому без предела зависший процесс навсегда занял бы очередь видео.
+const PROCESS_TIMEOUT_MS = 10 * 60 * 1000;
+
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', options.captureStdout ? 'pipe' : 'ignore', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    const timeoutMs = options.timeoutMs || PROCESS_TIMEOUT_MS;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
     if (options.captureStdout) child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-8000); });
-    child.on('error', reject);
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
     child.on('close', (code) => {
-      if (code === 0) resolve(stdout);
+      clearTimeout(timer);
+      if (timedOut) reject(new Error(`${command} не уложился в ${Math.round(timeoutMs / 60000)} мин и остановлен`));
+      else if (code === 0) resolve(stdout);
       else reject(new Error(`${command} завершился с кодом ${code}: ${stderr.trim()}`));
     });
   });
