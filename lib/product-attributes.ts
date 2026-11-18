@@ -219,24 +219,34 @@ function normalizeNumericSizes(raw: string): string[] {
   if (!raw) return []
   const cleaned = raw
     .replace(/\b(?:EU|US|UK|IT|RU)\b/gi, '')
+    // В строке с меткой размера часто есть цена: «Размеры: M•L•XL ▫️Цена: 530¥».
+    .split(/(?:цена|price|стоимость|руб|¥|₽|\$|€|元)/i)[0]
     .replace(/\s*(?:размер(?:ы|ный ряд)?|sizes?|码数|尺码|鞋码|鞋号)\s*$/i, '')
     .replace(/\s*[（(].*$/u, '')
     .trim()
-  const range = cleaned.match(/^(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)(?=$|\s|[，,;；/|])/u)
+  // «Размер: 25,5 × 15 × 6,5 см» — это габариты, а не размерный ряд.
+  if (/\d(?:[.,]\d+)?\s*[xх×*]\s*\d/i.test(cleaned)) return []
+  // Диапазон может стоять в середине значения: «39–44码，38/45/可定制» —
+  // это ряд 39…44 плюс отдельные 38 и 45, а не одно число.
+  const range = cleaned.match(/(\d{1,3}(?:[.,]5)?)\s*[-–—]\s*(\d{1,3}(?:[.,]5)?)/u)
+  const sizes: string[] = []
+  let rest = cleaned
   if (range) {
     const from = Number(range[1].replace(',', '.'))
     const to = Number(range[2].replace(',', '.'))
     const step = Number.isInteger(from) && Number.isInteger(to) ? 1 : 0.5
     const count = Math.floor((to - from) / step) + 1
     if (to >= from && count <= 20) {
-      return Array.from({ length: count }, (_, index) => formatSize(from + index * step))
+      sizes.push(...Array.from({ length: count }, (_, index) => formatSize(from + index * step)))
+      rest = `${cleaned.slice(0, range.index)} ${cleaned.slice((range.index || 0) + range[0].length)}`
     }
   }
 
-  return [...new Set(cleaned
-    .split(/[,;/|]+/)
-    .map((item) => item.trim().replace(',', '.').replace(/[^\d.]+$/g, ''))
-    .filter((item) => /^(?:\d{1,3})(?:\.5)?$/.test(item)))]
+  for (const match of rest.matchAll(/\d{1,3}(?:[.,]5)?/g)) {
+    const value = match[0].replace(',', '.')
+    if (/^\d{1,3}(?:\.5)?$/.test(value)) sizes.push(value)
+  }
+  return [...new Set(sizes)]
 }
 
 function formatSize(value: number) {

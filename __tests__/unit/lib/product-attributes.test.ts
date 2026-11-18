@@ -71,6 +71,11 @@ describe('product attributes', () => {
     })
   })
 
+  it('reads a size range that is followed by extra sizes and supplier notes', () => {
+    expect(extractExplicitShoeAttributes('GUCCI经典豆豆鞋 尺码：39–44码，38/45/可定制').sizes)
+      .toEqual(['39', '40', '41', '42', '43', '44', '38', '45'])
+  })
+
   it('keeps supplied structured values over text suggestions', () => {
     expect(extractProductAttributes({
       description: 'Размеры: 38-40',

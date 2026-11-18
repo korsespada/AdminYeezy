@@ -482,13 +482,34 @@ function alignSizing(ordered) {
     : recommendations.groups.length === 1 ? recommendations.winner.value : null;
 
   const keepOwn = ownPhotoChartProducts(tables.groups);
+  const sizeList = Array.isArray(sizes) ? sizes.filter((value) => !isEmptyValue(value)) : [];
   for (const product of ordered) {
     if (keepOwn.has(product.id)) continue;
     const attributes = attributesOf(product);
     const patch = {};
     const own = measurementsForComparison(product);
     if (source && (!own || measurementKey(own) !== mainTable.key)) patch.measurements = measurementsOf(source);
-    if (!isEmptyValue(sizes) && !sameValue(attributes.sizes, sizes)) patch.sizes = sizes;
+    if (!isEmptyValue(sizes) && !sameValue(attributes.sizes, sizes)) {
+      const ownSizes = attributes.sizes;
+      const ownCount = Array.isArray(ownSizes)
+        ? ownSizes.filter((value) => !isEmptyValue(value)).length
+        : (isEmptyValue(ownSizes) ? 0 : 1);
+      // Один размер — это не ряд: нельзя ни придумать его товару без размера,
+      // ни сузить до него уже прочитанный многозначный ряд соседнего цвета.
+      if (sizeList.length === 1 && ownCount === 0) {
+        // товару без размера чужой единственный размер не переносим
+      } else if (sizeList.length === 1 && ownCount > 1) {
+        issues.push(issue(
+          'sizes',
+          'размерный ряд',
+          [{ products: [product] }, { products: source ? [source] : [] }].filter((group) => group.products.length > 0),
+          [product],
+          SEVERITY_WARNING,
+        ));
+      } else {
+        patch.sizes = sizes;
+      }
+    }
     if (!isEmptyValue(recommendation) && !sameValue(attributes.size_recommendation, recommendation)) {
       patch.size_recommendation = recommendation;
     }

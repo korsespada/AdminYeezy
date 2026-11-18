@@ -95,6 +95,18 @@ describe('alignColorFamily', () => {
     expect(updateFor(result, 2)).toBeUndefined()
   })
 
+  it('does not invent a single size for a colour without one and does not shrink a run', () => {
+    const result = alignColorFamily([
+      member(1, 'Чёрный'),
+      member(2, 'Бежевый', { attributes: { sizes: ['5'] } }),
+      member(3, 'Зелёный', { attributes: { sizes: ['48', '50'] } }),
+    ])
+
+    expect(updateFor(result, 1)?.attributes?.sizes).toBeUndefined()
+    expect(updateFor(result, 3)?.attributes?.sizes).toBeUndefined()
+    expect(result.issues.some((entry: any) => entry.field === 'sizes')).toBe(true)
+  })
+
   it('treats differing readings of one chart album as the same chart', () => {
     const result = alignColorFamily([
       member(1, 'Чёрный', { attributes: { size_chart_source_id: 'chart-1', sizes: ['48', '50'], measurements: table('104') } }),

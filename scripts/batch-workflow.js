@@ -1267,14 +1267,46 @@ function isBagsProduct(product, lookups) {
   return catalogLookupKey(lookupName(lookups.categories, product.category, 'категории')) === 'сумки';
 }
 
-function withoutBagSizes(product, lookups) {
-  if (!isBagsProduct(product, lookups)) return product;
+// Габариты кошелька, обложки или очков — не размерный ряд: число из строки
+// «Size：10.3*7.5*0.4cm» не должно стать единственным вариантом на витрине.
+const DIMENSION_ONLY_SUBCATEGORIES = new Set([
+  'кошельки и картхолдеры',
+  'обложки для паспорта',
+  'косметички',
+  'очки',
+]);
+const NUMERIC_SIZE_VALUE = /^\d{1,3}(?:[.,]\d+)?$/;
+const FRAME_SIZE_VALUE = /^\d{2,3}-\d{1,3}-\d{1,3}$/;
 
+function dimensionOnlySizes(attributes, subcategory) {
+  const sizes = attributes.sizes;
+  const values = Array.isArray(sizes) ? sizes : [];
+  const kept = values.filter((value) => {
+    const text = String(value ?? '').trim();
+    return text !== '' && !NUMERIC_SIZE_VALUE.test(text) && !FRAME_SIZE_VALUE.test(text);
+  });
+  if (kept.length === values.length) return null;
+  return kept.length > 0 ? kept : null;
+}
+
+function withoutBagSizes(product, lookups) {
   const attributes = normalizeAttributes(product.attributes);
   if (!Object.hasOwn(attributes, 'sizes')) return product;
 
-  const { sizes: _sizes, ...attributesWithoutSizes } = attributes;
-  return { ...product, attributes: attributesWithoutSizes };
+  if (isBagsProduct(product, lookups)) {
+    const { sizes: _sizes, ...attributesWithoutSizes } = attributes;
+    return { ...product, attributes: attributesWithoutSizes };
+  }
+
+  const subcategory = catalogLookupKey(lookups.subcategories?.get(product.subcategory) || '');
+  if (!DIMENSION_ONLY_SUBCATEGORIES.has(subcategory)) return product;
+
+  const kept = dimensionOnlySizes(attributes, subcategory);
+  if (!kept) {
+    const { sizes: _sizes, ...attributesWithoutSizes } = attributes;
+    return { ...product, attributes: attributesWithoutSizes };
+  }
+  return { ...product, attributes: { ...attributes, sizes: kept } };
 }
 
 function productToRailsCsvRow(product, lookups) {
@@ -3349,6 +3381,7 @@ module.exports = {
   lookupName,
   parseCsvObjects,
   publicationPayloadHash,
+  withoutBagSizes,
   productToRailsJsonRow,
   mapWithConcurrency,
   mediaUploadConcurrency,

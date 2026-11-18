@@ -25,6 +25,7 @@ import { normalizeSupplierPublishedOn, supplierPublishedOnFromAttributes } from 
 import { normalizeMeasurementTable, normalizeProductMeasurements, normalizeSizeRecommendation, productMeasurementSizes, type MeasurementTable } from '@/lib/measurement-templates'
 import { expandEvenSizeRange, planEvenClothingSizes } from '@/lib/clothing-sizes'
 import { normalizeSupplierAiVisualExamples, type SupplierAiVisualExample } from '@/lib/supplier-ai-visual-examples'
+import { applyCatalogSizeRules } from '@/lib/size-rules'
 
 export type BatchAiProvider = 'openrouter' | 'byesu'
 
@@ -1959,6 +1960,20 @@ export function normalizeBatchAiOutput(raw: any, input: {
     if (size) {
       productName = appendNominalBagSize(productName, size)
       delete attributes.sizes
+    }
+  }
+  // Сумка/кошелёк/ювелирка не имеют размерного ряда: число из строки габаритов
+  // или подписи одной вещи не должно становиться размером и вариантом на витрине.
+  if (attributes.sizes !== undefined) {
+    const sizeGuard = applyCatalogSizeRules({
+      categoryName: input.categoryNames?.get(category) || category,
+      subcategoryName: input.subcategoryNames?.get(subcategory) || '',
+      sizes: attributes.sizes,
+      sourceText: [original.name, original.description, proposed.name, proposed.description].filter(Boolean).join('\n'),
+    })
+    if (sizeGuard.changed) {
+      if (sizeGuard.sizes === null) delete attributes.sizes
+      else attributes.sizes = sizeGuard.sizes as typeof attributes.sizes
     }
   }
   const proposedPrice = String(input.priceAiInstructions || '').trim() && Number.isFinite(Number(proposed.price)) && Number(proposed.price) >= 0

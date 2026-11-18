@@ -896,3 +896,27 @@ describe('publication attributes', () => {
     })).toEqual({ colors: ['Серебристый'] })
   })
 })
+
+describe('publication size cleanup', () => {
+  const lookups = {
+    categories: new Map([['bags', 'Сумки'], ['accessories', 'Аксессуары']]),
+    subcategories: new Map([['wallets', 'Кошельки и картхолдеры'], ['hats', 'Шапки']]),
+  }
+
+  it('removes bag sizes and numeric wallet sizes but keeps a hat one-size', () => {
+    const bag = workflow.withoutBagSizes({ category: 'bags', attributes: { sizes: ['5'], colors: ['Чёрный'] } }, lookups)
+    expect(bag.attributes).toEqual({ colors: ['Чёрный'] })
+
+    const wallet = workflow.withoutBagSizes(
+      { category: 'accessories', subcategory: 'wallets', attributes: { sizes: ['10'] } },
+      lookups,
+    )
+    expect(wallet.attributes).toEqual({})
+
+    const hat = workflow.withoutBagSizes(
+      { category: 'accessories', subcategory: 'hats', attributes: { sizes: ['OS'] } },
+      lookups,
+    )
+    expect(hat.attributes).toEqual({ sizes: ['OS'] })
+  })
+})

@@ -363,6 +363,58 @@ describe('batch AI normalization', () => {
     expect(result.mediaDecision).toEqual({ discard: [], sizeCharts: [] })
   })
 
+  it('drops a bag size read from the dimension line and keeps the nominal size in the name', () => {
+    const bagInput = {
+      product: { name: '', photos: [], attributes: {}, category: 'bags', subcategory: 'backpacks' },
+      brandIds: new Set<string>(), brandNames: new Map<string, string>(),
+      categoryIds: new Set(['bags']), categoryNames: new Map([['bags', 'Сумки']]),
+      subcategoryIds: new Set(['backpacks']), subcategoryNames: new Map([['backpacks', 'Рюкзаки']]),
+      attributeCodes: new Set(['sizes', 'dimensions']),
+    }
+    const dimension = normalizeBatchAiOutput({
+      product: {
+        name: 'Синий рюкзак Ophidia Mini',
+        description: 'Габариты: 20,5 × 20 × 12 см',
+        catalog_attributes: { sizes: ['5'], dimensions: '20,5 × 20 × 12 см' },
+      },
+    }, bagInput)
+    expect(dimension.product.attributes.sizes).toBeUndefined()
+
+    const nominal = normalizeBatchAiOutput({
+      product: {
+        name: 'Чёрный клатч Classic Flap',
+        catalog_attributes: { sizes: ['25'] },
+      },
+    }, bagInput)
+    expect(nominal.product.attributes.sizes).toBeUndefined()
+    expect(nominal.product.name).toContain('25')
+  })
+
+  it('drops a jewelry size the supplier text does not confirm', () => {
+    const jewelryInput = {
+      product: { name: '', photos: [], attributes: {}, category: 'jewelry', subcategory: 'rings' },
+      brandIds: new Set<string>(), brandNames: new Map<string, string>(),
+      categoryIds: new Set(['jewelry']), categoryNames: new Map([['jewelry', 'Ювелирные изделия']]),
+      subcategoryIds: new Set(['rings']), subcategoryNames: new Map([['rings', 'Кольца']]),
+      attributeCodes: new Set(['sizes']),
+    }
+    const invented = normalizeBatchAiOutput({
+      product: {
+        name: 'Золотое кольцо с бриллиантами',
+        catalog_attributes: { sizes: ['54'] },
+      },
+    }, { ...jewelryInput, product: { ...jewelryInput.product, description: '蝴蝶戒指 18K金镶嵌天然钻石。' } })
+    expect(invented.product.attributes.sizes).toBeUndefined()
+
+    const labelled = normalizeBatchAiOutput({
+      product: {
+        name: 'Золотое кольцо с бриллиантами',
+        catalog_attributes: { sizes: ['17'] },
+      },
+    }, { ...jewelryInput, product: { ...jewelryInput.product, description: '款号：A1 尺寸：17 圈口' } })
+    expect(labelled.product.attributes.sizes).toEqual(['17'])
+  })
+
   it('moves only the selected cover photo to the first position', () => {
     const result = normalizeBatchAiOutput({
       product: { name: 'Товар' },
