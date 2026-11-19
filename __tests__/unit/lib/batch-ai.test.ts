@@ -49,6 +49,7 @@ describe('batch AI normalization', () => {
   it('defines how an unsplit card with several garments is handled', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Одна модель в нескольких цветах')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('«Доступные цвета: …»')
+    expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Если особенности поставщика прямо требуют не публиковать альбом с несколькими расцветками одной модели')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Две и более разные вещи, которые продаются вместе')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('Две разные модели, которые продаются отдельно')
   })
@@ -214,6 +215,20 @@ describe('batch AI normalization', () => {
   it('prioritizes visible clothing type over loose set wording', () => {
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('комбинезоны и ромперы также относятся к «Платья»')
     expect(GLOBAL_BATCH_AI_CATALOG_RULES).toContain('только когда на фотографиях видны два разных предмета одежды')
+  })
+
+  it('fails instead of marking the product processed when the response has no product block', () => {
+    const input = {
+      product: { name: 'Без названия', description: '源自我们', photos: [], attributes: {} },
+      brandIds: new Set<string>(),
+      categoryIds: new Set<string>(), subcategoryIds: new Set<string>(), attributeCodes: new Set<string>(),
+    }
+    // Оборванный JSON: parseBatchAiJson вернул вложенный фрагмент вместо всего ответа.
+    expect(() => normalizeBatchAiOutput({ size_chart_indexes: [30] }, input)).toThrow('ИИ не вернул данные товара')
+    expect(() => normalizeBatchAiOutput({ product: [] }, input)).toThrow('ИИ не вернул данные товара')
+    expect(() => normalizeBatchAiOutput(null, input)).toThrow('ИИ не вернул данные товара')
+    // Пропуск альбома по правилу поставщика допускает ответ без product.
+    expect(() => normalizeBatchAiOutput({ ai_processing: { skip_product: true } }, input)).not.toThrow()
   })
 
   it('never creates new taxonomy proposals', () => {
