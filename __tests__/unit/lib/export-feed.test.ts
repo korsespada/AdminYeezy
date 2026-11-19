@@ -133,11 +133,24 @@ describe('sortFeedRows', () => {
   )
   const order = (sort: Parameters<typeof sortFeedRows>[1]) => sortFeedRows(rows, sort).map((row) => row.name)
 
-  it('keeps running suppliers first and suppliers without batches last for every sort', () => {
+  it('keeps running suppliers first, unpublished before published, and suppliers without batches last for every sort', () => {
     expect(order('attention')).toEqual(['ИИ идёт', 'Ошибка', 'Готово', 'Опубликован', 'Ещё новый', 'Новый'])
     expect(order('recent')).toEqual(['ИИ идёт', 'Готово', 'Ошибка', 'Опубликован', 'Ещё новый', 'Новый'])
-    expect(order('oldest')).toEqual(['ИИ идёт', 'Опубликован', 'Ошибка', 'Готово', 'Ещё новый', 'Новый'])
-    expect(order('name')).toEqual(['ИИ идёт', 'Готово', 'Опубликован', 'Ошибка', 'Ещё новый', 'Новый'])
+    expect(order('oldest')).toEqual(['ИИ идёт', 'Ошибка', 'Готово', 'Опубликован', 'Ещё новый', 'Новый'])
+    expect(order('name')).toEqual(['ИИ идёт', 'Готово', 'Ошибка', 'Опубликован', 'Ещё новый', 'Новый'])
+  })
+
+  it('lifts a supplier with a new unpublished batch above published ones in the manual order', () => {
+    const feed = buildSupplierFeedRows(
+      [supplier(1, 'Опубликован', { feed_position: 0 }), supplier(2, 'Новая выгрузка', { feed_position: 5 }), supplier(3, 'Новый поставщик')],
+      [
+        batch({ id: 'p', supplier_id: 1, status: 'Запушено в БД', stage: 'PUSHED', created_at: hoursAgo(48) }),
+        batch({ id: 'old', supplier_id: 2, status: 'Запушено в БД', stage: 'PUSHED', created_at: hoursAgo(72) }),
+        batch({ id: 'new', supplier_id: 2, created_at: hoursAgo(1) }),
+        batch({ id: 'first', supplier_id: 3, created_at: hoursAgo(2) }),
+      ],
+    )
+    expect(sortFeedRows(feed, 'manual').map((row) => row.name)).toEqual(['Новая выгрузка', 'Новый поставщик', 'Опубликован'])
   })
 
   it('orders by saved feed position inside each group, unplaced suppliers after placed ones', () => {

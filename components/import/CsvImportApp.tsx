@@ -21,6 +21,7 @@ import {
   RefreshCw,
   FolderOpen,
   Filter,
+  ChevronDown,
   Merge,
   CheckSquare,
   Square,
@@ -668,6 +669,8 @@ export default function CsvImportApp({
   const [filterColor, setFilterColor] = useState("");
   const [filterVariants, setFilterVariants] = useState<"" | "with" | "without">("");
   const [filterVideo, setFilterVideo] = useState<"" | "with" | "without">("");
+  // На телефоне фильтры свёрнуты под кнопку, на sm+ видны всегда.
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [filterAiStatus, setFilterAiStatus] = useState<"" | "raw" | "ready" | "error">("");
   const [visibleProductCount, setVisibleProductCount] = useState(PRODUCTS_PER_LAZY_PAGE);
   const [viewMode, setViewMode] = useState<"cards" | "photos" | "rows">("cards");
@@ -910,6 +913,12 @@ export default function CsvImportApp({
   }));
   const productsWithVideoCount = facetProducts.video.filter((product) => Boolean(productVideoForDisplay(product).url)).length;
   const productsWithVariantsCount = facetProducts.variants.filter((product) => variantGroups.has(approvedVariantGroupKey(product))).length;
+  // Фильтр показывается, только если в выгрузке есть что фильтровать, либо он уже
+  // выбран и его нужно сбросить. Считаем по всей выгрузке, а не по сужению.
+  const batchHasVideo = useMemo(() => products.some((product) => Boolean(productVideoForDisplay(product).url)), [products]);
+  const batchHasVariants = useMemo(() => products.some((product) => variantGroups.has(approvedVariantGroupKey(product))), [products, variantGroups]);
+  const activeFilterCount = [filterBrand, filterCategory, filterSubcategory, filterGender, filterAiStatus, filterPrice, filterColor, filterVariants, filterVideo]
+    .filter((value) => value !== "").length;
 
   useEffect(() => {
     if (filterBrand && !uniqueBrands.includes(filterBrand)) setFilterBrand("");
@@ -2029,7 +2038,7 @@ export default function CsvImportApp({
       )}
       <div className="mx-auto min-w-0 max-w-[1800px] p-3 sm:p-4">
         {(onClose || backHref) && (
-          <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800/70 px-4 py-3">
             <div className="min-w-0">
               <h2 className="truncate text-base font-bold text-white">Товары выгрузки</h2>
               <p className="truncate text-xs text-slate-500">{initialSupplierName || 'Поставщик не указан'}{products.length ? ` · ${products.length} товаров` : ''}{sourceLabel ? ` · ${sourceLabel}` : ''}</p>
@@ -2044,7 +2053,7 @@ export default function CsvImportApp({
                 </button>
               )}
               {backHref ? (
-                <Link href={backHref} className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700">
+                <Link href={backHref} className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300 transition-colors hover:bg-slate-700">
                   <X size={18} />
                   К истории
                 </Link>
@@ -2125,7 +2134,7 @@ export default function CsvImportApp({
         
         {/* Global Action Bar (only when products are loaded) */}
         {products.length > 0 && (
-          <div ref={actionBarRef} className="sticky top-0 z-30 mb-2 flex flex-col items-stretch justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row md:items-center">
+          <div ref={actionBarRef} className="z-30 mb-2 md:sticky md:top-0 flex flex-col items-stretch justify-between gap-3 rounded-xl border border-slate-700 bg-slate-800 p-3 shadow-xl md:flex-row md:items-center">
             <div className="flex min-w-0 flex-wrap items-center gap-4">
               <div className="flex flex-col">
                 <span className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Выбрано</span>
@@ -2272,19 +2281,19 @@ export default function CsvImportApp({
                     <MoreHorizontal className="h-5 w-5" />
                   </button>
                   {showMoreActions && (
-                    <div className="absolute right-0 top-full z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
+                    <div className="absolute right-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-slate-700 bg-slate-950 p-1 shadow-2xl">
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Настройки</div>
                       {supplierId && <Link href={`/admin/suppliers?supplier=${supplierId}`} target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Users className="h-4 w-4" />Настройки поставщика</Link>}
                       {supplierId && <button onClick={() => { setShowMoreActions(false); setShowPriceRules(true) }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-amber-200 hover:bg-slate-800"><BadgeRussianRuble className="h-4 w-4" />Правила цен</button>}
                       <Link href="/admin/ai-rules" target="_blank" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><Settings2 className="h-4 w-4" />Настройки ИИ</Link>
                       <div className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-slate-600">Изменения и AI</div>
                       {(previousProducts || isDirty) && <button onClick={handleUndoChanges} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Отменить изменения</button>}
-                      {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Восстановить таблицы замеров<span className="block text-xs text-slate-500">Только товары с фото таблиц</span></button>}
-                      {canPublish && batchStage !== "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("add") }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-200 hover:bg-slate-800"><Send className="h-4 w-4" />Добавить только новые<span className="block text-xs text-slate-500">Товары, уже существующие в каталоге, не трогать</span></button>}
-                      {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4" />Заменить каталог текущей версией<span className="block text-xs text-slate-500">Убрать в архив товары, которых нет в партии</span></button>}
-                      {(batchStage === "AI_PROCESSED" || batchStage === "PUSHED") && <button onClick={handleReprocessTexts} title="ИИ перепишет только название и описание: цена, размеры, замеры, альты и фото не меняются" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sky-300 hover:bg-slate-800"><FileText className="h-4 w-4" />Переобработать названия и описания<span className="block text-xs text-slate-500">Цена, размеры, альты и фото не меняются</span></button>}
-                      {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
-                      {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
+                      {batchStage === "PUSHED" && <button onClick={handleRecoverMeasurements} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4 shrink-0" /><span className="min-w-0"><span className="block">Восстановить таблицы замеров</span><span className="block text-xs text-slate-500">Только товары с фото таблиц</span></span></button>}
+                      {canPublish && batchStage !== "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("add") }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-emerald-200 hover:bg-slate-800"><Send className="h-4 w-4 shrink-0" /><span className="min-w-0"><span className="block">Добавить только новые</span><span className="block text-xs text-slate-500">Товары, уже существующие в каталоге, не трогать</span></span></button>}
+                      {batchStage === "PUSHED" && <button onClick={() => { setShowMoreActions(false); handlePush("upsert", true) }} disabled={isPushing || isPreparingPublish || Boolean(publishOperation?.running || publishOperation?.stale)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-amber-200 hover:bg-slate-800"><Trash2 className="h-4 w-4 shrink-0" /><span className="min-w-0"><span className="block">Заменить каталог текущей версией</span><span className="block text-xs text-slate-500">Убрать в архив товары, которых нет в партии</span></span></button>}
+                      {(batchStage === "AI_PROCESSED" || batchStage === "PUSHED") && <button onClick={handleReprocessTexts} title="ИИ перепишет только название и описание: цена, размеры, замеры, альты и фото не меняются" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-sky-300 hover:bg-slate-800"><FileText className="h-4 w-4 shrink-0" /><span className="min-w-0"><span className="block">Переобработать названия и описания</span><span className="block text-xs text-slate-500">Цена, размеры, альты и фото не меняются</span></span></button>}
+                      {batchStage === "AI_PROCESSED" && <button onClick={handleReprocessAll} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-indigo-300 hover:bg-slate-800"><RefreshCw className="h-4 w-4" />Переобработать ИИ всю партию</button>}
+                      {variantFamilyList.length > 0 && <button onClick={() => handleAiProcess("family_names")} title="Один запрос ИИ на семью по главным фото цветов: общая основа названия, разные оттенки, разделение по материалу" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-violet-300 hover:bg-slate-800"><Palette className="h-4 w-4" />Согласовать названия семей</button>}
                     </div>
                   )}
                 </div>
@@ -2692,10 +2701,23 @@ export default function CsvImportApp({
         {products.length > 0 && (
             <div
               // На телефоне фильтры занимают полэкрана, поэтому закрепляются только с md.
-              className="z-20 mb-4 grid grid-cols-1 items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/95 p-2 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-3 md:sticky md:top-[var(--filters-top)] lg:flex lg:flex-wrap"
+              className="z-20 mb-4 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-xl border border-slate-700/50 bg-slate-800/95 p-2 shadow-xl backdrop-blur-md sm:grid-cols-2 sm:p-3 md:sticky md:top-[var(--filters-top)] lg:flex lg:flex-wrap"
               style={{ "--filters-top": `${actionBarHeight + 8}px` } as React.CSSProperties}
             >
-              <div className="flex items-center gap-1.5 text-slate-500 mr-1">
+              <button
+                type="button"
+                onClick={() => setMobileFiltersOpen((open) => !open)}
+                aria-expanded={mobileFiltersOpen}
+                className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-colors sm:hidden ${mobileFiltersOpen || activeFilterCount ? "border-indigo-500/60 bg-indigo-500/15 text-indigo-100" : "border-slate-600 bg-slate-800 text-slate-300"}`}
+              >
+                <Filter className="h-3.5 w-3.5" />
+                Фильтры
+                {activeFilterCount > 0 && (
+                  <span className="rounded-full bg-indigo-500 px-1.5 text-[10px] font-bold leading-4 text-white">{activeFilterCount}</span>
+                )}
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${mobileFiltersOpen ? "rotate-180" : ""}`} />
+              </button>
+              <div className="mr-1 hidden items-center gap-1.5 text-slate-500 sm:flex">
                 <Filter className="h-3.5 w-3.5" />
                 <span className="text-[10px] font-medium uppercase tracking-wider">
                   Фильтры
@@ -2712,6 +2734,7 @@ export default function CsvImportApp({
                 />
               </div>
 
+              <div className={mobileFiltersOpen ? "col-span-full grid grid-cols-1 gap-2 sm:contents" : "hidden sm:contents"}>
               {uniqueBrands.length > 0 && (
                 <select
                   value={filterBrand}
@@ -2813,6 +2836,7 @@ export default function CsvImportApp({
                 ))}
               </select>
 
+              {(batchHasVariants || filterVariants) && (
               <select
                 value={filterVariants}
                 onChange={(e) => setFilterVariants(e.target.value as "" | "with" | "without")}
@@ -2822,7 +2846,9 @@ export default function CsvImportApp({
                 <option value="with">Есть варианты ({productsWithVariantsCount})</option>
                 <option value="without">Без вариантов ({facetProducts.variants.length - productsWithVariantsCount})</option>
               </select>
+              )}
 
+              {(batchHasVideo || filterVideo) && (
               <select
                 value={filterVideo}
                 onChange={(e) => setFilterVideo(e.target.value as "" | "with" | "without")}
@@ -2832,6 +2858,8 @@ export default function CsvImportApp({
                 <option value="with">С видео ({productsWithVideoCount})</option>
                 <option value="without">Без видео ({facetProducts.video.length - productsWithVideoCount})</option>
               </select>
+              )}
+              </div>
 
               {(filterSearch ||
                 filterBrand ||
@@ -2926,7 +2954,7 @@ export default function CsvImportApp({
                 </span>{" "}
                 из {filteredProducts.length} показанных
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {viewMode !== "rows" && (
                   <label className="hidden items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-400 xl:flex">
                     <span className="whitespace-nowrap">В ряд: {cardColumns}</span>
@@ -3199,10 +3227,12 @@ export default function CsvImportApp({
 
         {/* Floating Bulk Action Bar */}
         {selectedForMerge.length > 0 && (
-          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div className="bg-slate-800/95 backdrop-blur-md border border-slate-700 shadow-2xl rounded-2xl px-5 py-4 flex max-w-[calc(100vw-2rem)] flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <div className="flex items-center gap-3 pr-4 border-r border-slate-700">
+          <div className="fixed inset-x-2 bottom-2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 sm:inset-x-auto sm:bottom-8 sm:left-1/2 sm:-translate-x-1/2">
+            {/* На телефоне панель — нижняя шторка: не выше 70% экрана и со своей
+                прокруткой, чтобы карточки под ней оставались видны. */}
+            <div className="flex max-h-[70dvh] flex-col gap-3 overflow-y-auto overscroll-contain rounded-2xl border border-slate-700 bg-slate-800/95 px-3 py-3 shadow-2xl backdrop-blur-md sm:max-h-[calc(100dvh-4rem)] sm:max-w-[calc(100vw-2rem)] sm:gap-4 sm:px-5 sm:py-4">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                <div className="flex items-center gap-3 sm:border-r sm:border-slate-700 sm:pr-4">
                 <div className="p-2 bg-indigo-500/20 rounded-lg">
                   <CheckSquare className="w-5 h-5 text-indigo-400" />
                 </div>
@@ -3216,7 +3246,7 @@ export default function CsvImportApp({
                 </div>
               </div>
 
-                <div className="grid min-w-[min(920px,calc(100vw-3rem))] flex-1 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid w-full flex-1 basis-full grid-cols-1 gap-2 sm:w-auto sm:basis-0 sm:min-w-[min(920px,calc(100vw-5rem))] sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
                   <label className="relative">
                     <span className="sr-only">Цена для выбранных</span>
                     <input
@@ -3293,7 +3323,7 @@ export default function CsvImportApp({
                       {preset.split(":")[0]}
                     </button>
                   ))}
-                  <span className="ml-auto text-[11px] text-slate-500">
+                  <span className="w-full text-[11px] text-slate-500 sm:ml-auto sm:w-auto">
                     Уйдёт в промпт только этих товаров при «{selectedForMerge.every((index) => (
                       products[index]?.ai_processed === true || products[index]?.ai_processed === "true"
                     )) ? "Повторить ИИ из исходника" : "Обработать с ИИ"}» · {bulkAiNote.length}/1000
@@ -3301,10 +3331,10 @@ export default function CsvImportApp({
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="grid grid-cols-2 gap-2 max-sm:[&>button]:justify-center max-sm:[&>button]:px-3 sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
                 <button
                   onClick={() => setSelectedForMerge([])}
-                  className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+                  className="order-last col-span-2 px-4 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors sm:order-none"
                 >
                   Отмена
                 </button>
@@ -3323,7 +3353,7 @@ export default function CsvImportApp({
                     await handleAiProcess(retryFromSource ? "retry_selection" : "selection", ids, note || undefined);
                   }}
                   disabled={isProcessing || !batchId}
-                  className="flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
+                  className="col-span-2 flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-violet-500/20 transition-all hover:bg-violet-500 disabled:opacity-50"
                 >
                   <Sparkles className="h-4 w-4" />
                   {selectedForMerge.every((index) => (
@@ -3333,7 +3363,7 @@ export default function CsvImportApp({
                 <button
                   onClick={handleBulkApply}
                   disabled={bulkPrice === "" && !bulkBrand && !bulkCategory && !bulkSubcategory && !bulkMeasurements}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:grayscale"
+                  className="col-span-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:grayscale"
                 >
                   Применить цену и поля
                 </button>
@@ -3358,7 +3388,7 @@ export default function CsvImportApp({
                 <button
                   onClick={handleMergePhotos}
                   disabled={selectedForMerge.length < 2}
-                  className="px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:grayscale"
+                  className="col-span-2 px-6 py-2.5 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:grayscale"
                 >
                   <Merge className="w-4 h-4" />
                   Объединить фото

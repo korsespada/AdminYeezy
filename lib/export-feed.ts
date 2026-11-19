@@ -225,12 +225,17 @@ export function isSupplierRowRunning(row: Pick<SupplierFeedRow, 'batches'>) {
   return row.batches.some((batch) => RUNNING_KINDS.includes(batchFeedKind(batch)))
 }
 
+// Последняя партия уже на сайте (или убрана): поставщик ничего не ждёт.
+const SETTLED_KINDS: BatchFeedKind[] = ['pushed', 'archived', 'deleted']
+
 // Порядок групп не зависит от выбранной сортировки: всё, что сейчас в работе,
-// всегда сверху, поставщики без партий — всегда в самом низу.
+// всегда сверху; затем поставщики, у которых последняя партия ещё не
+// опубликована (новая выгрузка, после скрипта или ИИ, ошибка); затем
+// поставщики с опубликованной последней партией; без партий — в самом низу.
 function feedTier(row: SupplierFeedRow) {
   if (isSupplierRowRunning(row)) return 0
-  if (!row.latest) return 2
-  return 1
+  if (!row.latest || !row.latestKind) return 3
+  return SETTLED_KINDS.includes(row.latestKind) ? 2 : 1
 }
 
 function attentionRank(row: SupplierFeedRow) {
